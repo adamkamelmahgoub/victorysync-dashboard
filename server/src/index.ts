@@ -211,24 +211,44 @@ app.get("/api/admin/mightycall/phone-numbers", async (req, res) => {
   try {
     const unassignedOnly = req.query.unassignedOnly === 'true' || req.query.unassignedOnly === '1';
 
-    let query = supabaseAdmin
-      .from("phone_numbers")
-      .select(`id, number, label, org_id, created_at, organizations(id, name)`)
-      .order("created_at", { ascending: true });
-
-    if (unassignedOnly) {
-      query = query.is("org_id", null);
+    // Try newer schema first (number), then legacy (phone_number), then legacy table org_phone_numbers
+    let data: any[] = [];
+    try {
+      const q = supabaseAdmin.from('phone_numbers').select('id, number, label, org_id, created_at').order('created_at', { ascending: true });
+      const { data: d1, error: e1 } = await q;
+      if (e1) throw e1;
+      data = d1 || [];
+    } catch (e1) {
+      console.warn('phone_numbers select number failed:', e1?.message ?? e1);
+      try {
+        const q2 = supabaseAdmin.from('phone_numbers').select('id, phone_number, label, org_id, created_at').order('created_at', { ascending: true });
+        const { data: d2, error: e2 } = await q2;
+        if (e2) throw e2;
+        data = (d2 || []).map((r: any) => ({ ...r, number: r.phone_number }));
+      } catch (e2) {
+        console.warn('phone_numbers select phone_number failed:', e2?.message ?? e2);
+        try {
+          const q3 = supabaseAdmin.from('org_phone_numbers').select('id, phone_number, label, org_id, created_at').order('created_at', { ascending: true });
+          const { data: d3, error: e3 } = await q3;
+          if (e3) throw e3;
+          data = (d3 || []).map((r: any) => ({ ...r, number: r.phone_number }));
+        } catch (e3) {
+          console.warn('org_phone_numbers select failed:', e3?.message ?? e3);
+          data = [];
+        }
+      }
     }
 
-    const { data, error } = await query;
-    if (error) throw error;
+    if (unassignedOnly) {
+      data = (data || []).filter((r: any) => r.org_id == null || r.org_id === undefined);
+    }
 
     const mapped = (data || []).map((r: any) => ({
       id: r.id,
       number: r.number,
       label: r.label,
       orgId: r.org_id || null,
-      orgName: r.organizations ? r.organizations.name : null,
+      orgName: null,
       createdAt: r.created_at,
     }));
 
@@ -477,13 +497,27 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     if (orgErr) throw orgErr;
     if (!org) return res.status(404).json({ error: 'org_not_found' });
 
-    // members from org_members
-    const { data: memberships, error: memErr } = await supabaseAdmin
-      .from('org_members')
-      .select('id, user_id, role, mightycall_extension, created_at')
-      .eq('org_id', orgId)
-      .order('created_at', { ascending: false });
-    if (memErr) throw memErr;
+    // members from org_members (fall back to org_users if table not present)
+    let memberships: any[] = [];
+    try {
+      const { data: mdata, error: memErr } = await supabaseAdmin
+        .from('org_members')
+        .select('id, user_id, role, mightycall_extension, created_at')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: false });
+      if (memErr) throw memErr;
+      memberships = mdata || [];
+    } catch (e) {
+      // fallback to legacy org_users table if org_members doesn't exist
+      console.warn('org_members query failed, falling back to org_users:', e?.message ?? e);
+      const { data: legacy, error: legacyErr } = await supabaseAdmin
+        .from('org_users')
+        .select('org_id, user_id, role, mightycall_extension, created_at')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: false });
+      if (legacyErr) throw legacyErr;
+      memberships = legacy || [];
+    }
 
     const members: Array<any> = [];
     for (const m of (memberships || [])) {
@@ -499,13 +533,54 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
       }
     }
 
-    // phones assigned to this org
-    const { data: phones, error: phonesErr } = await supabaseAdmin
-      .from('phone_numbers')
-      .select('id, number, label, created_at')
-      .eq('org_id', orgId)
-      .order('created_at', { ascending: true });
-    if (phonesErr) throw phonesErr;
+    // phones assigned to this org - try multiple schema variants
+    let phones: any[] = [];
+    // attempt 1: newer schema with `number` column
+    try {
+      const { data: p1, error: e1 } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('id, number, label, created_at')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: true });
+      if (!e1 && p1) {
+        phones = (p1 || []).map((r: any) => ({ id: r.id, number: r.number, label: r.label, created_at: r.created_at }));
+      } else {
+        throw e1 || new Error('no-data');
+      }
+    } catch (err1) {
+      console.warn('phone_numbers select (number) failed:', err1?.message ?? err1);
+      // attempt 2: legacy column `phone_number`
+      try {
+        const { data: p2, error: e2 } = await supabaseAdmin
+          .from('phone_numbers')
+          .select('id, phone_number, label, created_at')
+          .eq('org_id', orgId)
+          .order('created_at', { ascending: true });
+        if (!e2 && p2) {
+          phones = (p2 || []).map((r: any) => ({ id: r.id, number: r.phone_number, label: r.label, created_at: r.created_at }));
+        } else {
+          throw e2 || new Error('no-data');
+        }
+      } catch (err2) {
+        console.warn('phone_numbers select (phone_number) failed:', err2?.message ?? err2);
+        // attempt 3: legacy table name `org_phone_numbers`
+        try {
+          const { data: p3, error: e3 } = await supabaseAdmin
+            .from('org_phone_numbers')
+            .select('id, phone_number, label, created_at')
+            .eq('org_id', orgId)
+            .order('created_at', { ascending: true });
+          if (!e3 && p3) {
+            phones = (p3 || []).map((r: any) => ({ id: r.id, number: r.phone_number, label: r.label, created_at: r.created_at }));
+          } else {
+            throw e3 || new Error('no-data');
+          }
+        } catch (err3) {
+          console.warn('org_phone_numbers select failed:', err3?.message ?? err3);
+          phones = [];
+        }
+      }
+    }
 
     // stats (calls today) - reuse logic
     const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
@@ -575,16 +650,22 @@ app.get("/api/admin/users", async (req, res) => {
 
     const authUsers = (data?.users || []);
 
-    // Fetch profiles for these users to include global_role
+    // Fetch profiles for these users to include global_role (handle missing column gracefully)
     const userIds = authUsers.map((u: any) => u.id);
     let profilesMap: Record<string, any> = {};
     if (userIds.length > 0) {
-      const { data: profiles, error: pErr } = await supabaseAdmin
-        .from('profiles')
-        .select('id, global_role')
-        .in('id', userIds);
-      if (pErr) throw pErr;
-      profilesMap = (profiles || []).reduce((acc: any, p: any) => ({ ...acc, [p.id]: p }), {});
+      try {
+        const { data: profiles, error: pErr } = await supabaseAdmin
+          .from('profiles')
+          .select('id, global_role')
+          .in('id', userIds);
+        if (pErr) throw pErr;
+        profilesMap = (profiles || []).reduce((acc: any, p: any) => ({ ...acc, [p.id]: p }), {});
+      } catch (profileErr) {
+        console.warn('profiles lookup failed (maybe missing global_role):', profileErr?.message ?? profileErr);
+        // Fallback: leave profilesMap empty so global_role is null
+        profilesMap = {};
+      }
     }
 
     const users = authUsers.map((u: any) => ({

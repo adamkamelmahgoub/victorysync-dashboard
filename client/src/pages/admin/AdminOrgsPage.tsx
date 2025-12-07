@@ -31,6 +31,8 @@ interface Member {
 // Org Details Modal Component
 function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
   const [stats, setStats] = useState<any>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [phones, setPhones] = useState<Array<{ id: string; number: string; label: string | null }>>([]);
@@ -43,6 +45,8 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
   const reloadOrgDetails = async () => {
     setMembersLoading(true);
     setPhonesLoading(true);
+    setStatsLoading(true);
+    setStatsError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`);
       if (!res.ok) throw new Error('Failed to fetch org details');
@@ -53,9 +57,12 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
       setCanEditPhones(Boolean(j.permissions?.canEditPhoneNumbers));
     } catch (err: any) {
       console.error('Failed to fetch org details:', err);
+      setStats(null);
+      setStatsError(err?.message || 'Failed to load stats');
     } finally {
       setMembersLoading(false);
       setPhonesLoading(false);
+      setStatsLoading(false);
     }
   };
 
@@ -306,7 +313,11 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
         {/* Content */}
         <div className="p-5 space-y-6">
           {/* KPIs */}
-          {stats ? (
+          {statsLoading ? (
+            <div className="text-xs text-slate-400">Loading stats...</div>
+          ) : statsError ? (
+            <div className="text-xs text-red-400">Failed to load stats</div>
+          ) : stats ? (
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-lg bg-slate-800/50 p-3">
                 <div className="text-xs text-slate-400 mb-1">Calls today</div>
@@ -318,7 +329,7 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
               </div>
             </div>
           ) : (
-            <div className="text-xs text-slate-400">Loading stats...</div>
+            <div className="text-xs text-slate-400">No stats available</div>
           )}
 
           {/* Members Section */}
