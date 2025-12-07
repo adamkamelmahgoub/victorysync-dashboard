@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL } from '../../config';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface Organization {
   id: string;
@@ -19,34 +20,271 @@ interface OrgDetailsModalProps {
   onClose: () => void;
 }
 
+interface Member {
+  orgMemberId: string;
+  user_id: string;
+  email: string | null;
+  role: string;
+  mightycall_extension?: string | null;
+}
+
 // Org Details Modal Component
 function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
   const [stats, setStats] = useState<any>(null);
-  const [members, setMembers] = useState<Array<{ user_id: string; email: string | null; role: string; mightycall_extension?: string | null }>>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
-  const [phones, setPhones] = useState<Array<{ id: string; phone_number: string; label: string | null; is_active: boolean }>>([]);
+  const [phones, setPhones] = useState<Array<{ id: string; number: string; label: string | null }>>([]);
   const [phonesLoading, setPhonesLoading] = useState(true);
+  const { user } = useAuth();
+  const [canEditPhones, setCanEditPhones] = useState(false);
+  const [showEditPhones, setShowEditPhones] = useState(false);
+  const [showPermissionsEditor, setShowPermissionsEditor] = useState<{ orgMemberId: string; memberEmail: string } | null>(null);
+
+  const reloadOrgDetails = async () => {
+    setMembersLoading(true);
+    setPhonesLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`);
+      if (!res.ok) throw new Error('Failed to fetch org details');
+      const j = await res.json();
+      setMembers(j.members || []);
+      setPhones(j.phones || []);
+      setStats(j.stats || null);
+      setCanEditPhones(Boolean(j.permissions?.canEditPhoneNumbers));
+    } catch (err: any) {
+      console.error('Failed to fetch org details:', err);
+    } finally {
+      setMembersLoading(false);
+      setPhonesLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      setMembersLoading(true);
-      setPhonesLoading(true);
+    reloadOrgDetails();
+  }, [org.id]);
+
+  // EditPhonesModal component
+  function EditPhonesModal({ orgId, onClose }: { orgId: string; onClose: () => void }) {
+    const [unassigned, setUnassigned] = useState<Array<{ id: string; number: string; label?: string }>>([]);
+    const [selected, setSelected] = useState<string[]>([]);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      const load = async () => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/admin/mightycall/phone-numbers?unassignedOnly=true`);
+          if (!res.ok) throw new Error('Failed to load numbers');
+          const j = await res.json();
+          setUnassigned(j.phone_numbers || []);
+        } catch (err) {
+          console.error('load numbers failed', err);
+        }
+      };
+      load();
+    }, [orgId]);
+
+    const save = async () => {
+      if (selected.length === 0) return onClose();
       try {
-        const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`);
-        if (!res.ok) throw new Error('Failed to fetch org details');
-        const j = await res.json();
-        setMembers(j.members || []);
-        setPhones(j.phones || []);
-        setStats(j.stats || null);
-      } catch (err: any) {
-        console.error('Failed to fetch org details:', err);
+        setSaving(true);
+        const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+          body: JSON.stringify({ phoneNumberIds: selected }),
+        });
+        if (!res.ok) throw new Error('Assign failed');
+        onClose();
+      } catch (err) {
+        console.error('Assign failed', err);
       } finally {
-        setMembersLoading(false);
-        setPhonesLoading(false);
+        setSaving(false);
       }
     };
-    load();
-  }, [org.id]);
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="w-full max-w-lg bg-slate-900 rounded-lg p-5 border border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg">Edit phone numbers</h3>
+            <button onClick={onClose} className="text-slate-400">×</button>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-xs text-slate-400 mb-2">Available unassigned numbers</label>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {unassigned.map((n) => (
+                <label key={n.id} className="flex items-center gap-2 bg-slate-800/30 p-2 rounded">
+                  <input type="checkbox" checked={selected.includes(n.id)} onChange={(e) => {
+                    const next = e.target.checked ? [...selected, n.id] : selected.filter(s => s !== n.id);
+                    setSelected(next);
+                  }} />
+                  <div>
+                    <div className="text-sm">{n.number}</div>
+                    {n.label && <div className="text-xs text-slate-400">{n.label}</div>}
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="px-3 py-1 bg-slate-700 rounded">Cancel</button>
+            <button onClick={save} disabled={saving} className="px-3 py-1 bg-emerald-500 rounded">{saving ? 'Saving...' : 'Save'}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // OrgManagerPermissionsModal component
+  interface OrgManagerPermissions {
+    can_manage_agents: boolean;
+    can_manage_phone_numbers: boolean;
+    can_edit_service_targets: boolean;
+    can_view_billing: boolean;
+  }
+
+  function OrgManagerPermissionsModal({
+    orgId,
+    orgMemberId,
+    memberEmail,
+    onClose,
+    userId,
+  }: {
+    orgId: string;
+    orgMemberId: string;
+    memberEmail: string;
+    onClose: () => void;
+    userId: string;
+  }) {
+    const [perms, setPerms] = useState<OrgManagerPermissions | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      const load = async () => {
+        try {
+          setLoading(true);
+          const res = await fetch(
+            `${API_BASE_URL}/api/admin/orgs/${orgId}/managers/${orgMemberId}/permissions`,
+            { headers: { 'x-user-id': userId } }
+          );
+          if (!res.ok) throw new Error('Failed to load permissions');
+          const j = await res.json();
+          setPerms(j.permissions || {
+            can_manage_agents: false,
+            can_manage_phone_numbers: false,
+            can_edit_service_targets: false,
+            can_view_billing: false,
+          });
+        } catch (err) {
+          console.error('Failed to load permissions', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+      load();
+    }, [orgId, orgMemberId, userId]);
+
+    const save = async () => {
+      if (!perms) return;
+      try {
+        setSaving(true);
+        const res = await fetch(
+          `${API_BASE_URL}/api/admin/orgs/${orgId}/managers/${orgMemberId}/permissions`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+            body: JSON.stringify(perms),
+          }
+        );
+        if (!res.ok) throw new Error('Failed to save permissions');
+        onClose();
+      } catch (err) {
+        console.error('Failed to save permissions', err);
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const togglePerm = (perm: keyof OrgManagerPermissions) => {
+      if (!perms) return;
+      setPerms({ ...perms, [perm]: !perms[perm] });
+    };
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="w-full max-w-lg bg-slate-900 rounded-lg p-5 border border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold">Manager Permissions</h3>
+              <p className="text-xs text-slate-400 mt-1">{memberEmail}</p>
+            </div>
+            <button onClick={onClose} className="text-slate-400 text-2xl">×</button>
+          </div>
+
+          {loading ? (
+            <div className="text-xs text-slate-400">Loading...</div>
+          ) : perms ? (
+            <div className="space-y-3 mb-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={perms.can_manage_agents}
+                  onChange={() => togglePerm('can_manage_agents')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">Manage agents</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={perms.can_manage_phone_numbers}
+                  onChange={() => togglePerm('can_manage_phone_numbers')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">Manage phone numbers</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={perms.can_edit_service_targets}
+                  onChange={() => togglePerm('can_edit_service_targets')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">Edit service targets</span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={perms.can_view_billing}
+                  onChange={() => togglePerm('can_view_billing')}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">View billing</span>
+              </label>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-400">Failed to load permissions</div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="px-3 py-1 bg-slate-700 rounded text-sm">Cancel</button>
+            <button
+              onClick={save}
+              disabled={saving || loading}
+              className="px-3 py-1 bg-emerald-500 rounded text-sm disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/50 backdrop-blur-sm">
@@ -92,9 +330,9 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
               <div className="text-xs text-slate-500">No members assigned</div>
             ) : (
               <div className="space-y-2 max-h-40 overflow-y-auto">
-                {members.map((member) => (
+                {members.map((member, idx) => (
                   <div
-                    key={member.id}
+                    key={idx}
                     className="flex items-center justify-between bg-slate-800/30 rounded-lg p-2"
                   >
                     <div className="flex-1 min-w-0">
@@ -102,18 +340,34 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
                         {member.email}
                       </div>
                     </div>
-                    <span className="text-[10px] text-slate-400 ml-2 flex-shrink-0">
-                      {member.role}
-                    </span>
+                    <div className="flex items-center gap-2 ml-2">
+                      {member.role === 'org_manager' && canEditPhones && (
+                        <button
+                          onClick={() => setShowPermissionsEditor({ orgMemberId: member.orgMemberId || '', memberEmail: member.email || '' })}
+                          className="text-[10px] text-emerald-400 hover:underline flex-shrink-0"
+                        >
+                          Perms
+                        </button>
+                      )}
+                      <span className="text-[10px] text-slate-400 flex-shrink-0">
+                        {member.role}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Phone Numbers Section */}
+          {/* Assigned Numbers */}
           <div>
-            <h3 className="font-semibold text-sm mb-3 text-slate-200">Phone Numbers</h3>
+            <h3 className="font-semibold text-sm mb-3 text-slate-200">Assigned Numbers</h3>
+            <div className="flex items-center justify-end">
+              {canEditPhones && (
+                <button onClick={() => setShowEditPhones(true)} className="text-xs text-emerald-400 hover:underline">Edit numbers</button>
+              )}
+            </div>
+
             {phonesLoading ? (
               <div className="text-xs text-slate-400">Loading...</div>
             ) : phones.length === 0 ? (
@@ -127,7 +381,7 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
                   >
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium text-slate-200">
-                        {phone.phone_number}
+                        {phone.number}
                       </div>
                       {phone.label && (
                         <div className="text-[10px] text-slate-400">
@@ -135,20 +389,48 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
                         </div>
                       )}
                     </div>
-                    <span
-                      className={`text-[10px] ml-2 flex-shrink-0 px-1.5 py-0.5 rounded ${
-                        phone.is_active
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-slate-600/30 text-slate-400'
-                      }`}
-                    >
-                      {phone.is_active ? 'Active' : 'Inactive'}
-                    </span>
+                    <div className="ml-2 flex items-center gap-2">
+                      {canEditPhones && (
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm(`Remove ${phone.number}?`)) return;
+                            try {
+                              const res = await fetch(
+                                `${API_BASE_URL}/api/admin/orgs/${org.id}/phone-numbers/${phone.id}`,
+                                { method: 'DELETE', headers: { 'x-user-id': user?.id || '' } }
+                              );
+                              if (!res.ok) throw new Error('Delete failed');
+                              reloadOrgDetails();
+                            } catch (err) {
+                              console.error('Delete failed', err);
+                              alert('Failed to remove phone number');
+                            }
+                          }}
+                          className="text-xs text-red-400 hover:underline"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
+
+          {showEditPhones && (
+            <EditPhonesModal orgId={org.id} onClose={() => { setShowEditPhones(false); /* reload */ const e = async () => { const r = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`); const j = await r.json(); setPhones(j.phones || []); setCanEditPhones(Boolean(j.permissions?.canEditPhoneNumbers)); }; e(); }} />
+          )}
+
+          {showPermissionsEditor && (
+            <OrgManagerPermissionsModal
+              orgId={org.id}
+              orgMemberId={showPermissionsEditor.orgMemberId}
+              memberEmail={showPermissionsEditor.memberEmail}
+              onClose={() => { setShowPermissionsEditor(null); reloadOrgDetails(); }}
+              userId={user?.id || ''}
+            />
+          )}
 
           {/* Created date */}
           <div className="text-xs text-slate-500 pt-2 border-t border-slate-700">

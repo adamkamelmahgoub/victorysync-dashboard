@@ -46,4 +46,21 @@ async function fetchMightyCallExtensions(): Promise<McExtension[]> {
   }
 }
 
-export { fetchMightyCallPhoneNumbers, fetchMightyCallExtensions };
+async function syncMightyCallPhoneNumbers(supabaseAdmin: any) {
+  const phones = await fetchMightyCallPhoneNumbers();
+  let upserted = 0;
+  for (const p of phones) {
+    const payload = {
+      number: p.number,
+      label: p.label || null,
+      external_id: p.id,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabaseAdmin.from('phone_numbers').upsert(payload, { onConflict: 'external_id' });
+    if (!error) upserted += 1;
+    else console.warn('phone upsert failed', error);
+  }
+  return { upserted };
+}
+
+export { fetchMightyCallPhoneNumbers, fetchMightyCallExtensions, syncMightyCallPhoneNumbers };

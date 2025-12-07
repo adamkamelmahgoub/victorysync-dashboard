@@ -357,6 +357,59 @@ app.post('/api/admin/users/:userId/platform-permissions', async (req, res) => {
   }
 });
 
+// GET /api/admin/users/:userId/platform-permissions - fetch global role + platform manager permissions (platform_admin only)
+app.get('/api/admin/users/:userId/platform-permissions', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { userId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { data: profile, error: pErr } = await supabaseAdmin
+      .from('profiles')
+      .select('global_role')
+      .eq('id', userId)
+      .maybeSingle();
+    if (pErr) throw pErr;
+
+    const { data: perms, error: permsErr } = await supabaseAdmin
+      .from('platform_manager_permissions')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (permsErr) throw permsErr;
+
+    res.json({ global_role: profile?.global_role || null, permissions: perms || null });
+  } catch (err: any) {
+    console.error('get_platform_permissions_failed:', err?.message ?? err);
+    res.status(500).json({ error: 'get_platform_permissions_failed', detail: err?.message ?? 'unknown_error' });
+  }
+});
+
+// POST /api/admin/users/:userId/global-role - set user's global role (platform_admin only)
+app.post('/api/admin/users/:userId/global-role', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { userId } = req.params;
+    const { globalRole } = req.body || {};
+
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .upsert({ id: userId, global_role: globalRole }, { onConflict: 'id' })
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    res.json({ profile: data });
+  } catch (err: any) {
+    console.error('set_global_role_failed:', err?.message ?? err);
+    res.status(500).json({ error: 'set_global_role_failed', detail: err?.message ?? 'unknown_error' });
+  }
+});
+
 // POST /api/admin/orgs/:orgId/phone-numbers - assign phone numbers to org
 app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
   try {
@@ -478,10 +531,36 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     }
     const answerRate = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
 
-    res.json({ org, members, phones: phones || [], stats: { total_calls: totalCalls, answered_calls: answeredCalls, missed_calls: missedCalls, answer_rate_pct: answerRate } });
+    // Determine if requesting user can edit phone numbers
+    const requestUserId = req.header('x-user-id') || null;
+    const canEditPhoneNumbers = requestUserId
+      ? (await isPlatformAdmin(requestUserId)) ||
+        (await isPlatformManagerWith(requestUserId, 'can_manage_phone_numbers_global')) ||
+        (await isOrgAdmin(requestUserId, orgId)) ||
+        (await isOrgManagerWith(requestUserId, orgId, 'can_manage_phone_numbers'))
+      : false;
+
+    res.json({ org, members, phones: phones || [], stats: { total_calls: totalCalls, answered_calls: answeredCalls, missed_calls: missedCalls, answer_rate_pct: answerRate }, permissions: { canEditPhoneNumbers } });
   } catch (err: any) {
     console.error('admin_org_detail_failed:', err?.message ?? err);
     res.status(500).json({ error: 'admin_org_detail_failed', detail: err?.message ?? 'unknown_error' });
+  }
+});
+
+// GET /api/admin/orgs/:orgId/managers/:orgMemberId/permissions - fetch org manager permissions
+app.get('/api/admin/orgs/:orgId/managers/:orgMemberId/permissions', async (req, res) => {
+  try {
+    const { orgId, orgMemberId } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('org_manager_permissions')
+      .select('*')
+      .eq('org_member_id', orgMemberId)
+      .maybeSingle();
+    if (error) throw error;
+    res.json({ permissions: data || null });
+  } catch (err: any) {
+    console.error('get_org_manager_permissions_failed:', err?.message ?? err);
+    res.status(500).json({ error: 'get_org_manager_permissions_failed', detail: err?.message ?? 'unknown_error' });
   }
 });
 
@@ -494,11 +573,26 @@ app.get("/api/admin/users", async (req, res) => {
       throw error;
     }
 
-    const users = (data?.users || []).map((u) => ({
+    const authUsers = (data?.users || []);
+
+    // Fetch profiles for these users to include global_role
+    const userIds = authUsers.map((u: any) => u.id);
+    let profilesMap: Record<string, any> = {};
+    if (userIds.length > 0) {
+      const { data: profiles, error: pErr } = await supabaseAdmin
+        .from('profiles')
+        .select('id, global_role')
+        .in('id', userIds);
+      if (pErr) throw pErr;
+      profilesMap = (profiles || []).reduce((acc: any, p: any) => ({ ...acc, [p.id]: p }), {});
+    }
+
+    const users = authUsers.map((u: any) => ({
       id: u.id,
       email: u.email,
       org_id: (u.user_metadata as any)?.org_id ?? null,
       role: (u.user_metadata as any)?.role ?? null,
+      global_role: profilesMap[u.id]?.global_role ?? null,
       created_at: u.created_at,
     }));
 

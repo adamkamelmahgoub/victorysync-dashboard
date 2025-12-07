@@ -1,6 +1,7 @@
 import type { FC } from "react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
 import { API_BASE_URL } from "../../config";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -28,6 +29,7 @@ type TabType = "all" | "agents";
 
 export const AdminUsersPage: FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   // Left panel: Create new user form
   const [createEmail, setCreateEmail] = useState("");
@@ -42,6 +44,7 @@ export const AdminUsersPage: FC = () => {
   const [assignRole, setAssignRole] = useState("agent");
   const [assignExtension, setAssignExtension] = useState("");
   const [assignLoading, setAssignLoading] = useState(false);
+  const [assignOrgId, setAssignOrgId] = useState("");
 
   // Organizations
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -64,6 +67,9 @@ export const AdminUsersPage: FC = () => {
   const [editExtension, setEditExtension] = useState("");
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  // Platform perms modal state
+  const [showPlatformModal, setShowPlatformModal] = useState<{ userId: string; email: string } | null>(null);
 
   // Load organizations
   useEffect(() => {
@@ -269,6 +275,110 @@ export const AdminUsersPage: FC = () => {
   const assignedUserIds = new Set(orgUsers.map(ou => ou.user_id));
   const unassignedUsers = allUsers.filter(u => !assignedUserIds.has(u.id));
 
+  // PlatformPermissionsModal component
+  function PlatformPermissionsModal({ userId, email, onClose }: { userId: string; email: string; onClose: () => void }) {
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [globalRole, setGlobalRole] = useState<string | null>(null);
+    const [perms, setPerms] = useState<any>({
+      can_manage_phone_numbers_global: false,
+      can_manage_agents_global: false,
+      can_manage_orgs: false,
+      can_view_billing_global: false,
+    });
+
+    useEffect(() => {
+      const load = async () => {
+        try {
+          setLoading(true);
+          const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/platform-permissions`, { headers: { 'x-user-id': user?.id || '' } });
+          if (!res.ok) throw new Error('Failed to load');
+          const j = await res.json();
+          setGlobalRole(j.global_role || null);
+          setPerms({
+            can_manage_phone_numbers_global: Boolean(j.permissions?.can_manage_phone_numbers_global),
+            can_manage_agents_global: Boolean(j.permissions?.can_manage_agents_global),
+            can_manage_orgs: Boolean(j.permissions?.can_manage_orgs),
+            can_view_billing_global: Boolean(j.permissions?.can_view_billing_global),
+          });
+        } catch (err) {
+          console.error('Failed to load platform perms', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+      load();
+    }, [userId]);
+
+    const save = async () => {
+      try {
+        setSaving(true);
+        // update global role
+        await fetch(`${API_BASE_URL}/api/admin/users/${userId}/global-role`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+          body: JSON.stringify({ globalRole }),
+        });
+
+        // update platform permissions
+        await fetch(`${API_BASE_URL}/api/admin/users/${userId}/platform-permissions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+          body: JSON.stringify(perms),
+        });
+
+        onClose();
+        // refresh users list
+        try { const r = await fetch(`${API_BASE_URL}/api/admin/users`); if (r.ok) { const j = await r.json(); setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null }))); } } catch(e){}
+      } catch (err) {
+        console.error('Failed to save platform perms', err);
+        alert('Failed to save');
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="w-full max-w-md bg-slate-900 rounded-lg p-5 border border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold">Platform permissions</h3>
+              <p className="text-xs text-slate-400 mt-1">{email}</p>
+            </div>
+            <button onClick={onClose} className="text-slate-400">×</button>
+          </div>
+
+          {loading ? (
+            <div className="text-xs text-slate-400">Loading...</div>
+          ) : (
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">Global role</label>
+                <select value={globalRole || ''} onChange={(e) => setGlobalRole(e.target.value || null)} className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded text-sm">
+                  <option value="">None</option>
+                  <option value="platform_manager">Platform Manager</option>
+                  <option value="platform_admin">Platform Admin</option>
+                </select>
+              </div>
+
+              <div className="text-xs text-slate-400">Platform manager permissions</div>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={perms.can_manage_phone_numbers_global} onChange={() => setPerms({...perms, can_manage_phone_numbers_global: !perms.can_manage_phone_numbers_global})} /> Manage phone numbers</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={perms.can_manage_agents_global} onChange={() => setPerms({...perms, can_manage_agents_global: !perms.can_manage_agents_global})} /> Manage agents</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={perms.can_manage_orgs} onChange={() => setPerms({...perms, can_manage_orgs: !perms.can_manage_orgs})} /> Manage orgs</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={perms.can_view_billing_global} onChange={() => setPerms({...perms, can_view_billing_global: !perms.can_view_billing_global})} /> View billing</label>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="px-3 py-1 bg-slate-700 rounded">Cancel</button>
+            <button onClick={save} disabled={saving || loading} className="px-3 py-1 bg-emerald-500 rounded">{saving ? 'Saving...' : 'Save'}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
@@ -411,8 +521,8 @@ export const AdminUsersPage: FC = () => {
                 <div>
                   <label className="block text-xs text-slate-300 mb-1">Organization</label>
                   <select
-                    value={createOrgId}
-                    onChange={(e) => setCreateOrgId(e.target.value)}
+                    value={assignOrgId}
+                    onChange={(e) => setAssignOrgId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 text-sm"
                   >
                     <option value="">Select organization...</option>
@@ -450,15 +560,16 @@ export const AdminUsersPage: FC = () => {
                 <div>
                   <button
                     onClick={async () => {
-                      if (!assignUserId || !createOrgId || !assignRole) {
+                      if (!assignUserId || !assignOrgId || !assignRole) {
                         alert('Please select user, org and role');
                         return;
                       }
                       setAssignLoading(true);
-                      await handleAssignUser(assignUserId, createOrgId, assignRole, assignExtension || null);
+                      await handleAssignUser(assignUserId, assignOrgId, assignRole, assignExtension || null);
                       setAssignLoading(false);
                       setAssignUserId('');
                       setAssignExtension('');
+                      setAssignOrgId('');
                     }}
                     className="w-full mt-1 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 text-white font-semibold rounded-lg text-sm"
                     disabled={assignLoading}
@@ -522,6 +633,14 @@ export const AdminUsersPage: FC = () => {
                         <div>
                           <div className="text-xs font-medium text-slate-200">{user.email}</div>
                           <div className="text-[10px] text-slate-500">{user.id.slice(0, 8)}...</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowPlatformModal({ userId: user.id, email: user.email })}
+                            className="text-xs text-emerald-400 hover:underline"
+                          >
+                            Platform
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -630,6 +749,12 @@ export const AdminUsersPage: FC = () => {
                                   >
                                     Remove
                                   </button>
+                                  <button
+                                    onClick={() => setShowPlatformModal({ userId: record.user_id, email: user?.email || record.user_id })}
+                                    className="text-xs text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
+                                  >
+                                    Platform
+                                  </button>
                                 </td>
                               </tr>
                             );
@@ -719,6 +844,13 @@ export const AdminUsersPage: FC = () => {
           </div>
         </section>
       </div>
+    {showPlatformModal && (
+      <PlatformPermissionsModal
+        userId={showPlatformModal.userId}
+        email={showPlatformModal.email}
+        onClose={() => setShowPlatformModal(null)}
+      />
+    )}
     </main>
   );
 };
