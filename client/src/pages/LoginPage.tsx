@@ -83,10 +83,6 @@ export const LoginPage: FC = () => {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
-
-        <div className="text-xs text-slate-500 text-center">
-          Demo credentials available in Supabase Auth dashboard
-        </div>
       </div>
     </div>
   );
