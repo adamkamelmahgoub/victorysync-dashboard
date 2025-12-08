@@ -1157,6 +1157,48 @@ app.get("/api/calls/recent", async (req, res) => {
   }
 });
 
+// Alias route for older/alternate frontend paths: /s/recent -> /api/calls/recent
+app.get("/s/recent", async (req, res) => {
+  try {
+    // Reuse same query semantics as /api/calls/recent
+    const orgId = req.query.org_id as string | undefined;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+
+    console.log('[s/recent] Request:', { orgId, limit });
+
+    let query = supabaseAdmin
+      .from("calls")
+      .select("id, direction, from_number, to_number, queue_name, status, started_at")
+      .order("started_at", { ascending: false })
+      .limit(limit);
+
+    if (orgId) query = query.eq("org_id", orgId);
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('[s/recent] Supabase error:', error.message || error);
+      return res.status(500).json({ error: 'supabase_error', detail: error.message });
+    }
+
+    const items = (data || []).map((c: any) => ({
+      id: c.id,
+      direction: c.direction,
+      status: c.status,
+      fromNumber: c.from_number ?? null,
+      toNumber: c.to_number ?? null,
+      queueName: c.queue_name ?? null,
+      startedAt: c.started_at,
+      answeredAt: c.answered_at ?? null,
+      endedAt: c.ended_at ?? null,
+    }));
+
+    res.json({ items });
+  } catch (err: any) {
+    console.error('[s/recent] Unexpected error:', err);
+    res.status(500).json({ error: 'unexpected_error', detail: String(err instanceof Error ? err.message : err) });
+  }
+});
+
 // GET /api/calls/queue-summary?org_id=...
 // Returns queue stats for today (total, answered, missed per queue)
 // If org_id is missing, aggregates across all orgs
@@ -1360,6 +1402,111 @@ app.get("/api/calls/series", async (req, res) => {
       error: "calls_series_failed",
       detail: String(err?.message ?? err),
     });
+  }
+});
+
+// Alias route for older/alternate frontend paths: /s/series -> /api/calls/series
+app.get("/s/series", async (req, res) => {
+  try {
+    const orgId = req.query.org_id as string | undefined;
+    const range = (req.query.range as string) || "day";
+
+    console.log('[s/series] Request:', { orgId, range });
+
+    const now = new Date();
+    let startDate = new Date();
+    let step: "hour" | "day" | "month" = "hour";
+
+    if (range === "day") {
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      step = "hour";
+    } else if (range === "week") {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 6);
+      startDate = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+      step = "day";
+    } else if (range === "month") {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 29);
+      startDate = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+      step = "day";
+    } else if (range === "year") {
+      const d = new Date(now);
+      d.setMonth(d.getMonth() - 11);
+      startDate = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+      step = "month";
+    }
+
+    let query = supabaseAdmin
+      .from("calls")
+      .select("started_at, status")
+      .gte("started_at", startDate.toISOString())
+      .order("started_at", { ascending: true });
+
+    if (orgId) query = query.eq("org_id", orgId);
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('[s/series] Supabase error:', error.message || error);
+      return res.status(500).json({ error: 'supabase_error', detail: error.message });
+    }
+
+    // Aggregate into buckets (same logic as /api/calls/series)
+    const bucketMap = new Map<string, { bucket: string; total_calls: number; answered_calls: number; missed_calls: number }>();
+    const markAnswered = (s: any) => {
+      const st = (s || "").toString().toLowerCase();
+      return st === "answered" || st === "completed";
+    };
+
+    for (const row of data || []) {
+      const started = new Date(row.started_at);
+      let bucketDate: Date;
+      if (step === "hour") {
+        bucketDate = new Date(started.getFullYear(), started.getMonth(), started.getDate(), started.getHours(), 0, 0, 0);
+      } else if (step === "day") {
+        bucketDate = new Date(started.getFullYear(), started.getMonth(), started.getDate(), 0, 0, 0, 0);
+      } else {
+        bucketDate = new Date(started.getFullYear(), started.getMonth(), 1, 0, 0, 0, 0);
+      }
+
+      const bucketKey = bucketDate.toISOString();
+      if (!bucketMap.has(bucketKey)) {
+        bucketMap.set(bucketKey, { bucket: bucketKey, total_calls: 0, answered_calls: 0, missed_calls: 0 });
+      }
+
+      const entry = bucketMap.get(bucketKey)!;
+      entry.total_calls += 1;
+      if (markAnswered(row.status)) entry.answered_calls += 1;
+      if ((row.status || "").toString().toLowerCase() === "missed") entry.missed_calls += 1;
+    }
+
+    const points: Array<{ bucket: string; total_calls: number; answered_calls: number; missed_calls: number }> = [];
+    const cursor = new Date(startDate);
+    const nowDate = new Date();
+    while (cursor <= nowDate) {
+      let b: Date;
+      if (step === "hour") {
+        b = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), cursor.getHours(), 0, 0, 0);
+        cursor.setHours(cursor.getHours() + 1);
+      } else if (step === "day") {
+        b = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), 0, 0, 0, 0);
+        cursor.setDate(cursor.getDate() + 1);
+      } else {
+        b = new Date(cursor.getFullYear(), cursor.getMonth(), 1, 0, 0, 0, 0);
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+
+      const key = b.toISOString();
+      const val = bucketMap.get(key) || { bucket: key, total_calls: 0, answered_calls: 0, missed_calls: 0 };
+      points.push(val);
+    }
+
+    const mapped = points.map((p) => ({ bucketLabel: p.bucket, totalCalls: p.total_calls, answered: p.answered_calls, missed: p.missed_calls }));
+    console.log('[s/series] Returning', mapped.length, 'time buckets');
+    res.json({ points: mapped });
+  } catch (err: any) {
+    console.error('[s/series] Unexpected error:', err);
+    res.status(500).json({ error: 'unexpected_error', detail: String(err instanceof Error ? err.message : err) });
   }
 });
 
