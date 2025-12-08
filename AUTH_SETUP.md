@@ -18,7 +18,7 @@ I've implemented a **complete authentication system** with Supabase Auth + a pol
 ## How It Works
 
 ```
-User visits http://localhost:3001
+User visits https://dashboard.victorysync.com
     ↓
 App checks if user is logged in
     ↓
@@ -77,7 +77,7 @@ npm run dev
 
 ### Step 4: Open the Dashboard
 User visits https://dashboard.victorysync.com
-Go to **http://localhost:3001** in your browser.
+Go to **https://dashboard.victorysync.com** in your browser.
 
 You should see:
 - **Login page** with email + password fields
@@ -167,7 +167,7 @@ Display real metrics
 - Verify `.env` in server has valid Supabase credentials
 
 ### Routes not working
-- Make sure browser is visiting `http://localhost:3001` (not 3000)
+- Make sure your browser is visiting the correct deployed host (e.g., `https://dashboard.victorysync.com`) or your local dev host if developing
 - Clear browser cache if old routes persist
 
 ---

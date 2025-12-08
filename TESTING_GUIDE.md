@@ -61,7 +61,7 @@
 ### Phase 3: Test Admin Panel (10 minutes)
 
 1. **Login as Admin**
-   - Open http://localhost:3000
+   - Open https://dashboard.victorysync.com (deployed) or your local dev host (port 3000)
    - Enter: `admin@example.com` / `AdminPass123!`
    - Click Dashboard link in navbar
 
