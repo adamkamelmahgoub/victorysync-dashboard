@@ -176,14 +176,14 @@ victorysync-dashboard/
 ```bash
 cd server
 npm run dev
-# Runs on http://localhost:4000
+# Runs on port 4000 (or configure `VITE_API_BASE_URL` to point to https://api.victorysync.com in production)
 ```
 
 ### 3. Frontend Setup
 ```bash
 cd client
 npm run dev
-# Runs on http://localhost:3000
+# Runs on port 3000 (or visit the deployed dashboard at https://dashboard.victorysync.com)
 ```
 
 ### 4. Admin Login

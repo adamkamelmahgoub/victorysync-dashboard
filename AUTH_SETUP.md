@@ -62,12 +62,12 @@ npm run dev
 
 Expected output:
 ```
-Metrics API listening on http://localhost:4000
+Metrics API listening (configured host or port 4000)
 ```
 
 ### Step 3: Verify Frontend is Running
 
-The frontend should already be running on **http://localhost:3001** (from the previous terminal).
+The frontend should already be running on **https://dashboard.victorysync.com** (deployed) or your local dev host if developing.
 
 If not:
 ```powershell
@@ -76,7 +76,7 @@ npm run dev
 ```
 
 ### Step 4: Open the Dashboard
-
+User visits https://dashboard.victorysync.com
 Go to **http://localhost:3001** in your browser.
 
 You should see:
@@ -88,25 +88,27 @@ You should see:
 1. Enter the test credentials you created in Step 1
 2. Click **Sign in**
 3. You should be redirected to **/dashboard**
-
-**Expected Result:**
-- ✅ Clean navbar with VictorySync logo, "Live" indicator, and "Sign out" button
-- ✅ Your email displayed in the navbar
+Expected output:
+```
+Metrics API listening (configured host or port 4000)
+```
 - ✅ Hero KPI card showing **real metrics** from Supabase for your org_id
 - ✅ All 4 KPIs updating every 15 seconds
 - ✅ Secondary metrics, chart, queue status, and recent activity sections
-
+The frontend should already be running on **https://dashboard.victorysync.com** (deployed) or your local dev host if developing.
 ## Testing Sign Out
 
 Click the **Sign out** button in the navbar.
-
+Go to **https://dashboard.victorysync.com** in your browser.
 **Expected Result:**
 - You're logged out
 - Redirected to `/login`
-- Session is cleared
-
+- "Dashboard shows "Error: Failed to load metrics"
+- Backend might not be running or misconfigured
+- Check `cd server && npm run dev` if running locally, or verify `VITE_API_BASE_URL` points to `https://api.victorysync.com` in production
 ## Architecture
-
+- "Routes not working
+- Make sure your browser is visiting the correct deployed host (e.g., `https://dashboard.victorysync.com`) or the local dev host if developing
 ### Frontend Auth Flow
 
 ```

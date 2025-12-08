@@ -20,7 +20,7 @@ npm install
 npm run dev
 ```
 
-Server will run on http://localhost:4000 by default.
+Server will run on port 4000 by default.
 
 2. Client
 
@@ -30,7 +30,7 @@ npm install
 npm run dev
 ```
 
-Vite dev server will run on http://localhost:3000 by default. Open the page and it will render the Dashboard.
+Vite dev server will run on port 3000 by default. Open the page (or visit the deployed dashboard at https://dashboard.victorysync.com) and it will render the Dashboard.
 
 ## Notes
 

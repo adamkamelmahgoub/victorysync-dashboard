@@ -1193,10 +1193,11 @@ app.get("/api/calls/recent", async (req, res) => {
     res.json({ items });
   } catch (err: any) {
     console.error('[calls/recent] Fatal error:', String(err?.message ?? err), err);
-    res.status(500).json({
-      error: "calls_recent_failed",
-      detail: String(err?.message ?? err),
-    });
+    const msg = String(err?.message ?? err);
+    if (/fetch failed|ECONNREFUSED|ENOTFOUND/i.test(msg) || err?.name === 'TypeError') {
+      return res.status(502).json({ error: 'calls_recent_failed', detail: `upstream_fetch_failed: ${msg}` });
+    }
+    res.status(500).json({ error: 'calls_recent_failed', detail: msg });
   }
 });
 
@@ -1313,10 +1314,11 @@ app.get("/api/calls/queue-summary", async (req, res) => {
     res.json({ queues: mapped });
   } catch (err: any) {
     console.error('[queue-summary] Fatal error:', String(err?.message ?? err), err);
-    res.status(500).json({
-      error: "queue_summary_failed",
-      detail: String(err?.message ?? err),
-    });
+    const msg = String(err?.message ?? err);
+    if (/fetch failed|ECONNREFUSED|ENOTFOUND/i.test(msg) || err?.name === 'TypeError') {
+      return res.status(502).json({ error: 'queue_summary_failed', detail: `upstream_fetch_failed: ${msg}` });
+    }
+    res.status(500).json({ error: 'queue_summary_failed', detail: msg });
   }
 });
 
@@ -1441,10 +1443,11 @@ app.get("/api/calls/series", async (req, res) => {
     res.json({ points: mapped });
   } catch (err: any) {
     console.error('[calls/series] Fatal error:', String(err?.message ?? err), err);
-    res.status(500).json({
-      error: "calls_series_failed",
-      detail: String(err?.message ?? err),
-    });
+    const msg = String(err?.message ?? err);
+    if (/fetch failed|ECONNREFUSED|ENOTFOUND/i.test(msg) || err?.name === 'TypeError') {
+      return res.status(502).json({ error: 'calls_series_failed', detail: `upstream_fetch_failed: ${msg}` });
+    }
+    res.status(500).json({ error: 'calls_series_failed', detail: msg });
   }
 });
 
@@ -1593,8 +1596,13 @@ app.get("/s/series", async (req, res) => {
     });
 
 const port = Number(process.env.PORT) || 4000;
+const serverHost = process.env.API_BASE_URL || process.env.SERVER_BASE_URL || null;
 app.listen(port, '0.0.0.0', () => {
-  console.log(`Metrics API listening on http://localhost:${port}`);
+  if (serverHost) {
+    console.log(`Metrics API listening (configured host): ${serverHost}`);
+  } else {
+    console.log(`Metrics API listening on port ${port}`);
+  }
 }).on('error', (err: any) => {
   console.error(`Failed to listen on port ${port}:`, err.message);
   process.exit(1);

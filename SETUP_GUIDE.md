@@ -42,7 +42,7 @@ npm run dev
 Expected output:
 ```
 [INFO] ...
-Metrics API listening on http://localhost:4000
+Metrics API listening (configured host or port 4000)
 ```
 
 ### Step 4: Start Frontend
@@ -57,12 +57,12 @@ npm run dev
 Expected output:
 ```
 VITE v5.x.x  ready in ... ms
-  ➜  Local:   http://localhost:3001/
+     ➜  Local:   port 3001 (or visit https://dashboard.victorysync.com for deployed)
 ```
 
 ### Step 5: Open Dashboard
 
-Visit the Vite dev URL (likely `http://localhost:3001`) in your browser.
+Visit the Vite dev URL (local port 3001) or the deployed dashboard at `https://dashboard.victorysync.com` in your browser.
 
 **Expected Result:**
 - ✅ Dashboard loads
@@ -82,7 +82,7 @@ To verify live updates:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Browser (Vite Dev Server @ localhost:3001)         │
+│  Browser (Vite Dev Server local)                    │
 │  ┌────────────────────────────────────────────────┐ │
 │  │  Dashboard.tsx                                 │ │
 │  │  - imports TEST_ORG_ID from config.ts          │ │
@@ -94,7 +94,7 @@ To verify live updates:
          API_BASE_URL + /api/client-metrics?org_id=...
               ↓
 ┌─────────────────────────────────────────────────────┐
-│  Express Server (localhost:4000)                    │
+│  Express Server (api.victorysync.com or local port 4000)                    │
 │  ┌────────────────────────────────────────────────┐ │
 │  │  GET /api/client-metrics?org_id=...            │ │
 │  │  - queries Supabase client_metrics_today view  │ │

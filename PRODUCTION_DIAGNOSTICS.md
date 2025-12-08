@@ -235,19 +235,19 @@ npm run dev
 ### Endpoint Testing ✅
 ```bash
 # Test metrics endpoint
-curl http://localhost:4000/api/client-metrics
+curl https://api.victorysync.com/api/client-metrics
 # Returns: {"metrics": {...}}
 
 # Test recent calls
-curl "http://localhost:4000/api/calls/recent?limit=5"
+curl "https://api.victorysync.com/api/calls/recent?limit=5"
 # Returns: {"items": [...]}
 
 # Test time series
-curl "http://localhost:4000/api/calls/series?range=day"
+curl "https://api.victorysync.com/api/calls/series?range=day"
 # Returns: {"points": [...]}
 
 # Test queue summary
-curl "http://localhost:4000/api/calls/queue-summary"
+curl "https://api.victorysync.com/api/calls/queue-summary"
 # Returns: {"queues": [...]}
 ```
 
