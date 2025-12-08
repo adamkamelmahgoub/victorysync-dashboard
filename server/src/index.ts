@@ -269,6 +269,40 @@ app.get("/api/admin/orgs", async (req, res) => {
   }
 });
 
+// POST /api/admin/orgs - Create a new organization (server-side)
+app.post("/api/admin/orgs", async (req, res) => {
+  try {
+    const { name } = req.body || {};
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'missing_required_fields', detail: 'name is required' });
+    }
+
+    // Insert organization using the admin Supabase client
+    const { data: org, error: orgErr } = await supabaseAdmin
+      .from('organizations')
+      .insert({ name })
+      .select()
+      .maybeSingle();
+
+    if (orgErr) {
+      console.error('admin_create_org_failed:', fmtErr(orgErr));
+      throw orgErr;
+    }
+
+    // Create default org_settings if table exists (ignore failure)
+    try {
+      await supabaseAdmin.from('org_settings').insert({ org_id: org.id, sla_answer_target_percent: 90, sla_answer_target_seconds: 30 });
+    } catch (e) {
+      console.warn('org_settings_create_warning:', fmtErr(e));
+    }
+
+    return res.json({ org });
+  } catch (err: any) {
+    console.error('admin_create_org_failed:', fmtErr(err));
+    return res.status(500).json({ error: 'admin_create_org_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
 // GET /api/admin/org_users - list all org_user assignments
 app.get("/api/admin/org_users", async (_req, res) => {
   try {
@@ -945,9 +979,18 @@ app.get("/api/admin/org-metrics", async (_req, res) => {
 
     if (error) {
       console.error("admin org-metrics error:", error);
-      return res
-        .status(500)
-        .json({ error: "org_metrics_failed", detail: error.message });
+      // Fallback: if the relation/view doesn't exist or query fails, return basic org list with zeroed metrics
+      try {
+        const { data: orgsOnly, error: oErr } = await supabaseAdmin.from('organizations').select('id, name').order('name', { ascending: true });
+        if (oErr) throw oErr;
+        const fallback = (orgsOnly || []).map((r: any) => ({ id: r.id, name: r.name, total_calls: 0, answered_calls: 0, answer_rate_pct: 0, avg_wait_seconds: 0 }));
+        return res.json({ orgs: fallback });
+      } catch (fallbackErr) {
+        console.error('admin org-metrics fallback failed:', fmtErr(fallbackErr));
+        return res
+          .status(500)
+          .json({ error: "org_metrics_failed", detail: fmtErr(error) ?? 'unknown_error' });
+      }
     }
 
     // Flatten embedded relation

@@ -2,7 +2,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../../lib/supabaseClient';
+// Server-side admin actions use API endpoints, not client-side Supabase
 import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL } from '../../config';
 import { useAuth } from '../../contexts/AuthContext';
@@ -641,8 +641,10 @@ export default function AdminOrgsPage() {
     setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/org-metrics`);
-      if (!res.ok) throw new Error('Failed to fetch org metrics');
-      const j = await res.json();
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(j.detail || 'Failed to fetch org metrics');
+      }
       const list = (j.orgs || []).map((o: any) => ({
         id: o.id,
         name: o.name,
@@ -677,32 +679,20 @@ export default function AdminOrgsPage() {
     try {
       setCreating(true);
 
-      // Create organization
-      const { data: org, error: orgErr } = await supabase
-        .from('organizations')
-        .insert({ name: newOrgName })
-        .select()
-        .single();
-      
-      if (orgErr) throw orgErr;
+      const res = await fetch(`${API_BASE_URL}/api/admin/orgs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': (user as any)?.id || '' },
+        body: JSON.stringify({ name: newOrgName }),
+      });
 
-      // Create default org_settings
-      const { error: settingsErr } = await supabase
-        .from('org_settings')
-        .insert({
-          org_id: org.id,
-          sla_answer_target_percent: 90,
-          sla_answer_target_seconds: 30,
-        });
-      
-      if (settingsErr) {
-        console.error('Settings creation error:', settingsErr);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(j.detail || 'Failed to create organization');
       }
 
       setNewOrgName('');
       setCreateSuccess(true);
       setTimeout(() => setCreateSuccess(false), 3000);
-      
       await fetchOrgs();
     } catch (err: any) {
       console.error('Create org error:', err);

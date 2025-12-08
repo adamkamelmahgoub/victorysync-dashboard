@@ -80,16 +80,19 @@ export const AdminUsersPage: FC = () => {
   // Platform perms modal state
   const [showPlatformModal, setShowPlatformModal] = useState<{ userId: string; email: string } | null>(null);
 
-  // Load organizations
+  // Load organizations (via server API to avoid client-side Supabase usage)
   useEffect(() => {
     const fetchOrgs = async () => {
       try {
-        const { data, error } = await supabase
-          .from('organizations')
-          .select('id, name')
-          .order('name');
-        if (error) throw error;
-        setOrgs(data || []);
+        const res = await fetch(`${API_BASE_URL}/api/admin/orgs`);
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          console.error('Failed to fetch orgs from API:', j);
+          setOrgs([]);
+          return;
+        }
+        const data = j.orgs || [];
+        setOrgs(data.map((o: any) => ({ id: o.id, name: o.name })));
         if (data && data.length > 0) {
           setCreateOrgId(data[0].id);
         }
@@ -108,8 +111,11 @@ export const AdminUsersPage: FC = () => {
       try {
         setAllUsersLoading(true);
         const res = await fetch(`${API_BASE_URL}/api/admin/users`);
-        if (!res.ok) throw new Error('Failed to fetch admin users');
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          console.error('Failed to fetch admin users:', json);
+          throw new Error(json.detail || 'Failed to fetch admin users');
+        }
         const users = json.users || [];
         setAllUsers(users.map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null })));
       } catch (err: any) {
@@ -126,8 +132,11 @@ export const AdminUsersPage: FC = () => {
     try {
       setOrgUsersLoading(true);
       const res = await fetch(`${API_BASE_URL}/api/admin/org_users`);
-      if (!res.ok) throw new Error('Failed to fetch org_users');
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error('Failed to fetch org_users:', json);
+        throw new Error(json.detail || 'Failed to fetch org_users');
+      }
       setOrgUsers(json.org_users || []);
     } catch (err: any) {
       console.error('Failed to fetch org_users:', err);
