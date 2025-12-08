@@ -4,7 +4,9 @@ import { supabase } from '../lib/supabaseClient';
 
 interface PhoneNumber {
   id: string;
-  phone_number: string;
+  number: string;
+  e164?: string | null;
+  number_digits?: string | null;
   label: string | null;
   is_active: boolean;
   created_at: string;
@@ -27,8 +29,8 @@ export default function PhoneNumbersTab({ orgId }: { orgId: string }) {
     setLoading(true);
     setError(null);
     const { data, error } = await supabase
-      .from('org_phone_numbers')
-      .select('*')
+      .from('phone_numbers')
+      .select('id, number, e164, number_digits, label, is_active, created_at')
       .eq('org_id', orgId)
       .order('created_at', { ascending: false });
     if (error) setError(error.message);
@@ -40,9 +42,11 @@ export default function PhoneNumbersTab({ orgId }: { orgId: string }) {
     e.preventDefault();
     setAdding(true);
     setError(null);
-    const { error: insertErr } = await supabase.from('org_phone_numbers').insert({
+    const { error: insertErr } = await supabase.from('phone_numbers').insert({
       org_id: orgId,
-      phone_number: newNumber,
+      number: newNumber,
+      e164: newNumber,
+      number_digits: newNumber.replace(/[^0-9]/g, ''),
       label: newLabel || null,
       is_active: true,
     });
@@ -54,7 +58,7 @@ export default function PhoneNumbersTab({ orgId }: { orgId: string }) {
   }
 
   async function handleToggleActive(id: string, isActive: boolean) {
-    await supabase.from('org_phone_numbers').update({ is_active: !isActive }).eq('id', id);
+    await supabase.from('phone_numbers').update({ is_active: !isActive }).eq('id', id);
     fetchNumbers();
   }
 
@@ -104,7 +108,7 @@ export default function PhoneNumbersTab({ orgId }: { orgId: string }) {
           <tbody>
             {numbers.map(num => (
               <tr key={num.id} className="border-t border-gray-800">
-                <td className="p-2">{num.phone_number}</td>
+                <td className="p-2">{num.number}</td>
                 <td className="p-2">{num.label || '-'}</td>
                 <td className="p-2">
                   <button

@@ -8,11 +8,13 @@ import {
 } from "react-router-dom";
 import "./index.css";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { ToastProvider } from "./contexts/ToastContext";
 import { Dashboard } from "./Dashboard";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage";
 import AdminOrgsPage from "./pages/admin/AdminOrgsPage";
 import { AdminOrgOverviewPage } from "./pages/admin/AdminOrgOverviewPage";
+import { OrgDashboardPage } from "./pages/admin/OrgDashboardPage";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -80,6 +82,14 @@ function AppRouter() {
         }
       />
       <Route
+        path="/admin/orgs/:orgId/dashboard"
+        element={
+          <AdminRoute>
+            <OrgDashboardPage />
+          </AdminRoute>
+        }
+      />
+      <Route
         path="/admin/org-overview"
         element={
           <AdminRoute>
@@ -96,7 +106,10 @@ createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <AuthProvider>
       <BrowserRouter>
-        <AppRouter />
+        {/* ToastProvider provides a simple global toast UI */}
+        <ToastProvider>
+          <AppRouter />
+        </ToastProvider>
       </BrowserRouter>
     </AuthProvider>
   </StrictMode>

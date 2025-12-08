@@ -1,8 +1,8 @@
 // server/src/index.ts
-import "dotenv/config";
+import './config/env';
 import express from "express";
 import cors from "cors";
-import { createClient } from "@supabase/supabase-js";
+import { supabase, supabaseAdmin } from './lib/supabaseClient';
 import { fetchMightyCallPhoneNumbers, fetchMightyCallExtensions, syncMightyCallPhoneNumbers } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgManagerWith } from './auth/rbac';
 
@@ -10,17 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Admin Supabase client for user management
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+// Using centralized Supabase client from `src/lib/supabaseClient`
 
 // Simple health check
 app.get("/", (_req, res) => {
@@ -143,7 +133,7 @@ app.get("/api/admin/orgs", async (req, res) => {
 app.get("/api/admin/org_users", async (_req, res) => {
   try {
     const { data, error } = await supabaseAdmin
-      .from("org_members")
+      .from("org_users")
       .select("org_id, user_id, role, mightycall_extension, created_at")
       .order("created_at", { ascending: false });
 
@@ -171,7 +161,7 @@ app.post("/api/admin/org_users", async (req, res) => {
     };
 
     const { data, error } = await supabaseAdmin
-      .from("org_members")
+      .from("org_users")
       .upsert(payload, { onConflict: "org_id,user_id" })
       .select()
       .maybeSingle();
@@ -193,7 +183,7 @@ app.delete("/api/admin/org_users", async (req, res) => {
     }
 
     const { error } = await supabaseAdmin
-      .from("org_members")
+      .from("org_users")
       .delete()
       .eq("user_id", user_id)
       .eq("org_id", org_id);
@@ -276,6 +266,26 @@ app.get("/api/admin/mightycall/extensions", async (_req, res) => {
   } catch (err: any) {
     console.error("mightycall_extensions_failed:", err?.message ?? err);
     res.status(500).json({ error: "mightycall_extensions_failed", detail: err?.message ?? "unknown_error" });
+  }
+});
+
+// GET /api/admin/phone-numbers - generic phone numbers listing
+app.get('/api/admin/phone-numbers', async (req, res) => {
+  try {
+    const orgId = req.query.orgId as string | undefined;
+    const unassignedOnly = (req.query.unassignedOnly as string | undefined) === 'true';
+
+    let q = supabaseAdmin.from('phone_numbers').select('id, number, e164, number_digits, label, org_id, client_id, is_active').order('created_at', { ascending: true });
+    if (unassignedOnly) q = q.is('org_id', null);
+    if (orgId) q = q.eq('org_id', orgId);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    const mapped = (data || []).map((r: any) => ({ id: r.id, number: r.number, label: r.label ?? null, orgId: r.org_id ?? null, isActive: !!r.is_active }));
+    res.json({ phone_numbers: mapped });
+  } catch (err: any) {
+    console.error('list_phone_numbers_failed:', err?.message ?? err);
+    res.status(500).json({ error: 'list_phone_numbers_failed', detail: err?.message ?? 'unknown_error' });
   }
 });
 
@@ -463,6 +473,37 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
   }
 });
 
+// DELETE /api/admin/orgs/:orgId/phone-numbers/:phoneNumberId - unassign number (set org_id = NULL)
+app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    const { orgId, phoneNumberId } = req.params;
+    if (!orgId || !phoneNumberId) return res.status(400).json({ error: 'missing_required_fields' });
+
+    const allowed =
+      (userId && (await isPlatformAdmin(userId))) ||
+      (userId && (await isPlatformManagerWith(userId, 'can_manage_phone_numbers_global'))) ||
+      (userId && (await isOrgAdmin(userId, orgId))) ||
+      (userId && (await isOrgManagerWith(userId, orgId, 'can_manage_phone_numbers')));
+
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    // Only unassign if it currently belongs to this org (safety)
+    const { data: existing, error: getErr } = await supabaseAdmin.from('phone_numbers').select('org_id').eq('id', phoneNumberId).maybeSingle();
+    if (getErr) throw getErr;
+    if (!existing) return res.status(404).json({ error: 'phone_not_found' });
+    if (existing.org_id && existing.org_id !== orgId) return res.status(400).json({ error: 'mismatched_org' });
+
+    const { error } = await supabaseAdmin.from('phone_numbers').update({ org_id: null }).eq('id', phoneNumberId);
+    if (error) throw error;
+
+    res.status(204).send();
+  } catch (err: any) {
+    console.error('unassign_phone_failed:', err?.message ?? err);
+    res.status(500).json({ error: 'unassign_phone_failed', detail: err?.message ?? 'unknown_error' });
+  }
+});
+
 // POST /api/admin/mightycall/sync - fetch from MightyCall and upsert phone numbers + extensions
 app.post('/api/admin/mightycall/sync', async (_req, res) => {
   try {
@@ -497,27 +538,13 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     if (orgErr) throw orgErr;
     if (!org) return res.status(404).json({ error: 'org_not_found' });
 
-    // members from org_members (fall back to org_users if table not present)
-    let memberships: any[] = [];
-    try {
-      const { data: mdata, error: memErr } = await supabaseAdmin
-        .from('org_members')
-        .select('id, user_id, role, mightycall_extension, created_at')
-        .eq('org_id', orgId)
-        .order('created_at', { ascending: false });
-      if (memErr) throw memErr;
-      memberships = mdata || [];
-    } catch (e) {
-      // fallback to legacy org_users table if org_members doesn't exist
-      console.warn('org_members query failed, falling back to org_users:', e?.message ?? e);
-      const { data: legacy, error: legacyErr } = await supabaseAdmin
-        .from('org_users')
-        .select('org_id, user_id, role, mightycall_extension, created_at')
-        .eq('org_id', orgId)
-        .order('created_at', { ascending: false });
-      if (legacyErr) throw legacyErr;
-      memberships = legacy || [];
-    }
+    // members from `org_users` (canonical in this deployment)
+    const { data: memberships, error: memErr } = await supabaseAdmin
+      .from('org_users')
+      .select('org_id, user_id, role, mightycall_extension, created_at')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: false });
+    if (memErr) throw memErr;
 
     const members: Array<any> = [];
     for (const m of (memberships || [])) {
@@ -585,20 +612,35 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     // stats (calls today) - reuse logic
     const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
     // Compute stats based only on calls to assigned phone numbers for this org
-    const assignedNumbers = (phones || []).map((p: any) => p.number);
-    let callsQuery = supabaseAdmin.from('calls').select('status').gte('started_at', todayStart);
-    if (assignedNumbers.length > 0) {
-      callsQuery = callsQuery.in('to_number', assignedNumbers);
-    } else {
+    const assignedNumbers = (phones || []).map((p: any) => p.number).filter(Boolean);
+    const assignedDigits = (phones || []).map((p: any) => p.number_digits).filter(Boolean);
+
+    if (assignedNumbers.length === 0 && assignedDigits.length === 0) {
       // No numbers assigned -> zero stats
       const answerRate = 0;
       return res.json({ org, members, phones: phones || [], stats: { total_calls: 0, answered_calls: 0, missed_calls: 0, answer_rate_pct: answerRate } });
     }
-    const { data: calls, error: callsError } = await callsQuery;
-    if (callsError) throw callsError;
 
+    // Fetch calls that match either E.164 `to_number` or digit-only `to_number_digits`
+    const callsSet: any[] = [];
+    if (assignedNumbers.length > 0) {
+      const { data: callsA, error: errA } = await supabaseAdmin.from('calls').select('status, to_number, started_at').gte('started_at', todayStart).in('to_number', assignedNumbers);
+      if (errA) throw errA;
+      if (callsA) callsSet.push(...callsA);
+    }
+    if (assignedDigits.length > 0) {
+      const { data: callsB, error: errB } = await supabaseAdmin.from('calls').select('status, to_number, started_at').gte('started_at', todayStart).in('to_number_digits', assignedDigits);
+      if (errB) throw errB;
+      if (callsB) callsSet.push(...callsB);
+    }
+
+    // Deduplicate calls by a composite key (started_at + to_number)
+    const seen = new Set<string>();
     let totalCalls = 0; let answeredCalls = 0; let missedCalls = 0;
-    for (const call of (calls || [])) {
+    for (const call of callsSet || []) {
+      const key = `${call.started_at || ''}::${call.to_number || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const st = (call.status || '').toString().toLowerCase();
       totalCalls += 1;
       if (st === 'answered' || st === 'completed') answeredCalls += 1;

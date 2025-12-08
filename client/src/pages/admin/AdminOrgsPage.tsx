@@ -1,3 +1,4 @@
+// v2 - Phone management modal with detailed logging
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -5,6 +6,7 @@ import { supabase } from '../../lib/supabaseClient';
 import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL } from '../../config';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 
 interface Organization {
   id: string;
@@ -18,6 +20,7 @@ interface Organization {
 interface OrgDetailsModalProps {
   org: Organization;
   onClose: () => void;
+  onViewDashboard?: (orgId: string) => void;
 }
 
 interface Member {
@@ -29,7 +32,7 @@ interface Member {
 }
 
 // Org Details Modal Component
-function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
+function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps) {
   const [stats, setStats] = useState<any>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
@@ -38,6 +41,13 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
   const [phones, setPhones] = useState<Array<{ id: string; number: string; label: string | null }>>([]);
   const [phonesLoading, setPhonesLoading] = useState(true);
   const { user } = useAuth();
+  const toast = (() => {
+    try {
+      return useToast();
+    } catch (e) {
+      return null as any;
+    }
+  })();
   const [canEditPhones, setCanEditPhones] = useState(false);
   const [showEditPhones, setShowEditPhones] = useState(false);
   const [showPermissionsEditor, setShowPermissionsEditor] = useState<{ orgMemberId: string; memberEmail: string } | null>(null);
@@ -48,9 +58,11 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
     setStatsLoading(true);
     setStatsError(null);
     try {
+      console.log('OrgDetailsModal: reloading org details for', org.id);
       const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`);
       if (!res.ok) throw new Error('Failed to fetch org details');
       const j = await res.json();
+      console.log('OrgDetailsModal: received data', { members: j.members?.length, phones: j.phones?.length, stats: j.stats, canEdit: j.permissions?.canEditPhoneNumbers });
       setMembers(j.members || []);
       setPhones(j.phones || []);
       setStats(j.stats || null);
@@ -70,73 +82,210 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
     reloadOrgDetails();
   }, [org.id]);
 
-  // EditPhonesModal component
-  function EditPhonesModal({ orgId, onClose }: { orgId: string; onClose: () => void }) {
-    const [unassigned, setUnassigned] = useState<Array<{ id: string; number: string; label?: string }>>([]);
-    const [selected, setSelected] = useState<string[]>([]);
+  // EditPhonesModalEnhanced component
+  function EditPhonesModalEnhanced({ orgId, phones, onClose }: { orgId: string; phones: Array<{ id: string; number: string; label: string | null }>; onClose: () => void }) {
+    const [allPhones, setAllPhones] = useState<Array<{ id: string; number: string; label?: string }>>([]);
+    const [toAdd, setToAdd] = useState<string[]>([]);
+    const [toRemove, setToRemove] = useState<string[]>([]);
     const [saving, setSaving] = useState(false);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
       const load = async () => {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/admin/mightycall/phone-numbers?unassignedOnly=true`);
-          if (!res.ok) throw new Error('Failed to load numbers');
+          console.log('EditPhonesModalEnhanced: fetching from', `${API_BASE_URL}/api/admin/phone-numbers`);
+          const res = await fetch(`${API_BASE_URL}/api/admin/phone-numbers`);
+          if (!res.ok) throw new Error(`Failed to load numbers: ${res.status}`);
           const j = await res.json();
-          setUnassigned(j.phone_numbers || []);
+          console.log('EditPhonesModalEnhanced: received phone_numbers', j);
+          setAllPhones(j.phone_numbers || []);
         } catch (err) {
           console.error('load numbers failed', err);
+        } finally {
+          setLoading(false);
         }
       };
       load();
     }, [orgId]);
 
+    const assignedIds = new Set(phones.map(p => p.id));
+    const assigned = allPhones.filter(p => assignedIds.has(p.id));
+    const available = allPhones.filter(p => !assignedIds.has(p.id) && !toRemove.includes(p.id));
+
     const save = async () => {
-      if (selected.length === 0) return onClose();
       try {
         setSaving(true);
-        const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
-          body: JSON.stringify({ phoneNumberIds: selected }),
-        });
-        if (!res.ok) throw new Error('Assign failed');
+        // Add new phone numbers
+        if (toAdd.length > 0) {
+          const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+            body: JSON.stringify({ phoneNumberIds: toAdd }),
+          });
+          if (!res.ok) throw new Error('Assign failed');
+        }
+        // Remove phone numbers
+        for (const phoneId of toRemove) {
+          const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers/${phoneId}`, {
+            method: 'DELETE',
+            headers: { 'x-user-id': user?.id || '' },
+          });
+          if (!res.ok) throw new Error('Unassign failed');
+        }
         onClose();
+        if (toast && toast.push) toast.push('Phone numbers updated', 'success');
       } catch (err) {
-        console.error('Assign failed', err);
+        console.error('Save failed', err);
+        alert('Failed to save changes');
       } finally {
         setSaving(false);
       }
     };
 
+    const hasChanges = toAdd.length > 0 || toRemove.length > 0;
+
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="w-full max-w-lg bg-slate-900 rounded-lg p-5 border border-slate-700">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg">Edit phone numbers</h3>
-            <button onClick={onClose} className="text-slate-400">×</button>
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-xs text-slate-400 mb-2">Available unassigned numbers</label>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {unassigned.map((n) => (
-                <label key={n.id} className="flex items-center gap-2 bg-slate-800/30 p-2 rounded">
-                  <input type="checkbox" checked={selected.includes(n.id)} onChange={(e) => {
-                    const next = e.target.checked ? [...selected, n.id] : selected.filter(s => s !== n.id);
-                    setSelected(next);
-                  }} />
-                  <div>
-                    <div className="text-sm">{n.number}</div>
-                    {n.label && <div className="text-xs text-slate-400">{n.label}</div>}
-                  </div>
-                </label>
-              ))}
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="w-full max-w-2xl bg-slate-900/95 rounded-lg border border-slate-700 overflow-hidden shadow-2xl">
+          {/* Header */}
+          <div className="border-b border-slate-700 bg-slate-900/95 p-5 flex items-center justify-between sticky top-0">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-50">Manage Phone Numbers</h3>
+              <p className="text-xs text-slate-400 mt-1">Assign or remove phone numbers from this organization</p>
             </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-200 transition text-2xl leading-none">
+              ×
+            </button>
           </div>
 
-          <div className="flex justify-end gap-2">
-            <button onClick={onClose} className="px-3 py-1 bg-slate-700 rounded">Cancel</button>
-            <button onClick={save} disabled={saving} className="px-3 py-1 bg-emerald-500 rounded">{saving ? 'Saving...' : 'Save'}</button>
+          {/* Content */}
+          <div className="p-5 max-h-[60vh] overflow-y-auto">
+            {loading ? (
+              <div className="text-xs text-slate-400 text-center py-8">Loading phone numbers...</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-6">
+                {/* Assigned Column */}
+                <div>
+                  <h4 className="font-semibold text-sm text-emerald-300 mb-3">
+                    Assigned ({assigned.length - toRemove.length})
+                  </h4>
+                  <div className="space-y-2 min-h-48 bg-slate-800/20 rounded-lg p-3 border border-emerald-700/30">
+                    {assigned.length === 0 ? (
+                      <div className="text-xs text-slate-500 text-center py-8">No phone numbers assigned yet</div>
+                    ) : (
+                      assigned
+                        .filter(p => !toRemove.includes(p.id))
+                        .map((n) => (
+                          <div
+                            key={n.id}
+                            className="flex items-center justify-between bg-emerald-900/30 border border-emerald-700/50 rounded p-2.5 hover:bg-emerald-900/40 transition"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-emerald-300">{n.number}</div>
+                              {n.label && <div className="text-xs text-slate-400 mt-0.5">{n.label}</div>}
+                            </div>
+                            <button
+                              onClick={() => setToRemove([...toRemove, n.id])}
+                              className="ml-2 text-xs text-red-400 hover:text-red-300 transition flex-shrink-0"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))
+                    )}
+                    {toRemove
+                      .map(id => assigned.find(p => p.id === id))
+                      .filter(Boolean)
+                      .map((n) => (
+                        <div
+                          key={n!.id}
+                          className="flex items-center justify-between bg-red-900/20 border border-red-700/30 rounded p-2.5 opacity-50"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-red-400 line-through">{n!.number}</div>
+                            {n!.label && <div className="text-xs text-slate-400 mt-0.5">{n!.label}</div>}
+                          </div>
+                          <button
+                            onClick={() => setToRemove(toRemove.filter(id => id !== n!.id))}
+                            className="ml-2 text-xs text-emerald-400 hover:text-emerald-300 transition flex-shrink-0"
+                          >
+                            Keep
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* Available Column */}
+                <div>
+                  <h4 className="font-semibold text-sm text-blue-300 mb-3">
+                    Available ({available.length - toAdd.length})
+                  </h4>
+                  <div className="space-y-2 min-h-48 bg-slate-800/20 rounded-lg p-3 border border-blue-700/30">
+                    {available.length === 0 ? (
+                      <div className="text-xs text-slate-500 text-center py-8">No available numbers</div>
+                    ) : (
+                      available
+                        .filter(p => !toAdd.includes(p.id))
+                        .map((n) => (
+                          <div
+                            key={n.id}
+                            className="flex items-center justify-between bg-blue-900/30 border border-blue-700/50 rounded p-2.5 hover:bg-blue-900/40 transition"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-blue-300">{n.number}</div>
+                              {n.label && <div className="text-xs text-slate-400 mt-0.5">{n.label}</div>}
+                            </div>
+                            <button
+                              onClick={() => setToAdd([...toAdd, n.id])}
+                              className="ml-2 text-xs text-emerald-400 hover:text-emerald-300 transition flex-shrink-0"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        ))
+                    )}
+                    {toAdd
+                      .map(id => available.find(p => p.id === id))
+                      .filter(Boolean)
+                      .map((n) => (
+                        <div
+                          key={n!.id}
+                          className="flex items-center justify-between bg-emerald-900/30 border border-emerald-700/50 rounded p-2.5 opacity-50"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-emerald-300">{n!.number}</div>
+                            {n!.label && <div className="text-xs text-slate-400 mt-0.5">{n!.label}</div>}
+                          </div>
+                          <button
+                            onClick={() => setToAdd(toAdd.filter(id => id !== n!.id))}
+                            className="ml-2 text-xs text-slate-400 hover:text-slate-300 transition flex-shrink-0"
+                          >
+                            Undo
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="border-t border-slate-700 bg-slate-900/95 p-5 flex justify-end gap-3 sticky bottom-0">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 transition rounded-lg text-sm font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={save}
+              disabled={saving || !hasChanges}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition rounded-lg text-sm font-medium"
+            >
+              {saving ? 'Saving...' : hasChanges ? 'Save Changes' : 'No Changes'}
+            </button>
           </div>
         </div>
       </div>
@@ -207,6 +356,7 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
         );
         if (!res.ok) throw new Error('Failed to save permissions');
         onClose();
+        if (toast && toast.push) toast.push('Manager permissions saved', 'success');
       } catch (err) {
         console.error('Failed to save permissions', err);
       } finally {
@@ -370,67 +520,71 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
             )}
           </div>
 
-          {/* Assigned Numbers */}
+          {/* Phone Numbers Management */}
           <div>
-            <h3 className="font-semibold text-sm mb-3 text-slate-200">Assigned Numbers</h3>
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm text-slate-200">Phone Numbers</h3>
               {canEditPhones && (
-                <button onClick={() => setShowEditPhones(true)} className="text-xs text-emerald-400 hover:underline">Edit numbers</button>
+                <button onClick={() => setShowEditPhones(true)} className="text-xs text-emerald-400 hover:underline">Manage</button>
               )}
             </div>
 
             {phonesLoading ? (
-              <div className="text-xs text-slate-400">Loading...</div>
+              <div className="text-xs text-slate-400">Loading phone numbers...</div>
             ) : phones.length === 0 ? (
-              <div className="text-xs text-slate-500">No phone numbers assigned</div>
+              <div className="rounded-lg border border-dashed border-slate-600 bg-slate-800/20 p-4 text-center">
+                <div className="text-xs text-slate-400">No phone numbers assigned</div>
+                {canEditPhones && (
+                  <button onClick={() => setShowEditPhones(true)} className="text-xs text-emerald-400 hover:underline mt-2">Add numbers</button>
+                )}
+              </div>
             ) : (
-              <div className="space-y-2 max-h-40 overflow-y-auto">
+              <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto">
                 {phones.map((phone) => (
                   <div
                     key={phone.id}
-                    className="flex items-center justify-between bg-slate-800/30 rounded-lg p-2"
+                    className="flex items-center justify-between bg-gradient-to-r from-emerald-900/20 to-emerald-900/5 border border-emerald-700/30 rounded-lg p-3"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-slate-200">
+                      <div className="text-sm font-medium text-emerald-300">
                         {phone.number}
                       </div>
                       {phone.label && (
-                        <div className="text-[10px] text-slate-400">
+                        <div className="text-xs text-slate-400 mt-0.5">
                           {phone.label}
                         </div>
                       )}
                     </div>
-                    <div className="ml-2 flex items-center gap-2">
-                      {canEditPhones && (
-                        <button
-                          onClick={async () => {
-                            if (!window.confirm(`Remove ${phone.number}?`)) return;
-                            try {
-                              const res = await fetch(
-                                `${API_BASE_URL}/api/admin/orgs/${org.id}/phone-numbers/${phone.id}`,
-                                { method: 'DELETE', headers: { 'x-user-id': user?.id || '' } }
-                              );
-                              if (!res.ok) throw new Error('Delete failed');
-                              reloadOrgDetails();
-                            } catch (err) {
-                              console.error('Delete failed', err);
-                              alert('Failed to remove phone number');
-                            }
-                          }}
-                          className="text-xs text-red-400 hover:underline"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
+                    {canEditPhones && (
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Remove ${phone.number} from this organization?`)) return;
+                          try {
+                            const res = await fetch(
+                              `${API_BASE_URL}/api/admin/orgs/${org.id}/phone-numbers/${phone.id}`,
+                              { method: 'DELETE', headers: { 'x-user-id': user?.id || '' } }
+                            );
+                            if (!res.ok) throw new Error('Delete failed');
+                            reloadOrgDetails();
+                          } catch (err) {
+                            console.error('Delete failed', err);
+                            alert('Failed to remove phone number');
+                          }
+                        }}
+                        className="ml-3 text-xs text-red-400 hover:text-red-300 transition flex-shrink-0"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
 
+          {/* Modal for editing phones - rendered separately to avoid z-index issues */}
           {showEditPhones && (
-            <EditPhonesModal orgId={org.id} onClose={() => { setShowEditPhones(false); /* reload */ const e = async () => { const r = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`); const j = await r.json(); setPhones(j.phones || []); setCanEditPhones(Boolean(j.permissions?.canEditPhoneNumbers)); }; e(); }} />
+            <EditPhonesModalEnhanced orgId={org.id} phones={phones} onClose={() => { setShowEditPhones(false); reloadOrgDetails(); }} />
           )}
 
           {showPermissionsEditor && (
@@ -443,9 +597,22 @@ function OrgDetailsModal({ org, onClose }: OrgDetailsModalProps) {
             />
           )}
 
-          {/* Created date */}
-          <div className="text-xs text-slate-500 pt-2 border-t border-slate-700">
-            Created {new Date(org.created_at).toLocaleDateString()}
+          {/* Created date and action buttons */}
+          <div className="pt-4 border-t border-slate-700 space-y-3">
+            <div className="text-xs text-slate-500">
+              Created {new Date(org.created_at).toLocaleDateString()}
+            </div>
+            {onViewDashboard && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onViewDashboard(org.id);
+                }}
+                className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 transition rounded-lg text-sm font-medium text-center"
+              >
+                View Full Dashboard →
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -663,6 +830,7 @@ export default function AdminOrgsPage() {
         <OrgDetailsModal
           org={selectedOrg}
           onClose={() => setSelectedOrg(null)}
+          onViewDashboard={(orgId) => navigate(`/admin/orgs/${orgId}/dashboard`)}
         />
       )}
     </main>

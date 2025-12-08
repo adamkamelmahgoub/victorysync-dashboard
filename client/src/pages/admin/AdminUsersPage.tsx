@@ -2,6 +2,7 @@ import type { FC } from "react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../contexts/ToastContext";
 import { API_BASE_URL } from "../../config";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -30,6 +31,13 @@ type TabType = "all" | "agents";
 export const AdminUsersPage: FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const toast = (() => {
+    try {
+      return useToast();
+    } catch (e) {
+      return null as any;
+    }
+  })();
 
   // Left panel: Create new user form
   const [createEmail, setCreateEmail] = useState("");
@@ -45,6 +53,7 @@ export const AdminUsersPage: FC = () => {
   const [assignExtension, setAssignExtension] = useState("");
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignOrgId, setAssignOrgId] = useState("");
+  const [assignSuccess, setAssignSuccess] = useState(false);
 
   // Organizations
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -188,7 +197,7 @@ export const AdminUsersPage: FC = () => {
   };
 
   // Handle assign existing user to org
-  const handleAssignUser = async (userId: string, orgId: string, role: string, extension?: string | null) => {
+  const handleAssignUser = async (userId: string, orgId: string, role: string, extension?: string | null): Promise<boolean> => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/org_users`, {
         method: 'POST',
@@ -200,8 +209,10 @@ export const AdminUsersPage: FC = () => {
         throw new Error(j.detail || 'Failed to assign user');
       }
       await loadOrgUsers();
+      return true;
     } catch (err: any) {
       console.error('Assign error:', err);
+      return false;
     }
   };
 
@@ -328,6 +339,7 @@ export const AdminUsersPage: FC = () => {
         });
 
         onClose();
+        if (toast && toast.push) toast.push('Platform permissions saved', 'success');
         // refresh users list
         try { const r = await fetch(`${API_BASE_URL}/api/admin/users`); if (r.ok) { const j = await r.json(); setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null }))); } } catch(e){}
       } catch (err) {
@@ -504,6 +516,11 @@ export const AdminUsersPage: FC = () => {
               <h3 className="font-semibold text-xs mb-2 text-slate-300">Or assign existing user</h3>
 
               <div className="space-y-3">
+                  {assignSuccess && (
+                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-300">
+                      ✓ User assigned successfully!
+                    </div>
+                  )}
                 <div>
                   <label className="block text-xs text-slate-300 mb-1">User</label>
                   <select
@@ -565,11 +582,18 @@ export const AdminUsersPage: FC = () => {
                         return;
                       }
                       setAssignLoading(true);
-                      await handleAssignUser(assignUserId, assignOrgId, assignRole, assignExtension || null);
+                      const ok = await handleAssignUser(assignUserId, assignOrgId, assignRole, assignExtension || null);
                       setAssignLoading(false);
-                      setAssignUserId('');
-                      setAssignExtension('');
-                      setAssignOrgId('');
+                                      if (ok) {
+                                        setAssignSuccess(true);
+                                        setAssignUserId('');
+                                        setAssignExtension('');
+                                        setAssignOrgId('');
+                                        if (toast && toast.push) toast.push('User assigned', 'success');
+                                        setTimeout(() => setAssignSuccess(false), 3000);
+                                      } else {
+                                        alert('Failed to assign user');
+                                      }
                     }}
                     className="w-full mt-1 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 text-white font-semibold rounded-lg text-sm"
                     disabled={assignLoading}
