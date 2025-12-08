@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { API_BASE_URL } from "../config";
+import { getCallSeries } from "../lib/apiClient";
 
 export type CallSeriesPoint = {
   bucketLabel: string;
@@ -33,20 +33,9 @@ export function useCallSeries(
       try {
         setLoading(true);
         setError(null);
-
-        const url = orgId
-          ? `${API_BASE_URL}/api/calls/series?org_id=${encodeURIComponent(orgId)}&range=${range}`
-          : `${API_BASE_URL}/api/calls/series?range=${range}`;
-
-        const res = await fetch(url);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-
-        const json = await res.json();
+        const pts = await getCallSeries({ orgId: orgId ?? undefined, range });
         if (!cancelled) {
-          // Server returns points in the shape: { bucketLabel, totalCalls, answered, missed }
-          setPoints(json.points || []);
+          setPoints(pts || []);
         }
       } catch (e: any) {
         if (!cancelled) {

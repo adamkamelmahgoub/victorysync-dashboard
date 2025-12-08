@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { API_BASE_URL } from "../config";
+import { getQueueSummary } from "../lib/apiClient";
 
 export type QueueSummary = {
   name: string;
@@ -28,20 +28,9 @@ export function useQueueSummary(orgId: string | null | undefined): UseQueueSumma
       try {
         setLoading(true);
         setError(null);
-
-        const url = orgId
-          ? `${API_BASE_URL}/api/calls/queue-summary?org_id=${encodeURIComponent(orgId)}`
-          : `${API_BASE_URL}/api/calls/queue-summary`;
-
-        const res = await fetch(url);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-
-        const json = await res.json();
+        const q = await getQueueSummary({ orgId: orgId ?? undefined });
         if (!cancelled) {
-          // Server returns queues as { name, totalCalls, answered, missed }
-          setQueues(json.queues || []);
+          setQueues(q || []);
         }
       } catch (e: any) {
         if (!cancelled) {

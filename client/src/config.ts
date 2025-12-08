@@ -20,8 +20,14 @@ export const TEST_ORG_ID = "d6b7bbde-54bb-4782-989d-cf9093f8cadf";
 /**
  * API_BASE_URL
  * - In production, set VITE_API_BASE_URL environment variable on Vercel
- * - In development, defaults to http://localhost:4000
+ * - By default this app will use https://api.victorysync.com (do not rely on localhost)
  * - All API calls should use this base URL to ensure requests go to the correct backend
  */
+/**
+ * API base URL used by the frontend to call the backend.
+ * - In production we MUST use the absolute URL including protocol and `/api` suffix.
+ * - `VITE_API_BASE_URL` can override this in any environment.
+ */
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+  import.meta.env.VITE_API_BASE_URL ??
+  "https://api.victorysync.com";

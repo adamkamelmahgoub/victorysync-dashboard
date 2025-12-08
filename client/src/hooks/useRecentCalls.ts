@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { API_BASE_URL } from '../config';
+import { getRecentCalls } from "../lib/apiClient";
 
 export type RecentCall = {
   id: string;
@@ -29,19 +29,9 @@ export function useRecentCalls(orgId: string | null | undefined): UseRecentCalls
       try {
         setLoading(true);
         setError(null);
-        
-        const url = new URL(`${API_BASE_URL}/api/calls/recent`);
-        url.searchParams.set('limit', '50');
-        if (orgId) {
-          url.searchParams.set('org_id', orgId);
-        }
-        
-        const res = await fetch(url.toString());
-        if (!res.ok) throw new Error(`API error: ${res.statusText}`);
-        
-        const json = await res.json();
+        const items = await getRecentCalls({ orgId: orgId ?? undefined, limit: 50 });
         if (!cancelled) {
-          setCalls(json.items || []);
+          setCalls(items || []);
         }
       } catch (e: any) {
         if (!cancelled) {

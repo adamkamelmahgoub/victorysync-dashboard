@@ -1,6 +1,6 @@
 // client/src/hooks/useClientMetrics.ts
 import { useEffect, useRef, useState } from "react";
-import { API_BASE_URL } from "../config";
+import { getClientMetrics } from "../lib/apiClient";
 
 export type Metrics = {
   org_id?: string;
@@ -32,18 +32,7 @@ export function useClientMetrics(orgId: string | null | undefined): UseClientMet
     const load = async () => {
       try {
         setLoading(true);
-        
-        // Build URL: if orgId is present, include it; otherwise omit for global stats
-        const url = orgId
-          ? `${API_BASE_URL}/api/client-metrics?org_id=${encodeURIComponent(orgId)}`
-          : `${API_BASE_URL}/api/client-metrics`;
-        
-        const res = await fetch(url);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        const json = await res.json();
-        const metrics: Metrics = json.metrics ?? json;
+        const metrics: Metrics = await getClientMetrics(orgId ?? null);
         if (!cancelled) {
           setData(metrics);
           lastGood.current = metrics;
