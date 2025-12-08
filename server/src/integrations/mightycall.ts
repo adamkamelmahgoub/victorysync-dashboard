@@ -1,6 +1,32 @@
 import fetch from 'node-fetch';
 import { MIGHTYCALL_API_KEY, MIGHTYCALL_USER_KEY, MIGHTYCALL_BASE_URL } from '../config/env';
 
+// Lightweight retry wrapper for node-fetch to handle transient network failures.
+async function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function requestWithRetry(url: string, opts: any, retries = 2, backoffMs = 250) {
+  let attempt = 0;
+  while (true) {
+    attempt += 1;
+    try {
+      const res = await fetch(url, opts);
+      return res;
+    } catch (err: any) {
+      const msg = err?.message ?? String(err);
+      const isNetworkErr = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network/i.test(msg);
+      console.warn(`[MightyCall] request error (attempt ${attempt}/${retries + 1})`, { url, msg });
+      if (!isNetworkErr || attempt > retries) {
+        // rethrow the original error if it's not retryable or retries exhausted
+        throw err;
+      }
+      // backoff before retrying
+      await delay(backoffMs * attempt);
+    }
+  }
+}
+
 export interface MightyCallPhoneNumber {
   externalId: string;
   e164: string;
@@ -25,11 +51,11 @@ export async function getMightyCallAccessToken(): Promise<string> {
   formData.append('client_id', MIGHTYCALL_API_KEY || '');
   formData.append('client_secret', MIGHTYCALL_USER_KEY || '');
 
-  const res = await fetch(url, {
+  const res = await requestWithRetry(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: formData.toString(),
-  });
+  }, 2, 300);
 
   const text = await res.text();
   if (!res.ok) {
@@ -72,14 +98,14 @@ export async function fetchMightyCallPhoneNumbers(accessToken: string): Promise<
     const url = `${baseUrl}${endpoint}`;
 
     try {
-      const res = await fetch(url, {
+      const res = await requestWithRetry(url, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'x-api-key': MIGHTYCALL_API_KEY || '',
           Accept: 'application/json',
         },
-      });
+      }, 2, 300);
 
       // If we get a 404, try the next endpoint
       if (res.status === 404) {
@@ -155,14 +181,14 @@ export async function fetchMightyCallExtensions(accessToken?: string): Promise<A
   const url = `${baseUrl}/extensions`;
 
   try {
-    const res = await fetch(url, {
+    const res = await requestWithRetry(url, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
         'x-api-key': MIGHTYCALL_API_KEY || '',
         Accept: 'application/json',
       },
-    });
+    }, 1, 200);
 
     if (!res.ok) {
       console.warn('[MightyCall] extensions request failed', res.status);
