@@ -1550,6 +1550,9 @@ app.get("/s/series", async (req, res) => {
     });
 
 const port = Number(process.env.PORT) || 4000;
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`Metrics API listening on http://localhost:${port}`);
+}).on('error', (err: any) => {
+  console.error(`Failed to listen on port ${port}:`, err.message);
+  process.exit(1);
 });
