@@ -145,3 +145,63 @@ export async function fetchMightyCallPhoneNumbers(accessToken: string): Promise<
   console.error('[MightyCall] could not find working phonenumbers endpoint', { lastError: lastError?.message });
   throw new Error(`Failed to fetch phone numbers: ${lastError?.message ?? 'no endpoints responded correctly'}`);
 }
+
+/**
+ * Fetch extensions (if available) from MightyCall. Returns simplified extension objects.
+ */
+export async function fetchMightyCallExtensions(accessToken?: string): Promise<Array<{ id: string; extension: string; display_name: string }>> {
+  const token = accessToken || (await getMightyCallAccessToken());
+  const baseUrl = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  const url = `${baseUrl}/extensions`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'x-api-key': MIGHTYCALL_API_KEY || '',
+        Accept: 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      console.warn('[MightyCall] extensions request failed', res.status);
+      return [];
+    }
+
+    const text = await res.text();
+    const json = JSON.parse(text || 'null');
+    const list = json?.data ?? json?.extensions ?? [];
+    if (!Array.isArray(list)) return [];
+
+    return list.map((e: any) => {
+      const id = String(e.id ?? e.extensionId ?? '');
+      const extension = String(e.extension ?? e.number ?? '');
+      const display_name = String(e.displayName ?? e.display_name ?? '');
+      return { id, extension, display_name };
+    });
+  } catch (err) {
+    console.warn('[MightyCall] fetch extensions error', err);
+    return [];
+  }
+}
+
+/**
+ * Sync phone numbers into a Supabase admin client.
+ * Returns { upserted } count.
+ */
+export async function syncMightyCallPhoneNumbers(supabaseAdminClient: any): Promise<{ upserted: number }> {
+  const token = await getMightyCallAccessToken();
+  const numbers = await fetchMightyCallPhoneNumbers(token);
+  if (!Array.isArray(numbers) || numbers.length === 0) return { upserted: 0 };
+
+  const rows = numbers.map(n => ({ external_id: n.externalId, e164: n.e164, number: n.number, number_digits: n.numberDigits, label: n.label, is_active: n.isActive }));
+
+  const { data, error } = await supabaseAdminClient.from('phone_numbers').upsert(rows, { onConflict: 'external_id' });
+  if (error) {
+    console.warn('[MightyCall sync] upsert error', error);
+    throw error;
+  }
+
+  return { upserted: (data?.length ?? rows.length) };
+}

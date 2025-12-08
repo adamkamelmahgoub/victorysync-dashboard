@@ -36,7 +36,7 @@ async function main() {
       throw error;
     }
 
-    console.info('[MightyCall sync] upserted', data?.length ?? rows.length, 'rows into phone_numbers');
+    console.info('[MightyCall sync] upserted', (data as any)?.length ?? rows.length, 'rows into phone_numbers');
     console.info('[MightyCall sync] complete');
     process.exit(0);
   } catch (err) {
