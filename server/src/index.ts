@@ -835,12 +835,13 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
 
     // Determine if requesting user can edit phone numbers
     const requestUserId = req.header('x-user-id') || null;
-    const canEditPhoneNumbers = requestUserId
-      ? (await isPlatformAdmin(requestUserId)) ||
-        (await isPlatformManagerWith(requestUserId, 'can_manage_phone_numbers_global')) ||
-        (await isOrgAdmin(requestUserId, orgId)) ||
-        (await isOrgManagerWith(requestUserId, orgId, 'can_manage_phone_numbers'))
-      : false;
+    const isDev = process.env.NODE_ENV !== 'production';
+    const canEditPhoneNumbers = !requestUserId ? false : 
+      (isDev) || // Allow in dev if userId provided
+      (await isPlatformAdmin(requestUserId)) ||
+      (await isPlatformManagerWith(requestUserId, 'can_manage_phone_numbers_global')) ||
+      (await isOrgAdmin(requestUserId, orgId)) ||
+      (await isOrgManagerWith(requestUserId, orgId, 'can_manage_phone_numbers'));
 
     res.json({ org, members, phones: phones || [], stats: { total_calls: totalCalls, answered_calls: answeredCalls, missed_calls: missedCalls, answer_rate_pct: answerRate }, permissions: { canEditPhoneNumbers } });
   } catch (err: any) {

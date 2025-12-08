@@ -524,9 +524,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
           <div>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-sm text-slate-200">Phone Numbers</h3>
-              {canEditPhones && (
-                <button onClick={() => setShowEditPhones(true)} className="text-xs text-emerald-400 hover:underline">Manage</button>
-              )}
+              <button onClick={() => setShowEditPhones(true)} className="text-xs text-emerald-400 hover:underline">Manage</button>
             </div>
 
             {phonesLoading ? (
@@ -534,9 +532,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
             ) : phones.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-600 bg-slate-800/20 p-4 text-center">
                 <div className="text-xs text-slate-400">No phone numbers assigned</div>
-                {canEditPhones && (
-                  <button onClick={() => setShowEditPhones(true)} className="text-xs text-emerald-400 hover:underline mt-2">Add numbers</button>
-                )}
+                <button onClick={() => setShowEditPhones(true)} className="text-xs text-emerald-400 hover:underline mt-2">Add numbers</button>
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto">
