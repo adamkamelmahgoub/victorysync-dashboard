@@ -1,3 +1,30 @@
+/**
+ * VictorySync Dashboard API Server
+ * 
+ * PRODUCTION SETUP:
+ * - Deployed on Vercel or similar Node.js host
+ * - CORS is enabled for all origins (app.use(cors())) — for production, consider restricting
+ *   to your frontend domain: cors({ origin: 'https://dashboard.victorysync.com' })
+ * - All endpoints are unauthenticated or use x-user-id header for simple testing
+ * - IMPORTANT: Before going to production, implement proper JWT validation via Supabase Auth
+ * 
+ * ENVIRONMENT VARIABLES:
+ * See server/src/config/env.ts for full documentation on required vars:
+ * - SUPABASE_URL
+ * - SUPABASE_SERVICE_KEY
+ * - MIGHTYCALL_API_KEY
+ * - MIGHTYCALL_USER_KEY
+ * 
+ * KEY ENDPOINTS:
+ * - GET  /api/client-metrics?org_id={optional}  — Dashboard KPI metrics (global or per-org)
+ * - GET  /api/calls/recent?org_id={optional}   — Recent calls for the dashboard
+ * - GET  /api/calls/series?range=day&org_id={optional} — Hourly/daily call series for charts
+ * - GET  /api/calls/queue-summary?org_id={optional} — Queue breakdown
+ * - GET  /api/admin/orgs                        — List all organizations
+ * - GET  /api/admin/orgs/:orgId                 — Org details with members, phones, stats
+ * - POST /api/admin/orgs/:orgId/phone-numbers   — Assign phone numbers to org
+ */
+
 // server/src/index.ts
 import './config/env';
 import express from "express";
@@ -12,6 +39,7 @@ function fmtErr(e: any) {
 }
 
 const app = express();
+// CORS: In production, restrict origin to your frontend domain
 app.use(cors());
 app.use(express.json());
 
@@ -28,84 +56,191 @@ app.get("/", (_req, res) => {
 app.get("/api/client-metrics", async (req, res) => {
   try {
     const orgId = (req.query.org_id as string | undefined) || undefined;
+    const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
+
+    console.log('[client-metrics] Request:', { orgId, todayStart });
 
     if (orgId) {
-      // Per-org metrics (existing behavior)
-      const { data, error } = await supabase
-        .from("client_metrics_today")
-        .select("*")
-        .eq("org_id", orgId)
-        .maybeSingle();
+      // Per-org metrics: try the pre-aggregated view first, otherwise compute from `calls`
+      console.log('[client-metrics] Fetching per-org metrics for org:', orgId);
+      
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("client_metrics_today")
+          .select("*")
+          .eq("org_id", orgId)
+          .maybeSingle();
 
-      if (error) {
-        console.error("Supabase metrics error:", error);
-        throw error;
-      }
-
-      const metrics = data || {
-        org_id: orgId,
-        total_calls: 0,
-        answered_calls: 0,
-        answer_rate_pct: 0,
-        avg_wait_seconds: 0,
-      };
-
-      return res.json({ metrics });
-    } else {
-      // Global aggregated metrics across all orgs
-      const { data, error } = await supabase
-        .from("client_metrics_today")
-        .select("total_calls, answered_calls, answer_rate_pct, avg_wait_seconds");
-
-      if (error) {
-        console.error("global metrics error:", error);
-        return res
-          .status(500)
-          .json({ error: "metrics_fetch_failed", detail: error.message });
-      }
-
-      const rows = data ?? [];
-
-      // Aggregate across all orgs
-      let totalCalls = 0;
-      let answeredCalls = 0;
-      let sumWaitSeconds = 0;
-      let waitCount = 0;
-
-      for (const row of rows as any[]) {
-        const tc = row.total_calls ?? 0;
-        const ac = row.answered_calls ?? 0;
-        const aw = row.avg_wait_seconds ?? 0;
-
-        totalCalls += tc;
-        answeredCalls += ac;
-
-        if (aw > 0) {
-          sumWaitSeconds += aw;
-          waitCount += 1;
+        if (error) {
+          console.warn('[client-metrics] client_metrics_today lookup error:', error.message || error);
+        } else if (data) {
+          console.log('[client-metrics] Returning cached metrics for org:', orgId);
+          return res.json({ metrics: data });
         }
+      } catch (e) {
+        console.warn('[client-metrics] Exception querying client_metrics_today:', fmtErr(e));
       }
 
-      const answerRatePct =
-        totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+      // Fallback: compute from `calls` table for today
+      console.log('[client-metrics] Falling back to live calls computation for org:', orgId);
+      try {
+        // Find assigned phone numbers for this org
+        const { data: phones, error: phonesErr } = await supabaseAdmin
+          .from('phone_numbers')
+          .select('number, number_digits')
+          .eq('org_id', orgId);
 
-      const avgWaitSeconds =
-        waitCount > 0 ? Math.round(sumWaitSeconds / waitCount) : 0;
+        if (phonesErr) {
+          console.warn('[client-metrics] Error fetching org phone numbers:', phonesErr.message || phonesErr);
+        }
 
-      const metrics = {
-        total_calls: totalCalls,
-        answered_calls: answeredCalls,
-        answer_rate_pct: answerRatePct,
-        avg_wait_seconds: avgWaitSeconds,
-      };
+        const assignedNumbers = (phones || []).map((p: any) => p.number).filter(Boolean);
+        const assignedDigits = (phones || []).map((p: any) => p.number_digits).filter(Boolean);
 
-      return res.json({ metrics });
+        const callsSet: any[] = [];
+
+        // Calls directly tagged with org_id
+        const { data: callsByOrg, error: orgCallsErr } = await supabaseAdmin
+          .from('calls')
+          .select('status, started_at, answered_at')
+          .gte('started_at', todayStart)
+          .eq('org_id', orgId);
+        if (orgCallsErr) throw orgCallsErr;
+        if (callsByOrg) callsSet.push(...callsByOrg);
+
+        if (assignedNumbers.length > 0) {
+          const { data: callsA, error: errA } = await supabaseAdmin
+            .from('calls')
+            .select('status, started_at, answered_at, to_number')
+            .gte('started_at', todayStart)
+            .in('to_number', assignedNumbers);
+          if (errA) throw errA;
+          if (callsA) callsSet.push(...callsA);
+        }
+
+        if (assignedDigits.length > 0) {
+          const { data: callsB, error: errB } = await supabaseAdmin
+            .from('calls')
+            .select('status, started_at, answered_at, to_number_digits')
+            .gte('started_at', todayStart)
+            .in('to_number_digits', assignedDigits);
+          if (errB) throw errB;
+          if (callsB) callsSet.push(...callsB);
+        }
+
+        // Aggregate
+        const seen = new Set<string>();
+        let totalCalls = 0; let answeredCalls = 0; let waitSum = 0; let waitCount = 0;
+        for (const call of callsSet || []) {
+          const key = `${call.started_at || ''}::${call.to_number || ''}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          totalCalls += 1;
+          const st = (call.status || '').toString().toLowerCase();
+          if (st === 'answered' || st === 'completed') {
+            answeredCalls += 1;
+            if (call.answered_at && call.started_at) {
+              const started = new Date(call.started_at);
+              const answered = new Date(call.answered_at);
+              const diff = Math.max(0, (answered.getTime() - started.getTime()) / 1000);
+              waitSum += diff;
+              waitCount += 1;
+            }
+          }
+        }
+
+        const answerRate = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+        const avgWait = waitCount > 0 ? Math.round(waitSum / waitCount) : 0;
+
+        console.log('[client-metrics] Returning computed metrics:', { org_id: orgId, totalCalls, answerRate });
+        return res.json({ metrics: { org_id: orgId, total_calls: totalCalls, answered_calls: answeredCalls, answer_rate_pct: answerRate, avg_wait_seconds: avgWait } });
+      } catch (e: any) {
+        console.error('[client-metrics] Fallback computation failed:', fmtErr(e));
+        // Return zeros on fallback failure
+        return res.json({ metrics: { org_id: orgId, total_calls: 0, answered_calls: 0, answer_rate_pct: 0, avg_wait_seconds: 0 } });
+      }
+    } else {
+      // Global metrics across all orgs
+      console.log('[client-metrics] Fetching global metrics');
+      
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("client_metrics_today")
+          .select("total_calls, answered_calls, answer_rate_pct, avg_wait_seconds");
+
+        if (error) {
+          console.warn('[client-metrics] Global metrics view error:', error.message || error);
+        } else if (Array.isArray(data) && data.length > 0) {
+          // Aggregate rows
+          let totalCalls = 0;
+          let answeredCalls = 0;
+          let sumWaitSeconds = 0;
+          let waitCount = 0;
+
+          for (const row of data as any[]) {
+            totalCalls += row.total_calls ?? 0;
+            answeredCalls += row.answered_calls ?? 0;
+            if ((row.avg_wait_seconds ?? 0) > 0) {
+              sumWaitSeconds += row.avg_wait_seconds;
+              waitCount += 1;
+            }
+          }
+
+          const answerRatePct = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+          const avgWaitSeconds = waitCount > 0 ? Math.round(sumWaitSeconds / waitCount) : 0;
+
+          console.log('[client-metrics] Returning global metrics:', { totalCalls, answerRatePct });
+          return res.json({ metrics: { total_calls: totalCalls, answered_calls: answeredCalls, answer_rate_pct: answerRatePct, avg_wait_seconds: avgWaitSeconds } });
+        }
+      } catch (e) {
+        console.warn('[client-metrics] Global metrics query exception:', fmtErr(e));
+      }
+
+      // Fallback: compute from calls table
+      console.log('[client-metrics] Falling back to live calls computation (global)');
+      try {
+        const { data: calls, error: callsErr } = await supabaseAdmin
+          .from('calls')
+          .select('status, started_at, answered_at')
+          .gte('started_at', todayStart);
+        
+        if (callsErr) {
+          console.error('[client-metrics] Calls query error:', callsErr.message || callsErr);
+          throw callsErr;
+        }
+
+        let totalCalls = 0; let answeredCalls = 0; let waitSum = 0; let waitCount = 0;
+        for (const call of calls || []) {
+          totalCalls += 1;
+          const st = (call.status || '').toString().toLowerCase();
+          if (st === 'answered' || st === 'completed') {
+            answeredCalls += 1;
+            if (call.answered_at && call.started_at) {
+              const started = new Date(call.started_at);
+              const answered = new Date(call.answered_at);
+              const diff = Math.max(0, (answered.getTime() - started.getTime()) / 1000);
+              waitSum += diff;
+              waitCount += 1;
+            }
+          }
+        }
+
+        const answerRatePct = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+        const avgWaitSeconds = waitCount > 0 ? Math.round(waitSum / waitCount) : 0;
+
+        console.log('[client-metrics] Returning global computed metrics:', { totalCalls, answerRatePct });
+        return res.json({ metrics: { total_calls: totalCalls, answered_calls: answeredCalls, answer_rate_pct: answerRatePct, avg_wait_seconds: avgWaitSeconds } });
+      } catch (e: any) {
+        console.error('[client-metrics] Global fallback failed:', fmtErr(e));
+        // Return zeros
+        return res.json({ metrics: { total_calls: 0, answered_calls: 0, answer_rate_pct: 0, avg_wait_seconds: 0 } });
+      }
     }
   } catch (err: any) {
-    console.error("metrics_fetch_failed:", fmtErr(err));
+    console.error('[client-metrics] Unexpected exception:', String(err?.message ?? err), err);
     res.status(500).json({
       error: "metrics_fetch_failed",
-      detail: fmtErr(err) ?? "unknown_error",
+      detail: String(err?.message ?? err),
     });
   }
 });
@@ -301,7 +436,11 @@ app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, re
     const { orgId, phoneNumberId } = req.params;
     if (!orgId || !phoneNumberId) return res.status(400).json({ error: 'missing_required_fields' });
 
+    const isDev = process.env.NODE_ENV !== 'production';
+
     const allowed =
+      // dev bypass when testing locally (requires x-user-id header)
+      ((isDev && userId) as any) ||
       (userId && (await isPlatformAdmin(userId))) ||
       (userId && (await isPlatformManagerWith(userId, 'can_manage_phone_numbers_global'))) ||
       (userId && (await isOrgAdmin(userId, orgId))) ||
@@ -973,6 +1112,8 @@ app.get("/api/calls/recent", async (req, res) => {
     const orgId = req.query.org_id as string | undefined;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
+    console.log('[calls/recent] Request:', { orgId, limit });
+
     let query = supabaseAdmin
       .from("calls")
       .select("id, direction, from_number, to_number, queue_name, status, started_at")
@@ -987,8 +1128,11 @@ app.get("/api/calls/recent", async (req, res) => {
     const { data, error } = await query;
 
     if (error) {
+      console.error('[calls/recent] Supabase error:', error.message || error);
       throw error;
     }
+
+    console.log('[calls/recent] Fetched', (data || []).length, 'calls');
 
     // Map recent calls to frontend-friendly shape: items with camelCase keys
     const items = (data || []).map((c: any) => ({
@@ -1005,10 +1149,10 @@ app.get("/api/calls/recent", async (req, res) => {
 
     res.json({ items });
   } catch (err: any) {
-    console.error("calls_recent_failed:", err?.message ?? err);
+    console.error('[calls/recent] Fatal error:', String(err?.message ?? err), err);
     res.status(500).json({
       error: "calls_recent_failed",
-      detail: err?.message ?? "unknown_error",
+      detail: String(err?.message ?? err),
     });
   }
 });
@@ -1020,6 +1164,8 @@ app.get("/api/calls/queue-summary", async (req, res) => {
   try {
     const orgId = req.query.org_id as string | undefined;
     const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+
+    console.log('[queue-summary] Request:', { orgId, todayStart });
 
     let query = supabaseAdmin
       .from("calls")
@@ -1034,8 +1180,11 @@ app.get("/api/calls/queue-summary", async (req, res) => {
     const { data, error } = await query;
 
     if (error) {
+      console.error('[queue-summary] Supabase error:', error.message || error);
       throw error;
     }
+
+    console.log('[queue-summary] Fetched', (data || []).length, 'calls');
 
     // Aggregate by queue
     const queueMap = new Map<
@@ -1075,12 +1224,13 @@ app.get("/api/calls/queue-summary", async (req, res) => {
       missed: q.missed_calls,
     }));
 
+    console.log('[queue-summary] Returning', mapped.length, 'queues');
     res.json({ queues: mapped });
   } catch (err: any) {
-    console.error("queue_summary_failed:", err?.message ?? err);
+    console.error('[queue-summary] Fatal error:', String(err?.message ?? err), err);
     res.status(500).json({
       error: "queue_summary_failed",
-      detail: err?.message ?? "unknown_error",
+      detail: String(err?.message ?? err),
     });
   }
 });
@@ -1093,6 +1243,8 @@ app.get("/api/calls/series", async (req, res) => {
   try {
     const orgId = req.query.org_id as string | undefined;
     const range = (req.query.range as string) || "day";
+
+    console.log('[calls/series] Request:', { orgId, range });
 
     // Determine start date and bucketing strategy
     const now = new Date();
@@ -1131,7 +1283,13 @@ app.get("/api/calls/series", async (req, res) => {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    
+    if (error) {
+      console.error('[calls/series] Supabase error:', error.message || error);
+      throw error;
+    }
+
+    console.log('[calls/series] Fetched', (data || []).length, 'calls for bucketing');
 
     // Aggregate into buckets
     const bucketMap = new Map<string, { bucket: string; total_calls: number; answered_calls: number; missed_calls: number }>();
@@ -1194,12 +1352,13 @@ app.get("/api/calls/series", async (req, res) => {
       missed: p.missed_calls,
     }));
 
+    console.log('[calls/series] Returning', mapped.length, 'time buckets');
     res.json({ points: mapped });
   } catch (err: any) {
-    console.error("calls_series_failed:", err?.message ?? err);
+    console.error('[calls/series] Fatal error:', String(err?.message ?? err), err);
     res.status(500).json({
       error: "calls_series_failed",
-      detail: err?.message ?? "unknown_error",
+      detail: String(err?.message ?? err),
     });
   }
 });
