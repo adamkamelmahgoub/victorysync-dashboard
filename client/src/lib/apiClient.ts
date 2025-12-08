@@ -7,9 +7,22 @@ async function fetchJson(path: string, init?: RequestInit) {
   const url = path.startsWith("http") ? path : `${API_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
   const res = await fetch(url, { ...init });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    const detail = text || res.statusText;
-    throw new Error(`${res.status} ${res.statusText} - ${detail}`);
+    // Try to parse JSON body for structured error details
+    let detail: string = res.statusText;
+    try {
+      const j = await res.json();
+      if (j && typeof j === 'object') {
+        detail = j.detail || JSON.stringify(j);
+      }
+    } catch (e) {
+      const text = await res.text().catch(() => "");
+      if (text) detail = text;
+    }
+
+    const err: any = new Error(detail || `${res.status} ${res.statusText}`);
+    err.status = res.status;
+    err.detail = detail;
+    throw err;
   }
   return res.json() as Promise<Json>;
 }

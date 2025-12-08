@@ -93,6 +93,7 @@ export async function fetchMightyCallPhoneNumbers(accessToken: string): Promise<
   ];
 
   let lastError: Error | null = null;
+  let lastFailureInfo: { url: string; status?: number; body?: string; message?: string } | null = null;
 
   for (const endpoint of endpoints) {
     const url = `${baseUrl}${endpoint}`;
@@ -109,22 +110,29 @@ export async function fetchMightyCallPhoneNumbers(accessToken: string): Promise<
 
       // If we get a 404, try the next endpoint
       if (res.status === 404) {
+        lastFailureInfo = { url, status: res.status, message: `Endpoint not found: ${endpoint}` };
         lastError = new Error(`Endpoint not found: ${endpoint}`);
         continue;
       }
 
       const text = await res.text();
       if (!res.ok) {
-        console.error('[MightyCall] phonenumbers request failed', { url, status: res.status, body: text });
-        throw new Error(`MightyCall phonenumbers request failed (status ${res.status})`);
+        // capture body for final-failure logging and try other endpoints
+        lastFailureInfo = { url, status: res.status, body: text, message: `phonenumbers request failed (status ${res.status})` };
+        lastError = new Error(`MightyCall phonenumbers request failed (status ${res.status})`);
+        console.error('[MightyCall] phonenumbers request failed', lastFailureInfo);
+        continue;
       }
 
       let json: any;
       try {
         json = JSON.parse(text);
       } catch (err) {
-        console.error('[MightyCall] failed to parse phonenumbers response', { url, status: res.status, err });
-        throw new Error('Failed to parse phonenumbers response');
+        // keep response body for diagnostics
+        lastFailureInfo = { url, status: res.status, body: text, message: 'Failed to parse phonenumbers response' };
+        console.error('[MightyCall] failed to parse phonenumbers response', lastFailureInfo);
+        lastError = new Error('Failed to parse phonenumbers response');
+        continue;
       }
 
       // Log raw response for debugging
@@ -162,14 +170,19 @@ export async function fetchMightyCallPhoneNumbers(accessToken: string): Promise<
       console.log(`[MightyCall] successfully fetched from ${endpoint}`);
       return mapped;
     } catch (err: any) {
+      // network / fetch errors - capture message and continue to try other endpoints
+      lastFailureInfo = { url, message: err?.message ?? String(err) };
       lastError = err;
+      console.warn('[MightyCall] endpoint attempt failed', lastFailureInfo);
       continue;
     }
   }
 
   // If we get here, none of the endpoints worked
-  console.error('[MightyCall] could not find working phonenumbers endpoint', { lastError: lastError?.message });
-  throw new Error(`Failed to fetch phone numbers: ${lastError?.message ?? 'no endpoints responded correctly'}`);
+  console.error('[MightyCall] could not find working phonenumbers endpoint', { lastError: lastError?.message, lastFailureInfo });
+  const detail = lastFailureInfo?.message ?? lastError?.message ?? 'no endpoints responded correctly';
+  const bodySnippet = lastFailureInfo?.body ? ` Response body: ${String(lastFailureInfo.body).slice(0, 2000)}` : '';
+  throw new Error(`Failed to fetch phone numbers: ${detail}.${bodySnippet}`);
 }
 
 /**
@@ -189,14 +202,21 @@ export async function fetchMightyCallExtensions(accessToken?: string): Promise<A
         Accept: 'application/json',
       },
     }, 1, 200);
-
     if (!res.ok) {
-      console.warn('[MightyCall] extensions request failed', res.status);
+      const text = await res.text().catch(() => '');
+      console.warn('[MightyCall] extensions request failed', { url, status: res.status, body: text });
       return [];
     }
 
     const text = await res.text();
-    const json = JSON.parse(text || 'null');
+    let json: any = null;
+    try {
+      json = JSON.parse(text || 'null');
+    } catch (err) {
+      console.warn('[MightyCall] extensions parse error', { url, err, body: text });
+      return [];
+    }
+
     const list = json?.data ?? json?.extensions ?? [];
     if (!Array.isArray(list)) return [];
 

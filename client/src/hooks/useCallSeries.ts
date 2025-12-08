@@ -39,7 +39,7 @@ export function useCallSeries(
         }
       } catch (e: any) {
         if (!cancelled) {
-          setError(e?.message ?? "Failed to load call series");
+          setError(e?.detail ?? e?.message ?? "Failed to load call series");
         }
       } finally {
         if (!cancelled) {

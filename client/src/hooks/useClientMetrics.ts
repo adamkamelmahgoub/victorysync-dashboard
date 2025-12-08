@@ -41,7 +41,7 @@ export function useClientMetrics(orgId: string | null | undefined): UseClientMet
       } catch (e: any) {
         console.error("useClientMetrics error:", e);
         if (!cancelled) {
-          setError(e?.message ?? "Failed to load metrics");
+          setError(e?.detail ?? e?.message ?? "Failed to load metrics");
           // keep last good data
           setData(lastGood.current);
         }

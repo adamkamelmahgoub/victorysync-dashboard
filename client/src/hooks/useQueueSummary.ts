@@ -34,7 +34,7 @@ export function useQueueSummary(orgId: string | null | undefined): UseQueueSumma
         }
       } catch (e: any) {
         if (!cancelled) {
-          setError(e?.message ?? "Failed to load queue summary");
+          setError(e?.detail ?? e?.message ?? "Failed to load queue summary");
         }
       } finally {
         if (!cancelled) {

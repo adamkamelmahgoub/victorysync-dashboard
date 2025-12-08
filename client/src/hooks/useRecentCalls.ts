@@ -36,7 +36,7 @@ export function useRecentCalls(orgId: string | null | undefined): UseRecentCalls
       } catch (e: any) {
         if (!cancelled) {
           console.error('Error loading recent calls:', e);
-          setError(e?.message ?? "Failed to load recent calls");
+          setError(e?.detail ?? e?.message ?? "Failed to load recent calls");
         }
       } finally {
         if (!cancelled) setLoading(false);
