@@ -84,6 +84,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
 
   // EditPhonesModalEnhanced component
   function EditPhonesModalEnhanced({ orgId, phones, onClose }: { orgId: string; phones: Array<{ id: string; number: string; label: string | null }>; onClose: () => void }) {
+
     const [allPhones, setAllPhones] = useState<Array<{ id: string; number: string; label?: string }>>([]);
     const [toAdd, setToAdd] = useState<string[]>([]);
     const [toRemove, setToRemove] = useState<string[]>([]);
@@ -108,8 +109,10 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
       load();
     }, [orgId]);
 
+    // Assigned = numbers currently assigned to this org (from props)
     const assignedIds = new Set(phones.map(p => p.id));
     const assigned = allPhones.filter(p => assignedIds.has(p.id));
+    // Available = all numbers not currently assigned to this org (regardless of assignment to other orgs)
     const available = allPhones.filter(p => !assignedIds.has(p.id) && !toRemove.includes(p.id));
 
     const save = async () => {
@@ -246,7 +249,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
                         ))
                     )}
                     {toAdd
-                      .map(id => available.find(p => p.id === id))
+                      .map(id => allPhones.find(p => p.id === id))
                       .filter(Boolean)
                       .map((n) => (
                         <div
