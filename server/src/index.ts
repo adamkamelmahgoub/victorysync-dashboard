@@ -269,6 +269,28 @@ app.post("/api/admin/orgs", async (req, res) => {
       console.warn('org_settings_create_warning:', fmtErr(e));
     }
 
+    // If the request includes an authenticated user (x-user-id header), create an org membership
+    try {
+      const creatorUserId = req.header('x-user-id') || null;
+      if (creatorUserId) {
+        // Upsert into org_users so the creator becomes an org_admin for this org
+        const payload = {
+          org_id: org.id,
+          user_id: creatorUserId,
+          role: 'org_admin',
+          mightycall_extension: null,
+        };
+        const { error: upErr } = await supabaseAdmin
+          .from('org_users')
+          .upsert(payload, { onConflict: 'org_id,user_id' });
+        if (upErr) console.warn('creator_membership_upsert_warning:', fmtErr(upErr));
+      } else {
+        console.warn('create_org_no_user_provided: org created without creator membership');
+      }
+    } catch (e) {
+      console.warn('create_org_membership_failed:', fmtErr(e));
+    }
+
     return res.json({ org });
   } catch (err: any) {
     console.error('admin_create_org_failed:', fmtErr(err));
