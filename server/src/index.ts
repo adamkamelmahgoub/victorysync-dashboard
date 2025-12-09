@@ -458,39 +458,8 @@ app.get('/api/admin/phone-numbers', async (req, res) => {
   }
 });
 
-// DELETE /api/admin/orgs/:orgId/phone-numbers/:phoneNumberId - unassign phone number
-app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, res) => {
-  try {
-    const userId = req.header('x-user-id') || null;
-    const { orgId, phoneNumberId } = req.params;
-    if (!orgId || !phoneNumberId) return res.status(400).json({ error: 'missing_required_fields' });
-
-    const isDev = process.env.NODE_ENV !== 'production';
-
-    const allowed =
-      // dev bypass when testing locally (requires x-user-id header)
-      ((isDev && userId) as any) ||
-      (userId && (await isPlatformAdmin(userId))) ||
-      (userId && (await isPlatformManagerWith(userId, 'can_manage_phone_numbers_global'))) ||
-      (userId && (await isOrgAdmin(userId, orgId))) ||
-      (userId && (await isOrgManagerWith(userId, orgId, 'can_manage_phone_numbers')));
-
-    if (!allowed) return res.status(403).json({ error: 'forbidden' });
-
-    // Clear org_id only if it matches provided orgId
-    const { error } = await supabaseAdmin
-      .from('phone_numbers')
-      .update({ org_id: null })
-      .eq('id', phoneNumberId)
-      .eq('org_id', orgId);
-
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('unassign_phone_failed:', fmtErr(err));
-    res.status(500).json({ error: 'unassign_phone_failed', detail: fmtErr(err) ?? 'unknown_error' });
-  }
-});
+// Legacy single-org unassign handler removed: unassignment now uses `org_phone_numbers` mapping.
+// See later handler which deletes from `org_phone_numbers` for the many-to-many model.
 
 // POST /api/admin/orgs/:orgId/managers/:orgMemberId/permissions - upsert org manager permissions
 app.post('/api/admin/orgs/:orgId/managers/:orgMemberId/permissions', async (req, res) => {
