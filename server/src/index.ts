@@ -38,6 +38,25 @@ function fmtErr(e: any) {
   return (e as any)?.message ?? e;
 }
 
+// Resolve assigned phone numbers for an org (many-to-many via org_phone_numbers)
+async function getAssignedPhoneNumbersForOrg(orgId: string) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('org_phone_numbers')
+      .select('phone_number');
+    if (error) {
+      console.warn('[getAssignedPhoneNumbersForOrg] supabase error:', fmtErr(error));
+      return { numbers: [] as string[], digits: [] as string[] };
+    }
+    const numbers = (data || []).map((r: any) => (r.phone_number || '').toString()).filter(Boolean);
+    const digits = numbers.map(n => (n || '').replace(/\D/g, '')).filter(Boolean);
+    return { numbers, digits };
+  } catch (e) {
+    console.warn('[getAssignedPhoneNumbersForOrg] exception:', fmtErr(e));
+    return { numbers: [] as string[], digits: [] as string[] };
+  }
+}
+
 const app = express();
 // CORS: In production, restrict origin to your frontend domain
 app.use(cors());
@@ -1089,28 +1108,60 @@ app.get("/api/calls/recent", async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
     console.log('[calls/recent] Request:', { orgId, limit });
+    if (orgId) {
+      // Resolve assigned numbers and filter recent calls by those numbers
+      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      if ((numbers.length === 0) && (digits.length === 0)) {
+        return res.json({ items: [] });
+      }
 
-    let query = supabaseAdmin
+      // Fetch a larger recent set and filter in-memory to avoid complex OR queries
+      const fetchLimit = Math.max(limit * 5, 200);
+      const { data, error } = await supabaseAdmin
+        .from('calls')
+        .select('id, direction, from_number, to_number, to_number_digits, queue_name, status, started_at, answered_at, ended_at')
+        .order('started_at', { ascending: false })
+        .limit(fetchLimit);
+
+      if (error) {
+        console.error('[calls/recent] Supabase error (org scoped):', fmtErr(error));
+        throw error;
+      }
+
+      const filtered = (data || []).filter((c: any) => {
+        const tn = c.to_number || null;
+        const td = c.to_number_digits || null;
+        return (tn && numbers.includes(tn)) || (td && digits.includes(td));
+      });
+
+      const sliced = filtered.slice(0, limit);
+      const items = sliced.map((c: any) => ({
+        id: c.id,
+        direction: c.direction,
+        status: c.status,
+        fromNumber: c.from_number ?? null,
+        toNumber: c.to_number ?? null,
+        queueName: c.queue_name ?? null,
+        startedAt: c.started_at,
+        answeredAt: c.answered_at ?? null,
+        endedAt: c.ended_at ?? null,
+      }));
+
+      return res.json({ items });
+    }
+
+    // Global (non-org) recent calls
+    const { data, error } = await supabaseAdmin
       .from("calls")
-      .select("id, direction, from_number, to_number, queue_name, status, started_at")
+      .select("id, direction, from_number, to_number, queue_name, status, started_at, answered_at, ended_at")
       .order("started_at", { ascending: false })
       .limit(limit);
 
-    // If org_id is provided, filter by it; otherwise get all orgs
-    if (orgId) {
-      query = query.eq("org_id", orgId);
-    }
-
-    const { data, error } = await query;
-
     if (error) {
-      console.error('[calls/recent] Supabase error:', error.message || error);
+      console.error('[calls/recent] Supabase error:', fmtErr(error));
       throw error;
     }
 
-    console.log('[calls/recent] Fetched', (data || []).length, 'calls');
-
-    // Map recent calls to frontend-friendly shape: items with camelCase keys
     const items = (data || []).map((c: any) => ({
       id: c.id,
       direction: c.direction,
@@ -1143,18 +1194,55 @@ app.get("/s/recent", async (req, res) => {
 
     console.log('[s/recent] Request:', { orgId, limit });
 
-    let query = supabaseAdmin
-      .from("calls")
-      .select("id, direction, from_number, to_number, queue_name, status, started_at")
-      .order("started_at", { ascending: false })
+    if (orgId) {
+      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      if ((numbers.length === 0) && (digits.length === 0)) {
+        return res.json({ items: [] });
+      }
+
+      const fetchLimit = Math.max(limit * 5, 200);
+      const { data, error } = await supabaseAdmin
+        .from('calls')
+        .select('id, direction, from_number, to_number, to_number_digits, queue_name, status, started_at, answered_at, ended_at')
+        .order('started_at', { ascending: false })
+        .limit(fetchLimit);
+
+      if (error) {
+        console.error('[s/recent] Supabase error (org scoped):', fmtErr(error));
+        return res.status(500).json({ error: 'supabase_error', detail: fmtErr(error) });
+      }
+
+      const filtered = (data || []).filter((c: any) => {
+        const tn = c.to_number || null;
+        const td = c.to_number_digits || null;
+        return (tn && numbers.includes(tn)) || (td && digits.includes(td));
+      }).slice(0, limit);
+
+      const items = filtered.map((c: any) => ({
+        id: c.id,
+        direction: c.direction,
+        status: c.status,
+        fromNumber: c.from_number ?? null,
+        toNumber: c.to_number ?? null,
+        queueName: c.queue_name ?? null,
+        startedAt: c.started_at,
+        answeredAt: c.answered_at ?? null,
+        endedAt: c.ended_at ?? null,
+      }));
+
+      return res.json({ items });
+    }
+
+    // Global behaviour
+    const { data, error } = await supabaseAdmin
+      .from('calls')
+      .select('id, direction, from_number, to_number, queue_name, status, started_at, answered_at, ended_at')
+      .order('started_at', { ascending: false })
       .limit(limit);
 
-    if (orgId) query = query.eq("org_id", orgId);
-
-    const { data, error } = await query;
     if (error) {
-      console.error('[s/recent] Supabase error:', error.message || error);
-      return res.status(500).json({ error: 'supabase_error', detail: error.message });
+      console.error('[s/recent] Supabase error:', fmtErr(error));
+      return res.status(500).json({ error: 'supabase_error', detail: fmtErr(error) });
     }
 
     const items = (data || []).map((c: any) => ({
@@ -1186,24 +1274,18 @@ app.get("/api/calls/queue-summary", async (req, res) => {
 
     console.log('[queue-summary] Request:', { orgId, todayStart });
 
-    let query = supabaseAdmin
-      .from("calls")
-      .select("queue_name, status")
-      .gte("started_at", todayStart);
-
-    // If org_id is provided, filter by it; otherwise get all orgs
-    if (orgId) {
-      query = query.eq("org_id", orgId);
-    }
-
-    const { data, error } = await query;
+    // Fetch today's calls and filter by assigned numbers when orgId is provided
+    const { data, error } = await supabaseAdmin
+      .from('calls')
+      .select('queue_name, status, to_number, to_number_digits')
+      .gte('started_at', todayStart);
 
     if (error) {
-      console.error('[queue-summary] Supabase error:', error.message || error);
+      console.error('[queue-summary] Supabase error:', fmtErr(error));
       throw error;
     }
 
-    console.log('[queue-summary] Fetched', (data || []).length, 'calls');
+    console.log('[queue-summary] Fetched', (data || []).length, 'calls (pre-filter)');
 
     // Aggregate by queue
     const queueMap = new Map<
@@ -1211,7 +1293,18 @@ app.get("/api/calls/queue-summary", async (req, res) => {
       { name: string | null; total_calls: number; answered_calls: number; missed_calls: number }
     >();
 
-    for (const call of data || []) {
+    // If orgId provided, filter calls to only those matching assigned phone numbers
+    let callsToAggregate = (data || []);
+    if (orgId) {
+      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      callsToAggregate = (callsToAggregate || []).filter((c: any) => {
+        const tn = c.to_number || null;
+        const td = c.to_number_digits || null;
+        return (tn && numbers.includes(tn)) || (td && digits.includes(td));
+      });
+    }
+
+    for (const call of callsToAggregate || []) {
       const queueName = call.queue_name || "No queue";
       if (!queueMap.has(queueName)) {
         queueMap.set(queueName, {
@@ -1291,25 +1384,32 @@ app.get("/api/calls/series", async (req, res) => {
       step = "month";
     }
 
-    // Query calls from public.calls
-    let query = supabaseAdmin
-      .from("calls")
-      .select("started_at, status")
-      .gte("started_at", startDate.toISOString())
-      .order("started_at", { ascending: true });
+    // Query calls from public.calls for the given time range
+    const { data, error } = await supabaseAdmin
+      .from('calls')
+      .select('started_at, status, to_number, to_number_digits')
+      .gte('started_at', startDate.toISOString())
+      .order('started_at', { ascending: true });
 
-    if (orgId) {
-      query = query.eq("org_id", orgId);
-    }
-
-    const { data, error } = await query;
-    
     if (error) {
-      console.error('[calls/series] Supabase error:', error.message || error);
+      console.error('[calls/series] Supabase error:', fmtErr(error));
       throw error;
     }
 
-    console.log('[calls/series] Fetched', (data || []).length, 'calls for bucketing');
+    console.log('[calls/series] Fetched', (data || []).length, 'calls for bucketing (pre-filter)');
+
+    // If orgId provided, filter calls to only those matching assigned phone numbers
+    let callsForBucketing = (data || []);
+    if (orgId) {
+      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      callsForBucketing = (callsForBucketing || []).filter((c: any) => {
+        const tn = c.to_number || null;
+        const td = c.to_number_digits || null;
+        return (tn && numbers.includes(tn)) || (td && digits.includes(td));
+      });
+    }
+
+    console.log('[calls/series] Calls after filtering:', (callsForBucketing || []).length);
 
     // Aggregate into buckets
     const bucketMap = new Map<string, { bucket: string; total_calls: number; answered_calls: number; missed_calls: number }>();
@@ -1319,7 +1419,7 @@ app.get("/api/calls/series", async (req, res) => {
       return st === "answered" || st === "completed";
     };
 
-    for (const row of data || []) {
+    for (const row of callsForBucketing || []) {
       const started = new Date(row.started_at);
       let bucketDate: Date;
 
@@ -1416,18 +1516,26 @@ app.get("/s/series", async (req, res) => {
       step = "month";
     }
 
-    let query = supabaseAdmin
-      .from("calls")
-      .select("started_at, status")
-      .gte("started_at", startDate.toISOString())
-      .order("started_at", { ascending: true });
+    // Query calls for the requested range and filter by assigned numbers if orgId provided
+    const { data, error } = await supabaseAdmin
+      .from('calls')
+      .select('started_at, status, to_number, to_number_digits')
+      .gte('started_at', startDate.toISOString())
+      .order('started_at', { ascending: true });
 
-    if (orgId) query = query.eq("org_id", orgId);
-
-    const { data, error } = await query;
     if (error) {
-      console.error('[s/series] Supabase error:', error.message || error);
-      return res.status(500).json({ error: 'supabase_error', detail: error.message });
+      console.error('[s/series] Supabase error:', fmtErr(error));
+      return res.status(500).json({ error: 'supabase_error', detail: fmtErr(error) });
+    }
+
+    let callsForBucketing = (data || []);
+    if (orgId) {
+      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      callsForBucketing = (callsForBucketing || []).filter((c: any) => {
+        const tn = c.to_number || null;
+        const td = c.to_number_digits || null;
+        return (tn && numbers.includes(tn)) || (td && digits.includes(td));
+      });
     }
 
     // Aggregate into buckets (same logic as /api/calls/series)
