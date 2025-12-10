@@ -896,10 +896,19 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
       return res.status(403).json({ error: "forbidden" });
     }
 
-    // Insert rows into org_phone_numbers for each phone/org pair (ignore duplicates)
-    // Safe per-row insert that ignores duplicate-key violations
+    // Determine whether to use phone_number_id or legacy phone_number column.
     console.log('[assign_phone_numbers] assigning', phoneNumberIds.length, 'phone(s) to org', orgId);
+    // Load phone number strings for provided ids to support legacy schema if needed
+    const { data: phoneRows } = await supabaseAdmin.from('phone_numbers').select('id, number').in('id', phoneNumberIds as string[]);
+    const idToNumber: Record<string, string> = {};
+    if (phoneRows && Array.isArray(phoneRows)) {
+      for (const p of phoneRows) idToNumber[p.id] = p.number;
+    }
+
+    let usedLegacy = false;
     const insertErrors: string[] = [];
+
+    // First attempt: insert using phone_number_id
     for (const phoneId of phoneNumberIds) {
       try {
         const { error: iErr } = await supabaseAdmin
@@ -907,12 +916,17 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
           .insert({ org_id: orgId, phone_number_id: phoneId });
         if (iErr) {
           const imsg = (iErr as any)?.message || String(iErr);
-          // Duplicate key (already assigned) -> ignore silently
+          // If column doesn't exist, flag legacy and break to try legacy flow
+          if (imsg && imsg.toLowerCase().includes("column \"phone_number_id\"")) {
+            console.warn('[assign_phone_numbers] phone_number_id column missing, switching to legacy phone_number column');
+            usedLegacy = true;
+            break;
+          }
+          // Duplicate key (already assigned) -> ignore
           if (imsg && (imsg.includes('duplicate key') || imsg.includes('already exists') || imsg.includes('unique constraint'))) {
             console.log('[assign_phone_numbers] phone', phoneId, 'already assigned to org', orgId, '(ignoring)');
             continue;
           }
-          // Other errors -> log but continue to try other phones
           console.warn('[assign_phone_numbers] insert error for phone', phoneId, ':', imsg);
           insertErrors.push(imsg);
         }
@@ -921,9 +935,33 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
         insertErrors.push(String(ie));
       }
     }
+
+    // If legacy schema detected (no phone_number_id), attempt inserts into phone_number text column
+    if (usedLegacy) {
+      for (const phoneId of phoneNumberIds) {
+        try {
+          const numberStr = idToNumber[phoneId] || phoneId;
+          const { error: liErr } = await supabaseAdmin
+            .from('org_phone_numbers')
+            .insert({ org_id: orgId, phone_number: numberStr });
+          if (liErr) {
+            const limsg = (liErr as any)?.message || String(liErr);
+            if (limsg && (limsg.includes('duplicate key') || limsg.includes('already exists') || limsg.includes('unique constraint'))) {
+              console.log('[assign_phone_numbers] legacy phone', numberStr, 'already assigned to org', orgId, '(ignoring)');
+              continue;
+            }
+            console.warn('[assign_phone_numbers] legacy insert error for phone', numberStr, ':', limsg);
+            insertErrors.push(limsg);
+          }
+        } catch (lie) {
+          console.warn('[assign_phone_numbers] legacy exception for phone', phoneId, ':', String(lie));
+          insertErrors.push(String(lie));
+        }
+      }
+    }
+
     if (insertErrors.length > 0) {
-      console.warn('[assign_phone_numbers] some inserts failed:', insertErrors.slice(0,3));
-      // Still return success if at least one phone was assigned
+      console.warn('[assign_phone_numbers] some inserts failed:', insertErrors.slice(0, 5));
     }
     res.json({ success: true });
   } catch (err: any) {
