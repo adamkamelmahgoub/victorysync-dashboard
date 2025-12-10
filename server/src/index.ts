@@ -1199,6 +1199,41 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
   }
 });
 
+// DEBUG: GET raw mappings for org_phone_numbers (admin only)
+app.get('/api/admin/orgs/:orgId/raw-phone-mappings', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+    const allowed = await isPlatformAdmin(userId);
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    const { orgId } = req.params;
+    if (!orgId) return res.status(400).json({ error: 'missing_orgId' });
+
+    const { data: rows, error: rowsErr } = await supabaseAdmin
+      .from('org_phone_numbers')
+      .select('id, org_id, phone_number, phone_number_id, label, created_at')
+      .eq('org_id', orgId);
+    if (rowsErr) throw rowsErr;
+
+    const phoneIds = (rows || []).filter((r: any) => r.phone_number_id).map((r: any) => r.phone_number_id);
+    let phoneRows: any[] = [];
+    if (phoneIds.length > 0) {
+      const { data: pRows, error: pErr } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('id, number, number_digits')
+        .in('id', phoneIds as string[]);
+      if (pErr) throw pErr;
+      phoneRows = pRows || [];
+    }
+
+    res.json({ rows: rows || [], phoneRows });
+  } catch (err: any) {
+    console.error('debug_raw_mappings_failed:', fmtErr(err));
+    res.status(500).json({ error: 'debug_raw_mappings_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
 // GET /api/admin/orgs/:orgId/managers/:orgMemberId/permissions - fetch org manager permissions
 app.get('/api/admin/orgs/:orgId/managers/:orgMemberId/permissions', async (req, res) => {
   try {
