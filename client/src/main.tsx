@@ -16,6 +16,7 @@ import AdminOrgsPage from "./pages/admin/AdminOrgsPage";
 import { AdminOrgOverviewPage } from "./pages/admin/AdminOrgOverviewPage";
 import AdminApiKeysPage from "./pages/admin/AdminApiKeysPage";
 import { OrgDashboardPage } from "./pages/admin/OrgDashboardPage";
+import { OrgOperationsPage } from "./pages/admin/OrgOperationsPage";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -87,6 +88,14 @@ function AppRouter() {
         element={
           <AdminRoute>
             <OrgDashboardPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/orgs/:orgId/operations"
+        element={
+          <AdminRoute>
+            <OrgOperationsPage />
           </AdminRoute>
         }
       />

@@ -6,7 +6,7 @@ import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL } from '../../config';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
-import { ApiKeysTab } from '../../components/ApiKeysTab';
+
 
 interface Organization {
   id: string;
@@ -591,10 +591,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
             )}
           </div>
 
-              {/* API Keys Tab */}
-              <div>
-                <ApiKeysTab orgId={org.id} isOrgAdmin={canEditPhones} />
-              </div>
+
 
               {/* Modal for editing phones - rendered separately to avoid z-index issues */}
           {showEditPhones && (
@@ -616,17 +613,25 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
             <div className="text-xs text-slate-500">
               Created {new Date(org.created_at).toLocaleDateString()}
             </div>
-            {onViewDashboard && (
-              <button
-                onClick={() => {
-                  onClose();
-                  onViewDashboard(org.id);
-                }}
-                className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 transition rounded-lg text-sm font-medium text-center"
+            <div className="flex flex-col gap-2">
+              {onViewDashboard && (
+                <button
+                  onClick={() => {
+                    onClose();
+                    onViewDashboard(org.id);
+                  }}
+                  className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 transition rounded-lg text-sm font-medium text-center"
+                >
+                  View Full Dashboard →
+                </button>
+              )}
+              <a
+                href={`/admin/orgs/${org.id}/operations`}
+                className="w-full px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 transition rounded-lg text-sm font-medium text-center inline-block"
               >
-                View Full Dashboard →
-              </button>
-            )}
+                Manage Operations →
+              </a>
+            </div>
           </div>
         </div>
       </div>
