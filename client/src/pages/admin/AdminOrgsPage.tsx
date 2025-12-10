@@ -83,7 +83,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
   }, [org.id]);
 
   // EditPhonesModalEnhanced component
-  function EditPhonesModalEnhanced({ orgId, phones, onClose }: { orgId: string; phones: Array<{ id: string; number: string; label: string | null }>; onClose: () => void }) {
+  function EditPhonesModalEnhanced({ orgId, phones, onClose, user }: { orgId: string; phones: Array<{ id: string; number: string; label: string | null }>; onClose: () => void; user: any }) {
 
     const [allPhones, setAllPhones] = useState<Array<{ id: string; number: string; label?: string }>>([]);
     const [toAdd, setToAdd] = useState<string[]>([]);
@@ -94,7 +94,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
     useEffect(() => {
       const load = async () => {
         try {
-          console.log('EditPhonesModalEnhanced: fetching from', `${API_BASE_URL}/api/admin/phone-numbers`);
+          console.log('EditPhonesModalEnhanced: fetching from', `${API_BASE_URL}/api/admin/phone-numbers`, 'with user.id:', user?.id);
           const res = await fetch(`${API_BASE_URL}/api/admin/phone-numbers`, { headers: { 'x-user-id': user?.id || '' } });
           if (!res.ok) throw new Error(`Failed to load numbers: ${res.status}`);
           const j = await res.json();
@@ -595,7 +595,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
 
               {/* Modal for editing phones - rendered separately to avoid z-index issues */}
           {showEditPhones && (
-            <EditPhonesModalEnhanced orgId={org.id} phones={phones} onClose={() => { setShowEditPhones(false); reloadOrgDetails(); }} />
+            <EditPhonesModalEnhanced orgId={org.id} phones={phones} onClose={() => { setShowEditPhones(false); reloadOrgDetails(); }} user={user} />
           )}
 
           {showPermissionsEditor && (
