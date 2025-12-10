@@ -90,6 +90,24 @@ export function ApiKeysTab({ orgId, isOrgAdmin }: ApiKeysTabProps) {
     }
   };
 
+  const handleDeleteKey = async (id: string) => {
+    if (!confirm('Delete this API key?')) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/orgs/${orgId}/api-keys/${id}`, {
+        method: 'DELETE',
+        headers: { 'x-user-id': user?.id || '' },
+      });
+      if (res.ok) fetchKeys();
+      else {
+        const json = await res.json();
+        setError(json.detail || 'Failed to delete API key');
+      }
+    } catch (e: any) {
+      console.error('Error deleting API key:', e);
+      setError(e.message || 'Failed to delete API key');
+    }
+  };
+
   if (!isOrgAdmin) {
     return (
       <div className="rounded-2xl bg-slate-900/80 p-4 ring-1 ring-slate-800">
@@ -191,18 +209,26 @@ export function ApiKeysTab({ orgId, isOrgAdmin }: ApiKeysTabProps) {
       ) : (
         <div className="space-y-2">
           {keys.map((key) => (
-            <div key={key.id} className="p-3 bg-slate-800/50 rounded text-xs space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-200">{key.label || 'Untitled'}</span>
-                <span className="text-slate-500 text-[10px]">
-                  {new Date(key.created_at).toLocaleDateString()}
-                </span>
-              </div>
-              {key.last_used_at && (
-                <div className="text-slate-400">
-                  Last used: {new Date(key.last_used_at).toLocaleString()}
+            <div key={key.id} className="p-3 bg-slate-800/50 rounded text-xs space-y-1 flex items-center justify-between">
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-200">{key.label || 'Untitled'}</span>
+                  <span className="text-slate-500 text-[10px]">
+                    {new Date(key.created_at).toLocaleDateString()}
+                  </span>
                 </div>
-              )}
+                {key.last_used_at && (
+                  <div className="text-slate-400 mt-1">
+                    Last used: {new Date(key.last_used_at).toLocaleString()}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => handleDeleteKey(key.id)}
+                className="ml-2 px-2 py-1 text-xs text-red-400 hover:text-red-300 bg-red-900/20 rounded transition flex-shrink-0"
+              >
+                Delete
+              </button>
             </div>
           ))}
         </div>

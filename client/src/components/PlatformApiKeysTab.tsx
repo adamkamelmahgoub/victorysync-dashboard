@@ -44,7 +44,7 @@ export const PlatformApiKeysTab: React.FC = () => {
       });
       const json = await res.json();
       if (res.ok) {
-        // API returns the plaintext token once
+        // API returns the plaintext token once (in 'token' field)
         setNewToken(json.token);
         fetchKeys();
         setName('');

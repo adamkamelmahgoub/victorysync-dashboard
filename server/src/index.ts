@@ -380,29 +380,30 @@ app.get("/api/client-metrics", async (req, res) => {
 // ============== ADMIN ENDPOINTS ==============
 
 // ------------------ API Keys Management ------------------
-// Platform keys (platform admins only)
-app.post('/api/admin/platform-keys', async (req, res) => {
+// Platform keys (platform admins only) — Create
+app.post('/api/admin/platform-api-keys', async (req, res) => {
   try {
     const actorId = req.header('x-user-id') || null;
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
     if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
 
-    const { label } = req.body || {};
+    const { name } = req.body || {};
     const plain = generateApiKeyPlaintext();
     const keyHash = hashApiKey(plain);
 
-    const payload = { key_hash: keyHash, label: label || null, created_by: actorId };
+    const payload = { key_hash: keyHash, label: name || null, created_by: actorId };
     const { data, error } = await supabaseAdmin.from('platform_api_keys').insert(payload).select().maybeSingle();
     if (error) throw error;
     // Return the plain token once
-    res.json({ apiKey: plain, key: { id: data.id, label: data.label, created_by: data.created_by, created_at: data.created_at } });
+    res.json({ token: plain, key: { id: data.id, name: data.label, created_by: data.created_by, created_at: data.created_at } });
   } catch (e: any) {
     console.error('create_platform_key_failed:', fmtErr(e));
     res.status(500).json({ error: 'create_platform_key_failed', detail: fmtErr(e) });
   }
 });
 
-app.get('/api/admin/platform-keys', async (req, res) => {
+// Platform keys — List
+app.get('/api/admin/platform-api-keys', async (req, res) => {
   try {
     const actorId = req.header('x-user-id') || null;
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
@@ -414,6 +415,23 @@ app.get('/api/admin/platform-keys', async (req, res) => {
   } catch (e: any) {
     console.error('list_platform_keys_failed:', fmtErr(e));
     res.status(500).json({ error: 'list_platform_keys_failed', detail: fmtErr(e) });
+  }
+});
+
+// Platform keys — Delete
+app.delete('/api/admin/platform-api-keys/:id', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { id } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { error } = await supabaseAdmin.from('platform_api_keys').delete().eq('id', id);
+    if (error) throw error;
+    res.status(204).send();
+  } catch (e: any) {
+    console.error('delete_platform_key_failed:', fmtErr(e));
+    res.status(500).json({ error: 'delete_platform_key_failed', detail: fmtErr(e) });
   }
 });
 
@@ -451,6 +469,22 @@ app.get('/api/orgs/:orgId/api-keys', async (req, res) => {
   } catch (e: any) {
     console.error('list_org_keys_failed:', fmtErr(e));
     res.status(500).json({ error: 'list_org_keys_failed', detail: fmtErr(e) });
+  }
+});
+
+app.delete('/api/orgs/:orgId/api-keys/:keyId', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId, keyId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { error } = await supabaseAdmin.from('org_api_keys').delete().eq('id', keyId).eq('org_id', orgId);
+    if (error) throw error;
+    res.status(204).send();
+  } catch (e: any) {
+    console.error('delete_org_key_failed:', fmtErr(e));
+    res.status(500).json({ error: 'delete_org_key_failed', detail: fmtErr(e) });
   }
 });
 
