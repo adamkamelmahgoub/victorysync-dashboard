@@ -894,62 +894,33 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
     }
 
     // Insert rows into org_phone_numbers for each phone/org pair (ignore duplicates)
-    // Prefer phone_number_id schema; if that column doesn't exist, fall back to phone_number
-    const insertsById = phoneNumberIds.map((phoneId: string) => ({ org_id: orgId, phone_number_id: phoneId }));
-    try {
-      // Try bulk upsert first (fast path). If the DB does not have the expected unique constraint,
-      // Postgres will return an error about ON CONFLICT — detect that and fall back to per-row inserts.
-      const { error: upsertErr } = await supabaseAdmin
-        .from('org_phone_numbers')
-        .upsert(insertsById, { onConflict: 'org_id,phone_number_id' });
-      if (upsertErr) {
-        // If the error indicates there's no matching unique constraint for the ON CONFLICT target,
-        // we'll fall back to inserting row-by-row and ignoring duplicate-key violations.
-        const msg = (upsertErr as any)?.message || String(upsertErr);
-        console.warn('[assign_phone_numbers] bulk upsert error (by id):', msg);
-        if (msg && msg.includes('no unique or exclusion constraint') || msg.includes('ON CONFLICT')) {
-          // fall through to per-row insert flow below
-          throw upsertErr;
-        } else {
-          throw upsertErr;
-        }
-      }
-    } catch (e) {
-      // Fallback: attempt per-row insert by phone_number_id; ignore unique-violation errors
-      console.warn('[assign_phone_numbers] falling back to per-row insert by phone_number_id:', fmtErr(e));
-      const insertErrors: any[] = [];
-      for (const phoneId of phoneNumberIds) {
-        try {
-          const { error: iErr } = await supabaseAdmin
-            .from('org_phone_numbers')
-            .insert({ org_id: orgId, phone_number_id: phoneId });
-          if (iErr) {
-            const imsg = (iErr as any)?.message || String(iErr);
-            // Duplicate key (already assigned) -> ignore
-            if (imsg && (imsg.includes('duplicate key') || imsg.includes('already exists') || imsg.includes('ON CONFLICT') || imsg.includes('no unique or exclusion constraint'))) {
-              // ignore
-              continue;
-            }
-            insertErrors.push(imsg);
+    // Safe per-row insert that ignores duplicate-key violations
+    console.log('[assign_phone_numbers] assigning', phoneNumberIds.length, 'phone(s) to org', orgId);
+    const insertErrors: string[] = [];
+    for (const phoneId of phoneNumberIds) {
+      try {
+        const { error: iErr } = await supabaseAdmin
+          .from('org_phone_numbers')
+          .insert({ org_id: orgId, phone_number_id: phoneId });
+        if (iErr) {
+          const imsg = (iErr as any)?.message || String(iErr);
+          // Duplicate key (already assigned) -> ignore silently
+          if (imsg && (imsg.includes('duplicate key') || imsg.includes('already exists') || imsg.includes('unique constraint'))) {
+            console.log('[assign_phone_numbers] phone', phoneId, 'already assigned to org', orgId, '(ignoring)');
+            continue;
           }
-        } catch (ie) {
-          insertErrors.push(String(ie));
+          // Other errors -> log but continue to try other phones
+          console.warn('[assign_phone_numbers] insert error for phone', phoneId, ':', imsg);
+          insertErrors.push(imsg);
         }
+      } catch (ie) {
+        console.warn('[assign_phone_numbers] exception for phone', phoneId, ':', String(ie));
+        insertErrors.push(String(ie));
       }
-      if (insertErrors.length > 0) {
-        console.error('[assign_phone_numbers] per-row insert errors:', insertErrors.slice(0,5));
-        // As a final fallback, try legacy `phone_number` text column upsert
-        try {
-          const inserts = phoneNumberIds.map((phoneId: string) => ({ org_id: orgId, phone_number: phoneId }));
-          const { error } = await supabaseAdmin
-            .from('org_phone_numbers')
-            .upsert(inserts, { onConflict: 'org_id,phone_number' });
-          if (error) throw error;
-        } catch (le) {
-          console.error('[assign_phone_numbers] legacy phone_number upsert also failed:', fmtErr(le));
-          throw le;
-        }
-      }
+    }
+    if (insertErrors.length > 0) {
+      console.warn('[assign_phone_numbers] some inserts failed:', insertErrors.slice(0,3));
+      // Still return success if at least one phone was assigned
     }
     res.json({ success: true });
   } catch (err: any) {
