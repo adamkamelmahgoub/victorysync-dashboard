@@ -60,7 +60,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
     setStatsError(null);
     try {
       console.log('OrgDetailsModal: reloading org details for', org.id);
-      const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`);
+      const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`, { headers: { 'x-user-id': user?.id || '' } });
       if (!res.ok) throw new Error('Failed to fetch org details');
       const j = await res.json();
       console.log('OrgDetailsModal: received data', { members: j.members?.length, phones: j.phones?.length, stats: j.stats, canEdit: j.permissions?.canEditPhoneNumbers });
@@ -96,7 +96,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
       const load = async () => {
         try {
           console.log('EditPhonesModalEnhanced: fetching from', `${API_BASE_URL}/api/admin/phone-numbers`);
-          const res = await fetch(`${API_BASE_URL}/api/admin/phone-numbers`);
+          const res = await fetch(`${API_BASE_URL}/api/admin/phone-numbers`, { headers: { 'x-user-id': user?.id || '' } });
           if (!res.ok) throw new Error(`Failed to load numbers: ${res.status}`);
           const j = await res.json();
           console.log('EditPhonesModalEnhanced: received phone_numbers', j);
