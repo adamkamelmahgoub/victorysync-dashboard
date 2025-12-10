@@ -940,7 +940,29 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
     if (usedLegacy) {
       for (const phoneId of phoneNumberIds) {
         try {
-          const numberStr = idToNumber[phoneId] || phoneId;
+          // Resolve number string: prefer cached mapping, otherwise try to lookup by id or number
+          let numberStr = idToNumber[phoneId];
+          if (!numberStr) {
+            try {
+              const { data: pRow, error: pErr } = await supabaseAdmin
+                .from('phone_numbers')
+                .select('id, number')
+                .or(`id.eq.${phoneId},number.eq.${phoneId}`)
+                .maybeSingle();
+              if (!pErr && pRow && pRow.number) {
+                numberStr = pRow.number;
+              }
+            } catch (e) {
+              // ignore lookup error; will handle below
+            }
+          }
+
+          if (!numberStr) {
+            console.warn('[assign_phone_numbers] could not resolve phone number for id or value', phoneId, '; skipping legacy insert');
+            insertErrors.push(`unresolved_phone:${phoneId}`);
+            continue;
+          }
+
           const { error: liErr } = await supabaseAdmin
             .from('org_phone_numbers')
             .insert({ org_id: orgId, phone_number: numberStr });
