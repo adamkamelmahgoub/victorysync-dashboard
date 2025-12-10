@@ -63,6 +63,7 @@ export const AdminUsersPage: FC = () => {
   // Auth users list
   const [allUsers, setAllUsers] = useState<AuthUser[]>([]);
   const [allUsersLoading, setAllUsersLoading] = useState(false);
+  const [currentGlobalRole, setCurrentGlobalRole] = useState<string | null>(null);
 
   // Tab state for right panel
   const [tab, setTab] = useState<TabType>("all");
@@ -119,6 +120,13 @@ export const AdminUsersPage: FC = () => {
         }
         const users = json.users || [];
         setAllUsers(users.map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null })));
+        // If current logged-in user's global_role is present on the server-side users list, capture it
+        try {
+          const me = users.find((u: any) => u.id === user?.id);
+          if (me && me.global_role) setCurrentGlobalRole(me.global_role);
+        } catch (e) {
+          // ignore
+        }
       } catch (err: any) {
         console.error('Failed to fetch auth users:', err);
       } finally {
@@ -424,7 +432,7 @@ export const AdminUsersPage: FC = () => {
           </button>
         </header>
 
-        {user?.role === 'platform_admin' && (
+        {(user?.user_metadata?.role === 'platform_admin' || currentGlobalRole === 'platform_admin') && (
           <div className="mb-6">
             <PlatformApiKeysTab />
           </div>
