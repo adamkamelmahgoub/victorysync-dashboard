@@ -21,6 +21,7 @@ interface OrgDetailsModalProps {
   org: Organization;
   onClose: () => void;
   onViewDashboard?: (orgId: string) => void;
+  onPhonesUpdated?: () => void;
 }
 
 interface Member {
@@ -32,7 +33,7 @@ interface Member {
 }
 
 // Org Details Modal Component
-function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps) {
+function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: OrgDetailsModalProps) {
   const [stats, setStats] = useState<any>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
@@ -615,7 +616,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
 
               {/* Modal for editing phones - rendered separately to avoid z-index issues */}
           {showEditPhones && (
-            <EditPhonesModalEnhanced orgId={org.id} phones={phones} onClose={() => { setShowEditPhones(false); reloadOrgDetails(); }} user={user} />
+            <EditPhonesModalEnhanced orgId={org.id} phones={phones} onClose={() => { setShowEditPhones(false); reloadOrgDetails(); if (onPhonesUpdated) onPhonesUpdated(); }} user={user} />
           )}
 
           {showPermissionsEditor && (
@@ -853,6 +854,7 @@ export default function AdminOrgsPage() {
           org={selectedOrg}
           onClose={() => setSelectedOrg(null)}
           onViewDashboard={(orgId) => navigate(`/admin/orgs/${orgId}/dashboard`)}
+          onPhonesUpdated={() => fetchOrgs()}
         />
       )}
     </main>

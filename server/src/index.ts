@@ -1199,16 +1199,21 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
   }
 });
 
-// DEBUG: GET raw mappings for org_phone_numbers (admin only)
+// DEBUG: GET raw mappings for org_phone_numbers (admin/org-admins only)
 app.get('/api/admin/orgs/:orgId/raw-phone-mappings', async (req, res) => {
   try {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
-    const allowed = await isPlatformAdmin(userId);
-    if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
     const { orgId } = req.params;
     if (!orgId) return res.status(400).json({ error: 'missing_orgId' });
+
+    // Allow platform admins or org admins/managers for this org
+    const allowed = await isPlatformAdmin(userId) ||
+      (await isPlatformManagerWith(userId, 'can_manage_phone_numbers_global')) ||
+      (await isOrgAdmin(userId, orgId)) ||
+      (await isOrgManagerWith(userId, orgId, 'can_manage_phone_numbers'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
     const { data: rows, error: rowsErr } = await supabaseAdmin
       .from('org_phone_numbers')
