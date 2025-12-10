@@ -811,7 +811,7 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
     const inserts = phoneNumberIds.map((phoneId: string) => ({ org_id: orgId, phone_number: phoneId }));
     const { error } = await supabaseAdmin
       .from("org_phone_numbers")
-      .upsert(inserts, { onConflict: ["org_id", "phone_number"] });
+      .upsert(inserts, { onConflict: "org_id,phone_number" });
     if (error) throw error;
     res.json({ success: true });
   } catch (err: any) {
@@ -1318,18 +1318,22 @@ app.get("/api/calls/recent", async (req, res) => {
       });
 
       const sliced = filtered.slice(0, limit);
-      const items = await Promise.all(sliced.map(async (c: any) => {
-        id: c.id,
-        direction: c.direction,
-        status: c.status,
-        fromNumber: c.from_number ?? null,
-        toNumber: c.to_number ?? null,
-        queueName: c.queue_name ?? null,
-        startedAt: c.started_at,
-        answeredAt: c.answered_at ?? null,
-        endedAt: c.ended_at ?? null,
-        agentName: await resolveAgentNameForExtension(c.mightycall_extension || c.answered_extension || c.answered_by || c.answer_extension || c.agent_extension || c.agent || null)
-      }));
+      const items: any[] = [];
+      for (const c of sliced) {
+        const agentName = await resolveAgentNameForExtension((c as any).mightycall_extension || (c as any).answered_extension || (c as any).answered_by || (c as any).answer_extension || (c as any).agent_extension || (c as any).agent || null);
+        items.push({
+          id: c.id,
+          direction: c.direction,
+          status: c.status,
+          fromNumber: c.from_number ?? null,
+          toNumber: c.to_number ?? null,
+          queueName: c.queue_name ?? null,
+          startedAt: c.started_at,
+          answeredAt: c.answered_at ?? null,
+          endedAt: c.ended_at ?? null,
+          agentName,
+        });
+      }
 
       return res.json({ items });
     }
@@ -1413,7 +1417,7 @@ app.get("/s/recent", async (req, res) => {
         startedAt: c.started_at,
         answeredAt: c.answered_at ?? null,
         endedAt: c.ended_at ?? null,
-        agentName: await resolveAgentNameForExtension(c.mightycall_extension || c.answered_extension || c.answered_by || c.answer_extension || c.agent_extension || c.agent || null)
+        agentName: await resolveAgentNameForExtension((c as any).mightycall_extension || (c as any).answered_extension || (c as any).answered_by || (c as any).answer_extension || (c as any).agent_extension || (c as any).agent || null)
       })));
 
       return res.json({ items });
@@ -1441,7 +1445,7 @@ app.get("/s/recent", async (req, res) => {
       startedAt: c.started_at,
       answeredAt: c.answered_at ?? null,
       endedAt: c.ended_at ?? null,
-        agentName: await resolveAgentNameForExtension(c.mightycall_extension || c.answered_extension || c.answered_by || c.answer_extension || c.agent_extension || c.agent || null)
+        agentName: await resolveAgentNameForExtension((c as any).mightycall_extension || (c as any).answered_extension || (c as any).answered_by || (c as any).answer_extension || (c as any).agent_extension || (c as any).agent || null)
       })));
 
     res.json({ items });
