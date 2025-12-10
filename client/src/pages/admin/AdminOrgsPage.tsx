@@ -119,22 +119,32 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
     const save = async () => {
       try {
         setSaving(true);
+        if (!user?.id) {
+          throw new Error('You must be signed in to perform this action');
+        }
+
         // Add new phone numbers
         if (toAdd.length > 0) {
           const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+            headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
             body: JSON.stringify({ phoneNumberIds: toAdd }),
           });
-          if (!res.ok) throw new Error('Assign failed');
+          if (!res.ok) {
+            const detail = await res.text();
+            throw new Error(`Assign failed: ${res.status} ${detail}`);
+          }
         }
         // Remove phone numbers
         for (const phoneId of toRemove) {
           const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers/${phoneId}`, {
             method: 'DELETE',
-            headers: { 'x-user-id': user?.id || '' },
+            headers: { 'x-user-id': user.id },
           });
-          if (!res.ok) throw new Error('Unassign failed');
+          if (!res.ok) {
+            const detail = await res.text();
+            throw new Error(`Unassign failed: ${res.status} ${detail}`);
+          }
         }
         onClose();
         if (toast && toast.push) toast.push('Phone numbers updated', 'success');

@@ -863,17 +863,24 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
       return res.status(400).json({ error: "missing_required_fields", detail: "orgId and phoneNumberIds array required" });
     }
 
-    // Authorization: platform_admin OR platform_manager with global perm OR org_admin OR org_manager with perm
-    // In dev mode, allow if userId is present (for testing)
+    // Authorization: allow via x-user-id (platform/org roles) OR via API key scope
+    const apiScope = (req as any).apiKeyScope || null;
     const isDev = process.env.NODE_ENV !== 'production';
-    const allowed =
+
+    const allowedByApiKey = apiScope && (apiScope.scope === 'platform' || (apiScope.scope === 'org' && apiScope.orgId === orgId));
+
+    const allowedByUser =
       (isDev && userId) ||
       (userId && (await isPlatformAdmin(userId))) ||
       (userId && (await isPlatformManagerWith(userId, "can_manage_phone_numbers_global"))) ||
       (userId && (await isOrgAdmin(userId, orgId))) ||
       (userId && (await isOrgManagerWith(userId, orgId, "can_manage_phone_numbers")));
 
-    if (!allowed) return res.status(403).json({ error: "forbidden" });
+    const allowed = Boolean(allowedByApiKey) || Boolean(allowedByUser);
+    if (!allowed) {
+      console.warn('[assign_phone_numbers] unauthorized attempt', { userId, apiScope, orgId });
+      return res.status(403).json({ error: "forbidden" });
+    }
 
     // Insert rows into org_phone_numbers for each phone/org pair (ignore duplicates)
     // Prefer phone_number_id schema; if that column doesn't exist, fall back to phone_number
@@ -908,15 +915,23 @@ app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, re
 
     // Authorization: platform_admin OR platform_manager with global perm OR org_admin OR org_manager with perm
     // In dev mode, allow if userId is present (for testing)
+    const apiScope = (req as any).apiKeyScope || null;
     const isDev = process.env.NODE_ENV !== 'production';
-    const allowed =
+
+    const allowedByApiKey = apiScope && (apiScope.scope === 'platform' || (apiScope.scope === 'org' && apiScope.orgId === orgId));
+
+    const allowedByUser =
       (isDev && userId) ||
       (userId && (await isPlatformAdmin(userId))) ||
       (userId && (await isPlatformManagerWith(userId, 'can_manage_phone_numbers_global'))) ||
       (userId && (await isOrgAdmin(userId, orgId))) ||
       (userId && (await isOrgManagerWith(userId, orgId, 'can_manage_phone_numbers')));
 
-    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+    const allowed = Boolean(allowedByApiKey) || Boolean(allowedByUser);
+    if (!allowed) {
+      console.warn('[unassign_phone] unauthorized attempt', { userId, apiScope, orgId, phoneNumberId });
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     // Remove mapping from org_phone_numbers. Try phone_number_id then fallback to phone_number
     try {
