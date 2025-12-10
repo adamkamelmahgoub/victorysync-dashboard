@@ -627,6 +627,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
 
 export default function AdminOrgsPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
