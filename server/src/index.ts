@@ -102,14 +102,13 @@ async function apiKeyAuthMiddleware(req: any, res: any, next: any) {
 }
 
 // Resolve assigned phone numbers for an org (many-to-many via org_phone_numbers).
-// Works with both legacy schema (org_phone_numbers.phone_number text)
-// and newer schema that stores phone_number_id referencing phone_numbers.id.
+// Works with schema that stores phone_number_id referencing phone_numbers.id.
 async function getAssignedPhoneNumbersForOrg(orgId: string) {
   try {
-    // Fetch mapping rows with both potential columns
+    // Fetch mapping rows
     const { data: rows, error: rowsErr } = await supabaseAdmin
       .from('org_phone_numbers')
-      .select('id, org_id, phone_number, phone_number_id, label, created_at')
+      .select('id, org_id, phone_number_id, label, created_at')
       .eq('org_id', orgId);
     if (rowsErr) {
       console.warn('[getAssignedPhoneNumbersForOrg] org_phone_numbers select failed:', fmtErr(rowsErr));
@@ -117,6 +116,8 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
     }
 
     const rowsArr = (rows || []) as any[];
+    console.log('[getAssignedPhoneNumbersForOrg] found', rowsArr.length, 'rows for orgId', orgId);
+    
     // Collect phone_number_ids to join to phone_numbers table in bulk
     const phoneIds = rowsArr.filter(r => r.phone_number_id).map(r => r.phone_number_id);
     const phonesById: Record<string, any> = {};
@@ -135,13 +136,12 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
       if (r.phone_number_id && phonesById[r.phone_number_id]) {
         const p = phonesById[r.phone_number_id];
         phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
-      } else if (r.phone_number) {
-        phones.push({ id: r.phone_number, number: r.phone_number, number_digits: (r.phone_number || '').toString().replace(/\D/g, ''), label: r.label ?? null, created_at: r.created_at });
       }
     }
 
     const numbers = phones.map(p => p.number).filter(Boolean);
     const digits = phones.map(p => (p.number_digits || (p.number || '').toString().replace(/\D/g, ''))).filter(Boolean);
+    console.log('[getAssignedPhoneNumbersForOrg] returning', phones.length, 'phones for orgId', orgId);
     return { phones, numbers, digits };
   } catch (e) {
     console.warn('[getAssignedPhoneNumbersForOrg] exception:', fmtErr(e));
