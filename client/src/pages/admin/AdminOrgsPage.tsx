@@ -1,8 +1,6 @@
-// v2 - Phone management modal with detailed logging
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import AdminTopNav from '../../components/AdminTopNav';
 // Server-side admin actions use API endpoints, not client-side Supabase
 import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL } from '../../config';
@@ -196,7 +194,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
                             className="flex items-center justify-between bg-emerald-900/30 border border-emerald-700/50 rounded p-2.5 hover:bg-emerald-900/40 transition"
                           >
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-emerald-300">{n.number}</div>
+                              <div className="text-sm font-medium text-emerald-300">{n.number || n.id}</div>
                               {n.label && <div className="text-xs text-slate-400 mt-0.5">{n.label}</div>}
                             </div>
                             <button
@@ -217,7 +215,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
                           className="flex items-center justify-between bg-red-900/20 border border-red-700/30 rounded p-2.5 opacity-50"
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium text-red-400 line-through">{n!.number}</div>
+                            <div className="text-sm font-medium text-red-400 line-through">{n!.number || n!.id}</div>
                             {n!.label && <div className="text-xs text-slate-400 mt-0.5">{n!.label}</div>}
                           </div>
                           <button
@@ -248,7 +246,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
                             className="flex items-center justify-between bg-blue-900/30 border border-blue-700/50 rounded p-2.5 hover:bg-blue-900/40 transition"
                           >
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-blue-300">{n.number}</div>
+                              <div className="text-sm font-medium text-blue-300">{n.number || n.id}</div>
                               {n.label && <div className="text-xs text-slate-400 mt-0.5">{n.label}</div>}
                             </div>
                             <button
@@ -269,7 +267,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
                           className="flex items-center justify-between bg-emerald-900/30 border border-emerald-700/50 rounded p-2.5 opacity-50"
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium text-emerald-300">{n!.number}</div>
+                            <div className="text-sm font-medium text-emerald-300">{n!.number || n!.id}</div>
                             {n!.label && <div className="text-xs text-slate-400 mt-0.5">{n!.label}</div>}
                           </div>
                           <button
@@ -462,7 +460,6 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
     <div className="fixed inset-0 z-50 flex items-end bg-black/50 backdrop-blur-sm">
       <div className="relative w-full max-w-lg rounded-t-2xl bg-slate-900/95 border border-slate-700 max-h-screen overflow-y-auto">
         {/* Header */}
-        <AdminTopNav />
         <div className="sticky top-0 border-b border-slate-700 bg-slate-900/95 p-5 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-50">{org.name}</h2>

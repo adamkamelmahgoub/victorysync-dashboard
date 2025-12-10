@@ -974,23 +974,57 @@ app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, re
       return res.status(403).json({ error: 'forbidden' });
     }
 
-    // Remove mapping from org_phone_numbers. Try phone_number_id then fallback to phone_number
+    // Remove mapping from org_phone_numbers. Robust approach: fetch the row first, then delete by id.
+    let deletedCount = 0;
     try {
-      const { error: delErr } = await supabaseAdmin
+      // Try to find by phone_number_id first
+      const { data: rowsById, error: fetchByIdErr } = await supabaseAdmin
         .from('org_phone_numbers')
-        .delete()
+        .select('id')
         .eq('org_id', orgId)
         .eq('phone_number_id', phoneNumberId);
-      if (delErr) throw delErr;
+      
+      if (!fetchByIdErr && rowsById && rowsById.length > 0) {
+        // Delete by row id (most reliable)
+        for (const row of rowsById) {
+          const { error: delErr } = await supabaseAdmin
+            .from('org_phone_numbers')
+            .delete()
+            .eq('id', row.id);
+          if (!delErr) deletedCount += 1;
+        }
+      }
     } catch (e) {
-      console.warn('[unassign_phone] delete by phone_number_id failed, trying phone_number:', fmtErr(e));
-      const { error } = await supabaseAdmin
-        .from('org_phone_numbers')
-        .delete()
-        .eq('org_id', orgId)
-        .eq('phone_number', phoneNumberId);
-      if (error) throw error;
+      console.warn('[unassign_phone] delete by phone_number_id failed:', fmtErr(e));
     }
+
+    // Fallback: try by phone_number text column
+    if (deletedCount === 0) {
+      try {
+        const { data: rowsByPhone, error: fetchByPhoneErr } = await supabaseAdmin
+          .from('org_phone_numbers')
+          .select('id')
+          .eq('org_id', orgId)
+          .eq('phone_number', phoneNumberId);
+        
+        if (!fetchByPhoneErr && rowsByPhone && rowsByPhone.length > 0) {
+          for (const row of rowsByPhone) {
+            const { error: delErr } = await supabaseAdmin
+              .from('org_phone_numbers')
+              .delete()
+              .eq('id', row.id);
+            if (!delErr) deletedCount += 1;
+          }
+        }
+      } catch (e) {
+        console.warn('[unassign_phone] delete by phone_number also failed:', fmtErr(e));
+      }
+    }
+
+    if (deletedCount === 0) {
+      return res.status(404).json({ error: 'phone_number_not_found_for_org' });
+    }
+
     res.status(204).send();
   } catch (err: any) {
     console.error('unassign_phone_failed:', fmtErr(err));
