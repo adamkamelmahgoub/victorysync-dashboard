@@ -53,13 +53,18 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
   const [showPermissionsEditor, setShowPermissionsEditor] = useState<{ orgMemberId: string; memberEmail: string } | null>(null);
 
   const reloadOrgDetails = async () => {
+    // Don't reload if user is not authenticated
+    if (!user?.id) {
+      console.log('OrgDetailsModal: skipping reload, no user.id');
+      return;
+    }
     setMembersLoading(true);
     setPhonesLoading(true);
     setStatsLoading(true);
     setStatsError(null);
     try {
       console.log('OrgDetailsModal: reloading org details for', org.id);
-      const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`, { headers: { 'x-user-id': user?.id || '' } });
+      const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`, { headers: { 'x-user-id': user.id } });
       if (!res.ok) throw new Error('Failed to fetch org details');
       const j = await res.json();
       console.log('OrgDetailsModal: received data', { members: j.members?.length, phones: j.phones?.length, stats: j.stats, canEdit: j.permissions?.canEditPhoneNumbers });
@@ -151,6 +156,8 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
             throw new Error(`Unassign failed: ${res.status} ${detail}`);
           }
         }
+        // Small delay to allow server to process changes
+        await new Promise(resolve => setTimeout(resolve, 500));
         onClose();
         if (toast && toast.push) toast.push('Phone numbers updated', 'success');
       } catch (err) {
