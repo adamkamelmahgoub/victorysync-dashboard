@@ -94,8 +94,14 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
     useEffect(() => {
       const load = async () => {
         try {
-          console.log('EditPhonesModalEnhanced: fetching from', `${API_BASE_URL}/api/admin/phone-numbers`, 'with user.id:', user?.id);
-          const res = await fetch(`${API_BASE_URL}/api/admin/phone-numbers`, { headers: { 'x-user-id': user?.id || '' } });
+          if (!user?.id) {
+            // Wait for auth to be available; avoid sending empty x-user-id header
+            console.log('EditPhonesModalEnhanced: no user.id yet, skipping load');
+            setLoading(false);
+            return;
+          }
+          console.log('EditPhonesModalEnhanced: fetching from', `${API_BASE_URL}/api/admin/phone-numbers`, 'with user.id:', user.id);
+          const res = await fetch(`${API_BASE_URL}/api/admin/phone-numbers`, { headers: { 'x-user-id': user.id } });
           if (!res.ok) throw new Error(`Failed to load numbers: ${res.status}`);
           const j = await res.json();
           console.log('EditPhonesModalEnhanced: received phone_numbers', j);
@@ -107,7 +113,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
         }
       };
       load();
-    }, [orgId]);
+    }, [orgId, user?.id]);
 
     // Assigned = numbers currently assigned to this org (from props)
     const assignedIds = new Set(phones.map(p => p.id));
