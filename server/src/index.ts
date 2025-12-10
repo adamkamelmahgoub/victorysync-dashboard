@@ -711,6 +711,9 @@ app.get("/api/admin/mightycall/extensions", async (_req, res) => {
 // GET /api/admin/phone-numbers - generic phone numbers listing
 app.get('/api/admin/phone-numbers', async (req, res) => {
   try {
+    // Log incoming headers for debugging auth issues
+    console.log('[list_phone_numbers] incoming headers x-user-id:', req.header('x-user-id'));
+    console.log('[list_phone_numbers] incoming headers keys:', Object.keys(req.headers || {}));
     const userId = req.header('x-user-id') || null;
     
     // Authorization: platform admin only
