@@ -18,7 +18,8 @@ export async function isPlatformAdmin(userId: string): Promise<boolean> {
       .eq("id", userId)
       .maybeSingle();
     if (error || !data) return false;
-    return data.global_role === "platform_admin";
+    // Accept both legacy 'admin' and canonical 'platform_admin' as platform-level admin
+    return data.global_role === "platform_admin" || data.global_role === "admin";
   } catch (err) {
     console.error("isPlatformAdmin check failed:", err);
     return false;

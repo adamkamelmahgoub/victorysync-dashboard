@@ -48,7 +48,7 @@ function AdminRoute({ children }: { children: JSX.Element }) {
     );
   }
 
-  if (!user || role !== "admin") {
+  if (!user || (role !== "admin" && role !== "platform_admin")) {
     return <Navigate to="/dashboard" replace />;
   }
 

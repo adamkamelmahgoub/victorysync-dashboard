@@ -11,7 +11,7 @@ interface Organization {
 
 export function AdminOperationsPage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'api-keys' | 'phone-numbers'>('api-keys');
+  const [activeTab, setActiveTab] = useState<'api-keys'>('api-keys');
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,16 +99,6 @@ export function AdminOperationsPage() {
           >
             API Keys
           </button>
-          <button
-            onClick={() => setActiveTab('phone-numbers')}
-            className={`px-4 py-3 border-b-2 transition font-medium text-sm ${
-              activeTab === 'phone-numbers'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            Phone Numbers
-          </button>
         </div>
 
         {/* Content */}
@@ -117,15 +107,6 @@ export function AdminOperationsPage() {
             <section>
               <h2 className="text-lg font-semibold mb-4">API Keys</h2>
               <ApiKeysTab orgId={selectedOrgId} isOrgAdmin={true} />
-            </section>
-          )}
-
-          {activeTab === 'phone-numbers' && (
-            <section>
-              <h2 className="text-lg font-semibold mb-4">Phone Numbers</h2>
-              <p className="text-slate-400 text-sm">
-                Phone number management is available in the Organizations section. Click on an organization to manage its phone numbers.
-              </p>
             </section>
           )}
         </div>

@@ -96,6 +96,12 @@ export const Dashboard: FC = () => {
                     >
                       Users
                     </Link>
+                    <Link
+                      to="/admin/operations"
+                      className="text-xs text-slate-300 hover:text-emerald-400 transition underline-offset-2 hover:underline"
+                    >
+                      Operations
+                    </Link>
                   </>
                 )}
                 <button
