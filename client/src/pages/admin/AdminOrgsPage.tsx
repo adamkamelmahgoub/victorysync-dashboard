@@ -133,29 +133,36 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
           throw new Error('You must be signed in to perform this action');
         }
 
+        console.log('[EditPhonesModal] saving changes. toAdd:', toAdd, 'toRemove:', toRemove);
+
         // Add new phone numbers
         if (toAdd.length > 0) {
+          console.log('[EditPhonesModal] assigning phones:', toAdd);
           const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
             body: JSON.stringify({ phoneNumberIds: toAdd }),
           });
+          const resBody = await res.json();
+          console.log('[EditPhonesModal] assign response:', res.status, resBody);
           if (!res.ok) {
-            const detail = await res.text();
-            throw new Error(`Assign failed: ${res.status} ${detail}`);
+            throw new Error(`Assign failed: ${res.status} ${JSON.stringify(resBody)}`);
           }
         }
         // Remove phone numbers
         for (const phoneId of toRemove) {
+          console.log('[EditPhonesModal] removing phone:', phoneId);
           const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers/${phoneId}`, {
             method: 'DELETE',
             headers: { 'x-user-id': user.id },
           });
+          const resBody = await res.json();
+          console.log('[EditPhonesModal] remove response:', res.status, resBody);
           if (!res.ok) {
-            const detail = await res.text();
-            throw new Error(`Unassign failed: ${res.status} ${detail}`);
+            throw new Error(`Unassign failed: ${res.status} ${JSON.stringify(resBody)}`);
           }
         }
+        console.log('[EditPhonesModal] save completed successfully, closing modal');
         // Small delay to allow server to process changes
         await new Promise(resolve => setTimeout(resolve, 500));
         onClose();

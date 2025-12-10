@@ -870,7 +870,10 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
     const { orgId } = req.params;
     const { phoneNumberIds } = req.body || {};
 
+    console.log('[assign_phone_numbers] POST request received', { orgId, phoneNumberIds, userId });
+
     if (!orgId || !Array.isArray(phoneNumberIds)) {
+      console.log('[assign_phone_numbers] missing required fields', { orgId, phoneNumberIds });
       return res.status(400).json({ error: "missing_required_fields", detail: "orgId and phoneNumberIds array required" });
     }
 
