@@ -101,22 +101,51 @@ async function apiKeyAuthMiddleware(req: any, res: any, next: any) {
   }
 }
 
-// Resolve assigned phone numbers for an org (many-to-many via org_phone_numbers)
+// Resolve assigned phone numbers for an org (many-to-many via org_phone_numbers).
+// Works with both legacy schema (org_phone_numbers.phone_number text)
+// and newer schema that stores phone_number_id referencing phone_numbers.id.
 async function getAssignedPhoneNumbersForOrg(orgId: string) {
   try {
-    const { data, error } = await supabaseAdmin
+    // Fetch mapping rows with both potential columns
+    const { data: rows, error: rowsErr } = await supabaseAdmin
       .from('org_phone_numbers')
-      .select('phone_number');
-    if (error) {
-      console.warn('[getAssignedPhoneNumbersForOrg] supabase error:', fmtErr(error));
-      return { numbers: [] as string[], digits: [] as string[] };
+      .select('id, org_id, phone_number, phone_number_id, label, created_at')
+      .eq('org_id', orgId);
+    if (rowsErr) {
+      console.warn('[getAssignedPhoneNumbersForOrg] org_phone_numbers select failed:', fmtErr(rowsErr));
+      return { phones: [], numbers: [], digits: [] };
     }
-    const numbers = (data || []).map((r: any) => (r.phone_number || '').toString()).filter(Boolean);
-    const digits = numbers.map(n => (n || '').replace(/\D/g, '')).filter(Boolean);
-    return { numbers, digits };
+
+    const rowsArr = (rows || []) as any[];
+    // Collect phone_number_ids to join to phone_numbers table in bulk
+    const phoneIds = rowsArr.filter(r => r.phone_number_id).map(r => r.phone_number_id);
+    const phonesById: Record<string, any> = {};
+    if (phoneIds.length > 0) {
+      const { data: pdata, error: perr } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('id, number, number_digits, label')
+        .in('id', phoneIds as string[]);
+      if (!perr && pdata) {
+        for (const p of pdata) phonesById[p.id] = p;
+      }
+    }
+
+    const phones: Array<{ id: string; number: string; number_digits?: string | null; label?: string | null; created_at?: string }> = [];
+    for (const r of rowsArr) {
+      if (r.phone_number_id && phonesById[r.phone_number_id]) {
+        const p = phonesById[r.phone_number_id];
+        phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
+      } else if (r.phone_number) {
+        phones.push({ id: r.phone_number, number: r.phone_number, number_digits: (r.phone_number || '').toString().replace(/\D/g, ''), label: r.label ?? null, created_at: r.created_at });
+      }
+    }
+
+    const numbers = phones.map(p => p.number).filter(Boolean);
+    const digits = phones.map(p => (p.number_digits || (p.number || '').toString().replace(/\D/g, ''))).filter(Boolean);
+    return { phones, numbers, digits };
   } catch (e) {
     console.warn('[getAssignedPhoneNumbersForOrg] exception:', fmtErr(e));
-    return { numbers: [] as string[], digits: [] as string[] };
+    return { phones: [], numbers: [], digits: [] };
   }
 }
 
@@ -210,23 +239,28 @@ app.get("/api/client-metrics", async (req, res) => {
       console.log('[client-metrics] Falling back to live calls computation for org:', orgId);
       try {
         // Find assigned phone numbers for this org (many-to-many)
-        const { data: orgPhones, error: orgPhonesErr } = await supabaseAdmin
-          .from('org_phone_numbers')
-          .select('phone_number')
-          .eq('org_id', orgId);
-        if (orgPhonesErr) {
-          console.warn('[client-metrics] Error fetching org_phone_numbers:', orgPhonesErr.message || orgPhonesErr);
-        }
-        const assignedNumbers = (orgPhones || []).map((p: any) => p.phone_number).filter(Boolean);
+        const { phones, numbers: assignedNumbers, digits: assignedDigits } = await getAssignedPhoneNumbersForOrg(orgId);
         const callsSet: any[] = [];
-        if (assignedNumbers.length > 0) {
-          const { data: callsA, error: errA } = await supabaseAdmin
-            .from('calls')
-            .select('status, started_at, answered_at, to_number')
-            .gte('started_at', todayStart)
-            .in('to_number', assignedNumbers);
-          if (errA) throw errA;
-          if (callsA) callsSet.push(...callsA);
+        if (assignedNumbers.length > 0 || assignedDigits.length > 0) {
+          // Try matching by to_number and to_number_digits
+          if (assignedNumbers.length > 0) {
+            const { data: callsA, error: errA } = await supabaseAdmin
+              .from('calls')
+              .select('status, started_at, answered_at, to_number')
+              .gte('started_at', todayStart)
+              .in('to_number', assignedNumbers);
+            if (errA) throw errA;
+            if (callsA) callsSet.push(...callsA);
+          }
+          if (assignedDigits.length > 0) {
+            const { data: callsB, error: errB } = await supabaseAdmin
+              .from('calls')
+              .select('status, started_at, answered_at, to_number')
+              .gte('started_at', todayStart)
+              .in('to_number_digits', assignedDigits);
+            if (errB) throw errB;
+            if (callsB) callsSet.push(...callsB);
+          }
         }
         // Aggregate
         const seen = new Set<string>();
@@ -808,11 +842,22 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
     if (!allowed) return res.status(403).json({ error: "forbidden" });
 
     // Insert rows into org_phone_numbers for each phone/org pair (ignore duplicates)
-    const inserts = phoneNumberIds.map((phoneId: string) => ({ org_id: orgId, phone_number: phoneId }));
-    const { error } = await supabaseAdmin
-      .from("org_phone_numbers")
-      .upsert(inserts, { onConflict: "org_id,phone_number" });
-    if (error) throw error;
+    // Prefer phone_number_id schema; if that column doesn't exist, fall back to phone_number
+    const insertsById = phoneNumberIds.map((phoneId: string) => ({ org_id: orgId, phone_number_id: phoneId }));
+    try {
+      const { error: upsertErr } = await supabaseAdmin
+        .from('org_phone_numbers')
+        .upsert(insertsById, { onConflict: 'org_id,phone_number_id' });
+      if (upsertErr) throw upsertErr;
+    } catch (e) {
+      // Fallback: try legacy text column 'phone_number'
+      console.warn('[assign_phone_numbers] upsert by phone_number_id failed, falling back to phone_number:', fmtErr(e));
+      const inserts = phoneNumberIds.map((phoneId: string) => ({ org_id: orgId, phone_number: phoneId }));
+      const { error } = await supabaseAdmin
+        .from('org_phone_numbers')
+        .upsert(inserts, { onConflict: 'org_id,phone_number' });
+      if (error) throw error;
+    }
     res.json({ success: true });
   } catch (err: any) {
     console.error("assign_phone_numbers_failed:", fmtErr(err));
@@ -839,13 +884,23 @@ app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, re
 
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
-    // Remove mapping from org_phone_numbers
-    const { error } = await supabaseAdmin
-      .from('org_phone_numbers')
-      .delete()
-      .eq('org_id', orgId)
-      .eq('phone_number', phoneNumberId);
-    if (error) throw error;
+    // Remove mapping from org_phone_numbers. Try phone_number_id then fallback to phone_number
+    try {
+      const { error: delErr } = await supabaseAdmin
+        .from('org_phone_numbers')
+        .delete()
+        .eq('org_id', orgId)
+        .eq('phone_number_id', phoneNumberId);
+      if (delErr) throw delErr;
+    } catch (e) {
+      console.warn('[unassign_phone] delete by phone_number_id failed, trying phone_number:', fmtErr(e));
+      const { error } = await supabaseAdmin
+        .from('org_phone_numbers')
+        .delete()
+        .eq('org_id', orgId)
+        .eq('phone_number', phoneNumberId);
+      if (error) throw error;
+    }
     res.status(204).send();
   } catch (err: any) {
     console.error('unassign_phone_failed:', fmtErr(err));
@@ -909,22 +964,13 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
       }
     }
 
-    // phones assigned to this org - try multiple schema variants
-    // phones assigned to this org (many-to-many)
+    // phones assigned to this org (many-to-many) - use helper that supports multiple schema variants
     let phones: any[] = [];
     try {
-      const { data: orgPhones, error: orgPhonesErr } = await supabaseAdmin
-        .from('org_phone_numbers')
-        .select('phone_number, label, created_at')
-        .eq('org_id', orgId)
-        .order('created_at', { ascending: true });
-      if (!orgPhonesErr && orgPhones) {
-        phones = (orgPhones || []).map((r: any) => ({ id: r.phone_number, number: r.phone_number, label: r.label, created_at: r.created_at }));
-      } else {
-        throw orgPhonesErr || new Error('no-data');
-      }
+      const { phones: assignedPhones } = await getAssignedPhoneNumbersForOrg(orgId);
+      phones = (assignedPhones || []).map((p: any) => ({ id: p.id, number: p.number, label: p.label ?? null, number_digits: p.number_digits ?? null, created_at: p.created_at }));
     } catch (err) {
-      console.warn('org_phone_numbers select failed:', fmtErr(err));
+      console.warn('org_phone_numbers helper failed:', fmtErr(err));
       phones = [];
     }
 

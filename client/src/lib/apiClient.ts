@@ -51,6 +51,8 @@ export type CallItem = {
   startedAt?: string;
   answeredAt?: string | null;
   endedAt?: string | null;
+  agentName?: string | null;
+  agentExtension?: string | null;
 };
 
 export async function getRecentCalls(params?: { orgId?: string; limit?: number }): Promise<CallItem[]> {
