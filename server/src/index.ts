@@ -711,6 +711,18 @@ app.get("/api/admin/mightycall/extensions", async (_req, res) => {
 // GET /api/admin/phone-numbers - generic phone numbers listing
 app.get('/api/admin/phone-numbers', async (req, res) => {
   try {
+    const userId = req.header('x-user-id') || null;
+    
+    // Authorization: platform admin only
+    if (!userId) {
+      return res.status(401).json({ error: 'unauthenticated' });
+    }
+    
+    const allowed = await isPlatformAdmin(userId);
+    if (!allowed) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
     const orgId = req.query.orgId as string | undefined;
     const unassignedOnly = (req.query.unassignedOnly as string | undefined) === 'true';
 
