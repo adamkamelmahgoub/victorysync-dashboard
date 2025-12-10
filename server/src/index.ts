@@ -717,18 +717,16 @@ app.get('/api/admin/phone-numbers', async (req, res) => {
     const orgId = req.query.orgId as string | undefined;
     const unassignedOnly = (req.query.unassignedOnly as string | undefined) === 'true';
 
-    let q = supabaseAdmin.from('phone_numbers').select('id, number, phone_number, e164, number_digits, label, org_id, client_id, is_active').order('created_at', { ascending: true });
+    let q = supabaseAdmin.from('phone_numbers').select('id, number, e164, number_digits, label, org_id, client_id, is_active').order('created_at', { ascending: true });
     if (unassignedOnly) q = q.is('org_id', null);
     if (orgId) q = q.eq('org_id', orgId);
 
     const { data, error } = await q;
     if (error) throw error;
     const mapped = (data || []).map((r: any) => {
-      // Prefer 'number' column, fallback to 'phone_number' (legacy)
-      const phoneNumber = r.number || r.phone_number;
       return {
         id: r.id,
-        number: phoneNumber,
+        number: r.number,
         label: r.label ?? null,
         orgId: r.org_id ?? null,
         isActive: !!r.is_active
