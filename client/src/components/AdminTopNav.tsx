@@ -12,6 +12,7 @@ export default function AdminTopNav() {
   const items: Array<{ to: string; label: string }> = [
     { to: '/admin/orgs', label: 'Orgs' },
     { to: '/admin/users', label: 'Users' },
+    { to: '/admin/operations', label: 'Operations' },
   ];
   if (isPlatformAdmin) items.push({ to: '/admin/api-keys', label: 'API Keys' });
 

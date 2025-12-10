@@ -613,25 +613,17 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
             <div className="text-xs text-slate-500">
               Created {new Date(org.created_at).toLocaleDateString()}
             </div>
-            <div className="flex flex-col gap-2">
-              {onViewDashboard && (
-                <button
-                  onClick={() => {
-                    onClose();
-                    onViewDashboard(org.id);
-                  }}
-                  className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 transition rounded-lg text-sm font-medium text-center"
-                >
-                  View Full Dashboard →
-                </button>
-              )}
-              <a
-                href={`/admin/orgs/${org.id}/operations`}
-                className="w-full px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 transition rounded-lg text-sm font-medium text-center inline-block"
+            {onViewDashboard && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onViewDashboard(org.id);
+                }}
+                className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 transition rounded-lg text-sm font-medium text-center"
               >
-                Manage Operations →
-              </a>
-            </div>
+                View Full Dashboard →
+              </button>
+            )}
           </div>
         </div>
       </div>
