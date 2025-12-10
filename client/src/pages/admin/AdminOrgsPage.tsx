@@ -7,6 +7,7 @@ import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL } from '../../config';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
+import { ApiKeysTab } from '../../components/ApiKeysTab';
 
 interface Organization {
   id: string;
@@ -581,7 +582,12 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
             )}
           </div>
 
-          {/* Modal for editing phones - rendered separately to avoid z-index issues */}
+              {/* API Keys Tab */}
+              <div>
+                <ApiKeysTab orgId={org.id} isOrgAdmin={canEditPhones} />
+              </div>
+
+              {/* Modal for editing phones - rendered separately to avoid z-index issues */}
           {showEditPhones && (
             <EditPhonesModalEnhanced orgId={org.id} phones={phones} onClose={() => { setShowEditPhones(false); reloadOrgDetails(); }} />
           )}

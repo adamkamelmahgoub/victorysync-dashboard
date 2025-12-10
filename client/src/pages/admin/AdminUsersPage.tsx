@@ -5,6 +5,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
 import { API_BASE_URL } from "../../config";
 import { supabase } from "../../lib/supabaseClient";
+import PlatformApiKeysTab from '../../components/PlatformApiKeysTab';
 
 interface Org {
   id: string;
@@ -422,6 +423,12 @@ export const AdminUsersPage: FC = () => {
             ← Back
           </button>
         </header>
+
+        {user?.role === 'platform_admin' && (
+          <div className="mb-6">
+            <PlatformApiKeysTab />
+          </div>
+        )}
 
         <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           {/* LEFT PANEL: Create New User Form */}

@@ -81,6 +81,40 @@ export async function getQueueSummary(params?: { orgId?: string }) {
   return (json.queues ?? json) as Array<{ name: string | null; totalCalls: number; answered: number; missed: number }>;
 }
 
+// Org API keys
+export async function getOrgApiKeys(orgId: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys`);
+}
+
+export async function createOrgApiKey(orgId: string, label: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function deleteOrgApiKey(orgId: string, keyId: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys/${encodeURIComponent(keyId)}`, { method: 'DELETE' });
+}
+
+// Platform (global) API keys — admin-only
+export async function getPlatformApiKeys() {
+  return await fetchJson(`/api/admin/platform-api-keys`);
+}
+
+export async function createPlatformApiKey(name: string) {
+  return await fetchJson(`/api/admin/platform-api-keys`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deletePlatformApiKey(id: string) {
+  return await fetchJson(`/api/admin/platform-api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 export default {
   getClientMetrics,
   getRecentCalls,
