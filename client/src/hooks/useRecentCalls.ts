@@ -9,6 +9,7 @@ export type RecentCall = {
   toNumber: string | null;
   startedAt: string;
   queueName: string | null;
+  agentName?: string | null;
 };
 
 type UseRecentCallsResult = {

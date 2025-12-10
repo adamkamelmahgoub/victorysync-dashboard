@@ -77,6 +77,11 @@ export const RecentActivityList: FC<RecentActivityListProps> = ({ orgId }) => {
                 <div className="text-slate-400">
                   {direction} · {queueLabel}
                 </div>
+                {call.agentName && (
+                  <div className="text-slate-500 text-xs mt-0.5">
+                    Agent: {call.agentName}
+                  </div>
+                )}
                 <div className="text-slate-500 text-[10px] mt-0.5">
                   {time}
                 </div>
