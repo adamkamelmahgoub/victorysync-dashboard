@@ -57,6 +57,42 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
   }
 }
 
+// Cache for extension->display name during a single request
+async function resolveAgentNameForExtension(ext: string | null, orgId?: string) {
+  if (!ext) return null;
+  try {
+    // Try mightycall_extensions table first
+    const { data: meData, error: meErr } = await supabaseAdmin
+      .from('mightycall_extensions')
+      .select('display_name')
+      .eq('extension', ext)
+      .maybeSingle();
+    if (!meErr && meData && meData.display_name) return meData.display_name;
+
+    // Fallback: find org_users with this extension to get user_id and then user's email/name
+    const { data: ou, error: ouErr } = await supabaseAdmin
+      .from('org_users')
+      .select('user_id')
+      .eq('mightycall_extension', ext)
+      .limit(1)
+      .maybeSingle();
+    if (!ouErr && ou && ou.user_id) {
+      try {
+        const { data: udata, error: uerr } = await supabaseAdmin.auth.admin.getUserById(ou.user_id);
+        if (!uerr && udata && udata.user && udata.user.email) return udata.user.email;
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // Last resort: return the extension string itself
+    return ext;
+  } catch (e) {
+    console.warn('[resolveAgentNameForExtension] failed:', fmtErr(e));
+    return ext;
+  }
+}
+
 const app = express();
 // CORS: In production, restrict origin to your frontend domain
 app.use(cors());
@@ -1135,7 +1171,7 @@ app.get("/api/calls/recent", async (req, res) => {
       });
 
       const sliced = filtered.slice(0, limit);
-      const items = sliced.map((c: any) => ({
+      const items = await Promise.all(sliced.map(async (c: any) => {
         id: c.id,
         direction: c.direction,
         status: c.status,
@@ -1145,6 +1181,7 @@ app.get("/api/calls/recent", async (req, res) => {
         startedAt: c.started_at,
         answeredAt: c.answered_at ?? null,
         endedAt: c.ended_at ?? null,
+        agentName: await resolveAgentNameForExtension(c.mightycall_extension || c.answered_extension || c.answered_by || c.answer_extension || c.agent_extension || c.agent || null)
       }));
 
       return res.json({ items });
@@ -1162,7 +1199,7 @@ app.get("/api/calls/recent", async (req, res) => {
       throw error;
     }
 
-    const items = (data || []).map((c: any) => ({
+    const items = await Promise.all((data || []).map(async (c: any) => ({
       id: c.id,
       direction: c.direction,
       status: c.status,
@@ -1172,7 +1209,8 @@ app.get("/api/calls/recent", async (req, res) => {
       startedAt: c.started_at,
       answeredAt: c.answered_at ?? null,
       endedAt: c.ended_at ?? null,
-    }));
+      agentName: await resolveAgentNameForExtension(c.mightycall_extension || c.answered_extension || c.answered_by || c.answer_extension || c.agent_extension || c.agent || null)
+    })));
 
     res.json({ items });
   } catch (err: any) {
@@ -1218,7 +1256,7 @@ app.get("/s/recent", async (req, res) => {
         return (tn && numbers.includes(tn)) || (td && digits.includes(td));
       }).slice(0, limit);
 
-      const items = filtered.map((c: any) => ({
+      const items = await Promise.all(filtered.slice(0, limit).map(async (c: any) => ({
         id: c.id,
         direction: c.direction,
         status: c.status,
@@ -1228,7 +1266,8 @@ app.get("/s/recent", async (req, res) => {
         startedAt: c.started_at,
         answeredAt: c.answered_at ?? null,
         endedAt: c.ended_at ?? null,
-      }));
+        agentName: await resolveAgentNameForExtension(c.mightycall_extension || c.answered_extension || c.answered_by || c.answer_extension || c.agent_extension || c.agent || null)
+      })));
 
       return res.json({ items });
     }
@@ -1245,7 +1284,7 @@ app.get("/s/recent", async (req, res) => {
       return res.status(500).json({ error: 'supabase_error', detail: fmtErr(error) });
     }
 
-    const items = (data || []).map((c: any) => ({
+      const items = await Promise.all((data || []).map(async (c: any) => ({
       id: c.id,
       direction: c.direction,
       status: c.status,
@@ -1255,7 +1294,8 @@ app.get("/s/recent", async (req, res) => {
       startedAt: c.started_at,
       answeredAt: c.answered_at ?? null,
       endedAt: c.ended_at ?? null,
-    }));
+        agentName: await resolveAgentNameForExtension(c.mightycall_extension || c.answered_extension || c.answered_by || c.answer_extension || c.agent_extension || c.agent || null)
+      })));
 
     res.json({ items });
   } catch (err: any) {
