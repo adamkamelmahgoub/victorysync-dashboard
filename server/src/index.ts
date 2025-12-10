@@ -29,6 +29,7 @@
 import './config/env';
 import express from "express";
 import cors from "cors";
+import crypto from 'crypto';
 import { supabase, supabaseAdmin } from './lib/supabaseClient';
 import { fetchMightyCallPhoneNumbers, fetchMightyCallExtensions, syncMightyCallPhoneNumbers } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgManagerWith } from './auth/rbac';
@@ -36,6 +37,68 @@ import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgManagerWith } 
 // Helper to safely format errors for logging (avoids TS property errors)
 function fmtErr(e: any) {
   return (e as any)?.message ?? e;
+}
+
+// ---- API Key helpers ----
+function hashApiKey(token: string) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function generateApiKeyPlaintext() {
+  // 32 bytes -> 43 chars base64url-ish; use hex for simplicity
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// Verify token against both platform and org api keys. Returns { scope: 'platform' } or { scope: 'org', orgId }
+async function verifyApiKeyToken(token: string) {
+  if (!token) return null;
+  try {
+    const h = hashApiKey(token);
+    // Check platform keys
+    const { data: p, error: pErr } = await supabaseAdmin
+      .from('platform_api_keys')
+      .select('id, label, created_by')
+      .eq('key_hash', h)
+      .maybeSingle();
+    if (!pErr && p) return { scope: 'platform', keyId: p.id } as any;
+
+    // Check org keys
+    const { data: o, error: oErr } = await supabaseAdmin
+      .from('org_api_keys')
+      .select('id, org_id, label, created_by')
+      .eq('key_hash', h)
+      .maybeSingle();
+    if (!oErr && o) return { scope: 'org', orgId: o.org_id, keyId: o.id } as any;
+    return null;
+  } catch (e) {
+    console.warn('[verifyApiKeyToken] error', fmtErr(e));
+    return null;
+  }
+}
+
+// Middleware for endpoints that accept API keys: sets req.apiKeyScope if valid
+async function apiKeyAuthMiddleware(req: any, res: any, next: any) {
+  try {
+    const header = (req.get('Authorization') || '') as string;
+    let token: string | null = null;
+    if (header && header.toLowerCase().startsWith('bearer ')) token = header.split(' ')[1];
+    if (!token) token = req.get('x-api-key') || null;
+    if (!token) return next();
+    const v = await verifyApiKeyToken(token);
+    if (v) {
+      req.apiKeyScope = v;
+      // update last_used_at
+      if (v.scope === 'platform') {
+        await supabaseAdmin.from('platform_api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', v.keyId);
+      } else if (v.scope === 'org') {
+        await supabaseAdmin.from('org_api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', v.keyId);
+      }
+    }
+    return next();
+  } catch (e) {
+    console.warn('[apiKeyAuthMiddleware] failure', fmtErr(e));
+    return next();
+  }
 }
 
 // Resolve assigned phone numbers for an org (many-to-many via org_phone_numbers)
@@ -97,6 +160,8 @@ const app = express();
 // CORS: In production, restrict origin to your frontend domain
 app.use(cors());
 app.use(express.json());
+// Apply API key middleware early so endpoints can detect org-scoped or platform keys
+app.use(apiKeyAuthMiddleware as any);
 
 // Using centralized Supabase client from `src/lib/supabaseClient`
 
@@ -110,7 +175,12 @@ app.get("/", (_req, res) => {
 // If org_id is missing: returns aggregated metrics across all orgs (for admin global view)
 app.get("/api/client-metrics", async (req, res) => {
   try {
-    const orgId = (req.query.org_id as string | undefined) || undefined;
+    // Allow API keys to implicitly scope the request to an org
+    let orgId = (req.query.org_id as string | undefined) || undefined;
+    const apiScope = (req as any).apiKeyScope || null;
+    if (apiScope && apiScope.scope === 'org') {
+      orgId = apiScope.orgId;
+    }
     const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
 
     console.log('[client-metrics] Request:', { orgId, todayStart });
@@ -274,6 +344,83 @@ app.get("/api/client-metrics", async (req, res) => {
 });
 
 // ============== ADMIN ENDPOINTS ==============
+
+// ------------------ API Keys Management ------------------
+// Platform keys (platform admins only)
+app.post('/api/admin/platform-keys', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { label } = req.body || {};
+    const plain = generateApiKeyPlaintext();
+    const keyHash = hashApiKey(plain);
+
+    const payload = { key_hash: keyHash, label: label || null, created_by: actorId };
+    const { data, error } = await supabaseAdmin.from('platform_api_keys').insert(payload).select().maybeSingle();
+    if (error) throw error;
+    // Return the plain token once
+    res.json({ apiKey: plain, key: { id: data.id, label: data.label, created_by: data.created_by, created_at: data.created_at } });
+  } catch (e: any) {
+    console.error('create_platform_key_failed:', fmtErr(e));
+    res.status(500).json({ error: 'create_platform_key_failed', detail: fmtErr(e) });
+  }
+});
+
+app.get('/api/admin/platform-keys', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { data, error } = await supabaseAdmin.from('platform_api_keys').select('id, label, created_by, created_at, last_used_at').order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ keys: data || [] });
+  } catch (e: any) {
+    console.error('list_platform_keys_failed:', fmtErr(e));
+    res.status(500).json({ error: 'list_platform_keys_failed', detail: fmtErr(e) });
+  }
+});
+
+// Org-scoped keys (org admins)
+app.post('/api/orgs/:orgId/api-keys', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    const { label } = req.body || {};
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+
+    const plain = generateApiKeyPlaintext();
+    const keyHash = hashApiKey(plain);
+    const payload = { org_id: orgId, key_hash: keyHash, label: label || null, created_by: actorId };
+    const { data, error } = await supabaseAdmin.from('org_api_keys').insert(payload).select().maybeSingle();
+    if (error) throw error;
+    res.json({ apiKey: plain, key: { id: data.id, org_id: data.org_id, label: data.label, created_by: data.created_by, created_at: data.created_at } });
+  } catch (e: any) {
+    console.error('create_org_key_failed:', fmtErr(e));
+    res.status(500).json({ error: 'create_org_key_failed', detail: fmtErr(e) });
+  }
+});
+
+app.get('/api/orgs/:orgId/api-keys', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { data, error } = await supabaseAdmin.from('org_api_keys').select('id, label, created_by, created_at, last_used_at').eq('org_id', orgId).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ keys: data || [] });
+  } catch (e: any) {
+    console.error('list_org_keys_failed:', fmtErr(e));
+    res.status(500).json({ error: 'list_org_keys_failed', detail: fmtErr(e) });
+  }
+});
+
+// ------------------ End API Keys Management ------------------
 
 // GET /api/admin/orgs - List all organizations
 app.get("/api/admin/orgs", async (req, res) => {
