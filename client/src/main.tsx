@@ -14,6 +14,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage";
 import AdminOrgsPage from "./pages/admin/AdminOrgsPage";
 import { AdminOrgOverviewPage } from "./pages/admin/AdminOrgOverviewPage";
+import AdminApiKeysPage from "./pages/admin/AdminApiKeysPage";
 import { OrgDashboardPage } from "./pages/admin/OrgDashboardPage";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
@@ -94,6 +95,14 @@ function AppRouter() {
         element={
           <AdminRoute>
             <AdminOrgOverviewPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/api-keys"
+        element={
+          <AdminRoute>
+            <AdminApiKeysPage />
           </AdminRoute>
         }
       />

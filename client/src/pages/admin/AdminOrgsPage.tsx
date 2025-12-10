@@ -2,6 +2,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AdminTopNav from '../../components/AdminTopNav';
 // Server-side admin actions use API endpoints, not client-side Supabase
 import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL } from '../../config';
@@ -461,6 +462,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard }: OrgDetailsModalProps
     <div className="fixed inset-0 z-50 flex items-end bg-black/50 backdrop-blur-sm">
       <div className="relative w-full max-w-lg rounded-t-2xl bg-slate-900/95 border border-slate-700 max-h-screen overflow-y-auto">
         {/* Header */}
+        <AdminTopNav />
         <div className="sticky top-0 border-b border-slate-700 bg-slate-900/95 p-5 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-50">{org.name}</h2>

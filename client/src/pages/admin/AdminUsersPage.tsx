@@ -1,6 +1,7 @@
 import type { FC } from "react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import AdminTopNav from '../../components/AdminTopNav';
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
 import { API_BASE_URL } from "../../config";
@@ -432,11 +433,7 @@ export const AdminUsersPage: FC = () => {
           </button>
         </header>
 
-        {(user?.user_metadata?.role === 'platform_admin' || currentGlobalRole === 'platform_admin') && (
-          <div className="mb-6">
-            <PlatformApiKeysTab />
-          </div>
-        )}
+        <AdminTopNav />
 
         <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           {/* LEFT PANEL: Create New User Form */}
