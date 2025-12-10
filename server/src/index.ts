@@ -896,96 +896,104 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
       return res.status(403).json({ error: "forbidden" });
     }
 
-    // Determine whether to use phone_number_id or legacy phone_number column.
     console.log('[assign_phone_numbers] assigning', phoneNumberIds.length, 'phone(s) to org', orgId);
+    
     // Load phone number strings for provided ids to support legacy schema if needed
     const { data: phoneRows } = await supabaseAdmin.from('phone_numbers').select('id, number').in('id', phoneNumberIds as string[]);
     const idToNumber: Record<string, string> = {};
     if (phoneRows && Array.isArray(phoneRows)) {
-      for (const p of phoneRows) idToNumber[p.id] = p.number;
+      for (const p of phoneRows) {
+        idToNumber[p.id] = p.number;
+        console.log('[assign_phone_numbers] resolved phone', p.id, '→', p.number);
+      }
     }
+    console.log('[assign_phone_numbers] id-to-number mapping:', idToNumber);
 
-    let usedLegacy = false;
     const insertErrors: string[] = [];
+    let successCount = 0;
 
-    // First attempt: insert using phone_number_id
+    // Try to assign each phone: first try modern schema, then fall back to legacy if needed
     for (const phoneId of phoneNumberIds) {
+      let assigned = false;
+
+      // Try modern schema first (phone_number_id)
       try {
-        const { error: iErr } = await supabaseAdmin
+        console.log('[assign_phone_numbers] trying modern schema for phoneId:', phoneId);
+        const { error: modernErr } = await supabaseAdmin
           .from('org_phone_numbers')
           .insert({ org_id: orgId, phone_number_id: phoneId });
-        if (iErr) {
-          const imsg = (iErr as any)?.message || String(iErr);
-          // If column doesn't exist, flag legacy and break to try legacy flow
-          if (imsg && imsg.toLowerCase().includes("column \"phone_number_id\"")) {
-            console.warn('[assign_phone_numbers] phone_number_id column missing, switching to legacy phone_number column');
-            usedLegacy = true;
-            break;
+        
+        if (!modernErr) {
+          console.log('[assign_phone_numbers] ✓ successfully assigned via modern schema:', phoneId);
+          successCount++;
+          assigned = true;
+        } else {
+          const modernMsg = (modernErr as any)?.message || String(modernErr);
+          
+          // Check if it's a duplicate - that's OK
+          if (modernMsg && (modernMsg.includes('duplicate key') || modernMsg.includes('already exists') || modernMsg.includes('unique constraint'))) {
+            console.log('[assign_phone_numbers] phone already assigned (via modern schema):', phoneId);
+            successCount++;
+            assigned = true;
+          } else if (modernMsg && modernMsg.includes('column "phone_number_id" does not exist')) {
+            // Schema doesn't have phone_number_id, will try legacy below
+            console.log('[assign_phone_numbers] modern schema not available, will try legacy for:', phoneId);
+          } else {
+            // Other error - log it but try legacy
+            console.warn('[assign_phone_numbers] modern schema insert failed:', modernMsg);
           }
-          // Duplicate key (already assigned) -> ignore
-          if (imsg && (imsg.includes('duplicate key') || imsg.includes('already exists') || imsg.includes('unique constraint'))) {
-            console.log('[assign_phone_numbers] phone', phoneId, 'already assigned to org', orgId, '(ignoring)');
-            continue;
-          }
-          console.warn('[assign_phone_numbers] insert error for phone', phoneId, ':', imsg);
-          insertErrors.push(imsg);
         }
-      } catch (ie) {
-        console.warn('[assign_phone_numbers] exception for phone', phoneId, ':', String(ie));
-        insertErrors.push(String(ie));
+      } catch (e) {
+        console.warn('[assign_phone_numbers] modern schema exception:', String(e));
       }
-    }
 
-    // If legacy schema detected (no phone_number_id), attempt inserts into phone_number text column
-    if (usedLegacy) {
-      for (const phoneId of phoneNumberIds) {
+      // If modern schema didn't work, try legacy schema (phone_number text)
+      if (!assigned) {
         try {
-          // Resolve number string: prefer cached mapping, otherwise try to lookup by id or number
-          let numberStr = idToNumber[phoneId];
+          const numberStr = idToNumber[phoneId];
+          
           if (!numberStr) {
-            try {
-              const { data: pRow, error: pErr } = await supabaseAdmin
-                .from('phone_numbers')
-                .select('id, number')
-                .or(`id.eq.${phoneId},number.eq.${phoneId}`)
-                .maybeSingle();
-              if (!pErr && pRow && pRow.number) {
-                numberStr = pRow.number;
-              }
-            } catch (e) {
-              // ignore lookup error; will handle below
-            }
-          }
-
-          if (!numberStr) {
-            console.warn('[assign_phone_numbers] could not resolve phone number for id or value', phoneId, '; skipping legacy insert');
-            insertErrors.push(`unresolved_phone:${phoneId}`);
+            console.warn('[assign_phone_numbers] phoneId', phoneId, 'cannot be resolved to phone number');
+            insertErrors.push(`unresolved:${phoneId}`);
             continue;
           }
 
-          const { error: liErr } = await supabaseAdmin
+          console.log('[assign_phone_numbers] trying legacy schema for phoneId:', phoneId, '→', numberStr);
+          const { error: legacyErr } = await supabaseAdmin
             .from('org_phone_numbers')
             .insert({ org_id: orgId, phone_number: numberStr });
-          if (liErr) {
-            const limsg = (liErr as any)?.message || String(liErr);
-            if (limsg && (limsg.includes('duplicate key') || limsg.includes('already exists') || limsg.includes('unique constraint'))) {
-              console.log('[assign_phone_numbers] legacy phone', numberStr, 'already assigned to org', orgId, '(ignoring)');
-              continue;
+          
+          if (!legacyErr) {
+            console.log('[assign_phone_numbers] ✓ successfully assigned via legacy schema:', numberStr);
+            successCount++;
+            assigned = true;
+          } else {
+            const legacyMsg = (legacyErr as any)?.message || String(legacyErr);
+            
+            // Check if it's a duplicate - that's OK
+            if (legacyMsg && (legacyMsg.includes('duplicate key') || legacyMsg.includes('already exists') || legacyMsg.includes('unique constraint'))) {
+              console.log('[assign_phone_numbers] phone already assigned (via legacy schema):', numberStr);
+              successCount++;
+              assigned = true;
+            } else {
+              console.warn('[assign_phone_numbers] legacy schema insert failed:', legacyMsg);
+              insertErrors.push(legacyMsg);
             }
-            console.warn('[assign_phone_numbers] legacy insert error for phone', numberStr, ':', limsg);
-            insertErrors.push(limsg);
           }
-        } catch (lie) {
-          console.warn('[assign_phone_numbers] legacy exception for phone', phoneId, ':', String(lie));
-          insertErrors.push(String(lie));
+        } catch (e) {
+          console.warn('[assign_phone_numbers] legacy schema exception:', String(e));
+          insertErrors.push(String(e));
         }
       }
     }
 
-    if (insertErrors.length > 0) {
-      console.warn('[assign_phone_numbers] some inserts failed:', insertErrors.slice(0, 5));
+    console.log('[assign_phone_numbers] assignment complete:', { successCount, totalRequested: phoneNumberIds.length, errorCount: insertErrors.length });
+    
+    if (successCount === 0) {
+      return res.status(400).json({ error: 'all_inserts_failed', details: insertErrors });
     }
-    res.json({ success: true });
+    
+    res.json({ success: true, assigned: successCount });
   } catch (err: any) {
     console.error("assign_phone_numbers_failed:", fmtErr(err));
     res.status(500).json({ error: "assign_phone_numbers_failed", detail: fmtErr(err) ?? "unknown_error" });
