@@ -105,10 +105,10 @@ async function apiKeyAuthMiddleware(req: any, res: any, next: any) {
 // Works with schema that stores phone_number_id referencing phone_numbers.id.
 async function getAssignedPhoneNumbersForOrg(orgId: string) {
   try {
-    // Fetch mapping rows
+    // Fetch mapping rows (supports both modern phone_number_id and legacy phone_number columns)
     const { data: rows, error: rowsErr } = await supabaseAdmin
       .from('org_phone_numbers')
-      .select('id, org_id, phone_number_id, label, created_at')
+      .select('id, org_id, phone_number_id, phone_number, label, created_at')
       .eq('org_id', orgId);
     if (rowsErr) {
       console.warn('[getAssignedPhoneNumbersForOrg] org_phone_numbers select failed:', fmtErr(rowsErr));
@@ -118,7 +118,7 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
     const rowsArr = (rows || []) as any[];
     console.log('[getAssignedPhoneNumbersForOrg] found', rowsArr.length, 'rows for orgId', orgId);
     
-    // Collect phone_number_ids to join to phone_numbers table in bulk
+    // Collect phone_number_ids to join to phone_numbers table in bulk (modern schema)
     const phoneIds = rowsArr.filter(r => r.phone_number_id).map(r => r.phone_number_id);
     const phonesById: Record<string, any> = {};
     if (phoneIds.length > 0) {
@@ -131,11 +131,35 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
       }
     }
 
+    // Collect legacy phone_number strings to look up in phone_numbers table
+    const phoneNumberStrings = rowsArr.filter(r => r.phone_number && !r.phone_number_id).map(r => r.phone_number);
+    const phonesByNumber: Record<string, any> = {};
+    if (phoneNumberStrings.length > 0) {
+      const { data: pdata, error: perr } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('id, number, number_digits, label')
+        .in('number', phoneNumberStrings as string[]);
+      if (!perr && pdata) {
+        for (const p of pdata) phonesByNumber[p.number] = p;
+      }
+    }
+
     const phones: Array<{ id: string; number: string; number_digits?: string | null; label?: string | null; created_at?: string }> = [];
     for (const r of rowsArr) {
+      // Modern schema: phone_number_id → look up in phonesById
       if (r.phone_number_id && phonesById[r.phone_number_id]) {
         const p = phonesById[r.phone_number_id];
         phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
+      }
+      // Legacy schema: phone_number text → look up in phonesByNumber, use mapping id or generate from number
+      else if (r.phone_number && phonesByNumber[r.phone_number]) {
+        const p = phonesByNumber[r.phone_number];
+        phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
+      }
+      // Legacy schema: phone_number text but not found in phone_numbers table → use as-is with org_phone_numbers row id as synthetic id
+      else if (r.phone_number && !r.phone_number_id) {
+        console.log('[getAssignedPhoneNumbersForOrg] legacy phone_number', r.phone_number, 'not found in phone_numbers table, using synthetic id:', r.id);
+        phones.push({ id: r.id, number: r.phone_number, number_digits: r.phone_number.replace(/\D/g, ''), label: r.label ?? null, created_at: r.created_at });
       }
     }
 
