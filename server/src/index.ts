@@ -118,21 +118,31 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
     const rowsArr = (rows || []) as any[];
     console.log('[getAssignedPhoneNumbersForOrg] found', rowsArr.length, 'rows for orgId', orgId);
     
-    // Collect phone_number_ids to join to phone_numbers table in bulk (modern schema)
-    const phoneIds = rowsArr.filter(r => r.phone_number_id).map(r => r.phone_number_id);
+    // Collect all potential phone IDs to look up (both from phone_number_id and phone_number fields)
+    const phoneIds = new Set<string>();
+    for (const r of rowsArr) {
+      if (r.phone_number_id) phoneIds.add(r.phone_number_id);
+      // Also treat phone_number as potential phone ID if it looks like a UUID
+      if (r.phone_number && r.phone_number.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+        phoneIds.add(r.phone_number);
+      }
+    }
+    
     const phonesById: Record<string, any> = {};
-    if (phoneIds.length > 0) {
+    if (phoneIds.size > 0) {
       const { data: pdata, error: perr } = await supabaseAdmin
         .from('phone_numbers')
         .select('id, number, number_digits, label')
-        .in('id', phoneIds as string[]);
+        .in('id', Array.from(phoneIds));
       if (!perr && pdata) {
         for (const p of pdata) phonesById[p.id] = p;
       }
     }
 
     // Collect legacy phone_number strings to look up in phone_numbers table
-    const phoneNumberStrings = rowsArr.filter(r => r.phone_number && !r.phone_number_id).map(r => r.phone_number);
+    const phoneNumberStrings = rowsArr
+      .filter(r => r.phone_number && !r.phone_number.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) && !r.phone_number_id)
+      .map(r => r.phone_number);
     const phonesByNumber: Record<string, any> = {};
     if (phoneNumberStrings.length > 0) {
       const { data: pdata, error: perr } = await supabaseAdmin
@@ -151,13 +161,19 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
         const p = phonesById[r.phone_number_id];
         phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
       }
-      // Legacy schema: phone_number text → look up in phonesByNumber, use mapping id or generate from number
+      // Edge case: phone_number field contains a UUID (phone ID) instead of actual number
+      else if (r.phone_number && r.phone_number.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) && phonesById[r.phone_number]) {
+        const p = phonesById[r.phone_number];
+        console.log('[getAssignedPhoneNumbersForOrg] found phone_number field containing UUID', r.phone_number, 'in phonesById lookup');
+        phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
+      }
+      // Legacy schema: phone_number text → look up in phonesByNumber
       else if (r.phone_number && phonesByNumber[r.phone_number]) {
         const p = phonesByNumber[r.phone_number];
         phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
       }
       // Legacy schema: phone_number text but not found in phone_numbers table → use as-is with org_phone_numbers row id as synthetic id
-      else if (r.phone_number && !r.phone_number_id) {
+      else if (r.phone_number && !r.phone_number_id && !r.phone_number.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
         console.log('[getAssignedPhoneNumbersForOrg] legacy phone_number', r.phone_number, 'not found in phone_numbers table, using synthetic id:', r.id);
         phones.push({ id: r.id, number: r.phone_number, number_digits: r.phone_number.replace(/\D/g, ''), label: r.label ?? null, created_at: r.created_at });
       }
@@ -1053,26 +1069,59 @@ app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, re
 
     // Remove mapping from org_phone_numbers. Robust approach: fetch the row first, then delete by id.
     let deletedCount = 0;
+    
+    console.log('[unassign_phone] attempting to delete phoneNumberId:', phoneNumberId, 'for org:', orgId);
+    
+    // Try to find by org_phone_numbers.id (the row ID - this is what the frontend sends)
     try {
-      // Try to find by phone_number_id first
       const { data: rowsById, error: fetchByIdErr } = await supabaseAdmin
         .from('org_phone_numbers')
         .select('id')
         .eq('org_id', orgId)
-        .eq('phone_number_id', phoneNumberId);
+        .eq('id', phoneNumberId);
+      
+      console.log('[unassign_phone] lookup by id result:', { error: fetchByIdErr, rowsFound: rowsById?.length || 0 });
       
       if (!fetchByIdErr && rowsById && rowsById.length > 0) {
-        // Delete by row id (most reliable)
+        // Delete by row id
         for (const row of rowsById) {
           const { error: delErr } = await supabaseAdmin
             .from('org_phone_numbers')
             .delete()
             .eq('id', row.id);
-          if (!delErr) deletedCount += 1;
+          if (!delErr) {
+            console.log('[unassign_phone] ✓ successfully deleted row:', row.id);
+            deletedCount += 1;
+          } else {
+            console.warn('[unassign_phone] delete failed for row:', row.id, 'error:', fmtErr(delErr));
+          }
         }
       }
     } catch (e) {
-      console.warn('[unassign_phone] delete by phone_number_id failed:', fmtErr(e));
+      console.warn('[unassign_phone] delete by org_phone_numbers.id failed:', fmtErr(e));
+    }
+
+    // Fallback: try by phone_number_id column
+    if (deletedCount === 0) {
+      try {
+        const { data: rowsByPhoneId, error: fetchByPhoneIdErr } = await supabaseAdmin
+          .from('org_phone_numbers')
+          .select('id')
+          .eq('org_id', orgId)
+          .eq('phone_number_id', phoneNumberId);
+        
+        if (!fetchByPhoneIdErr && rowsByPhoneId && rowsByPhoneId.length > 0) {
+          for (const row of rowsByPhoneId) {
+            const { error: delErr } = await supabaseAdmin
+              .from('org_phone_numbers')
+              .delete()
+              .eq('id', row.id);
+            if (!delErr) deletedCount += 1;
+          }
+        }
+      } catch (e) {
+        console.warn('[unassign_phone] delete by phone_number_id failed:', fmtErr(e));
+      }
     }
 
     // Fallback: try by phone_number text column
