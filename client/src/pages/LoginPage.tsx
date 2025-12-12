@@ -16,12 +16,17 @@ export const LoginPage: FC = () => {
     setError(null);
     setLoading(true);
 
-    const result = await signIn(email, password);
-    if (result.error) {
-      setError(result.error);
+    try {
+      const result = await signIn(email, password);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        navigate("/dashboard");
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Sign in failed');
+    } finally {
       setLoading(false);
-    } else {
-      navigate("/dashboard");
     }
   };
 

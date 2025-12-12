@@ -105,24 +105,31 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     email: string,
     password: string
   ): Promise<{ error?: string }> => {
+    // Wrap signInWithPassword with a timeout so the UI doesn't hang indefinitely
+    const timeoutMs = 8000;
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const p = supabase.auth.signInWithPassword({ email, password });
+      const timer = new Promise<{ error: string }>((resolve) =>
+        setTimeout(() => resolve({ error: 'Sign in timed out' }), timeoutMs)
+      );
 
-      if (error) {
-        return { error: error.message };
-      }
+      const res: any = await Promise.race([p, timer]);
 
-      if (data.user) {
+      if (res?.error) return { error: res.error?.message ?? res.error };
+
+      // supabase returns { data, error }
+      const data = res?.data ?? res;
+      const err = res?.error ?? null;
+      if (err) return { error: err.message || String(err) };
+
+      if (data && data.user) {
         setUser(data.user);
         setOrgId(data.user.user_metadata?.org_id ?? null);
       }
 
       return {};
     } catch (err: any) {
-      return { error: err?.message ?? "Sign in failed" };
+      return { error: err?.message ?? 'Sign in failed' };
     }
   };
 
