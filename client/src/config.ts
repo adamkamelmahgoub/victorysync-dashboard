@@ -27,6 +27,11 @@ export const TEST_ORG_ID = "d6b7bbde-54bb-4782-989d-cf9093f8cadf";
  * - In production we MUST use the absolute URL including protocol and `/api` suffix.
  * - `VITE_API_BASE_URL` can override this in any environment.
  */
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ??
-  "https://api.victorysync.com";
+// Default to calling the same origin's `/api` (works when frontend and backend
+// are deployed together behind the same host). Allow `VITE_API_BASE_URL` to
+// override this in environments where the API is hosted on a different origin.
+const _defaultApi = (typeof window !== 'undefined' && window.location && window.location.origin)
+  ? `${window.location.origin}/api`
+  : 'https://api.victorysync.com';
+
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? _defaultApi;
