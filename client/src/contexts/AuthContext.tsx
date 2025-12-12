@@ -53,33 +53,51 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     initializeAuth();
 
     // Subscribe to auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        setOrgId(session.user.user_metadata?.org_id ?? null);
-        // refresh profile global_role on auth change
-        try {
-          const { data: pData, error: pErr } = await supabase
-            .from('profiles')
-            .select('global_role')
-            .eq('id', session.user.id)
-            .maybeSingle();
-          if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
-        } catch (e) {
-          // ignore
+    let subscription: any = null;
+    try {
+      const sub = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) {
+          setUser(session.user);
+          setOrgId(session.user.user_metadata?.org_id ?? null);
+          // refresh profile global_role on auth change
+          try {
+            const { data: pData, error: pErr } = await supabase
+              .from('profiles')
+              .select('global_role')
+              .eq('id', session.user.id)
+              .maybeSingle();
+            if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
+          } catch (e) {
+            // ignore
+          }
+        } else {
+          setUser(null);
+          setOrgId(null);
+          setGlobalRole(null);
         }
-      } else {
-        setUser(null);
-        setOrgId(null);
-        setGlobalRole(null);
+        setLoading(false);
+      });
+      subscription = sub.data?.subscription || sub;
+    } catch (e) {
+      console.warn('Auth subscription failed to initialize:', e);
+      subscription = null;
+    }
+
+    // Safety fallback: if auth initialization stalls, stop showing global loading after 5s
+    const fallback = setTimeout(() => {
+      if (loading) {
+        console.warn('[AuthProvider] auth init timeout reached, clearing loading state');
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    }, 5000);
 
     return () => {
-      subscription?.unsubscribe();
+      try {
+        subscription?.unsubscribe?.();
+      } catch (e) {
+        // ignore
+      }
+      clearTimeout(fallback);
     };
   }, []);
 
