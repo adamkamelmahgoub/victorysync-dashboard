@@ -32,7 +32,7 @@ type TabType = "all" | "agents";
 
 export const AdminUsersPage: FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const toast = (() => {
     try {
       return useToast();
@@ -361,6 +361,12 @@ export const AdminUsersPage: FC = () => {
         if (toast && toast.push) toast.push('Platform permissions saved', 'success');
         // refresh users list
         try { const r = await fetch(`${API_BASE_URL}/api/admin/users`); if (r.ok) { const j = await r.json(); setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null }))); } } catch(e){}
+        // if we changed the current user's global role/permissions, refresh local profile
+        try {
+          if (user && userId === user.id && refreshProfile) await refreshProfile();
+        } catch (e) {
+          // ignore
+        }
       } catch (err) {
         console.error('Failed to save platform perms', err);
         alert('Failed to save');
