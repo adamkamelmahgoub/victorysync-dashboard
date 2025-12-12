@@ -83,13 +83,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       subscription = null;
     }
 
-    // Safety fallback: if auth initialization stalls, stop showing global loading after 5s
-    const fallback = setTimeout(() => {
-      if (loading) {
-        console.warn('[AuthProvider] auth init timeout reached, clearing loading state');
-        setLoading(false);
-      }
-    }, 5000);
+    // No timeout fallback: avoid races by waiting for actual auth state
 
     return () => {
       try {
@@ -97,7 +91,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       } catch (e) {
         // ignore
       }
-      clearTimeout(fallback);
+      // nothing to clear
     };
   }, []);
 

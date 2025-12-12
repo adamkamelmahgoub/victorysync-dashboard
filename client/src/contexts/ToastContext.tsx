@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useState, FC, ReactNode } from 'react';
 
 type Toast = { id: string; message: string; type?: 'info' | 'success' | 'error' };
 
@@ -12,7 +12,7 @@ export const useToast = () => {
   return ctx;
 };
 
-export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const ToastProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const push = useCallback((message: string, type: Toast['type'] = 'info') => {

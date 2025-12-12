@@ -82,37 +82,37 @@ export async function getQueueSummary(params?: { orgId?: string }) {
 }
 
 // Org API keys
-export async function getOrgApiKeys(orgId: string) {
-  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys`);
+export async function getOrgApiKeys(orgId: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys`, { headers: { 'x-user-id': userId || '' } });
 }
 
-export async function createOrgApiKey(orgId: string, label: string) {
+export async function createOrgApiKey(orgId: string, label: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify({ label }),
   });
 }
 
-export async function deleteOrgApiKey(orgId: string, keyId: string) {
-  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys/${encodeURIComponent(keyId)}`, { method: 'DELETE' });
+export async function deleteOrgApiKey(orgId: string, keyId: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys/${encodeURIComponent(keyId)}`, { method: 'DELETE', headers: { 'x-user-id': userId || '' } });
 }
 
 // Platform (global) API keys — admin-only
-export async function getPlatformApiKeys() {
-  return await fetchJson(`/api/admin/platform-api-keys`);
+export async function getPlatformApiKeys(userId?: string) {
+  return await fetchJson(`/api/admin/platform-api-keys`, { headers: { 'x-user-id': userId || '' } });
 }
 
-export async function createPlatformApiKey(name: string) {
+export async function createPlatformApiKey(name: string, userId?: string) {
   return await fetchJson(`/api/admin/platform-api-keys`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify({ name }),
   });
 }
 
-export async function deletePlatformApiKey(id: string) {
-  return await fetchJson(`/api/admin/platform-api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export async function deletePlatformApiKey(id: string, userId?: string) {
+  return await fetchJson(`/api/admin/platform-api-keys/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'x-user-id': userId || '' } });
 }
 
 export default {

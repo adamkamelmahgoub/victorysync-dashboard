@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_URL, buildApiUrl } from '../config';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface Agent {
   id: string;
@@ -10,6 +11,7 @@ export interface Agent {
 }
 
 export function useAgents() {
+  const { user } = useAuth();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +24,7 @@ export function useAgents() {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(buildApiUrl('/api/admin/agents'), { cache: 'no-store' });
+        const res = await fetch(buildApiUrl('/api/admin/agents'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }

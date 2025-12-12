@@ -87,7 +87,7 @@ export const AdminUsersPage: FC = () => {
   useEffect(() => {
     const fetchOrgs = async () => {
       try {
-        const res = await fetch(buildApiUrl('/api/admin/orgs'));
+        const res = await fetch(buildApiUrl('/api/admin/orgs'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) {
           console.error('Failed to fetch orgs from API:', j);
@@ -113,7 +113,7 @@ export const AdminUsersPage: FC = () => {
     const fetchAuthUsers = async () => {
       try {
         setAllUsersLoading(true);
-        const res = await fetch(buildApiUrl('/api/admin/users'));
+        const res = await fetch(buildApiUrl('/api/admin/users'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
           console.error('Failed to fetch admin users:', json);
@@ -141,7 +141,7 @@ export const AdminUsersPage: FC = () => {
   const loadOrgUsers = async () => {
     try {
       setOrgUsersLoading(true);
-      const res = await fetch(buildApiUrl('/api/admin/org_users'));
+      const res = await fetch(buildApiUrl('/api/admin/org_users'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         console.error('Failed to fetch org_users:', json);
@@ -175,7 +175,7 @@ export const AdminUsersPage: FC = () => {
 
       const res = await fetch(buildApiUrl('/api/admin/users'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
         body: JSON.stringify({
           email: createEmail,
           password: createPassword,
@@ -197,7 +197,7 @@ export const AdminUsersPage: FC = () => {
 
       // Refresh admin users list from backend
       try {
-        const r = await fetch(buildApiUrl('/api/admin/users'));
+        const r = await fetch(buildApiUrl('/api/admin/users'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
         if (r.ok) {
           const j = await r.json();
           setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null })));
@@ -220,7 +220,7 @@ export const AdminUsersPage: FC = () => {
     try {
       const res = await fetch(buildApiUrl('/api/admin/org_users'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
         body: JSON.stringify({ user_id: userId, org_id: orgId, role, mightycall_extension: extension || null }),
       });
       if (!res.ok) {
@@ -228,6 +228,7 @@ export const AdminUsersPage: FC = () => {
         throw new Error(j.detail || 'Failed to assign user');
       }
       await loadOrgUsers();
+      try { if (user && userId === user.id && refreshProfile) await refreshProfile(); } catch (e) { /* ignore */ }
       return true;
     } catch (err: any) {
       console.error('Assign error:', err);
@@ -254,7 +255,7 @@ export const AdminUsersPage: FC = () => {
 
       const res = await fetch(buildApiUrl('/api/admin/org_users'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
         body: JSON.stringify({ user_id: userId, org_id: orgId, role: editRole, mightycall_extension: editExtension || null }),
       });
       if (!res.ok) {
@@ -283,7 +284,7 @@ export const AdminUsersPage: FC = () => {
     try {
       const res = await fetch(buildApiUrl('/api/admin/org_users'), {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
         body: JSON.stringify({ user_id: userId, org_id: orgId }),
       });
       if (!res.ok) {
@@ -291,6 +292,7 @@ export const AdminUsersPage: FC = () => {
         throw new Error(j.detail || 'Failed to remove assignment');
       }
       await loadOrgUsers();
+      try { if (user && userId === user.id && refreshProfile) await refreshProfile(); } catch (e) { /* ignore */ }
     } catch (err: any) {
       console.error('Delete error:', err);
     }
@@ -360,7 +362,7 @@ export const AdminUsersPage: FC = () => {
         onClose();
         if (toast && toast.push) toast.push('Platform permissions saved', 'success');
         // refresh users list
-        try { const r = await fetch(buildApiUrl('/api/admin/users')); if (r.ok) { const j = await r.json(); setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null }))); } } catch(e){}
+        try { const r = await fetch(buildApiUrl('/api/admin/users'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } }); if (r.ok) { const j = await r.json(); setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null }))); } } catch(e){}
         // if we changed the current user's global role/permissions, refresh local profile
         try {
           if (user && userId === user.id && refreshProfile) await refreshProfile();

@@ -674,7 +674,7 @@ export default function AdminOrgsPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(buildApiUrl('/api/admin/org-metrics'));
+      const res = await fetch(buildApiUrl('/api/admin/org-metrics'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(j.detail || 'Failed to fetch org metrics');

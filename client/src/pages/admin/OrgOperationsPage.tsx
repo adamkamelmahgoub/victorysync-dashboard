@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiKeysTab } from '../../components/ApiKeysTab';
@@ -34,6 +34,7 @@ export function OrgOperationsPage() {
       setLoading(true);
       setError(null);
       const res = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}`), {
+        cache: 'no-store',
         headers: { 'x-user-id': user?.id || '' }
       });
       if (!res.ok) throw new Error(`Failed to load org: ${res.status}`);

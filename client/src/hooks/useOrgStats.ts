@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_URL, buildApiUrl } from '../config';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface OrgStats {
   total_calls: number;
@@ -9,6 +10,7 @@ export interface OrgStats {
 }
 
 export function useOrgStats(orgId: string | null | undefined) {
+  const { user } = useAuth();
   const [stats, setStats] = useState<OrgStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +25,7 @@ export function useOrgStats(orgId: string | null | undefined) {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(buildApiUrl(`/api/admin/orgs/${encodeURIComponent(orgId)}/stats`), { cache: 'no-store' });
+        const res = await fetch(buildApiUrl(`/api/admin/orgs/${encodeURIComponent(orgId)}/stats`), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }

@@ -1,5 +1,6 @@
 import type { FC } from "react";
 import { useState, useEffect } from "react";
+import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from "react-router-dom";
 import { API_BASE_URL, buildApiUrl } from '../../config';
 
@@ -14,6 +15,7 @@ type OrgMetrics = {
 
 export const AdminOrgOverviewPage: FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [orgs, setOrgs] = useState<OrgMetrics[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +24,7 @@ export const AdminOrgOverviewPage: FC = () => {
     const fetchOrgMetrics = async () => {
       try {
         setError(null);
-        const res = await fetch(buildApiUrl('/api/admin/org-metrics'));
+        const res = await fetch(buildApiUrl('/api/admin/org-metrics'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
         const json = await res.json();
 
         if (!res.ok) {

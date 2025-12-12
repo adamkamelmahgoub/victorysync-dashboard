@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { API_BASE_URL, buildApiUrl } from '../config';
+import { getPlatformApiKeys, createPlatformApiKey, deletePlatformApiKey } from '../lib/apiClient';
 
 type PlatformApiKey = {
   id: string;
@@ -10,7 +11,7 @@ type PlatformApiKey = {
   last_used_at?: string | null;
 };
 
-export const PlatformApiKeysTab: React.FC = () => {
+export const PlatformApiKeysTab: FC = () => {
   const { user } = useAuth();
   const toast = useToast();
   const [keys, setKeys] = useState<PlatformApiKey[]>([]);
@@ -29,15 +30,9 @@ export const PlatformApiKeysTab: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(buildApiUrl('/api/admin/platform-api-keys'), {
-        headers: { 'x-user-id': user.id },
-      });
-      const json = await res.json();
-      if (res.ok && json.keys) {
-        setKeys(json.keys);
-      } else {
-        setError(json.error || 'Failed to fetch platform keys');
-      }
+      const json = await getPlatformApiKeys(user.id);
+      if (json && json.keys) setKeys(json.keys);
+      else setKeys([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch keys');
       console.error('fetchKeys error:', err);
@@ -55,21 +50,13 @@ export const PlatformApiKeysTab: React.FC = () => {
     setNewToken(null);
     setError(null);
     try {
-      const res = await fetch(buildApiUrl('/api/admin/platform-api-keys'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user.id,
-        },
-        body: JSON.stringify({ name }),
-      });
-      const json = await res.json();
-      if (res.ok && json.token) {
+      const json = await createPlatformApiKey(name, user.id);
+      if (json && json.token) {
         setNewToken(json.token);
         setName('');
         setError(null);
         if (toast) {
-          toast.success('API key created! Copy the token now (it won\'t be shown again)');
+          toast.push('API key created! Copy the token now (it won\'t be shown again)', 'success');
         }
         fetchKeys();
       } else {
@@ -89,19 +76,11 @@ export const PlatformApiKeysTab: React.FC = () => {
     if (!confirm('Delete this platform API key?')) return;
     setError(null);
     try {
-      const res = await fetch(buildApiUrl(`/api/admin/platform-api-keys/${id}`), {
-        method: 'DELETE',
-        headers: { 'x-user-id': user.id },
-      });
-      if (res.ok) {
-        if (toast) {
-          toast.success('API key deleted');
-        }
-        fetchKeys();
-      } else {
-        const json = await res.json();
-        setError(json.error || 'Failed to delete key');
+      await deletePlatformApiKey(id, user.id);
+      if (toast) {
+        toast.push('API key deleted', 'success');
       }
+      await fetchKeys();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete key';
       setError(message);
@@ -150,7 +129,7 @@ export const PlatformApiKeysTab: React.FC = () => {
           <div
             onClick={() => {
               navigator.clipboard.writeText(newToken);
-              if (toast) toast.success('Copied to clipboard');
+              if (toast) toast.push('Copied to clipboard', 'success');
             }}
             className="p-3 bg-slate-800/80 rounded border border-emerald-500/20 font-mono text-xs text-emerald-200 overflow-auto max-h-32 cursor-pointer hover:bg-slate-800 transition"
           >

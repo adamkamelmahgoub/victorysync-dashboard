@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL, buildApiUrl } from '../config';
+import { getOrgApiKeys, createOrgApiKey, deleteOrgApiKey } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ApiKey {
@@ -31,16 +32,7 @@ export function ApiKeysTab({ orgId, isOrgAdmin }: ApiKeysTabProps) {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(buildApiUrl(`/api/orgs/${orgId}/api-keys`), {
-        headers: {
-          'x-user-id': user?.id || '',
-        },
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.detail || 'Failed to load API keys');
-        return;
-      }
+      const json = await getOrgApiKeys(orgId, user?.id);
       setKeys(json.keys || []);
     } catch (e: any) {
       console.error('Error loading API keys:', e);
@@ -63,21 +55,8 @@ export function ApiKeysTab({ orgId, isOrgAdmin }: ApiKeysTabProps) {
     try {
       setCreatingKey(true);
       setError(null);
-      const res = await fetch(buildApiUrl(`/api/orgs/${orgId}/api-keys`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user?.id || '',
-        },
-        body: JSON.stringify({ label: newKeyLabel.trim() }),
-      });
-
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.detail || 'Failed to create API key');
-        return;
-      }
-
+      const json = await createOrgApiKey(orgId, newKeyLabel.trim(), user?.id);
+      // fetchJson throws on non-ok; if we are here, creation succeeded
       setCreatedKey(json);
       setNewKeyLabel('');
       setShowNewKeyModal(false);
@@ -93,15 +72,8 @@ export function ApiKeysTab({ orgId, isOrgAdmin }: ApiKeysTabProps) {
   const handleDeleteKey = async (id: string) => {
     if (!confirm('Delete this API key?')) return;
     try {
-      const res = await fetch(buildApiUrl(`/api/orgs/${orgId}/api-keys/${id}`), {
-        method: 'DELETE',
-        headers: { 'x-user-id': user?.id || '' },
-      });
-      if (res.ok) fetchKeys();
-      else {
-        const json = await res.json();
-        setError(json.detail || 'Failed to delete API key');
-      }
+      await deleteOrgApiKey(orgId, id, user?.id);
+      await fetchKeys();
     } catch (e: any) {
       console.error('Error deleting API key:', e);
       setError(e.message || 'Failed to delete API key');

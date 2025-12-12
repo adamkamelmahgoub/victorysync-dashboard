@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import AdminTopNav from '../../components/AdminTopNav';
 import { ApiKeysTab } from '../../components/ApiKeysTab';
@@ -25,6 +25,7 @@ export function AdminOperationsPage() {
     try {
       setLoading(true);
       const res = await fetch(buildApiUrl('/api/admin/orgs'), {
+        cache: 'no-store',
         headers: { 'x-user-id': user?.id || '' }
       });
       if (!res.ok) throw new Error(`Failed to load orgs: ${res.status}`);

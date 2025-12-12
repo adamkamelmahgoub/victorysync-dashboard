@@ -9,6 +9,7 @@
  */
 
 const http = require('http');
+const { spawn } = require('child_process');
 
 function makeRequest(url, options = {}) {
   return new Promise((resolve, reject) => {
@@ -39,14 +40,27 @@ async function runTests() {
   let failed = 0;
 
   // Test 1: Client server running
+  let clientProcess = null;
   try {
     console.log('Test 1: Client server (port 3000)');
-    const res = await makeRequest('http://127.0.0.1:3000/');
-    if (res.status === 200 && res.body.includes('<title>VictorySync Dashboard</title>')) {
+    let res = await makeRequest('http://127.0.0.1:3000/').catch(() => null);
+    let clientProcess = null;
+    if (!res) {
+      console.log('Client server not running; trying to start local static server (serve-dist.js)...');
+      clientProcess = spawn('node', ['serve-dist.js'], { cwd: __dirname, stdio: 'inherit' });
+      // Wait for server to start (poll)
+      const start = Date.now();
+      while (Date.now() - start < 15000) {
+        res = await makeRequest('http://127.0.0.1:3000/').catch(() => null);
+        if (res) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+    if (res && res.status === 200 && res.body.includes('<title>VictorySync Dashboard</title>')) {
       console.log('✅ PASS: Client is served\n');
       passed++;
     } else {
-      console.log(`❌ FAIL: Got status ${res.status}\n`);
+      console.log(`❌ FAIL: Got response ${res ? res.status : 'no response'}\n`);
       failed++;
     }
   } catch (e) {
@@ -119,9 +133,11 @@ async function runTests() {
     console.log('Access the dashboard at: http://localhost:3000\n');
     console.log('Note: The client will make API calls to http://localhost:4000/api/...');
     console.log('since they are on different ports but same host.\n');
+    if (clientProcess) clientProcess.kill();
     process.exit(0);
   } else {
     console.log('❌ Setup not ready\n');
+    if (clientProcess) clientProcess.kill();
     process.exit(1);
   }
 }
