@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import AdminTopNav from '../../components/AdminTopNav';
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
-import { API_BASE_URL } from "../../config";
+import { API_BASE_URL, buildApiUrl } from "../../config";
 import { supabase } from "../../lib/supabaseClient";
 import PlatformApiKeysTab from '../../components/PlatformApiKeysTab';
 
@@ -87,7 +87,7 @@ export const AdminUsersPage: FC = () => {
   useEffect(() => {
     const fetchOrgs = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/admin/orgs`);
+        const res = await fetch(buildApiUrl('/api/admin/orgs'));
         const j = await res.json().catch(() => ({}));
         if (!res.ok) {
           console.error('Failed to fetch orgs from API:', j);
@@ -113,7 +113,7 @@ export const AdminUsersPage: FC = () => {
     const fetchAuthUsers = async () => {
       try {
         setAllUsersLoading(true);
-        const res = await fetch(`${API_BASE_URL}/api/admin/users`);
+        const res = await fetch(buildApiUrl('/api/admin/users'));
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
           console.error('Failed to fetch admin users:', json);
@@ -141,7 +141,7 @@ export const AdminUsersPage: FC = () => {
   const loadOrgUsers = async () => {
     try {
       setOrgUsersLoading(true);
-      const res = await fetch(`${API_BASE_URL}/api/admin/org_users`);
+      const res = await fetch(buildApiUrl('/api/admin/org_users'));
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         console.error('Failed to fetch org_users:', json);
@@ -173,7 +173,7 @@ export const AdminUsersPage: FC = () => {
     try {
       setCreateLoading(true);
 
-      const res = await fetch(`${API_BASE_URL}/api/admin/users`, {
+      const res = await fetch(buildApiUrl('/api/admin/users'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -197,7 +197,7 @@ export const AdminUsersPage: FC = () => {
 
       // Refresh admin users list from backend
       try {
-        const r = await fetch(`${API_BASE_URL}/api/admin/users`);
+        const r = await fetch(buildApiUrl('/api/admin/users'));
         if (r.ok) {
           const j = await r.json();
           setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null })));
@@ -218,7 +218,7 @@ export const AdminUsersPage: FC = () => {
   // Handle assign existing user to org
   const handleAssignUser = async (userId: string, orgId: string, role: string, extension?: string | null): Promise<boolean> => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/org_users`, {
+      const res = await fetch(buildApiUrl('/api/admin/org_users'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, org_id: orgId, role, mightycall_extension: extension || null }),
@@ -252,7 +252,7 @@ export const AdminUsersPage: FC = () => {
       setEditLoading(true);
       setEditError(null);
 
-      const res = await fetch(`${API_BASE_URL}/api/admin/org_users`, {
+      const res = await fetch(buildApiUrl('/api/admin/org_users'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, org_id: orgId, role: editRole, mightycall_extension: editExtension || null }),
@@ -281,7 +281,7 @@ export const AdminUsersPage: FC = () => {
     if (!window.confirm('Remove this user from this organization?')) return;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/org_users`, {
+      const res = await fetch(buildApiUrl('/api/admin/org_users'), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, org_id: orgId }),
@@ -321,7 +321,7 @@ export const AdminUsersPage: FC = () => {
       const load = async () => {
         try {
           setLoading(true);
-          const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/platform-permissions`, { headers: { 'x-user-id': user?.id || '' } });
+          const res = await fetch(buildApiUrl(`/api/admin/users/${userId}/platform-permissions`), { headers: { 'x-user-id': user?.id || '' } });
           if (!res.ok) throw new Error('Failed to load');
           const j = await res.json();
           setGlobalRole(j.global_role || null);
@@ -344,14 +344,14 @@ export const AdminUsersPage: FC = () => {
       try {
         setSaving(true);
         // update global role
-        await fetch(`${API_BASE_URL}/api/admin/users/${userId}/global-role`, {
+        await fetch(buildApiUrl(`/api/admin/users/${userId}/global-role`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
           body: JSON.stringify({ globalRole }),
         });
 
         // update platform permissions
-        await fetch(`${API_BASE_URL}/api/admin/users/${userId}/platform-permissions`, {
+        await fetch(buildApiUrl(`/api/admin/users/${userId}/platform-permissions`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
           body: JSON.stringify(perms),
@@ -360,7 +360,7 @@ export const AdminUsersPage: FC = () => {
         onClose();
         if (toast && toast.push) toast.push('Platform permissions saved', 'success');
         // refresh users list
-        try { const r = await fetch(`${API_BASE_URL}/api/admin/users`); if (r.ok) { const j = await r.json(); setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null }))); } } catch(e){}
+        try { const r = await fetch(buildApiUrl('/api/admin/users')); if (r.ok) { const j = await r.json(); setAllUsers((j.users || []).map((u: any) => ({ id: u.id, email: u.email || '', role: u.role || null, org_id: u.org_id || null }))); } } catch(e){}
         // if we changed the current user's global role/permissions, refresh local profile
         try {
           if (user && userId === user.id && refreshProfile) await refreshProfile();

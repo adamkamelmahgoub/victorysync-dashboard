@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiKeysTab } from '../../components/ApiKeysTab';
 import AdminTopNav from '../../components/AdminTopNav';
+import { buildApiUrl } from '../../config';
 
 interface OrgData {
   id: string;
@@ -22,7 +23,6 @@ export function OrgOperationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'api-keys' | 'phone-numbers' | 'users'>('api-keys');
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
   useEffect(() => {
     if (!orgId || !user?.id) return;
@@ -33,7 +33,7 @@ export function OrgOperationsPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}`, {
+      const res = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}`), {
         headers: { 'x-user-id': user?.id || '' }
       });
       if (!res.ok) throw new Error(`Failed to load org: ${res.status}`);

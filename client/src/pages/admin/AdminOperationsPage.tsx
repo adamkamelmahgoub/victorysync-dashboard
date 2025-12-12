@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import AdminTopNav from '../../components/AdminTopNav';
 import { ApiKeysTab } from '../../components/ApiKeysTab';
+import { buildApiUrl } from '../../config';
 
 interface Organization {
   id: string;
@@ -16,8 +17,6 @@ export function AdminOperationsPage() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-
   useEffect(() => {
     loadOrgs();
   }, []);
@@ -25,7 +24,7 @@ export function AdminOperationsPage() {
   const loadOrgs = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE_URL}/api/admin/orgs`, {
+      const res = await fetch(buildApiUrl('/api/admin/orgs'), {
         headers: { 'x-user-id': user?.id || '' }
       });
       if (!res.ok) throw new Error(`Failed to load orgs: ${res.status}`);

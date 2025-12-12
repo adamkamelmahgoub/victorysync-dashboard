@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, buildApiUrl } from '../config';
 
 export interface Agent {
   id: string;
@@ -22,7 +22,7 @@ export function useAgents() {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(`${API_BASE_URL}/api/admin/agents`);
+        const res = await fetch(buildApiUrl('/api/admin/agents'));
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }

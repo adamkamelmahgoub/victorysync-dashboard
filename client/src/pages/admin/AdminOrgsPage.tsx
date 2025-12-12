@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 // Server-side admin actions use API endpoints, not client-side Supabase
 import { useOrgStats } from '../../hooks/useOrgStats';
-import { API_BASE_URL } from '../../config';
+import { API_BASE_URL, buildApiUrl } from '../../config';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 
@@ -65,7 +65,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
     setStatsError(null);
     try {
       console.log('OrgDetailsModal: reloading org details for', org.id);
-      const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${org.id}`, { headers: { 'x-user-id': user.id } });
+      const res = await fetch(buildApiUrl(`/api/admin/orgs/${org.id}`), { headers: { 'x-user-id': user.id } });
       if (!res.ok) throw new Error('Failed to fetch org details');
       const j = await res.json();
       console.log('OrgDetailsModal: received data', { members: j.members?.length, phones: j.phones?.length, stats: j.stats, canEdit: j.permissions?.canEditPhoneNumbers });
@@ -106,8 +106,8 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
             setLoading(false);
             return;
           }
-          console.log('EditPhonesModalEnhanced: fetching from', `${API_BASE_URL}/api/admin/phone-numbers`, 'with user.id:', user.id);
-          const res = await fetch(`${API_BASE_URL}/api/admin/phone-numbers`, { headers: { 'x-user-id': user.id } });
+          console.log('EditPhonesModalEnhanced: fetching from', buildApiUrl('/api/admin/phone-numbers'), 'with user.id:', user.id);
+          const res = await fetch(buildApiUrl('/api/admin/phone-numbers'), { headers: { 'x-user-id': user.id } });
           if (!res.ok) throw new Error(`Failed to load numbers: ${res.status}`);
           const j = await res.json();
           console.log('EditPhonesModalEnhanced: received phone_numbers', j);
@@ -139,7 +139,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
         // Add new phone numbers
         if (toAdd.length > 0) {
           console.log('[EditPhonesModal] assigning phones:', toAdd);
-          const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers`, {
+          const res = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}/phone-numbers`), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
             body: JSON.stringify({ phoneNumberIds: toAdd }),
@@ -154,7 +154,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
         for (const phoneId of toRemove) {
           console.log('[EditPhonesModal] removing phone:', phoneId);
           const target = (phones.find(p => p.id === phoneId)?.number) || (allPhones.find(p => p.id === phoneId)?.number) || phoneId;
-          const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers/${encodeURIComponent(target)}`, {
+          const res = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}/phone-numbers/${encodeURIComponent(target)}`), {
             method: 'DELETE',
             headers: { 'x-user-id': user.id },
           });
@@ -357,7 +357,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
         try {
           setLoading(true);
           const res = await fetch(
-            `${API_BASE_URL}/api/admin/orgs/${orgId}/managers/${orgMemberId}/permissions`,
+            buildApiUrl(`/api/admin/orgs/${orgId}/managers/${orgMemberId}/permissions`),
             { headers: { 'x-user-id': userId } }
           );
           if (!res.ok) throw new Error('Failed to load permissions');
@@ -382,7 +382,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
       try {
         setSaving(true);
         const res = await fetch(
-          `${API_BASE_URL}/api/admin/orgs/${orgId}/managers/${orgMemberId}/permissions`,
+          buildApiUrl(`/api/admin/orgs/${orgId}/managers/${orgMemberId}/permissions`),
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
@@ -592,7 +592,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
                           if (!window.confirm(`Remove ${phone.number} from this organization?`)) return;
                           try {
                             const res = await fetch(
-                              `${API_BASE_URL}/api/admin/orgs/${org.id}/phone-numbers/${encodeURIComponent(phone.number || phone.id)}`,
+                              buildApiUrl(`/api/admin/orgs/${org.id}/phone-numbers/${encodeURIComponent(phone.number || phone.id)}`),
                               { method: 'DELETE', headers: { 'x-user-id': user?.id || '' } }
                             );
                             if (!res.ok) throw new Error('Delete failed');
@@ -674,7 +674,7 @@ export default function AdminOrgsPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/org-metrics`);
+      const res = await fetch(buildApiUrl('/api/admin/org-metrics'));
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(j.detail || 'Failed to fetch org metrics');
@@ -713,7 +713,7 @@ export default function AdminOrgsPage() {
     try {
       setCreating(true);
 
-      const res = await fetch(`${API_BASE_URL}/api/admin/orgs`, {
+      const res = await fetch(buildApiUrl('/api/admin/orgs'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': (user as any)?.id || '' },
         body: JSON.stringify({ name: newOrgName }),

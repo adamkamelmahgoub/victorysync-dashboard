@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, buildApiUrl } from '../config';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ApiKey {
@@ -31,7 +31,7 @@ export function ApiKeysTab({ orgId, isOrgAdmin }: ApiKeysTabProps) {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`${API_BASE_URL}/api/orgs/${orgId}/api-keys`, {
+      const res = await fetch(buildApiUrl(`/api/orgs/${orgId}/api-keys`), {
         headers: {
           'x-user-id': user?.id || '',
         },
@@ -63,7 +63,7 @@ export function ApiKeysTab({ orgId, isOrgAdmin }: ApiKeysTabProps) {
     try {
       setCreatingKey(true);
       setError(null);
-      const res = await fetch(`${API_BASE_URL}/api/orgs/${orgId}/api-keys`, {
+      const res = await fetch(buildApiUrl(`/api/orgs/${orgId}/api-keys`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -93,7 +93,7 @@ export function ApiKeysTab({ orgId, isOrgAdmin }: ApiKeysTabProps) {
   const handleDeleteKey = async (id: string) => {
     if (!confirm('Delete this API key?')) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/orgs/${orgId}/api-keys/${id}`, {
+      const res = await fetch(buildApiUrl(`/api/orgs/${orgId}/api-keys/${id}`), {
         method: 'DELETE',
         headers: { 'x-user-id': user?.id || '' },
       });

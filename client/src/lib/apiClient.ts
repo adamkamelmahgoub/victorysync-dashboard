@@ -1,10 +1,10 @@
 // client/src/lib/apiClient.ts
-import { API_BASE_URL } from "../config";
+import { API_BASE_URL, buildApiUrl } from "../config";
 
 type Json = any;
 
 async function fetchJson(path: string, init?: RequestInit) {
-  const url = path.startsWith("http") ? path : `${API_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
+  const url = path.startsWith("http") ? path : buildApiUrl(path);
   const res = await fetch(url, { ...init });
   if (!res.ok) {
     // Try to parse JSON body for structured error details

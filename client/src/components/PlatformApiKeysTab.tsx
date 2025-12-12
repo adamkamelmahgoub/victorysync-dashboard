@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, buildApiUrl } from '../config';
 
 type PlatformApiKey = {
   id: string;
@@ -29,7 +29,7 @@ export const PlatformApiKeysTab: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/platform-api-keys`, {
+      const res = await fetch(buildApiUrl('/api/admin/platform-api-keys'), {
         headers: { 'x-user-id': user.id },
       });
       const json = await res.json();
@@ -55,7 +55,7 @@ export const PlatformApiKeysTab: React.FC = () => {
     setNewToken(null);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/platform-api-keys`, {
+      const res = await fetch(buildApiUrl('/api/admin/platform-api-keys'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -89,7 +89,7 @@ export const PlatformApiKeysTab: React.FC = () => {
     if (!confirm('Delete this platform API key?')) return;
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/platform-api-keys/${id}`, {
+      const res = await fetch(buildApiUrl(`/api/admin/platform-api-keys/${id}`), {
         method: 'DELETE',
         headers: { 'x-user-id': user.id },
       });

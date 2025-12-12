@@ -1,7 +1,7 @@
 import type { FC } from "react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { API_BASE_URL } from "../../config";
+import { API_BASE_URL, buildApiUrl } from '../../config';
 
 type OrgMetrics = {
   id: string;
@@ -22,7 +22,7 @@ export const AdminOrgOverviewPage: FC = () => {
     const fetchOrgMetrics = async () => {
       try {
         setError(null);
-        const res = await fetch(`${API_BASE_URL}/api/admin/org-metrics`);
+        const res = await fetch(buildApiUrl('/api/admin/org-metrics'));
         const json = await res.json();
 
         if (!res.ok) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, buildApiUrl } from '../config';
 import { useAuth } from '../contexts/AuthContext';
 
 export interface DashboardMetrics {
@@ -59,7 +59,7 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       let assignedPhones: Array<{ id: string; number: string; label?: string | null }> = [];
       if (orgId) {
         try {
-          const orgRes = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}`, { headers });
+          const orgRes = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}`), { headers });
           if (orgRes.ok) {
             const orgData = await orgRes.json();
             assignedPhones = orgData.phones || [];
