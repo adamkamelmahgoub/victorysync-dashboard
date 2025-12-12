@@ -105,30 +105,26 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     email: string,
     password: string
   ): Promise<{ error?: string }> => {
-    // Wrap signInWithPassword with a timeout so the UI doesn't hang indefinitely
-    const timeoutMs = 20000;
     try {
-      const p = supabase.auth.signInWithPassword({ email, password });
-      const timer = new Promise<{ error: string }>((resolve) =>
-        setTimeout(() => resolve({ error: 'Sign in timed out' }), timeoutMs)
-      );
+      console.log('[AuthContext] Attempting sign in for:', email);
+      const res = await supabase.auth.signInWithPassword({ email, password });
+      console.log('[AuthContext] Sign in response:', res);
 
-      const res: any = await Promise.race([p, timer]);
+      if (res?.error) {
+        console.error('[AuthContext] Auth error:', res.error);
+        return { error: res.error?.message ?? String(res.error) };
+      }
 
-      if (res?.error) return { error: res.error?.message ?? res.error };
-
-      // supabase returns { data, error }
-      const data = res?.data ?? res;
-      const err = res?.error ?? null;
-      if (err) return { error: err.message || String(err) };
-
+      const data = res?.data;
       if (data && data.user) {
+        console.log('[AuthContext] Sign in successful, setting user:', data.user.email);
         setUser(data.user);
         setOrgId(data.user.user_metadata?.org_id ?? null);
       }
 
       return {};
     } catch (err: any) {
+      console.error('[AuthContext] Sign in exception:', err);
       return { error: err?.message ?? 'Sign in failed' };
     }
   };
