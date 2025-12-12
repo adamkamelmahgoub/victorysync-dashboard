@@ -1364,7 +1364,7 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
     if (assignedNumbers.length > 0) {
       const { data: callsA, error: errA } = await supabaseAdmin
         .from('calls')
-        .select('id, status, to_number, to_number_digits, started_at, answered_at, duration')
+        .select('id, status, to_number, to_number_digits, started_at, answered_at, ended_at')
         .gte('started_at', todayStart)
         .in('to_number', assignedNumbers);
       if (errA) throw errA;
@@ -1373,7 +1373,7 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
     if (assignedDigits.length > 0) {
       const { data: callsB, error: errB } = await supabaseAdmin
         .from('calls')
-        .select('id, status, to_number, to_number_digits, started_at, answered_at, duration')
+        .select('id, status, to_number, to_number_digits, started_at, answered_at, ended_at')
         .gte('started_at', todayStart)
         .in('to_number_digits', assignedDigits);
       if (errB) throw errB;
@@ -1405,8 +1405,20 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
       } else if (st === 'missed') {
         m.missedCount += 1;
       }
+      // compute duration: prefer explicit `duration` if present, otherwise
+      // compute from `ended_at - answered_at` (seconds)
+      let dur = 0;
       if (call.duration && typeof call.duration === 'number') {
-        m.avgHandleSeconds = (m.avgHandleSeconds || 0) + call.duration;
+        dur = call.duration;
+      } else if (call.ended_at && call.answered_at) {
+        const ended = new Date(call.ended_at).getTime();
+        const answered = new Date(call.answered_at).getTime();
+        if (!isNaN(ended) && !isNaN(answered) && ended >= answered) {
+          dur = Math.round((ended - answered) / 1000);
+        }
+      }
+      if (dur > 0) {
+        m.avgHandleSeconds = (m.avgHandleSeconds || 0) + dur;
       }
     }
 
