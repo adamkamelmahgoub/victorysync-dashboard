@@ -28,7 +28,8 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
     setError(null);
     try {
       // Call backend API which handles today's metrics and org filtering
-      const url = new URL(`${API_BASE_URL}/api/client-metrics`);
+      const baseUrl = API_BASE_URL || window.location.origin;
+      const url = new URL(`${baseUrl}/api/client-metrics`);
       if (orgId) {
         url.searchParams.set('org_id', orgId);
       }
