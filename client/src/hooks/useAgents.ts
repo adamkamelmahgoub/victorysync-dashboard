@@ -22,7 +22,7 @@ export function useAgents() {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(buildApiUrl('/api/admin/agents'));
+        const res = await fetch(buildApiUrl('/api/admin/agents'), { cache: 'no-store' });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }

@@ -23,7 +23,7 @@ export function useOrgStats(orgId: string | null | undefined) {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(buildApiUrl(`/api/admin/orgs/${encodeURIComponent(orgId)}/stats`));
+        const res = await fetch(buildApiUrl(`/api/admin/orgs/${encodeURIComponent(orgId)}/stats`), { cache: 'no-store' });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }

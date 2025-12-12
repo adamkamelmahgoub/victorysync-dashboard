@@ -65,7 +65,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
     setStatsError(null);
     try {
       console.log('OrgDetailsModal: reloading org details for', org.id);
-      const res = await fetch(buildApiUrl(`/api/admin/orgs/${org.id}`), { headers: { 'x-user-id': user.id } });
+      const res = await fetch(buildApiUrl(`/api/admin/orgs/${org.id}`), { cache: 'no-store', headers: { 'x-user-id': user.id } });
       if (!res.ok) throw new Error('Failed to fetch org details');
       const j = await res.json();
       console.log('OrgDetailsModal: received data', { members: j.members?.length, phones: j.phones?.length, stats: j.stats, canEdit: j.permissions?.canEditPhoneNumbers });
@@ -107,7 +107,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
             return;
           }
           console.log('EditPhonesModalEnhanced: fetching from', buildApiUrl('/api/admin/phone-numbers'), 'with user.id:', user.id);
-          const res = await fetch(buildApiUrl('/api/admin/phone-numbers'), { headers: { 'x-user-id': user.id } });
+          const res = await fetch(buildApiUrl('/api/admin/phone-numbers'), { cache: 'no-store', headers: { 'x-user-id': user.id } });
           if (!res.ok) throw new Error(`Failed to load numbers: ${res.status}`);
           const j = await res.json();
           console.log('EditPhonesModalEnhanced: received phone_numbers', j);
@@ -139,7 +139,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
         // Add new phone numbers
         if (toAdd.length > 0) {
           console.log('[EditPhonesModal] assigning phones:', toAdd);
-          const res = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}/phone-numbers`), {
+          const res = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}/phone-numbers`), { cache: 'no-store',
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
             body: JSON.stringify({ phoneNumberIds: toAdd }),
@@ -154,7 +154,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
         for (const phoneId of toRemove) {
           console.log('[EditPhonesModal] removing phone:', phoneId);
           const target = (phones.find(p => p.id === phoneId)?.number) || (allPhones.find(p => p.id === phoneId)?.number) || phoneId;
-          const res = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}/phone-numbers/${encodeURIComponent(target)}`), {
+          const res = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}/phone-numbers/${encodeURIComponent(target)}`), { cache: 'no-store',
             method: 'DELETE',
             headers: { 'x-user-id': user.id },
           });

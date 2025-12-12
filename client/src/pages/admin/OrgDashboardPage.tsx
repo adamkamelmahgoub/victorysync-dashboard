@@ -50,7 +50,7 @@ export function OrgDashboardPage() {
     try {
       setPerNumberLoading(true);
       // Call server-side endpoint that computes per-phone metrics (avoids client-side Supabase REST calls)
-      const resp = await fetch(buildApiUrl('/api/admin/orgs/' + orgId + '/phone-metrics'));
+      const resp = await fetch(buildApiUrl('/api/admin/orgs/' + orgId + '/phone-metrics'), { cache: 'no-store' });
       if (!resp.ok) throw new Error(`Failed to fetch phone metrics: ${resp.statusText}`);
       const body = await resp.json();
       const metricsList = body.metrics || [];

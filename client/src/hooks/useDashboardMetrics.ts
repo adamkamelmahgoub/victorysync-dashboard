@@ -37,7 +37,7 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       const headers: Record<string, string> = {};
       if (user && user.id) headers['x-user-id'] = user.id;
 
-      const res = await fetch(url.toString(), { headers });
+      const res = await fetch(url.toString(), { cache: 'no-store', headers });
       if (!res.ok) throw new Error(`API error: ${res.statusText}`);
       
       const json = await res.json();
@@ -59,7 +59,7 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       let assignedPhones: Array<{ id: string; number: string; label?: string | null }> = [];
       if (orgId) {
         try {
-          const orgRes = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}`), { headers });
+          const orgRes = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}`), { cache: 'no-store', headers });
           if (orgRes.ok) {
             const orgData = await orgRes.json();
             assignedPhones = orgData.phones || [];
