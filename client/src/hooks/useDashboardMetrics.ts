@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_URL } from '../config';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface DashboardMetrics {
   total_calls_today: number;
@@ -14,6 +15,7 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchMetrics();
@@ -30,7 +32,10 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
         url.searchParams.set('org_id', orgId);
       }
 
-      const res = await fetch(url.toString());
+      const headers: Record<string, string> = {};
+      if (user && user.id) headers['x-user-id'] = user.id;
+
+      const res = await fetch(url.toString(), { headers });
       if (!res.ok) throw new Error(`API error: ${res.statusText}`);
       
       const json = await res.json();
