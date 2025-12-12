@@ -32,5 +32,8 @@ export const TEST_ORG_ID = "d6b7bbde-54bb-4782-989d-cf9093f8cadf";
 // override this in environments where the API is hosted on a different origin.
 // Default to api.victorysync.com for production. Frontend and backend
 // are deployed on different origins. Set VITE_API_BASE_URL to override.
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? 'https://api.victorysync.com';
+// Default to same-origin API (empty string) so frontend calls `/api/...` when
+// `VITE_API_BASE_URL` is not provided. This avoids hardcoding an external API
+// host which can lead to 404s when the frontend and backend are deployed
+// together under the same domain.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';

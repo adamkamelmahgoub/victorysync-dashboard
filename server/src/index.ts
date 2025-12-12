@@ -2320,15 +2320,34 @@ app.get("/s/series", async (req, res) => {
       }
     });
 
+// Global error handlers to catch issues before they crash silently
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  console.error('[UNHANDLED REJECTION]', reason instanceof Error ? reason.message : reason);
+  console.error('Promise:', promise);
+});
+
+process.on('uncaughtException', (err: Error) => {
+  console.error('[UNCAUGHT EXCEPTION]', err.message);
+  console.error(err.stack);
+  process.exit(1);
+});
+
 const port = Number(process.env.PORT) || 4000;
 const serverHost = process.env.API_BASE_URL || process.env.SERVER_BASE_URL || null;
-app.listen(port, '0.0.0.0', () => {
+
+console.log(`[startup] Starting Express server on port ${port}...`);
+
+const server = app.listen(port, '0.0.0.0', () => {
+  console.log('[startup] Express app.listen() callback fired');
   if (serverHost) {
     console.log(`Metrics API listening (configured host): ${serverHost}`);
   } else {
     console.log(`Metrics API listening on port ${port}`);
   }
 }).on('error', (err: any) => {
-  console.error(`Failed to listen on port ${port}:`, err.message);
+  console.error(`[startup] Failed to bind on port ${port}:`, err.message);
+  console.error(err.stack);
   process.exit(1);
 });
+
+console.log('[startup] app.listen() returned, server object created');
