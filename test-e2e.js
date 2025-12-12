@@ -79,6 +79,11 @@ async function runTests() {
       if (data.metrics) {
         console.log('✅ PASS: API returns metrics');
         console.log(`   Data: ${JSON.stringify(data.metrics).substring(0, 80)}...\n`);
+        if ((res.headers['cache-control'] || '').includes('no-store')) {
+          console.log('   ✅ PASS: API response includes Cache-Control: no-store');
+        } else {
+          console.log('   ⚠️ WARNING: API response missing Cache-Control: no-store');
+        }
         passed++;
       } else {
         console.log('❌ FAIL: Invalid API response\n');

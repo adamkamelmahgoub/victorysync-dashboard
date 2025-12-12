@@ -105,6 +105,22 @@ async function runTests() {
     failed++;
   }
 
+  // Test 2b: Conditional GET with If-None-Match should still return 200 (ETag disabled) and include no-store
+  try {
+    console.log('Test 2b: Conditional GET /api/client-metrics with If-None-Match');
+    const res2 = await makeRequest('/api/client-metrics', { 'x-user-id': 'test-user', 'If-None-Match': '"12345"' });
+    if (res2.status === 200 && (res2.headers['cache-control'] || '').includes('no-store')) {
+      console.log('✅ PASS: Conditional GET returns 200 and no-store header present');
+      passed++;
+    } else {
+      console.log(`❌ FAIL: Expected 200 + cache-control no-store, got ${res2.status} ${res2.headers['cache-control']}`);
+      failed++;
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+    failed++;
+  }
+
   // Test 3: Invalid endpoint (should return 404)
   try {
     console.log('Test 3: Invalid endpoint (GET /api/nonexistent)');
@@ -136,6 +152,70 @@ async function runTests() {
       console.log('⚠️  WARNING: CORS headers not present (may be disabled)\n');
       // Don't count as fail since it could be intentional
       passed++;
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+    failed++;
+  }
+
+  // Test 5: Admin orgs list should return JSON and no-store cache header
+  try {
+    console.log('Test 5: Admin orgs list (GET /api/admin/orgs)');
+    const res = await makeRequest('/api/admin/orgs', { 'x-user-id': 'test-user' });
+    if (res.status === 200) {
+      console.log('✅ PASS: Admin orgs list responded');
+      console.log(`   Cache-Control: ${res.headers['cache-control'] || 'none'}`);
+      if ((res.headers['cache-control'] || '').includes('no-store')) {
+        console.log('   ✅ PASS: no-store header present for admin orgs endpoint');
+      } else {
+        console.log('   ⚠️  WARNING: no-store header not present for admin orgs endpoint');
+      }
+      passed++;
+    } else {
+      console.log(`❌ FAIL: Expected 200, got ${res.status}`);
+      failed++;
+    }
+  } catch (error) {
+    console.log(`❌ FAIL: ${error.message}\n`);
+    failed++;
+  }
+
+  // Test 6: Create an org and GET /api/admin/orgs/:orgId details
+  try {
+    console.log('Test 6: Create org then fetch details (POST /api/admin/orgs -> GET /api/admin/orgs/:orgId)');
+    const orgName = `test-org-${Date.now()}`;
+    const createRes = await new Promise((resolve, reject) => {
+      const url = new URL('/api/admin/orgs', BASE_URL);
+      const options = { hostname: url.hostname, port: url.port, path: url.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': 'test-user' }, timeout: 5000 };
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
+      });
+      req.on('error', reject);
+      req.write(JSON.stringify({ name: orgName }));
+      req.end();
+    });
+    if (createRes.status !== 200) {
+      console.log(`❌ FAIL: Create org failed with status ${createRes.status}`);
+      failed++;
+    } else {
+      const j = JSON.parse(createRes.body || '{}');
+      const oid = (j.org && j.org.id) || null;
+      if (!oid) {
+        console.log('❌ FAIL: Created org response missing id');
+        failed++;
+      } else {
+        const det = await makeRequest(`/api/admin/orgs/${oid}`, { 'x-user-id': 'test-user' });
+        if (det.status === 200) {
+          console.log('✅ PASS: Fetched org details');
+          try { const body = JSON.parse(det.body); console.log(`   keys: ${Object.keys(body).join(', ')}`); } catch(e) {}
+          passed++;
+        } else {
+          console.log(`❌ FAIL: Expected 200 for org details, got ${det.status}`);
+          failed++;
+        }
+      }
     }
   } catch (error) {
     console.log(`❌ FAIL: ${error.message}\n`);

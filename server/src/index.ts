@@ -229,6 +229,16 @@ const app = express();
 // CORS: In production, restrict origin to your frontend domain
 app.use(cors());
 app.use(express.json());
+// Disable ETag generation for API responses to avoid conditional GET returning 304
+app.disable('etag');
+
+// Ensure API responses are not cached by intermediaries or clients
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
 // Apply API key middleware early so endpoints can detect org-scoped or platform keys
 app.use(apiKeyAuthMiddleware as any);
 
