@@ -37,8 +37,8 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
 }
 
 function AdminRoute({ children }: { children: JSX.Element }) {
-  const { user, loading } = useAuth();
-  const role = (user?.user_metadata as any)?.role;
+  const { user, loading, globalRole } = useAuth();
+  const role = (user?.user_metadata as any)?.role || globalRole;
 
   if (loading) {
     return (

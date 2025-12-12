@@ -7,6 +7,8 @@ type AuthContextValue = {
   user: User | null;
   orgId: string | null;
   loading: boolean;
+  globalRole: string | null;
+  refreshProfile: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 };
@@ -17,6 +19,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [globalRole, setGlobalRole] = useState<string | null>(null);
 
   useEffect(() => {
     // Check current session on mount
@@ -26,6 +29,19 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         if (data.session?.user) {
           setUser(data.session.user);
           setOrgId(data.session.user.user_metadata?.org_id ?? null);
+          // fetch profile global_role for this user
+          try {
+            const { data: pData, error: pErr } = await supabase
+              .from('profiles')
+              .select('global_role')
+              .eq('id', data.session.user.id)
+              .maybeSingle();
+            if (!pErr && pData) {
+              setGlobalRole(pData.global_role ?? null);
+            }
+          } catch (e) {
+            // ignore
+          }
         }
       } catch (error) {
         console.error("Error initializing auth:", error);
@@ -43,9 +59,21 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       if (session?.user) {
         setUser(session.user);
         setOrgId(session.user.user_metadata?.org_id ?? null);
+        // refresh profile global_role on auth change
+        try {
+          const { data: pData, error: pErr } = await supabase
+            .from('profiles')
+            .select('global_role')
+            .eq('id', session.user.id)
+            .maybeSingle();
+          if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
+        } catch (e) {
+          // ignore
+        }
       } else {
         setUser(null);
         setOrgId(null);
+        setGlobalRole(null);
       }
       setLoading(false);
     });
@@ -85,13 +113,28 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       await supabase.auth.signOut();
       setUser(null);
       setOrgId(null);
+      setGlobalRole(null);
     } catch (err) {
       console.error("Sign out error:", err);
     }
   };
 
+  const refreshProfile = async () => {
+    try {
+      if (!user) return;
+      const { data: pData, error: pErr } = await supabase
+        .from('profiles')
+        .select('global_role')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
+    } catch (e) {
+      // ignore
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, orgId, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, orgId, loading, globalRole, refreshProfile, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );
@@ -104,3 +147,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+export type { AuthContextValue };

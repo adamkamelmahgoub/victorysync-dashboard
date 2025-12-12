@@ -11,8 +11,8 @@ import ServiceLevelTargetBlock from "./components/ServiceLevelTargetBlock";
 export const Dashboard: FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { orgId: userOrgId, user, signOut } = useAuth();
-  const userRole = (user?.user_metadata as any)?.role;
+  const { orgId: userOrgId, user, signOut, globalRole } = useAuth();
+  const userRole = (user?.user_metadata as any)?.role || globalRole;
   
   // Admin can view any org via ?org_id= param, or see global stats with no param
   const paramOrgId = searchParams.get("org_id");
