@@ -153,7 +153,8 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
         // Remove phone numbers
         for (const phoneId of toRemove) {
           console.log('[EditPhonesModal] removing phone:', phoneId);
-          const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers/${phoneId}`, {
+          const target = (phones.find(p => p.id === phoneId)?.number) || (allPhones.find(p => p.id === phoneId)?.number) || phoneId;
+          const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-numbers/${encodeURIComponent(target)}`, {
             method: 'DELETE',
             headers: { 'x-user-id': user.id },
           });
@@ -591,7 +592,7 @@ function OrgDetailsModal({ org, onClose, onViewDashboard, onPhonesUpdated }: Org
                           if (!window.confirm(`Remove ${phone.number} from this organization?`)) return;
                           try {
                             const res = await fetch(
-                              `${API_BASE_URL}/api/admin/orgs/${org.id}/phone-numbers/${phone.id}`,
+                              `${API_BASE_URL}/api/admin/orgs/${org.id}/phone-numbers/${encodeURIComponent(phone.number || phone.id)}`,
                               { method: 'DELETE', headers: { 'x-user-id': user?.id || '' } }
                             );
                             if (!res.ok) throw new Error('Delete failed');

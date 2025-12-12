@@ -1147,6 +1147,44 @@ app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, re
       }
     }
 
+    // Final fallback: if still nothing deleted, attempt to resolve the provided identifier
+    // as an actual phone number in the `phone_numbers` table (either exact `number` or
+    // `number_digits`). If matches are found, delete any `org_phone_numbers` rows that
+    // reference those phone_numbers via `phone_number_id` for this org.
+    if (deletedCount === 0) {
+      try {
+        // Normalize digits-only representation from the provided string
+        const digitsOnly = (phoneNumberId || '').replace(/\D+/g, '');
+
+        const { data: matchedPhones, error: matchErr } = await supabaseAdmin
+          .from('phone_numbers')
+          .select('id, number, number_digits')
+          .or(`number.eq.${phoneNumberId},number_digits.eq.${digitsOnly}`);
+
+        if (!matchErr && matchedPhones && matchedPhones.length > 0) {
+          const ids = matchedPhones.map((p: any) => p.id);
+          console.log('[unassign_phone] resolved phoneNumberId to phone_numbers ids:', ids);
+
+          const { error: delMapErr } = await supabaseAdmin
+            .from('org_phone_numbers')
+            .delete()
+            .eq('org_id', orgId)
+            .in('phone_number_id', ids);
+
+          if (!delMapErr) {
+            // We can't easily know how many rows were deleted from this single call,
+            // so count this as at least one deletion to avoid returning 404.
+            deletedCount += 1;
+            console.log('[unassign_phone] deleted org_phone_numbers by resolved phone_number_id for org:', orgId);
+          } else {
+            console.warn('[unassign_phone] failed deleting resolved org_phone_numbers:', fmtErr(delMapErr));
+          }
+        }
+      } catch (e) {
+        console.warn('[unassign_phone] final fallback (resolve by phone_numbers) failed:', fmtErr(e));
+      }
+    }
+
     if (deletedCount === 0) {
       return res.status(404).json({ error: 'phone_number_not_found_for_org' });
     }
