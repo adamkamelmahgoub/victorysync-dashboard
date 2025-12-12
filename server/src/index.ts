@@ -268,10 +268,14 @@ app.get("/api/client-metrics", async (req, res) => {
           orgId = userOrgs[0].org_id;
           console.log('[client-metrics] inferred org_id from user:', orgId);
         } else {
-          console.warn('[client-metrics] user not found in any org:', userId);
+          console.log('[client-metrics] user not found in any org, returning zero metrics:', userId);
+          // Return zero metrics for user with no org
+          return res.json({ metrics: { total_calls: 0, answered_calls: 0, answer_rate_pct: 0, avg_wait_seconds: 0 } });
         }
       } catch (e) {
         console.warn('[client-metrics] error inferring org from user:', fmtErr(e));
+        // Return zero metrics on error
+        return res.json({ metrics: { total_calls: 0, answered_calls: 0, answer_rate_pct: 0, avg_wait_seconds: 0 } });
       }
     }
 
