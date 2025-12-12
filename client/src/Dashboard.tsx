@@ -165,7 +165,21 @@ export const Dashboard: FC = () => {
                 ) : error ? (
                   <span className="text-rose-400">Error: {error}</span>
                 ) : (
-                  <span>Stats refresh every 15 seconds based on today's calls.</span>
+                  <div className="space-y-1">
+                    <span>Stats refresh every 15 seconds based on today's calls.</span>
+                    {metrics?.assignedPhones && metrics.assignedPhones.length > 0 && (
+                      <div className="text-[10px] text-slate-400 mt-2">
+                        <div className="font-semibold text-slate-300">Tracking {metrics.assignedPhones.length} phone(s):</div>
+                        <div className="space-y-0.5 mt-1">
+                          {metrics.assignedPhones.map((phone) => (
+                            <div key={phone.id} className="text-emerald-400">
+                              {phone.number} {phone.label ? `(${phone.label})` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
               <div />

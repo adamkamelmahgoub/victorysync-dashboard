@@ -241,7 +241,7 @@ app.get("/", (_req, res) => {
 
 // GET /api/client-metrics?org_id=...
 // If org_id is present: returns metrics for that org
-// If org_id is missing: returns aggregated metrics across all orgs (for admin global view)
+// If org_id is missing: infers from x-user-id (for org clients) or returns global metrics (for admin)
 app.get("/api/client-metrics", async (req, res) => {
   try {
     // Allow API keys to implicitly scope the request to an org
@@ -253,6 +253,27 @@ app.get("/api/client-metrics", async (req, res) => {
     const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
 
     console.log('[client-metrics] Request:', { orgId, todayStart });
+
+    // If org_id not provided, try to infer from x-user-id (for org clients accessing their own metrics)
+    const userId = req.header('x-user-id') || null;
+    if (!orgId && userId) {
+      console.log('[client-metrics] no explicit org_id; attempting to infer from user:', userId);
+      try {
+        const { data: userOrgs, error: userOrgsErr } = await supabaseAdmin
+          .from('org_users')
+          .select('org_id')
+          .eq('user_id', userId)
+          .limit(1);
+        if (!userOrgsErr && userOrgs && userOrgs.length > 0) {
+          orgId = userOrgs[0].org_id;
+          console.log('[client-metrics] inferred org_id from user:', orgId);
+        } else {
+          console.warn('[client-metrics] user not found in any org:', userId);
+        }
+      } catch (e) {
+        console.warn('[client-metrics] error inferring org from user:', fmtErr(e));
+      }
+    }
 
     if (orgId) {
       // Per-org metrics: try the pre-aggregated view first, otherwise compute from `calls`
