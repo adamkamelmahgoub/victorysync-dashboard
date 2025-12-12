@@ -37,3 +37,20 @@ export const TEST_ORG_ID = "d6b7bbde-54bb-4782-989d-cf9093f8cadf";
 // host which can lead to 404s when the frontend and backend are deployed
 // together under the same domain.
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+
+/**
+ * Build a full API URL from a path
+ * Handles the case where API_BASE_URL is empty (same-origin)
+ */
+export function buildApiUrl(path: string): string {
+  // If empty, use same-origin (relative path works fine with fetch)
+  if (!API_BASE_URL) {
+    return path.startsWith('/') ? path : `/${path}`;
+  }
+  // If absolute URL, use it directly
+  if (path.startsWith('http')) {
+    return path;
+  }
+  // Otherwise, combine base URL with path
+  return `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+}

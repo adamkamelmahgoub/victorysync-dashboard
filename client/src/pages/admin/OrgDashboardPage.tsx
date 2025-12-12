@@ -2,7 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useOrgPhoneMetrics } from '../../hooks/useOrgPhoneMetrics';
 import { supabase } from '../../lib/supabaseClient';
-import { API_BASE_URL } from '../../config';
+import { buildApiUrl } from '../../config';
 
 interface Organization {
   id: string;
@@ -50,7 +50,7 @@ export function OrgDashboardPage() {
     try {
       setPerNumberLoading(true);
       // Call server-side endpoint that computes per-phone metrics (avoids client-side Supabase REST calls)
-      const resp = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-metrics`);
+      const resp = await fetch(buildApiUrl('/api/admin/orgs/' + orgId + '/phone-metrics'));
       if (!resp.ok) throw new Error(`Failed to fetch phone metrics: ${resp.statusText}`);
       const body = await resp.json();
       const metricsList = body.metrics || [];
@@ -86,7 +86,7 @@ export function OrgDashboardPage() {
         setError(null);
 
         // Fetch org details
-        const res = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}`);
+        const res = await fetch(buildApiUrl('/api/admin/orgs/' + orgId));
         if (!res.ok) throw new Error('Failed to fetch org details');
         const orgData = await res.json();
         const phonesList = (orgData.phones || []).map((p: any) => ({
