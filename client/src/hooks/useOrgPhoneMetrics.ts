@@ -43,9 +43,9 @@ export function useOrgPhoneMetrics(orgId: string | null, daysBack: number = 1) {
 
         if (phonesErr) throw phonesErr;
 
-        const phoneIds = orgPhones?.map(p => p.phone_number_id) || [];
+        const phoneIds = (orgPhones?.map(p => p.phone_number_id).filter(Boolean)) || [];
 
-        if (phoneIds.length === 0) {
+        if (!phoneIds || phoneIds.length === 0) {
           setData({
             callsToday: 0,
             answeredCalls: 0,
