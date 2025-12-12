@@ -1343,6 +1343,88 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
   }
 });
 
+// GET /api/admin/orgs/:orgId/phone-metrics - per-phone metrics for this org
+app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    if (!orgId) return res.status(400).json({ error: 'missing_orgId' });
+
+    // Use helper which handles multiple schema variants
+    const { phones } = await getAssignedPhoneNumbersForOrg(orgId);
+    const assignedNumbers = (phones || []).map((p: any) => p.number).filter(Boolean);
+    const assignedDigits = (phones || []).map((p: any) => p.number_digits).filter(Boolean);
+
+    if ((assignedNumbers.length === 0 && assignedDigits.length === 0) || !phones || phones.length === 0) {
+      return res.json({ metrics: [] });
+    }
+
+    // Fetch calls for today matching any assigned numbers/digits
+    const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
+    const callsSet: any[] = [];
+    if (assignedNumbers.length > 0) {
+      const { data: callsA, error: errA } = await supabaseAdmin
+        .from('calls')
+        .select('id, status, to_number, to_number_digits, started_at, answered_at, duration')
+        .gte('started_at', todayStart)
+        .in('to_number', assignedNumbers);
+      if (errA) throw errA;
+      if (callsA) callsSet.push(...callsA);
+    }
+    if (assignedDigits.length > 0) {
+      const { data: callsB, error: errB } = await supabaseAdmin
+        .from('calls')
+        .select('id, status, to_number, to_number_digits, started_at, answered_at, duration')
+        .gte('started_at', todayStart)
+        .in('to_number_digits', assignedDigits);
+      if (errB) throw errB;
+      if (callsB) callsSet.push(...callsB);
+    }
+
+    // Group calls by phone (match by number_digits first, then to_number)
+    const metricsMap = new Map<string, any>();
+    for (const p of phones) {
+      metricsMap.set(p.id, { phoneId: p.id, number: p.number, label: p.label ?? null, callsCount: 0, answeredCount: 0, missedCount: 0, answerRate: 0, avgHandleSeconds: 0 });
+    }
+
+    for (const call of callsSet || []) {
+      const digits = call.to_number_digits || null;
+      let matched = null;
+      if (digits) {
+        matched = phones.find((p: any) => p.number_digits === digits);
+      }
+      if (!matched && call.to_number) {
+        matched = phones.find((p: any) => p.number === call.to_number);
+      }
+      if (!matched) continue;
+      const m = metricsMap.get(matched.id);
+      if (!m) continue;
+      m.callsCount += 1;
+      const st = (call.status || '').toString().toLowerCase();
+      if (st === 'answered' || st === 'completed') {
+        m.answeredCount += 1;
+      } else if (st === 'missed') {
+        m.missedCount += 1;
+      }
+      if (call.duration && typeof call.duration === 'number') {
+        m.avgHandleSeconds = (m.avgHandleSeconds || 0) + call.duration;
+      }
+    }
+
+    // finalize averages and answer rate
+    const result = [] as any[];
+    for (const [id, m] of metricsMap.entries()) {
+      const avgHandle = m.callsCount > 0 ? Math.round((m.avgHandleSeconds || 0) / m.callsCount) : 0;
+      const answerRate = m.callsCount > 0 ? Math.round((m.answeredCount / m.callsCount) * 100 * 100) / 100 : 0;
+      result.push({ phoneId: id, number: m.number, label: m.label, callsCount: m.callsCount, answeredCount: m.answeredCount, missedCount: m.missedCount, answerRate, avgHandleSeconds: avgHandle });
+    }
+
+    return res.json({ metrics: result });
+  } catch (err: any) {
+    console.error('phone_metrics_failed:', err?.message ?? err);
+    res.status(500).json({ error: 'phone_metrics_failed', detail: fmtErr(err) });
+  }
+});
+
 // DEBUG: GET raw mappings for org_phone_numbers (admin/org-admins only)
 app.get('/api/admin/orgs/:orgId/raw-phone-mappings', async (req, res) => {
   try {

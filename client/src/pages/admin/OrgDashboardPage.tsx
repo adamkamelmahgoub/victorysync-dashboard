@@ -49,78 +49,22 @@ export function OrgDashboardPage() {
 
     try {
       setPerNumberLoading(true);
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - daysBack);
-      const startDateStr = startDate.toISOString().split('T')[0];
-      const todayStr = new Date().toISOString().split('T')[0];
-
-      // Get phone_numbers with number_digits
-      const { data: phoneDetails } = await supabase
-        .from('phone_numbers')
-        .select('id, number_digits')
-        .in('id', phoneNumbers.map(p => p.id));
-
-      const numberDigitsMap = new Map(
-        (phoneDetails || []).map(p => [p.id, p.number_digits])
-      );
-
-      // Fetch calls for this period
-      const allNumberDigits = Array.from(numberDigitsMap.values()).filter(Boolean);
-      if (allNumberDigits.length === 0) {
-        setPerNumberMetrics(phoneNumbers.map(p => ({
-          phoneId: p.id,
-          number: p.number,
-          label: p.label,
-          callsCount: 0,
-          answeredCount: 0,
-          missedCount: 0,
-          answerRate: 0,
-        })));
-        setPerNumberLoading(false);
-        return;
-      }
-
-      const { data: callsData } = await supabase
-        .from('calls')
-        .select('id, number_digits, is_answered, created_at')
-        .in('number_digits', allNumberDigits)
-        .gte('created_at', startDateStr)
-        .lte('created_at', todayStr);
-
-      // Calculate metrics per phone
-      const metricsMap = new Map<string, PerNumberMetrics>();
-      
-      phoneNumbers.forEach(phone => {
-        metricsMap.set(phone.id, {
-          phoneId: phone.id,
-          number: phone.number,
-          label: phone.label,
-          callsCount: 0,
-          answeredCount: 0,
-          missedCount: 0,
-          answerRate: 0,
-        });
-      });
-
-      (callsData || []).forEach(call => {
-        const matchingPhone = phoneNumbers.find(
-          p => numberDigitsMap.get(p.id) === call.number_digits
-        );
-        if (!matchingPhone) return;
-
-        const metric = metricsMap.get(matchingPhone.id)!;
-        metric.callsCount += 1;
-        if (call.is_answered) {
-          metric.answeredCount += 1;
-        } else {
-          metric.missedCount += 1;
-        }
-        metric.answerRate = metric.callsCount > 0 
-          ? Math.round((metric.answeredCount / metric.callsCount) * 100 * 100) / 100
-          : 0;
-      });
-
-      setPerNumberMetrics(Array.from(metricsMap.values()));
+      // Call server-side endpoint that computes per-phone metrics (avoids client-side Supabase REST calls)
+      const resp = await fetch(`${API_BASE_URL}/api/admin/orgs/${orgId}/phone-metrics`);
+      if (!resp.ok) throw new Error(`Failed to fetch phone metrics: ${resp.statusText}`);
+      const body = await resp.json();
+      const metricsList = body.metrics || [];
+      // Map to PerNumberMetrics shape
+      const mapped = (metricsList || []).map((m: any) => ({
+        phoneId: m.phoneId,
+        number: m.number,
+        label: m.label,
+        callsCount: m.callsCount || 0,
+        answeredCount: m.answeredCount || 0,
+        missedCount: m.missedCount || 0,
+        answerRate: m.answerRate || 0,
+      }));
+      setPerNumberMetrics(mapped);
     } catch (err) {
       console.error('Failed to fetch per-number metrics:', err);
       setPerNumberMetrics([]);
