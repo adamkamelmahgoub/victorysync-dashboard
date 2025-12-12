@@ -5,7 +5,7 @@ type Json = any;
 
 async function fetchJson(path: string, init?: RequestInit) {
   const url = path.startsWith("http") ? path : buildApiUrl(path);
-  const res = await fetch(url, { ...init });
+  const res = await fetch(url, { cache: (init && (init as any).cache) || 'no-store', ...init });
   if (!res.ok) {
     // Try to parse JSON body for structured error details
     let detail: string = res.statusText;
