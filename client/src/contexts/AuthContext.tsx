@@ -106,7 +106,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     password: string
   ): Promise<{ error?: string }> => {
     // Wrap signInWithPassword with a timeout so the UI doesn't hang indefinitely
-    const timeoutMs = 8000;
+    const timeoutMs = 20000;
     try {
       const p = supabase.auth.signInWithPassword({ email, password });
       const timer = new Promise<{ error: string }>((resolve) =>
