@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION public.get_org_phone_metrics(_org_id uuid, _start tim
 RETURNS TABLE (
   phone_id uuid,
   phone_number text,
-  label text,
+  phone_label text,
   calls_count integer,
   answered_count integer,
   missed_count integer,
@@ -59,7 +59,7 @@ BEGIN
     FROM filtered_calls
     GROUP BY key_num
   )
-  SELECT p.id, p.phone_number AS phone_number, p.label,
+  SELECT p.id, p.phone_number AS phone_number, p.label AS phone_label,
     COALESCE(a.calls_count, 0) as calls_count,
     COALESCE(a.answered_count, 0) as answered_count,
     COALESCE(a.missed_count, 0) as missed_count,
@@ -80,7 +80,7 @@ CREATE OR REPLACE FUNCTION public.get_org_phone_metrics_alpha(_end timestamptz, 
 RETURNS TABLE (
   phone_id uuid,
   phone_number text,
-  label text,
+  phone_label text,
   calls_count integer,
   answered_count integer,
   missed_count integer,

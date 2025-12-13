@@ -198,6 +198,48 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
   }
 }
 
+// Helper: fallback calculation for totals using direct DB calls (used when RPC is unavailable)
+async function computeTotalsFromCalls(orgId: string, startTime: Date, endTime: Date, assignedNumbers: string[], assignedDigits: string[]) {
+  const totalsObj = { callsToday: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgSpeedOfAnswer: 0, answerRate: 0 } as any;
+  try {
+    const { data: callFetch, error: callFetchErr } = await supabaseAdmin
+      .from('calls')
+      .select('to_number,to_number_digits,status,answered_at,ended_at,started_at')
+      .gte('started_at', startTime.toISOString())
+      .lte('started_at', endTime.toISOString())
+      .limit(5000);
+    if (callFetchErr) throw callFetchErr;
+    const callRows = (callFetch || []).filter((c: any) => {
+      const n = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
+      if (n && assignedDigits.includes(n)) return true;
+      if (c.to_number && assignedNumbers.includes(c.to_number)) return true;
+      return false;
+    });
+    let sumHandleSecondsLocal = 0; let handleCountLocal = 0; let sumSpeedSecondsLocal = 0; let speedAnsweredCountLocal = 0;
+    for (const c of callRows) {
+      totalsObj.callsToday += 1;
+      const st = (c.status || '').toLowerCase();
+      if (st === 'answered' || st === 'completed') {
+        totalsObj.answeredCalls += 1;
+        if (c.answered_at && c.started_at) {
+          const speedSeconds = (new Date(c.answered_at).getTime() - new Date(c.started_at).getTime())/1000;
+          if (speedSeconds >= 0) { sumSpeedSecondsLocal += speedSeconds; speedAnsweredCountLocal++; }
+        }
+        const handleSeconds = ((c as any).duration != null) ? Number((c as any).duration) : (c.ended_at && c.answered_at ? (new Date(c.ended_at).getTime() - new Date(c.answered_at).getTime())/1000 : 0);
+        if (handleSeconds > 0) { sumHandleSecondsLocal += handleSeconds; handleCountLocal++; }
+      } else if (st === 'missed') {
+        totalsObj.missedCalls += 1;
+      }
+    }
+    totalsObj.avgHandleTime = handleCountLocal > 0 ? Math.round(sumHandleSecondsLocal / handleCountLocal) : 0;
+    totalsObj.avgSpeedOfAnswer = speedAnsweredCountLocal > 0 ? Math.round(sumSpeedSecondsLocal / speedAnsweredCountLocal) : 0;
+    totalsObj.answerRate = totalsObj.callsToday > 0 ? Math.round((totalsObj.answeredCalls / totalsObj.callsToday) * 100 * 10) / 10 : 0;
+  } catch (e) {
+    console.warn('[computeTotalsFromCalls] failed:', fmtErr(e));
+  }
+  return totalsObj;
+}
+
 // In-memory cache for per-org metrics. Keyed by `${orgId}:${range}:${start}:${end}`
 const metricsCache = new Map<string, { ts: number, payload: any }>();
 const METRICS_CACHE_TTL_MS = 60 * 1000; // 60s
@@ -1338,11 +1380,9 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     }
     if (totalsErr) {
       console.warn('[org_detail] get_org_phone_metrics failed:', fmtErr(totalsErr));
-      // fallback to no data
-      const answerRate = 0;
-      const totalCalls = 0; const answeredCalls = 0; const missedCalls = 0;
-      // When function fails, don't crash; send zeros
-      return res.json({ org, members, phones: phones || [], stats: { total_calls: 0, answered_calls: 0, missed_calls: 0, answer_rate_pct: 0 } });
+      // Fallback to compute totals from calls if RPC fails
+      const totalsFallback = await computeTotalsFromCalls(orgId, new Date(todayStart), new Date(), assignedNumbers, assignedDigits);
+      return res.json({ org, members, phones: phones || [], stats: { total_calls: totalsFallback.callsToday, answered_calls: totalsFallback.answeredCalls, missed_calls: totalsFallback.missedCalls, answer_rate_pct: totalsFallback.answerRate } });
     }
     const rows = (totals || []) as any[];
     let totalCalls = 0, answeredCalls = 0, missedCalls = 0;
@@ -1507,7 +1547,7 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
     const metrics = rows.map((r: any) => ({
       phoneId: r.phone_id,
       number: r.phone_number || r.number,
-      label: r.label,
+      label: r.phone_label || r.label,
       callsCount: r.calls_count,
       answeredCount: r.answered_count,
       missedCount: r.missed_count,
@@ -1576,44 +1616,11 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
     const dbMs = Date.now() - t0;
     if (err) {
       console.error(`[org_metrics_totals] rpc failed org=${orgId} range=${range} dbMs=${dbMs} err=${fmtErr(err)}`);
-      // Fallback: compute totals in Node.js by querying calls table
+      // fallback to helper function
       try {
-        const { data: callFetch, error: callFetchErr } = await supabaseAdmin
-          .from('calls')
-          .select('to_number,to_number_digits,status,answered_at,ended_at,started_at')
-          .gte('started_at', startTime.toISOString())
-          .lte('started_at', endTime.toISOString())
-          .limit(5000);
-        if (callFetchErr) throw callFetchErr;
-        const callRows = (callFetch || []).filter((c: any) => {
-          const n = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
-          if (n && assignedDigits.includes(n)) return true;
-          if (c.to_number && assignedNumbers.includes(c.to_number)) return true;
-          return false;
-        });
-        const totalsObj = { callsToday: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgSpeedOfAnswer: 0 } as any;
-        let sumHandleSecondsLocal = 0; let handleCountLocal = 0; let sumSpeedSecondsLocal = 0; let speedAnsweredCountLocal = 0;
-        for (const c of callRows) {
-          totalsObj.callsToday += 1;
-          const st = (c.status || '').toLowerCase();
-          if (st === 'answered' || st === 'completed') {
-            totalsObj.answeredCalls += 1;
-            if (c.answered_at && c.started_at) {
-              const speedSeconds = (new Date(c.answered_at).getTime() - new Date(c.started_at).getTime())/1000;
-              if (speedSeconds >= 0) { sumSpeedSecondsLocal += speedSeconds; speedAnsweredCountLocal++; }
-            }
-            const handleSeconds = ((c as any).duration != null) ? Number((c as any).duration) : (c.ended_at && c.answered_at ? (new Date(c.ended_at).getTime() - new Date(c.answered_at).getTime())/1000 : 0);
-            if (handleSeconds > 0) { sumHandleSecondsLocal += handleSeconds; handleCountLocal++; }
-          } else if (st === 'missed') {
-            totalsObj.missedCalls += 1;
-          }
-        }
-        totalsObj.avgHandleTime = handleCountLocal > 0 ? Math.round(sumHandleSecondsLocal / handleCountLocal) : 0;
-        totalsObj.avgSpeedOfAnswer = speedAnsweredCountLocal > 0 ? Math.round(sumSpeedSecondsLocal / speedAnsweredCountLocal) : 0;
-        // Calculate answer rate
-        totalsObj.answerRate = totalsObj.callsToday > 0 ? Math.round((totalsObj.answeredCalls / totalsObj.callsToday) * 100 * 10) / 10 : 0;
+        const totalsObj = await computeTotalsFromCalls(orgId, startTime, endTime, assignedNumbers, assignedDigits);
         metricsCache.set(cacheKey, { ts: Date.now(), payload: totalsObj });
-        console.info(`[org_metrics_totals] fallback org=${orgId} range=${range} rows=${callRows.length}`);
+        console.info(`[org_metrics_totals] fallback computed totals org=${orgId} range=${range}`);
         return res.json({ totals: totalsObj, cached: false });
       } catch (fallbackErr) {
         console.error('[org_metrics_totals] fallback aggregation failed:', fmtErr(fallbackErr));
