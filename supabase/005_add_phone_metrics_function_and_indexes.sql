@@ -42,8 +42,9 @@ BEGIN
     FROM public.calls
     WHERE started_at >= _start AND started_at <= _end
       AND (
-        to_number IN (SELECT phone_number FROM org_phones) OR
         to_number_digits IN (SELECT phone_digits FROM org_phones)
+        OR regexp_replace(to_number, '\\D', '', 'g') IN (SELECT phone_digits FROM org_phones)
+        OR to_number IN (SELECT phone_number FROM org_phones)
       )
   ),
   agg AS (
