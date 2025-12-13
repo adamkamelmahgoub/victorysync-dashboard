@@ -1316,7 +1316,16 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     // Use the aggregated function for totals (today)
     const startTime = todayStart;
     const endTime = new Date().toISOString();
-    const { data: totals, error: totalsErr } = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime, _end: endTime });
+    let totals:any, totalsErr:any;
+    try {
+      const result = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime, _end: endTime });
+      totals = result.data; totalsErr = result.error;
+      if (!totalsErr) console.info(`[org_detail] rpc_success totals org=${orgId} range=today`);
+    } catch (e) {
+      const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime, _end: endTime });
+      totals = result.data; totalsErr = result.error;
+      if (!totalsErr) console.info(`[org_detail] rpc_alpha_success totals org=${orgId} range=today`);
+    }
     if (totalsErr) {
       console.warn('[org_detail] get_org_phone_metrics failed:', fmtErr(totalsErr));
       // fallback to no data
@@ -1358,6 +1367,8 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
     if (!orgId) return res.status(400).json({ error: 'missing_orgId' });
     // Use helper which handles multiple schema variants
     const { phones } = await getAssignedPhoneNumbersForOrg(orgId);
+    const assignedNumbers = (phones || []).map((p: any) => p.number).filter(Boolean);
+    const assignedDigits = (phones || []).map((p: any) => p.number_digits).filter(Boolean);
     if (!phones || phones.length === 0) return res.json({ metrics: [] });
 
     // Determine range (query param: range=today|7d|30d or start=end ISO timestamps)
@@ -1394,11 +1405,69 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
 
     const queryStart = Date.now();
     // Call the aggregated Postgres function for per-phone metrics
-    const { data: metricsRows, error: metricsErr } = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+    let metricsRows:any, metricsErr:any;
+    try {
+      const result = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+      metricsRows = result.data; metricsErr = result.error;
+    } catch (e) {
+      const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+      metricsRows = result.data; metricsErr = result.error;
+    }
     const dbMs = Date.now() - queryStart;
     if (metricsErr) {
       console.error(`[org_metrics] db_query_failed org=${orgId} range=${range} dbMs=${dbMs} error=${fmtErr(metricsErr)}`);
-      throw metricsErr;
+      // Fallback: perform aggregation in Node.js via two calls queries (to_number and to_number_digits)
+      try {
+        const numQuery = (assignedNumbers && assignedNumbers.length > 0) ? await supabaseAdmin
+          .from('calls')
+          .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
+          .in('to_number', assignedNumbers)
+          .gte('started_at', startTime.toISOString())
+          .lte('started_at', endTime.toISOString()) : { data: [] as any[] };
+        const digQuery = (assignedDigits && assignedDigits.length > 0) ? await supabaseAdmin
+          .from('calls')
+          .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
+          .in('to_number_digits', assignedDigits)
+          .gte('started_at', startTime.toISOString())
+          .lte('started_at', endTime.toISOString()) : { data: [] as any[] };
+        const callRows = (numQuery.data || []).concat(digQuery.data || []);
+        // Aggregate in JS
+        const map = new Map<string, any>();
+        for (const c of callRows) {
+          const key = c.to_number_digits || c.to_number;
+          if (!key) continue;
+          if (!map.has(key)) map.set(key, { calls_count: 0, answered_count: 0, missed_count: 0, sum_handle_seconds: 0, handle_count: 0, sum_speed_seconds: 0, speed_count: 0 });
+          const bucket = map.get(key);
+          bucket.calls_count++;
+          const st = (c.status || '').toLowerCase();
+          if (st === 'answered' || st === 'completed') bucket.answered_count++;
+          if (st === 'missed') bucket.missed_count++;
+          const handleSeconds = (c.duration != null) ? Number(c.duration) : (c.ended_at && c.answered_at ? (new Date(c.ended_at).getTime() - new Date(c.answered_at).getTime())/1000 : 0);
+          if (handleSeconds > 0) {
+            bucket.sum_handle_seconds += handleSeconds;
+            bucket.handle_count++;
+          }
+          if (c.answered_at && c.started_at) {
+            const speedSeconds = (new Date(c.answered_at).getTime() - new Date(c.started_at).getTime())/1000;
+            if (speedSeconds >= 0) {
+              bucket.sum_speed_seconds += speedSeconds;
+              bucket.speed_count++;
+            }
+          }
+        }
+        const fallbackMetrics = Array.from(map.entries()).map(([key, b]) => ({
+          key_num: key,
+          calls_count: b.calls_count,
+          answered_count: b.answered_count,
+          missed_count: b.missed_count,
+          avg_handle_seconds: b.handle_count > 0 ? Math.floor(b.sum_handle_seconds / b.handle_count) : 0,
+          avg_speed_seconds: b.speed_count > 0 ? Math.floor(b.sum_speed_seconds / b.speed_count) : 0,
+        }));
+        metricsRows = fallbackMetrics;
+      } catch (fallbackErr) {
+        console.error('[org_metrics] fallback aggregation failed:', fmtErr(fallbackErr));
+        throw metricsErr;
+      }
     }
 
     const rows = (metricsRows || []) as any[];
@@ -1413,6 +1482,7 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
       missedCount: r.missed_count,
       answerRate: Number(r.answer_rate || 0),
       avgHandleSeconds: Number(r.avg_handle_seconds || 0),
+      avgSpeedSeconds: Number(r.avg_speed_seconds || 0),
     }));
     const serializeMs = Date.now() - serializeStart;
 
@@ -1444,6 +1514,11 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
       else if (range === '30d') startTime.setDate(startTime.getDate() - 29);
     }
 
+    // fetch assigned phone numbers for this org for fallback aggregation
+    const { phones } = await getAssignedPhoneNumbersForOrg(orgId);
+    const assignedNumbers = (phones || []).map((p: any) => p.number).filter(Boolean);
+    const assignedDigits = (phones || []).map((p: any) => p.number_digits).filter(Boolean);
+
     const cacheKey = `${orgId}:totals:${range}:${startTime.toISOString()}:${endTime.toISOString()}`;
     const cached = metricsCache.get(cacheKey);
     if (cached && (Date.now() - cached.ts < METRICS_CACHE_TTL_MS)) {
@@ -1451,15 +1526,68 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
     }
 
     const t0 = Date.now();
-    const { data: rows, error: err } = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+    let rows:any, err:any;
+    try {
+      const result = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+      rows = result.data; err = result.error;
+      if (!err) console.info(`[org_metrics_totals] rpc_success org=${orgId} range=${range}`);
+    } catch (e) {
+      const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+      rows = result.data; err = result.error;
+      if (!err) console.info(`[org_metrics_totals] rpc_alpha_success org=${orgId} range=${range}`);
+    }
     const dbMs = Date.now() - t0;
     if (err) {
       console.error(`[org_metrics_totals] rpc failed org=${orgId} range=${range} dbMs=${dbMs} err=${fmtErr(err)}`);
-      return res.status(500).json({ error: 'metrics_totals_failed', detail: fmtErr(err) });
+      // Fallback: compute totals in Node.js by querying calls table
+      try {
+        const numQuery = (assignedNumbers && assignedNumbers.length > 0) ? await supabaseAdmin
+          .from('calls')
+          .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
+          .in('to_number', assignedNumbers)
+          .gte('started_at', startTime.toISOString())
+          .lte('started_at', endTime.toISOString()) : { data: [] as any[] };
+        const digQuery = (assignedDigits && assignedDigits.length > 0) ? await supabaseAdmin
+          .from('calls')
+          .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
+          .in('to_number_digits', assignedDigits)
+          .gte('started_at', startTime.toISOString())
+          .lte('started_at', endTime.toISOString()) : { data: [] as any[] };
+        const callRows = (numQuery.data || []).concat(digQuery.data || []);
+        const totalsObj = { callsToday: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgSpeedOfAnswer: 0 } as any;
+        let sumHandleSecondsLocal = 0; let handleCountLocal = 0; let sumSpeedSecondsLocal = 0; let speedAnsweredCountLocal = 0;
+        for (const c of callRows) {
+          totalsObj.callsToday += 1;
+          const st = (c.status || '').toLowerCase();
+          if (st === 'answered' || st === 'completed') {
+            totalsObj.answeredCalls += 1;
+            if (c.answered_at && c.started_at) {
+              const speedSeconds = (new Date(c.answered_at).getTime() - new Date(c.started_at).getTime())/1000;
+              if (speedSeconds >= 0) { sumSpeedSecondsLocal += speedSeconds; speedAnsweredCountLocal++; }
+            }
+            const handleSeconds = (c.duration != null) ? Number(c.duration) : (c.ended_at && c.answered_at ? (new Date(c.ended_at).getTime() - new Date(c.answered_at).getTime())/1000 : 0);
+            if (handleSeconds > 0) { sumHandleSecondsLocal += handleSeconds; handleCountLocal++; }
+          } else if (st === 'missed') {
+            totalsObj.missedCalls += 1;
+          }
+        }
+        totalsObj.avgHandleTime = handleCountLocal > 0 ? Math.round(sumHandleSecondsLocal / handleCountLocal) : 0;
+        totalsObj.avgSpeedOfAnswer = speedAnsweredCountLocal > 0 ? Math.round(sumSpeedSecondsLocal / speedAnsweredCountLocal) : 0;
+        // Calculate answer rate
+        totalsObj.answerRate = totalsObj.callsToday > 0 ? Math.round((totalsObj.answeredCalls / totalsObj.callsToday) * 100 * 10) / 10 : 0;
+        metricsCache.set(cacheKey, { ts: Date.now(), payload: totalsObj });
+        console.info(`[org_metrics_totals] fallback org=${orgId} range=${range} rows=${callRows.length}`);
+        return res.json({ totals: totalsObj, cached: false });
+      } catch (fallbackErr) {
+        console.error('[org_metrics_totals] fallback aggregation failed:', fmtErr(fallbackErr));
+        return res.status(500).json({ error: 'metrics_totals_failed', detail: fmtErr(err) });
+      }
     }
     const totals = { callsToday: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgSpeedOfAnswer: 0, answerRate: 0 } as any;
     let sumHandleSeconds = 0;
     let handleCount = 0;
+    let sumSpeedSeconds = 0;
+    let speedAnsweredCount = 0;
     for (const r of (rows || [])) {
       totals.callsToday += Number(r.calls_count || 0);
       totals.answeredCalls += Number(r.answered_count || 0);
@@ -1468,8 +1596,13 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
         sumHandleSeconds += Number(r.avg_handle_seconds || 0) * Number(r.calls_count || 0);
         handleCount += Number(r.calls_count || 0);
       }
+      if (Number(r.avg_speed_seconds || 0) > 0 && Number(r.answered_count || 0) > 0) {
+        sumSpeedSeconds += Number(r.avg_speed_seconds || 0) * Number(r.answered_count || 0);
+        speedAnsweredCount += Number(r.answered_count || 0);
+      }
     }
     totals.avgHandleTime = handleCount > 0 ? Math.round(sumHandleSeconds / handleCount) : 0;
+    totals.avgSpeedOfAnswer = speedAnsweredCount > 0 ? Math.round(sumSpeedSeconds / speedAnsweredCount) : 0;
     totals.answerRate = totals.callsToday > 0 ? Math.round((totals.answeredCalls / totals.callsToday) * 100 * 10) / 10 : 0;
 
     metricsCache.set(cacheKey, { ts: Date.now(), payload: totals });

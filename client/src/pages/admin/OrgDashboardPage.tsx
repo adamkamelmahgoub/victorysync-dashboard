@@ -27,6 +27,7 @@ interface PerNumberMetrics {
   answeredCount: number;
   missedCount: number;
   answerRate: number;
+  avgSpeedSeconds?: number;
 }
 
 export function OrgDashboardPage() {
@@ -71,6 +72,7 @@ export function OrgDashboardPage() {
         answeredCount: m.answeredCount || 0,
         missedCount: m.missedCount || 0,
         answerRate: m.answerRate || 0,
+        avgSpeedSeconds: m.avgSpeedSeconds || 0,
       }));
       setPerNumberMetrics(mapped);
       setPerNumberError(null);
@@ -308,6 +310,7 @@ export function OrgDashboardPage() {
                           <th className="text-center px-4 py-3 text-xs font-semibold text-slate-300">Total Calls</th>
                           <th className="text-center px-4 py-3 text-xs font-semibold text-slate-300">Answered</th>
                           <th className="text-center px-4 py-3 text-xs font-semibold text-slate-300">Missed</th>
+                          <th className="text-center px-4 py-3 text-xs font-semibold text-slate-300">Avg Speed</th>
                           <th className="text-center px-4 py-3 text-xs font-semibold text-slate-300">Answer Rate</th>
                         </tr>
                       </thead>
@@ -328,6 +331,9 @@ export function OrgDashboardPage() {
                               <span className="inline-block px-2 py-1 bg-orange-900/40 text-orange-300 rounded">
                                 {metric.missedCount}
                               </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-center">
+                              <span className="inline-block px-2 py-1 bg-slate-700/30 rounded">{metric.avgSpeedSeconds ? `${metric.avgSpeedSeconds}s` : '—'}</span>
                             </td>
                             <td className="px-4 py-3 text-sm text-center">
                               <span className={`inline-block px-2 py-1 rounded font-semibold ${

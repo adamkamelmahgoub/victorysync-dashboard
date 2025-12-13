@@ -35,19 +35,16 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
           const user = r.data.session.user;
           setUser(user);
           setOrgId(user.user_metadata?.org_id ?? null);
-          // fetch profile global_role for this user
-          try {
-            const { data: pData, error: pErr } = await supabase
-              .from('profiles')
-              .select('global_role')
-              .eq('id', user.id)
-              .maybeSingle();
-            if (!pErr && pData) {
-              setGlobalRole(pData.global_role ?? null);
-            }
-          } catch (e) {
-            // ignore
-          }
+          // fetch profile global_role for this user (don't block auth init)
+          supabase
+            .from('profiles')
+            .select('global_role')
+            .eq('id', user.id)
+            .maybeSingle()
+            .then(({ data: pData, error: pErr }) => {
+              if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
+            })
+            .catch(() => {});
         }
       } catch (error) {
         console.error("Error initializing auth:", error);
@@ -65,17 +62,16 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         if (session?.user) {
           setUser(session.user);
           setOrgId(session.user.user_metadata?.org_id ?? null);
-          // refresh profile global_role on auth change
-          try {
-            const { data: pData, error: pErr } = await supabase
-              .from('profiles')
-              .select('global_role')
-              .eq('id', session.user.id)
-              .maybeSingle();
-            if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
-          } catch (e) {
-            // ignore
-          }
+          // refresh profile global_role on auth change (don't block the callback)
+          supabase
+            .from('profiles')
+            .select('global_role')
+            .eq('id', session.user.id)
+            .maybeSingle()
+            .then(({ data: pData, error: pErr }) => {
+              if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
+            })
+            .catch(() => {});
         } else {
           setUser(null);
           setOrgId(null);
@@ -105,7 +101,13 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   ): Promise<{ error?: string }> => {
     try {
       console.log('[AuthContext] Attempting sign in for:', email);
-      const res = await supabase.auth.signInWithPassword({ email, password });
+      // guard against the Supabase client hanging by adding an explicit timeout
+      const timeoutMs = 10000; // 10s
+      const signInPromise = supabase.auth.signInWithPassword({ email, password });
+      const res: any = await Promise.race([
+        signInPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('sign-in timeout')), timeoutMs)),
+      ]);
       console.log('[AuthContext] Sign in response:', res);
 
       if (res?.error) {
@@ -118,6 +120,11 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         console.log('[AuthContext] Sign in successful, setting user:', data.user.email);
         setUser(data.user);
         setOrgId(data.user.user_metadata?.org_id ?? null);
+      }
+
+      if (!data || !data.user) {
+        console.warn('[AuthContext] Sign in returned no user object');
+        return { error: 'Sign in did not return a user' };
       }
 
       return {};
