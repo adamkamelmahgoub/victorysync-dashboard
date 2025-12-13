@@ -1472,14 +1472,25 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
             }
           }
         }
-        const fallbackMetrics = Array.from(map.entries()).map(([key, b]) => ({
+        const fallbackMetrics = Array.from(map.entries()).map(([key, b]) => {
+          // Try to map key back to an assigned phone to provide readable results when RPC isn't available
+          const phoneMatch = (phones || []).find((p: any) =>
+            p.number_digits === key ||
+            p.number === key ||
+            (p.number && (p.number.replace(/\D/g,'') === key || p.number === `+${key}`))
+          );
+          return {
+          phone_id: phoneMatch?.id ?? null,
+          number: phoneMatch?.number ?? key,
+          label: phoneMatch?.label ?? null,
           key_num: key,
           calls_count: b.calls_count,
           answered_count: b.answered_count,
           missed_count: b.missed_count,
           avg_handle_seconds: b.handle_count > 0 ? Math.floor(b.sum_handle_seconds / b.handle_count) : 0,
           avg_speed_seconds: b.speed_count > 0 ? Math.floor(b.sum_speed_seconds / b.speed_count) : 0,
-        }));
+          };
+        });
         metricsRows = fallbackMetrics;
       } catch (fallbackErr) {
         console.error('[org_metrics] fallback aggregation failed:', fmtErr(fallbackErr));
