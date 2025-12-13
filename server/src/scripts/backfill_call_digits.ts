@@ -1,4 +1,4 @@
-import './env';
+import '../config/env';
 import { supabaseAdmin } from '../lib/supabaseClient';
 import { normalizePhoneDigits } from '../lib/phoneUtils';
 

@@ -12,10 +12,11 @@ CREATE INDEX IF NOT EXISTS idx_calls_org_started_answered ON public.calls (org_i
 
 -- Aggregated function for per-phone metrics
 -- Given an org_id, start_time, end_time returns per-phone aggregated metrics
+DROP FUNCTION IF EXISTS public.get_org_phone_metrics(uuid,timestamptz,timestamptz);
 CREATE OR REPLACE FUNCTION public.get_org_phone_metrics(_org_id uuid, _start timestamptz, _end timestamptz)
 RETURNS TABLE (
   phone_id uuid,
-  number text,
+  phone_number text,
   label text,
   calls_count integer,
   answered_count integer,
@@ -58,7 +59,7 @@ BEGIN
     FROM filtered_calls
     GROUP BY key_num
   )
-  SELECT p.id, p.phone_number AS number, p.label,
+  SELECT p.id, p.phone_number AS phone_number, p.label,
     COALESCE(a.calls_count, 0) as calls_count,
     COALESCE(a.answered_count, 0) as answered_count,
     COALESCE(a.missed_count, 0) as missed_count,
@@ -74,10 +75,11 @@ END; $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 COMMIT;
 
 -- Compatibility wrapper for clients that pass args in different alphabetical orders
+DROP FUNCTION IF EXISTS public.get_org_phone_metrics_alpha(timestamptz,uuid,timestamptz);
 CREATE OR REPLACE FUNCTION public.get_org_phone_metrics_alpha(_end timestamptz, _org_id uuid, _start timestamptz)
 RETURNS TABLE (
   phone_id uuid,
-  number text,
+  phone_number text,
   label text,
   calls_count integer,
   answered_count integer,

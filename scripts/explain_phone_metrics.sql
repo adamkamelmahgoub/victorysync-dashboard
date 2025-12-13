@@ -8,7 +8,7 @@
 
 EXPLAIN ANALYZE
 WITH org_phones AS (
-  SELECT id, number, number_digits
+  SELECT id, number AS phone_number, number_digits
   FROM public.phone_numbers
   WHERE org_id = :'ORG_ID'
 ),
@@ -19,7 +19,7 @@ filtered_calls AS (
   FROM public.calls
   WHERE started_at >= :'START_TIME' AND started_at <= :'END_TIME'
     AND (
-      to_number IN (SELECT number FROM org_phones) OR
+      to_number IN (SELECT phone_number FROM org_phones) OR
       to_number_digits IN (SELECT number_digits FROM org_phones)
     )
 ),
@@ -33,6 +33,6 @@ agg AS (
   FROM filtered_calls
   GROUP BY key_num
 )
-SELECT p.id, p.number, p.number_digits, COALESCE(a.calls_count,0) as calls_count, COALESCE(a.answered_count,0) as answered_count, COALESCE(a.missed_count,0) as missed_count, COALESCE(a.avg_handle_seconds,0) as avg_handle_seconds, COALESCE(a.avg_speed_seconds,0) as avg_speed_seconds
+SELECT p.id, p.phone_number, p.number_digits, COALESCE(a.calls_count,0) as calls_count, COALESCE(a.answered_count,0) as answered_count, COALESCE(a.missed_count,0) as missed_count, COALESCE(a.avg_handle_seconds,0) as avg_handle_seconds, COALESCE(a.avg_speed_seconds,0) as avg_speed_seconds
 FROM org_phones p
-LEFT JOIN agg a ON a.key_num = COALESCE(p.number_digits, p.number);
+LEFT JOIN agg a ON a.key_num = COALESCE(p.number_digits, p.phone_number);

@@ -1472,6 +1472,7 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
             }
           }
         }
+        console.info('[org_metrics] assigned phones count:', (phones || []).length, 'phones sample:', (phones || [])[0] || null);
         const fallbackMetrics = Array.from(map.entries()).map(([key, b]) => {
           // Try to map key back to an assigned phone to provide readable results when RPC isn't available
           const phoneMatch = (phones || []).find((p: any) =>
@@ -1492,6 +1493,7 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
           };
         });
         metricsRows = fallbackMetrics;
+        console.log('[org_metrics] fallbackMetrics raw sample:', JSON.stringify(metricsRows.slice(0,5), null, 2));
       } catch (fallbackErr) {
         console.error('[org_metrics] fallback aggregation failed:', fmtErr(fallbackErr));
         throw metricsErr;
@@ -1500,10 +1502,11 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
 
     const rows = (metricsRows || []) as any[];
     const serializeStart = Date.now();
+    console.info('[org_metrics] raw metricsRows count:', (metricsRows || []).length, 'firstRowKeys:', Object.keys((metricsRows || [])[0] || {}));
     // Convert rows to response format
     const metrics = rows.map((r: any) => ({
       phoneId: r.phone_id,
-      number: r.number,
+      number: r.phone_number || r.number,
       label: r.label,
       callsCount: r.calls_count,
       answeredCount: r.answered_count,
