@@ -9,8 +9,9 @@ async function main() {
   const digits = normalizePhoneDigits(number)!;
   console.log('[check_assigned_calls] orgId:', orgId, 'number:', number, 'digits:', digits);
 
+  const days = Number(process.argv[4] || '1');
   const now = new Date();
-  const start = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  const start = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000)).toISOString();
   const end = now.toISOString();
   const { data, error } = await supabaseAdmin
     .from('calls')
