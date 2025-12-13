@@ -1420,49 +1420,6 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
     metricsCache.set(cacheKey, { ts: Date.now(), payload: metrics });
     console.info(`[org_metrics] org=${orgId} range=${range} rows=${metrics.length} dbMs=${dbMs} serializeMs=${serializeMs}`);
     return res.json({ metrics });
-      let matched = null;
-      if (digits) {
-        matched = phones.find((p: any) => p.number_digits === digits);
-      }
-      if (!matched && call.to_number) {
-        matched = phones.find((p: any) => p.number === call.to_number);
-      }
-      if (!matched) continue;
-      const m = metricsMap.get(matched.id);
-      if (!m) continue;
-      m.callsCount += 1;
-      const st = (call.status || '').toString().toLowerCase();
-      if (st === 'answered' || st === 'completed') {
-        m.answeredCount += 1;
-      } else if (st === 'missed') {
-        m.missedCount += 1;
-      }
-      // compute duration: prefer explicit `duration` if present, otherwise
-      // compute from `ended_at - answered_at` (seconds)
-      let dur = 0;
-      if (call.duration && typeof call.duration === 'number') {
-        dur = call.duration;
-      } else if (call.ended_at && call.answered_at) {
-        const ended = new Date(call.ended_at).getTime();
-        const answered = new Date(call.answered_at).getTime();
-        if (!isNaN(ended) && !isNaN(answered) && ended >= answered) {
-          dur = Math.round((ended - answered) / 1000);
-        }
-      }
-      if (dur > 0) {
-        m.avgHandleSeconds = (m.avgHandleSeconds || 0) + dur;
-      }
-    }
-
-    // finalize averages and answer rate
-    const result = [] as any[];
-    for (const [id, m] of metricsMap.entries()) {
-      const avgHandle = m.callsCount > 0 ? Math.round((m.avgHandleSeconds || 0) / m.callsCount) : 0;
-      const answerRate = m.callsCount > 0 ? Math.round((m.answeredCount / m.callsCount) * 100 * 100) / 100 : 0;
-      result.push({ phoneId: id, number: m.number, label: m.label, callsCount: m.callsCount, answeredCount: m.answeredCount, missedCount: m.missedCount, answerRate, avgHandleSeconds: avgHandle });
-    }
-
-    return res.json({ metrics: result });
   } catch (err: any) {
     console.error('phone_metrics_failed:', err?.message ?? err);
     res.status(500).json({ error: 'phone_metrics_failed', detail: fmtErr(err) });
