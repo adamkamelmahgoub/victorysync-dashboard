@@ -33,21 +33,24 @@ export const TEST_ORG_ID = "d6b7bbde-54bb-4782-989d-cf9093f8cadf";
 // `VITE_API_BASE_URL` when running the client.
 // Default to same-origin when not explicitly set; this avoids making API calls
 // to the production API host when running the static client locally.
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+const DEFAULT_PROD_API = 'https://api.victorysync.com';
+
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? DEFAULT_PROD_API : '');
 
 /**
  * Build a full API URL from a path
  * Handles the case where API_BASE_URL is empty (same-origin)
  */
 export function buildApiUrl(path: string): string {
-  // If empty, use same-origin (relative path works fine with fetch)
+  // If absolute path provided, return as-is
+  if (path.startsWith('http')) return path;
+
+  // If empty API_BASE_URL, use same-origin relative path
   if (!API_BASE_URL) {
     return path.startsWith('/') ? path : `/${path}`;
   }
-  // If absolute URL, use it directly
-  if (path.startsWith('http')) {
-    return path;
-  }
-  // Otherwise, combine base URL with path
-  return `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+
+  // Normalize base URL to not end with trailing slash
+  const base = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+  return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
 }

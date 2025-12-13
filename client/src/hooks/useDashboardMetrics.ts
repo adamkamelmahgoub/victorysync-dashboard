@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_URL, buildApiUrl } from '../config';
+import { fetchJson } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 
 export interface DashboardMetrics {
@@ -85,5 +86,5 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
     }
   }
 
-  return { metrics, loading, error };
+  return { metrics, loading, error, retry: fetchMetrics };
 }

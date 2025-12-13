@@ -24,7 +24,7 @@ export const Dashboard: FC = () => {
   //   - if not present => null => global stats
   const effectiveOrgId = isAdmin ? (paramOrgId ? decodeURIComponent(paramOrgId) : null) : userOrgId;
   
-  const { metrics, loading, error } = useDashboardMetrics(effectiveOrgId);
+  const { metrics, loading, error, retry } = useDashboardMetrics(effectiveOrgId);
 
   const handleSignOut = async () => {
     await signOut();
@@ -163,7 +163,10 @@ export const Dashboard: FC = () => {
                 {loading ? (
                   <span>Loading metrics…</span>
                 ) : error ? (
-                  <span className="text-rose-400">Error: {error}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-rose-400">Error: {error}</span>
+                    <button className="text-xs text-emerald-400 underline" onClick={() => retry?.()}>Retry</button>
+                  </div>
                 ) : (
                   <div className="space-y-1">
                     <span>Stats refresh every 15 seconds based on today's calls.</span>

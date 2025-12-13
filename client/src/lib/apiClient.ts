@@ -3,12 +3,16 @@ import { API_BASE_URL, buildApiUrl } from "../config";
 
 type Json = any;
 
-async function fetchJson(path: string, init?: RequestInit) {
+export async function fetchJson(path: string, init?: RequestInit) {
   const url = path.startsWith("http") ? path : buildApiUrl(path);
   // Use a generous timeout to avoid indefinite fetch hangs in the browser
   const timeoutMs = 10000; // 10s
 
   async function fetchWithTimeout(u: string, i?: RequestInit, t = timeoutMs) {
+    if (typeof (import.meta as any).env !== 'undefined' && (import.meta as any).env.VITE_DEBUG_API === 'true') {
+      // eslint-disable-next-line no-console
+      console.debug(`[fetchWithTimeout] -> ${i?.method || 'GET'} ${u} (timeout=${t}ms)`);
+    }
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), t);
     try {
@@ -25,6 +29,19 @@ async function fetchJson(path: string, init?: RequestInit) {
   }
 
   const res = await fetchWithTimeout(url, init);
+  // Optionally dump response metadata and snippet to console when debug enabled
+  if (typeof (import.meta as any).env !== 'undefined' && (import.meta as any).env.VITE_DEBUG_API === 'true') {
+    const contentType = res.headers.get('content-type') || 'unknown';
+    let snippet = '';
+    try {
+      const text = await res.text();
+      snippet = text.slice(0, 200);
+    } catch (e) {
+      snippet = '<unable to read response text>';
+    }
+    // eslint-disable-next-line no-console
+    console.debug(`[fetchJson] <- ${res.status} ${url} content-type=${contentType} snippet=${JSON.stringify(snippet)}`);
+  }
   if (!res.ok) {
     // Try to parse JSON body for structured error details
     let detail: string = res.statusText;

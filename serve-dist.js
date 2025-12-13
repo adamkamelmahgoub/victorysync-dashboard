@@ -19,6 +19,8 @@ console.log(`[server] Starting client server on port ${PORT}`);
 console.log(`[server] Serving files from: ${DIST_DIR}`);
 
 const server = http.createServer((req, res) => {
+  const now = new Date().toISOString();
+  console.log(`[serve-dist] ${now} ${req.method} ${req.url}`);
   // Parse the URL
   const parsedUrl = url.parse(req.url);
   let pathname = parsedUrl.pathname;
@@ -42,18 +44,20 @@ const server = http.createServer((req, res) => {
     }
   }
 
-  // Construct the file path
-  let filePath = path.join(DIST_DIR, pathname);
+  // Construct the file path (ensure we don't treat absolute paths as root paths)
+  const safePath = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+  let filePath = path.join(DIST_DIR, safePath);
 
-  // Prevent directory traversal
-  if (!filePath.startsWith(DIST_DIR)) {
+  // Normalize and prevent directory traversal
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(path.resolve(DIST_DIR))) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     res.end('Forbidden');
     return;
   }
 
   // Check if file exists
-  fs.stat(filePath, (err, stats) => {
+  fs.stat(resolved, (err, stats) => {
     if (err) {
       if (err.code === 'ENOENT') {
         // If 404, try index.html (for SPA routing)
@@ -80,10 +84,12 @@ const server = http.createServer((req, res) => {
       fs.readFile(filePath, (err, data) => {
         if (err) {
           res.writeHead(404, { 'Content-Type': 'text/plain' });
+          console.warn(`[serve-dist] 404 -> ${req.url} (tried: ${filePath || resolved})`);
           res.end('Not Found');
           return;
         }
         res.writeHead(200, { 'Content-Type': 'text/html' });
+        console.log(`[serve-dist] 200 OK -> ${req.url} -> ${filePath}`);
         res.end(data);
       });
       return;
@@ -116,6 +122,7 @@ const server = http.createServer((req, res) => {
         'Content-Type': contentType,
         'Cache-Control': 'no-cache'
       });
+      console.log(`[serve-dist] 200 OK -> ${req.url} -> ${resolved}`);
       res.end(data);
     });
   });
