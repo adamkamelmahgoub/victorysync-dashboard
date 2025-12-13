@@ -35,95 +35,102 @@ export function useOrgPhoneMetrics(orgId: string | null, daysBack: number = 1) {
         setIsLoading(true);
         setError(null);
 
-        // First get phone numbers assigned to this org
-        const { data: orgPhones, error: phonesErr } = await supabase
-          .from('org_phone_numbers')
-          .select('phone_number_id')
-          .eq('org_id', orgId);
+        // Use 10s timeout to prevent indefinite loading if Supabase is slow
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Metrics query timed out (10s)')), 10000)
+        );
 
-        if (phonesErr) throw phonesErr;
+        const metricsPromise = (async () => {
+          // First get phone numbers assigned to this org
+          const { data: orgPhones, error: phonesErr } = await supabase
+            .from('org_phone_numbers')
+            .select('phone_number_id')
+            .eq('org_id', orgId);
 
-        const phoneIds = (orgPhones?.map(p => p.phone_number_id).filter(Boolean)) || [];
+          if (phonesErr) throw phonesErr;
 
-        if (!phoneIds || phoneIds.length === 0) {
-          setData({
-            callsToday: 0,
-            answeredCalls: 0,
-            missedCalls: 0,
-            answerRate: 0,
-            avgHandleTime: 0,
-            avgSpeedOfAnswer: 0,
-          });
-          setIsLoading(false);
-          return;
-        }
+          const phoneIds = (orgPhones?.map(p => p.phone_number_id).filter(Boolean)) || [];
 
-        // Get phone_numbers with their number_digits
-        const { data: phones, error: phoneDetailsErr } = await supabase
-          .from('phone_numbers')
-          .select('number_digits')
-          .in('id', phoneIds);
+          if (!phoneIds || phoneIds.length === 0) {
+            return {
+              callsToday: 0,
+              answeredCalls: 0,
+              missedCalls: 0,
+              answerRate: 0,
+              avgHandleTime: 0,
+              avgSpeedOfAnswer: 0,
+            };
+          }
 
-        if (phoneDetailsErr) throw phoneDetailsErr;
+          // Get phone_numbers with their number_digits
+          const { data: phones, error: phoneDetailsErr } = await supabase
+            .from('phone_numbers')
+            .select('number_digits')
+            .in('id', phoneIds);
 
-        const numberDigits = phones?.map(p => p.number_digits).filter(Boolean) || [];
+          if (phoneDetailsErr) throw phoneDetailsErr;
 
-        if (numberDigits.length === 0) {
-          setData({
-            callsToday: 0,
-            answeredCalls: 0,
-            missedCalls: 0,
-            answerRate: 0,
-            avgHandleTime: 0,
-            avgSpeedOfAnswer: 0,
-          });
-          setIsLoading(false);
-          return;
-        }
+          const numberDigits = phones?.map(p => p.number_digits).filter(Boolean) || [];
 
-        // Query calls table for metrics
-        // Using a date calculation for flexibility
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - daysBack);
-        const startDateStr = startDate.toISOString().split('T')[0];
+          if (numberDigits.length === 0) {
+            return {
+              callsToday: 0,
+              answeredCalls: 0,
+              missedCalls: 0,
+              answerRate: 0,
+              avgHandleTime: 0,
+              avgSpeedOfAnswer: 0,
+            };
+          }
 
-        const { data: callsData, error: callsErr } = await supabase
-          .from('calls')
-          .select('id, is_answered, duration, speed_of_answer')
-          .in('number_digits', numberDigits)
-          .gte('created_at', startDateStr)
-          .eq('call_date', new Date().toISOString().split('T')[0]); // Only today for "callsToday"
+          // Query calls table for metrics
+          // Using a date calculation for flexibility
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() - daysBack);
+          const startDateStr = startDate.toISOString().split('T')[0];
 
-        if (callsErr) throw callsErr;
+          const { data: callsData, error: callsErr } = await supabase
+            .from('calls')
+            .select('id, is_answered, duration, speed_of_answer')
+            .in('number_digits', numberDigits)
+            .gte('created_at', startDateStr)
+            .eq('call_date', new Date().toISOString().split('T')[0]); // Only today for "callsToday"
 
-        const calls = callsData || [];
-        const callsToday = calls.length;
-        const answeredCalls = calls.filter(c => c.is_answered).length;
-        const missedCalls = callsToday - answeredCalls;
-        const answerRate = callsToday > 0 ? (answeredCalls / callsToday) * 100 : 0;
+          if (callsErr) throw callsErr;
 
-        const validDurations = calls
-          .filter(c => c.duration && typeof c.duration === 'number')
-          .map(c => c.duration as number);
-        const avgHandleTime = validDurations.length > 0
-          ? validDurations.reduce((a, b) => a + b, 0) / validDurations.length
-          : 0;
+          const calls = callsData || [];
+          const callsToday = calls.length;
+          const answeredCalls = calls.filter(c => c.is_answered).length;
+          const missedCalls = callsToday - answeredCalls;
+          const answerRate = callsToday > 0 ? (answeredCalls / callsToday) * 100 : 0;
 
-        const validSpeeds = calls
-          .filter(c => c.speed_of_answer && typeof c.speed_of_answer === 'number')
-          .map(c => c.speed_of_answer as number);
-        const avgSpeedOfAnswer = validSpeeds.length > 0
-          ? validSpeeds.reduce((a, b) => a + b, 0) / validSpeeds.length
-          : 0;
+          const validDurations = calls
+            .filter(c => c.duration && typeof c.duration === 'number')
+            .map(c => c.duration as number);
+          const avgHandleTime = validDurations.length > 0
+            ? validDurations.reduce((a, b) => a + b, 0) / validDurations.length
+            : 0;
 
-        setData({
-          callsToday,
-          answeredCalls,
-          missedCalls,
-          answerRate: Math.round(answerRate * 100) / 100,
-          avgHandleTime: Math.round(avgHandleTime),
-          avgSpeedOfAnswer: Math.round(avgSpeedOfAnswer),
-        });
+          const validSpeeds = calls
+            .filter(c => c.speed_of_answer && typeof c.speed_of_answer === 'number')
+            .map(c => c.speed_of_answer as number);
+          const avgSpeedOfAnswer = validSpeeds.length > 0
+            ? validSpeeds.reduce((a, b) => a + b, 0) / validSpeeds.length
+            : 0;
+
+          return {
+            callsToday,
+            answeredCalls,
+            missedCalls,
+            answerRate: Math.round(answerRate * 100) / 100,
+            avgHandleTime: Math.round(avgHandleTime),
+            avgSpeedOfAnswer: Math.round(avgSpeedOfAnswer),
+          };
+        })();
+
+        // Race against timeout
+        const result = await Promise.race([metricsPromise, timeoutPromise]);
+        setData(result);
       } catch (err: any) {
         console.error('Failed to fetch org metrics:', err);
         setError(err?.message || 'Failed to fetch metrics');

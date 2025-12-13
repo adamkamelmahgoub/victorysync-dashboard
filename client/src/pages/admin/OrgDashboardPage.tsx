@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useOrgPhoneMetrics } from '../../hooks/useOrgPhoneMetrics';
 import { supabase } from '../../lib/supabaseClient';
 import { buildApiUrl } from '../../config';
+import { fetchJson } from '../../lib/apiClient';
 
 interface Organization {
   id: string;
@@ -37,6 +38,7 @@ export function OrgDashboardPage() {
   const [daysBack, setDaysBack] = useState(1);
   const [loading, setLoading] = useState(true);
   const [perNumberLoading, setPerNumberLoading] = useState(false);
+  const [perNumberError, setPerNumberError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
 
@@ -46,16 +48,18 @@ export function OrgDashboardPage() {
   const fetchPerNumberMetrics = async (phoneNumbers: PhoneNumberInfo[]) => {
     if (!orgId || phoneNumbers.length === 0) {
       setPerNumberMetrics([]);
+      setPerNumberError(null);
       return;
     }
 
     try {
       setPerNumberLoading(true);
-      // Call server-side endpoint that computes per-phone metrics (avoids client-side Supabase REST calls)
-      const resp = await fetch(buildApiUrl('/api/admin/orgs/' + orgId + '/phone-metrics'), { cache: 'no-store', headers: { 'x-user-id': user?.id || '' } });
-      if (!resp.ok) throw new Error(`Failed to fetch phone metrics: ${resp.statusText}`);
-      const body = await resp.json();
+      setPerNumberError(null);
+      
+      // Use fetchJson with timeout instead of raw fetch
+      const body = await fetchJson(`/api/admin/orgs/${orgId}/phone-metrics`);
       const metricsList = body.metrics || [];
+      
       // Map to PerNumberMetrics shape
       const mapped = (metricsList || []).map((m: any) => ({
         phoneId: m.phoneId,
@@ -67,9 +71,11 @@ export function OrgDashboardPage() {
         answerRate: m.answerRate || 0,
       }));
       setPerNumberMetrics(mapped);
-    } catch (err) {
+      setPerNumberError(null);
+    } catch (err: any) {
       console.error('Failed to fetch per-number metrics:', err);
       setPerNumberMetrics([]);
+      setPerNumberError(err?.message || 'Failed to load per-number metrics');
     } finally {
       setPerNumberLoading(false);
     }
@@ -276,6 +282,16 @@ export function OrgDashboardPage() {
                 <h2 className="text-lg font-semibold mb-4">Metrics by Phone Number</h2>
                 {perNumberLoading ? (
                   <div className="text-center py-8 text-slate-400 text-sm">Loading per-number metrics...</div>
+                ) : perNumberError ? (
+                  <div className="rounded-lg border border-red-700/30 bg-red-900/20 p-6">
+                    <div className="text-sm text-red-400 font-semibold mb-3">{perNumberError}</div>
+                    <button
+                      onClick={() => fetchPerNumberMetrics(phones)}
+                      className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-sm rounded transition"
+                    >
+                      Retry
+                    </button>
+                  </div>
                 ) : perNumberMetrics.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-600 bg-slate-800/20 p-6 text-center">
                     <div className="text-sm text-slate-400">No call data available</div>
