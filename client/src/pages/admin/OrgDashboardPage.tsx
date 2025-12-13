@@ -56,8 +56,10 @@ export function OrgDashboardPage() {
       setPerNumberLoading(true);
       setPerNumberError(null);
       
-      // Use fetchJson with timeout instead of raw fetch
-      const body = await fetchJson(`/api/admin/orgs/${orgId}/phone-metrics`);
+      // Use fetchJson with timeout instead of raw fetch; include range param for server-side optimization
+      const rangeParam = daysBack === 1 ? 'today' : daysBack === 7 ? '7d' : daysBack === 30 ? '30d' : `custom`; 
+      const qs = rangeParam === 'custom' ? `?start=${encodeURIComponent(new Date(Date.now() - daysBack*24*60*60*1000).toISOString())}&end=${encodeURIComponent(new Date().toISOString())}` : `?range=${rangeParam}`;
+      const body = await fetchJson(`/api/admin/orgs/${orgId}/phone-metrics${qs}`);
       const metricsList = body.metrics || [];
       
       // Map to PerNumberMetrics shape

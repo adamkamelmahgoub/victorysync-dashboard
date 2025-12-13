@@ -189,6 +189,10 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
   }
 }
 
+// In-memory cache for per-org metrics. Keyed by `${orgId}:${range}:${start}:${end}`
+const metricsCache = new Map<string, { ts: number, payload: any }>();
+const METRICS_CACHE_TTL_MS = 60 * 1000; // 60s
+
 // Cache for extension->display name during a single request
 async function resolveAgentNameForExtension(ext: string | null, orgId?: string) {
   if (!ext) return null;
@@ -1309,30 +1313,24 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
       return res.json({ org, members, phones: phones || [], stats: { total_calls: 0, answered_calls: 0, missed_calls: 0, answer_rate_pct: answerRate } });
     }
 
-    // Fetch calls that match either E.164 `to_number` or digit-only `to_number_digits`
-    const callsSet: any[] = [];
-    if (assignedNumbers.length > 0) {
-      const { data: callsA, error: errA } = await supabaseAdmin.from('calls').select('status, to_number, started_at').gte('started_at', todayStart).in('to_number', assignedNumbers);
-      if (errA) throw errA;
-      if (callsA) callsSet.push(...callsA);
+    // Use the aggregated function for totals (today)
+    const startTime = todayStart;
+    const endTime = new Date().toISOString();
+    const { data: totals, error: totalsErr } = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime, _end: endTime });
+    if (totalsErr) {
+      console.warn('[org_detail] get_org_phone_metrics failed:', fmtErr(totalsErr));
+      // fallback to no data
+      const answerRate = 0;
+      const totalCalls = 0; const answeredCalls = 0; const missedCalls = 0;
+      // When function fails, don't crash; send zeros
+      return res.json({ org, members, phones: phones || [], stats: { total_calls: 0, answered_calls: 0, missed_calls: 0, answer_rate_pct: 0 } });
     }
-    if (assignedDigits.length > 0) {
-      const { data: callsB, error: errB } = await supabaseAdmin.from('calls').select('status, to_number, started_at').gte('started_at', todayStart).in('to_number_digits', assignedDigits);
-      if (errB) throw errB;
-      if (callsB) callsSet.push(...callsB);
-    }
-
-    // Deduplicate calls by a composite key (started_at + to_number)
-    const seen = new Set<string>();
-    let totalCalls = 0; let answeredCalls = 0; let missedCalls = 0;
-    for (const call of callsSet || []) {
-      const key = `${call.started_at || ''}::${call.to_number || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const st = (call.status || '').toString().toLowerCase();
-      totalCalls += 1;
-      if (st === 'answered' || st === 'completed') answeredCalls += 1;
-      else if (st === 'missed') missedCalls += 1;
+    const rows = (totals || []) as any[];
+    let totalCalls = 0, answeredCalls = 0, missedCalls = 0;
+    for (const r of rows) {
+      totalCalls += Number(r.calls_count || 0);
+      answeredCalls += Number(r.answered_count || 0);
+      missedCalls += Number(r.missed_count || 0);
     }
     const answerRate = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
 
@@ -1358,46 +1356,70 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
   try {
     const { orgId } = req.params;
     if (!orgId) return res.status(400).json({ error: 'missing_orgId' });
-
     // Use helper which handles multiple schema variants
     const { phones } = await getAssignedPhoneNumbersForOrg(orgId);
-    const assignedNumbers = (phones || []).map((p: any) => p.number).filter(Boolean);
-    const assignedDigits = (phones || []).map((p: any) => p.number_digits).filter(Boolean);
+    if (!phones || phones.length === 0) return res.json({ metrics: [] });
 
-    if ((assignedNumbers.length === 0 && assignedDigits.length === 0) || !phones || phones.length === 0) {
-      return res.json({ metrics: [] });
+    // Determine range (query param: range=today|7d|30d or start=end ISO timestamps)
+    const range = (req.query.range as string) || 'today';
+    let startTime = new Date(new Date().setHours(0,0,0,0));
+    let endTime = new Date();
+    if (req.query.start && req.query.end) {
+      startTime = new Date(String(req.query.start));
+      endTime = new Date(String(req.query.end));
+    } else {
+      if (range === '7d') {
+        startTime.setDate(startTime.getDate() - 6);
+      } else if (range === '30d') {
+        startTime.setDate(startTime.getDate() - 29);
+      } else { // default: today
+        /* startTime already set to start of day */
+      }
     }
 
-    // Fetch calls for today matching any assigned numbers/digits
-    const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
-    const callsSet: any[] = [];
-    if (assignedNumbers.length > 0) {
-      const { data: callsA, error: errA } = await supabaseAdmin
-        .from('calls')
-        .select('id, status, to_number, to_number_digits, started_at, answered_at, ended_at')
-        .gte('started_at', todayStart)
-        .in('to_number', assignedNumbers);
-      if (errA) throw errA;
-      if (callsA) callsSet.push(...callsA);
-    }
-    if (assignedDigits.length > 0) {
-      const { data: callsB, error: errB } = await supabaseAdmin
-        .from('calls')
-        .select('id, status, to_number, to_number_digits, started_at, answered_at, ended_at')
-        .gte('started_at', todayStart)
-        .in('to_number_digits', assignedDigits);
-      if (errB) throw errB;
-      if (callsB) callsSet.push(...callsB);
+    // enforce a sensible maximum range to avoid long-running queries
+    const MAX_RANGE_DAYS = 90;
+    const msRange = endTime.getTime() - startTime.getTime();
+    if (msRange > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: 'range_too_large', detail: `Range must be <= ${MAX_RANGE_DAYS} days` });
     }
 
-    // Group calls by phone (match by number_digits first, then to_number)
-    const metricsMap = new Map<string, any>();
-    for (const p of phones) {
-      metricsMap.set(p.id, { phoneId: p.id, number: p.number, label: p.label ?? null, callsCount: 0, answeredCount: 0, missedCount: 0, answerRate: 0, avgHandleSeconds: 0 });
+    // Use in-memory cache keyed by range and time window
+    const cacheKey = `${orgId}:${range}:${startTime.toISOString()}:${endTime.toISOString()}`;
+    const cached = metricsCache.get(cacheKey);
+    if (cached && (Date.now() - cached.ts < METRICS_CACHE_TTL_MS)) {
+      console.info(`[org_metrics] cache_hit org=${orgId} range=${range} start=${startTime.toISOString()} end=${endTime.toISOString()}`);
+      return res.json({ metrics: cached.payload, cached: true });
     }
 
-    for (const call of callsSet || []) {
-      const digits = call.to_number_digits || null;
+    const queryStart = Date.now();
+    // Call the aggregated Postgres function for per-phone metrics
+    const { data: metricsRows, error: metricsErr } = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+    const dbMs = Date.now() - queryStart;
+    if (metricsErr) {
+      console.error(`[org_metrics] db_query_failed org=${orgId} range=${range} dbMs=${dbMs} error=${fmtErr(metricsErr)}`);
+      throw metricsErr;
+    }
+
+    const rows = (metricsRows || []) as any[];
+    const serializeStart = Date.now();
+    // Convert rows to response format
+    const metrics = rows.map((r: any) => ({
+      phoneId: r.phone_id,
+      number: r.number,
+      label: r.label,
+      callsCount: r.calls_count,
+      answeredCount: r.answered_count,
+      missedCount: r.missed_count,
+      answerRate: Number(r.answer_rate || 0),
+      avgHandleSeconds: Number(r.avg_handle_seconds || 0),
+    }));
+    const serializeMs = Date.now() - serializeStart;
+
+    // Cache the payload
+    metricsCache.set(cacheKey, { ts: Date.now(), payload: metrics });
+    console.info(`[org_metrics] org=${orgId} range=${range} rows=${metrics.length} dbMs=${dbMs} serializeMs=${serializeMs}`);
+    return res.json({ metrics });
       let matched = null;
       if (digits) {
         matched = phones.find((p: any) => p.number_digits === digits);
@@ -1444,6 +1466,61 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
   } catch (err: any) {
     console.error('phone_metrics_failed:', err?.message ?? err);
     res.status(500).json({ error: 'phone_metrics_failed', detail: fmtErr(err) });
+  }
+});
+
+// GET /api/admin/orgs/:orgId/metrics - aggregated totals for an org
+app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    if (!orgId) return res.status(400).json({ error: 'missing_orgId' });
+
+    // Determine range
+    const range = (req.query.range as string) || 'today';
+    let startTime = new Date(new Date().setHours(0,0,0,0));
+    let endTime = new Date();
+    if (req.query.start && req.query.end) {
+      startTime = new Date(String(req.query.start));
+      endTime = new Date(String(req.query.end));
+    } else {
+      if (range === '7d') startTime.setDate(startTime.getDate() - 6);
+      else if (range === '30d') startTime.setDate(startTime.getDate() - 29);
+    }
+
+    const cacheKey = `${orgId}:totals:${range}:${startTime.toISOString()}:${endTime.toISOString()}`;
+    const cached = metricsCache.get(cacheKey);
+    if (cached && (Date.now() - cached.ts < METRICS_CACHE_TTL_MS)) {
+      return res.json({ totals: cached.payload, cached: true });
+    }
+
+    const t0 = Date.now();
+    const { data: rows, error: err } = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+    const dbMs = Date.now() - t0;
+    if (err) {
+      console.error(`[org_metrics_totals] rpc failed org=${orgId} range=${range} dbMs=${dbMs} err=${fmtErr(err)}`);
+      return res.status(500).json({ error: 'metrics_totals_failed', detail: fmtErr(err) });
+    }
+    const totals = { callsToday: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgSpeedOfAnswer: 0, answerRate: 0 } as any;
+    let sumHandleSeconds = 0;
+    let handleCount = 0;
+    for (const r of (rows || [])) {
+      totals.callsToday += Number(r.calls_count || 0);
+      totals.answeredCalls += Number(r.answered_count || 0);
+      totals.missedCalls += Number(r.missed_count || 0);
+      if (Number(r.avg_handle_seconds || 0) > 0) {
+        sumHandleSeconds += Number(r.avg_handle_seconds || 0) * Number(r.calls_count || 0);
+        handleCount += Number(r.calls_count || 0);
+      }
+    }
+    totals.avgHandleTime = handleCount > 0 ? Math.round(sumHandleSeconds / handleCount) : 0;
+    totals.answerRate = totals.callsToday > 0 ? Math.round((totals.answeredCalls / totals.callsToday) * 100 * 10) / 10 : 0;
+
+    metricsCache.set(cacheKey, { ts: Date.now(), payload: totals });
+    console.info(`[org_metrics_totals] org=${orgId} range=${range} rows=${(rows||[]).length} dbMs=${dbMs}`);
+    return res.json({ totals });
+  } catch (err: any) {
+    console.error('org_metrics_totals_failed:', fmtErr(err));
+    return res.status(500).json({ error: 'org_metrics_totals_failed', detail: fmtErr(err) });
   }
 });
 
