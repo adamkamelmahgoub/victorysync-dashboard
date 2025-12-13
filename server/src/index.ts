@@ -95,6 +95,7 @@ async function apiKeyAuthMiddleware(req: any, res: any, next: any) {
         await supabaseAdmin.from('org_api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', v.keyId);
       }
     }
+    
     return next();
   } catch (e) {
     console.warn('[apiKeyAuthMiddleware] failure', fmtErr(e));
@@ -115,6 +116,7 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
       console.warn('[getAssignedPhoneNumbersForOrg] org_phone_numbers select failed:', fmtErr(rowsErr));
       return { phones: [], numbers: [], digits: [] };
     }
+    
 
     const rowsArr = (rows || []) as any[];
     console.log('[getAssignedPhoneNumbersForOrg] found', rowsArr.length, 'rows for orgId', orgId);
@@ -128,6 +130,7 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
         phoneIds.add(r.phone_number);
       }
     }
+    
     
     const phonesById: Record<string, any> = {};
     if (phoneIds.size > 0) {
@@ -1318,14 +1321,20 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     const startTime = todayStart;
     const endTime = new Date().toISOString();
     let totals:any, totalsErr:any;
+    let rpcErr:any = null;
     try {
       const result = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime, _end: endTime });
       totals = result.data; totalsErr = result.error;
       if (!totalsErr) console.info(`[org_detail] rpc_success totals org=${orgId} range=today`);
-    } catch (e) {
-      const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime, _end: endTime });
-      totals = result.data; totalsErr = result.error;
-      if (!totalsErr) console.info(`[org_detail] rpc_alpha_success totals org=${orgId} range=today`);
+    } catch (e1) {
+      rpcErr = e1;
+      try {
+        const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime, _end: endTime });
+        totals = result.data; totalsErr = result.error;
+        if (!totalsErr) console.info(`[org_detail] rpc_alpha_success totals org=${orgId} range=today`);
+      } catch (e2) {
+        rpcErr = e2;
+      }
     }
     if (totalsErr) {
       console.warn('[org_detail] get_org_phone_metrics failed:', fmtErr(totalsErr));
@@ -1407,12 +1416,18 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
     const queryStart = Date.now();
     // Call the aggregated Postgres function for per-phone metrics
     let metricsRows:any, metricsErr:any;
+    let metricsRpcErr:any = null;
     try {
       const result = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
       metricsRows = result.data; metricsErr = result.error;
-    } catch (e) {
-      const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
-      metricsRows = result.data; metricsErr = result.error;
+    } catch (e1) {
+      metricsRpcErr = e1;
+      try {
+        const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+        metricsRows = result.data; metricsErr = result.error;
+      } catch (e2) {
+        metricsRpcErr = e2;
+      }
     }
     const dbMs = Date.now() - queryStart;
     if (metricsErr) {
@@ -1529,14 +1544,20 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
 
     const t0 = Date.now();
     let rows:any, err:any;
+    let totalsRpcErr:any = null;
     try {
       const result = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
       rows = result.data; err = result.error;
       if (!err) console.info(`[org_metrics_totals] rpc_success org=${orgId} range=${range}`);
-    } catch (e) {
-      const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
-      rows = result.data; err = result.error;
-      if (!err) console.info(`[org_metrics_totals] rpc_alpha_success org=${orgId} range=${range}`);
+    } catch (e1) {
+      totalsRpcErr = e1;
+      try {
+        const result = await supabaseAdmin.rpc('get_org_phone_metrics_alpha', { _org_id: orgId, _start: startTime.toISOString(), _end: endTime.toISOString() });
+        rows = result.data; err = result.error;
+        if (!err) console.info(`[org_metrics_totals] rpc_alpha_success org=${orgId} range=${range}`);
+      } catch (e2) {
+        totalsRpcErr = e2;
+      }
     }
     const dbMs = Date.now() - t0;
     if (err) {
