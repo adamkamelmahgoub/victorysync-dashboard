@@ -1437,7 +1437,7 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
         // Fetch recent calls for the range and filter by normalized digits or exact to_number match
         const { data: callFetch, error: callFetchErr } = await supabaseAdmin
           .from('calls')
-          .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
+          .select('to_number,to_number_digits,status,answered_at,ended_at,started_at')
           .gte('started_at', startTime.toISOString())
           .lte('started_at', endTime.toISOString())
           .limit(5000);
@@ -1459,7 +1459,7 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
           const st = (c.status || '').toLowerCase();
           if (st === 'answered' || st === 'completed') bucket.answered_count++;
           if (st === 'missed') bucket.missed_count++;
-          const handleSeconds = (c.duration != null) ? Number(c.duration) : (c.ended_at && c.answered_at ? (new Date(c.ended_at).getTime() - new Date(c.answered_at).getTime())/1000 : 0);
+          const handleSeconds = ((c as any).duration != null) ? Number((c as any).duration) : (c.ended_at && c.answered_at ? (new Date(c.ended_at).getTime() - new Date(c.answered_at).getTime())/1000 : 0);
           if (handleSeconds > 0) {
             bucket.sum_handle_seconds += handleSeconds;
             bucket.handle_count++;
@@ -1566,7 +1566,7 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
       try {
         const { data: callFetch, error: callFetchErr } = await supabaseAdmin
           .from('calls')
-          .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
+          .select('to_number,to_number_digits,status,answered_at,ended_at,started_at')
           .gte('started_at', startTime.toISOString())
           .lte('started_at', endTime.toISOString())
           .limit(5000);
@@ -1588,7 +1588,7 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
               const speedSeconds = (new Date(c.answered_at).getTime() - new Date(c.started_at).getTime())/1000;
               if (speedSeconds >= 0) { sumSpeedSecondsLocal += speedSeconds; speedAnsweredCountLocal++; }
             }
-            const handleSeconds = (c.duration != null) ? Number(c.duration) : (c.ended_at && c.answered_at ? (new Date(c.ended_at).getTime() - new Date(c.answered_at).getTime())/1000 : 0);
+            const handleSeconds = ((c as any).duration != null) ? Number((c as any).duration) : (c.ended_at && c.answered_at ? (new Date(c.ended_at).getTime() - new Date(c.answered_at).getTime())/1000 : 0);
             if (handleSeconds > 0) { sumHandleSecondsLocal += handleSeconds; handleCountLocal++; }
           } else if (st === 'missed') {
             totalsObj.missedCalls += 1;
