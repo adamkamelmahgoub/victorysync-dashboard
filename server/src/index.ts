@@ -31,6 +31,7 @@ import express from "express";
 import cors from "cors";
 import crypto from 'crypto';
 import { supabase, supabaseAdmin } from './lib/supabaseClient';
+import { normalizePhoneDigits, normalizeToE164FromRaw } from './lib/phoneUtils';
 import { fetchMightyCallPhoneNumbers, fetchMightyCallExtensions, syncMightyCallPhoneNumbers } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgManagerWith } from './auth/rbac';
 
@@ -180,7 +181,12 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
     }
 
     const numbers = phones.map(p => p.number).filter(Boolean);
-    const digits = phones.map(p => (p.number_digits || (p.number || '').toString().replace(/\D/g, ''))).filter(Boolean);
+    const digits = phones.map(p => {
+      if (p.number_digits) return p.number_digits;
+      // normalize number fallback
+      const d = normalizePhoneDigits(p.number);
+      return d ?? null;
+    }).filter(Boolean);
     console.log('[getAssignedPhoneNumbersForOrg] returning', phones.length, 'phones for orgId', orgId);
     return { phones, numbers, digits };
   } catch (e) {
@@ -1611,6 +1617,52 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
   } catch (err: any) {
     console.error('org_metrics_totals_failed:', fmtErr(err));
     return res.status(500).json({ error: 'org_metrics_totals_failed', detail: fmtErr(err) });
+  }
+});
+
+// DEBUG: /api/admin/orgs/:orgId/metrics/debug - show assigned phones and top destination digits
+app.get('/api/admin/orgs/:orgId/metrics/debug', async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    if (!orgId) return res.status(400).json({ error: 'missing_orgId' });
+    const now = new Date();
+    const since = new Date(now.getTime() - 1000 * 60 * 60 * 24 * 30).toISOString(); // 30 days
+
+    const { phones } = await getAssignedPhoneNumbersForOrg(orgId);
+    const assigned = (phones || []).map((p: any) => ({ id: p.id, number: p.number, number_digits: p.number_digits || normalizePhoneDigits(p.number) }));
+
+    // Query recent calls to get distinct normalized digits
+    const { data: callsData, error: callsErr } = await supabaseAdmin
+      .from('calls')
+      .select('to_number_digits, to_number')
+      .gte('started_at', since)
+      .limit(1000)
+      .order('started_at', { ascending: false });
+    if (callsErr) console.warn('[metrics_debug] calls query error', fmtErr(callsErr));
+
+    const freq: Record<string, number> = {};
+    for (const row of (callsData || [])) {
+      const d = row?.to_number_digits || normalizePhoneDigits(row?.to_number || null) || null;
+      if (!d) continue;
+      freq[d] = (freq[d] || 0) + 1;
+    }
+    const topDigits = Object.entries(freq).map(([digits, count]) => ({ digits, count })).sort((a: any, b: any) => b.count - a.count).slice(0, 50);
+
+    const matches: any[] = [];
+    for (const p of assigned) {
+      const d = p.number_digits;
+      if (!d) { matches.push({ phone: p.number, digits: null, matchCount: 0 }); continue; }
+      const { count, error: cErr } = await supabaseAdmin
+        .from('calls')
+        .select('id', { count: 'exact', head: true })
+        .gte('started_at', since)
+        .or(`to_number_digits.eq.${d},to_number.eq.${d},to_number.eq.+${d}`);
+      matches.push({ phone: p.number, digits: d, matchCount: (count || 0), error: cErr ? String(cErr) : undefined });
+    }
+    return res.json({ assigned, topDigits, matches });
+  } catch (err: any) {
+    console.error('metrics_debug_failed:', fmtErr(err));
+    return res.status(500).json({ error: 'metrics_debug_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
