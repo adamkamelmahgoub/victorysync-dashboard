@@ -22,19 +22,25 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [globalRole, setGlobalRole] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check current session on mount
+    // Check current session on mount, but timeout to avoid infinite loading
     const initializeAuth = async () => {
       try {
-        const { data } = await supabase.auth.getSession();
-        if (data.session?.user) {
-          setUser(data.session.user);
-          setOrgId(data.session.user.user_metadata?.org_id ?? null);
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 5000));
+        const getSessionPromise = supabase.auth.getSession();
+
+        const r: any = await Promise.race([getSessionPromise, timeoutPromise]);
+        if (r && r.timeout) {
+          console.warn('[AuthContext] getSession timed out after 5000ms');
+        } else if (r && r.data && r.data.session?.user) {
+          const user = r.data.session.user;
+          setUser(user);
+          setOrgId(user.user_metadata?.org_id ?? null);
           // fetch profile global_role for this user
           try {
             const { data: pData, error: pErr } = await supabase
               .from('profiles')
               .select('global_role')
-              .eq('id', data.session.user.id)
+              .eq('id', user.id)
               .maybeSingle();
             if (!pErr && pData) {
               setGlobalRole(pData.global_role ?? null);
@@ -82,8 +88,6 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       console.warn('Auth subscription failed to initialize:', e);
       subscription = null;
     }
-
-    // No timeout fallback: avoid races by waiting for actual auth state
 
     return () => {
       try {

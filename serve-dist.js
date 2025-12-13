@@ -10,9 +10,30 @@ const path = require('path');
 const url = require('url');
 
 const PORT = 3000;
-const BASE_PATH = process.env.VITE_BASE_PATH ?? '/';
+let BASE_PATH = process.env.VITE_BASE_PATH ?? '/';
 // Normalize base path to always end with a slash, and ensure it starts with a slash.
-const normalizedBase = (BASE_PATH.startsWith('/') ? BASE_PATH : '/' + BASE_PATH).replace(/([^/])$/, '$1/')
+let normalizedBase = (BASE_PATH.startsWith('/') ? BASE_PATH : '/' + BASE_PATH).replace(/([^/])$/, '$1/')
+
+// If no explicit base path was provided, attempt to detect it from index.html
+if (process.env.VITE_BASE_PATH == null || process.env.VITE_BASE_PATH === '') {
+  try {
+    const indexHtml = fs.readFileSync(path.join(DIST_DIR, 'index.html'), 'utf8');
+    // Find the first script src or link href that includes '/assets/' and extract prefix
+    const m = indexHtml.match(/(?:src|href)\s*=\s*\"(\/[^\"]*assets\/[^"]+)\"/);
+    if (m && m[1]) {
+      const possible = m[1];
+      // possible is like '/dashboard/assets/... or /assets/...'
+      const baseCandidate = possible.replace(/\/assets\/.*/, '/');
+      if (baseCandidate) {
+        BASE_PATH = baseCandidate;
+        normalizedBase = (BASE_PATH.startsWith('/') ? BASE_PATH : '/' + BASE_PATH).replace(/([^/])$/, '$1/');
+        console.log(`[server] Auto-detected VITE_BASE_PATH -> '${normalizedBase}' from index.html`);
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+}
 const DIST_DIR = path.join(__dirname, 'client/dist');
 
 console.log(`[server] Starting client server on port ${PORT}`);
@@ -24,11 +45,21 @@ const server = http.createServer((req, res) => {
   // Parse the URL
   const parsedUrl = url.parse(req.url);
   let pathname = parsedUrl.pathname;
+  console.log(`[serve-dist] Request mapping -> req.url=${req.url}, initialPath=${parsedUrl.pathname}, normalizedBase=${normalizedBase}`);
   
   // Default to index.html for root
   if (pathname === '/') {
     pathname = '/index.html';
   }
+  
+  // If the path looks like a route (no extension) -> serve index.html (SPA fallback)
+  const extname = path.extname(pathname);
+  if (!extname) {
+    // Normalize to index.html for SPA client-side routing
+    pathname = '/index.html';
+  }
+
+  console.log(`[serve-dist] After SPA fallback -> pathname=${pathname}`);
 
   // If running behind a reverse proxy or hosting under a subpath (e.g., /dashboard),
   // strip the base path from the incoming request so we serve the correct static
@@ -57,6 +88,7 @@ const server = http.createServer((req, res) => {
   }
 
   // Check if file exists
+  console.log(`[serve-dist] checking exist: filePath=${filePath}, resolved=${resolved}, exists=${fs.existsSync(resolved)}`);
   fs.stat(resolved, (err, stats) => {
     if (err) {
       if (err.code === 'ENOENT') {

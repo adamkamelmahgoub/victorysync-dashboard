@@ -17,6 +17,22 @@ import { AdminOrgOverviewPage } from "./pages/admin/AdminOrgOverviewPage";
 import AdminApiKeysPage from "./pages/admin/AdminApiKeysPage";
 import { OrgDashboardPage } from "./pages/admin/OrgDashboardPage";
 import { AdminOperationsPage } from "./pages/admin/AdminOperationsPage";
+import ErrorBoundary from "./components/ErrorBoundary";
+
+// Global error handlers (dev/testing only behind a flag)
+if ((import.meta as any).env && (import.meta as any).env.VITE_DEBUG_API === 'true') {
+  window.addEventListener('error', (ev: ErrorEvent) => {
+    console.error('[GlobalError] error', ev.filename, ev.message, ev.error);
+    // If resource load (script/link) failed
+    const target: any = ev.target as any || undefined;
+    try { window.__lastResourceError = { filename: ev.filename, message: ev.message, stack: ev.error?.stack } } catch(e) {}
+  }, true);
+
+  window.addEventListener('unhandledrejection', (ev) => {
+    console.error('[GlobalError] unhandledrejection', ev.reason);
+    try { window.__lastPromiseRejection = { reason: ev.reason } } catch(e) {}
+  });
+}
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -124,10 +140,12 @@ createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <AuthProvider>
       <BrowserRouter>
-        {/* ToastProvider provides a simple global toast UI */}
-        <ToastProvider>
-          <AppRouter />
-        </ToastProvider>
+        <ErrorBoundary>
+          {/* ToastProvider provides a simple global toast UI */}
+          <ToastProvider>
+            <AppRouter />
+          </ToastProvider>
+        </ErrorBoundary>
       </BrowserRouter>
     </AuthProvider>
   </StrictMode>
