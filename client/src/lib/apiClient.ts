@@ -6,7 +6,8 @@ type Json = any;
 export async function fetchJson(path: string, init?: RequestInit) {
   const url = path.startsWith("http") ? path : buildApiUrl(path);
   // Use a generous timeout to avoid indefinite fetch hangs in the browser
-  const timeoutMs = 10000; // 10s
+  // 15s gives the backend time to process requests, while still catching hangs
+  const timeoutMs = 15000; // 15s
 
   async function fetchWithTimeout(u: string, i?: RequestInit, t = timeoutMs) {
     if (typeof (import.meta as any).env !== 'undefined' && (import.meta as any).env.VITE_DEBUG_API === 'true') {

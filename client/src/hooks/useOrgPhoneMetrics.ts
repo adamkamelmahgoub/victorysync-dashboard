@@ -35,9 +35,10 @@ export function useOrgPhoneMetrics(orgId: string | null, daysBack: number = 1) {
         setIsLoading(true);
         setError(null);
 
-        // Use 10s timeout to prevent indefinite loading if Supabase is slow
+        // Use 30s timeout to prevent indefinite loading if Supabase is slow
+        // Supabase queries can take a while on large datasets, so we give it ample time
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Metrics query timed out (10s)')), 10000)
+          setTimeout(() => reject(new Error('Metrics query timed out (30s). Check your internet connection or try again.')), 30000)
         );
 
         const metricsPromise = (async () => {
