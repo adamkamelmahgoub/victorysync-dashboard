@@ -12,7 +12,7 @@ async function main() {
   // For readability, show recent calls in last 24 hours
   const { data: rows, error } = await supabaseAdmin
     .from('calls')
-    .select('id,org_id,to_number,to_number_digits,status,started_at,answered_at,ended_at')
+    .select('id,org_id,to_number,to_number_digits,from_number,from_number_digits,status,started_at,answered_at,ended_at')
     .eq('org_id', orgId)
     .gte('started_at', new Date(new Date().getTime() - 24 * 60 * 60 * 1000).toISOString())
     .order('started_at', { ascending: false })

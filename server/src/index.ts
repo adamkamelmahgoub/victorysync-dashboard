@@ -204,17 +204,20 @@ async function computeTotalsFromCalls(orgId: string, startTime: Date, endTime: D
   try {
     const { data: callFetch, error: callFetchErr } = await supabaseAdmin
       .from('calls')
-      .select('to_number,to_number_digits,status,answered_at,ended_at,started_at')
+      .select('to_number,to_number_digits,from_number,from_number_digits,status,answered_at,ended_at,started_at')
       .gte('started_at', startTime.toISOString())
       .lte('started_at', endTime.toISOString())
       .limit(5000);
     if (callFetchErr) throw callFetchErr;
-    const callRows = (callFetch || []).filter((c: any) => {
-      const n = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
-      if (n && assignedDigits.includes(n)) return true;
-      if (c.to_number && assignedNumbers.includes(c.to_number)) return true;
-      return false;
-    });
+        const callRows = (callFetch || []).filter((c: any) => {
+          const toDigits = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
+          const fromDigits = c.from_number_digits || normalizePhoneDigits(c.from_number || null);
+          if (toDigits && assignedDigits.includes(toDigits)) return true;
+          if (c.to_number && assignedNumbers.includes(c.to_number)) return true;
+          if (fromDigits && assignedDigits.includes(fromDigits)) return true;
+          if (c.from_number && assignedNumbers.includes(c.from_number)) return true;
+          return false;
+        });
     let sumHandleSecondsLocal = 0; let handleCountLocal = 0; let sumSpeedSecondsLocal = 0; let speedAnsweredCountLocal = 0;
     for (const c of callRows) {
       totalsObj.callsToday += 1;
@@ -376,14 +379,19 @@ app.get("/api/client-metrics", async (req, res) => {
             // Fetch calls and filter by normalized digits OR exact to_number
             const { data: callsAll, error: callsAllErr } = await supabaseAdmin
               .from('calls')
-              .select('status, started_at, answered_at, to_number, to_number_digits')
+              .select('status, started_at, answered_at, to_number, to_number_digits, from_number, from_number_digits')
               .gte('started_at', todayStart);
             if (callsAllErr) throw callsAllErr;
             if (callsAll && callsAll.length) {
               for (const c of callsAll) {
-                const norm = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
-                if (norm && assignedDigits.includes(norm)) callsSet.push(c);
-                else if (c.to_number && assignedNumbers.includes(c.to_number)) callsSet.push(c);
+                const toDigits = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
+                const fromDigits = c.from_number_digits || normalizePhoneDigits(c.from_number || null);
+                let matchedNumber: string | null = null;
+                if (toDigits && assignedDigits.includes(toDigits)) matchedNumber = c.to_number || toDigits;
+                else if (c.to_number && assignedNumbers.includes(c.to_number)) matchedNumber = c.to_number;
+                else if (fromDigits && assignedDigits.includes(fromDigits)) matchedNumber = c.from_number || fromDigits;
+                else if (c.from_number && assignedNumbers.includes(c.from_number)) matchedNumber = c.from_number;
+                if (matchedNumber) callsSet.push({ ...c, matchedNumber });
               }
             }
         }
@@ -391,7 +399,7 @@ app.get("/api/client-metrics", async (req, res) => {
         const seen = new Set<string>();
         let totalCalls = 0; let answeredCalls = 0; let waitSum = 0; let waitCount = 0;
         for (const call of callsSet || []) {
-          const key = `${call.started_at || ''}::${call.to_number || ''}`;
+          const key = `${call.started_at || ''}::${call.matchedNumber || call.to_number || call.from_number || ''}`;
           if (seen.has(key)) continue;
           seen.add(key);
           totalCalls += 1;
@@ -1477,21 +1485,32 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
         // Fetch recent calls for the range and filter by normalized digits or exact to_number match
         const { data: callFetch, error: callFetchErr } = await supabaseAdmin
           .from('calls')
-          .select('to_number,to_number_digits,status,answered_at,ended_at,started_at')
+          .select('to_number,to_number_digits,from_number,from_number_digits,status,answered_at,ended_at,started_at')
           .gte('started_at', startTime.toISOString())
           .lte('started_at', endTime.toISOString())
           .limit(5000);
         if (callFetchErr) throw callFetchErr;
         const callRows = (callFetch || []).filter((c: any) => {
-          const n = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
-          if (n && assignedDigits.includes(n)) return true;
+          const toDigits = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
+          const fromDigits = c.from_number_digits || normalizePhoneDigits(c.from_number || null);
+          if (toDigits && assignedDigits.includes(toDigits)) return true;
           if (c.to_number && assignedNumbers.includes(c.to_number)) return true;
+          if (fromDigits && assignedDigits.includes(fromDigits)) return true;
+          if (c.from_number && assignedNumbers.includes(c.from_number)) return true;
           return false;
         });
         // Aggregate in JS
         const map = new Map<string, any>();
         for (const c of callRows) {
-          const key = c.to_number_digits || c.to_number;
+          // Prefer to_number as key when present/assigned, otherwise use from_number
+          const toDigits = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
+          const fromDigits = c.from_number_digits || normalizePhoneDigits(c.from_number || null);
+          let key = null as string | null;
+          if (toDigits && assignedDigits.includes(toDigits)) key = toDigits;
+          else if (c.to_number && assignedNumbers.includes(c.to_number)) key = c.to_number;
+          else if (fromDigits && assignedDigits.includes(fromDigits)) key = fromDigits;
+          else if (c.from_number && assignedNumbers.includes(c.from_number)) key = c.from_number;
+          if (!key) continue;
           if (!key) continue;
           if (!map.has(key)) map.set(key, { calls_count: 0, answered_count: 0, missed_count: 0, sum_handle_seconds: 0, handle_count: 0, sum_speed_seconds: 0, speed_count: 0 });
           const bucket = map.get(key);

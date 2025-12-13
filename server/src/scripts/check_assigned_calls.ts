@@ -17,7 +17,7 @@ async function main() {
     .from('calls')
     .select('id,org_id,to_number,to_number_digits,status,started_at,answered_at,ended_at')
     .eq('org_id', orgId)
-    .or(`to_number.eq.${number},to_number_digits.eq.${digits}`)
+    .or(`to_number.eq.${number},to_number_digits.eq.${digits},from_number.eq.${number},from_number_digits.eq.${digits}`)
     .gte('started_at', start)
     .lte('started_at', end)
     .order('started_at', { ascending: false })

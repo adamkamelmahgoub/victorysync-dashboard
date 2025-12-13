@@ -6,6 +6,18 @@ CREATE INDEX IF NOT EXISTS idx_calls_to_number ON public.calls (to_number);
 CREATE INDEX IF NOT EXISTS idx_calls_to_number_started_at ON public.calls (to_number, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_to_number_digits_started_at ON public.calls (to_number_digits, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_calls_org_id_to_number_started_at ON public.calls (org_id, to_number, started_at DESC);
+-- Ensure from_number_digits exists for outgoing-call indexing
+ALTER TABLE public.calls
+  ADD COLUMN IF NOT EXISTS from_number_digits text;
+
+-- Backfill existing data for from_number_digits
+UPDATE public.calls
+SET from_number_digits = regexp_replace(from_number, '\\D', '', 'g')
+WHERE from_number IS NOT NULL
+  AND (from_number_digits IS NULL OR from_number_digits = '');
+CREATE INDEX IF NOT EXISTS idx_calls_from_number_digits_started_at ON public.calls (from_number_digits, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_calls_from_number_digits ON public.calls (from_number_digits);
+CREATE INDEX IF NOT EXISTS idx_calls_org_id_from_number_digits ON public.calls (org_id, from_number_digits);
 
 -- Partial index for answered status (common filter)
 CREATE INDEX IF NOT EXISTS idx_calls_org_started_answered ON public.calls (org_id, started_at DESC) WHERE status IN ('answered','completed');
@@ -34,7 +46,13 @@ BEGIN
   ),
   filtered_calls AS (
     SELECT
-      COALESCE(to_number_digits, to_number) AS key_num,
+      CASE
+        WHEN (to_number_digits IN (SELECT phone_digits FROM org_phones) OR regexp_replace(to_number, '\\D', '', 'g') IN (SELECT phone_digits FROM org_phones) OR to_number IN (SELECT phone_number FROM org_phones))
+          THEN COALESCE(to_number_digits, to_number)
+        WHEN (from_number_digits IN (SELECT phone_digits FROM org_phones) OR regexp_replace(from_number, '\\D', '', 'g') IN (SELECT phone_digits FROM org_phones) OR from_number IN (SELECT phone_number FROM org_phones))
+          THEN COALESCE(from_number_digits, from_number)
+        ELSE COALESCE(to_number_digits, to_number)
+      END AS key_num,
       status,
       COALESCE(duration, NULL) AS duration,
       started_at,
@@ -46,6 +64,9 @@ BEGIN
         to_number_digits IN (SELECT phone_digits FROM org_phones)
         OR regexp_replace(to_number, '\\D', '', 'g') IN (SELECT phone_digits FROM org_phones)
         OR to_number IN (SELECT phone_number FROM org_phones)
+        OR from_number_digits IN (SELECT phone_digits FROM org_phones)
+        OR regexp_replace(from_number, '\\D', '', 'g') IN (SELECT phone_digits FROM org_phones)
+        OR from_number IN (SELECT phone_number FROM org_phones)
       )
   ),
   agg AS (

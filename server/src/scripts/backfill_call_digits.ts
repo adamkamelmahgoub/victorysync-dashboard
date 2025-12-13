@@ -10,15 +10,23 @@ async function backfill() {
     while (true) {
       const { data: rows, error } = await supabaseAdmin
         .from('calls')
-        .select('id, to_number')
-        .is('to_number_digits', null)
+        .select('id, to_number, from_number, to_number_digits, from_number_digits')
+        .or('to_number_digits.is.null,from_number_digits.is.null')
         .limit(BATCH);
       if (error) throw error;
       if (!rows || rows.length === 0) break;
       for (const r of rows) {
-        const digits = normalizePhoneDigits(r.to_number as string | null);
-        if (!digits) continue;
-        const { error: upErr } = await supabaseAdmin.from('calls').update({ to_number_digits: digits }).eq('id', r.id);
+        const updates: any = {};
+        if (!r.to_number_digits) {
+          const digits = normalizePhoneDigits(r.to_number as string | null);
+          if (digits) updates.to_number_digits = digits;
+        }
+        if (!r.from_number_digits) {
+          const fdigits = normalizePhoneDigits(r.from_number as string | null);
+          if (fdigits) updates.from_number_digits = fdigits;
+        }
+        if (Object.keys(updates).length === 0) continue;
+        const { error: upErr } = await supabaseAdmin.from('calls').update(updates).eq('id', r.id);
         if (upErr) console.warn('[backfill_call_digits] update error for id', r.id, upErr);
         else updated++;
       }
