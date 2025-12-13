@@ -328,24 +328,19 @@ app.get("/api/client-metrics", async (req, res) => {
         const callsSet: any[] = [];
         if (assignedNumbers.length > 0 || assignedDigits.length > 0) {
           // Try matching by to_number and to_number_digits
-          if (assignedNumbers.length > 0) {
-            const { data: callsA, error: errA } = await supabaseAdmin
+            // Fetch calls and filter by normalized digits OR exact to_number
+            const { data: callsAll, error: callsAllErr } = await supabaseAdmin
               .from('calls')
-              .select('status, started_at, answered_at, to_number')
-              .gte('started_at', todayStart)
-              .in('to_number', assignedNumbers);
-            if (errA) throw errA;
-            if (callsA) callsSet.push(...callsA);
-          }
-          if (assignedDigits.length > 0) {
-            const { data: callsB, error: errB } = await supabaseAdmin
-              .from('calls')
-              .select('status, started_at, answered_at, to_number')
-              .gte('started_at', todayStart)
-              .in('to_number_digits', assignedDigits);
-            if (errB) throw errB;
-            if (callsB) callsSet.push(...callsB);
-          }
+              .select('status, started_at, answered_at, to_number, to_number_digits')
+              .gte('started_at', todayStart);
+            if (callsAllErr) throw callsAllErr;
+            if (callsAll && callsAll.length) {
+              for (const c of callsAll) {
+                const norm = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
+                if (norm && assignedDigits.includes(norm)) callsSet.push(c);
+                else if (c.to_number && assignedNumbers.includes(c.to_number)) callsSet.push(c);
+              }
+            }
         }
         // Aggregate
         const seen = new Set<string>();
@@ -1424,19 +1419,20 @@ app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
       console.error(`[org_metrics] db_query_failed org=${orgId} range=${range} dbMs=${dbMs} error=${fmtErr(metricsErr)}`);
       // Fallback: perform aggregation in Node.js via two calls queries (to_number and to_number_digits)
       try {
-        const numQuery = (assignedNumbers && assignedNumbers.length > 0) ? await supabaseAdmin
+        // Fetch recent calls for the range and filter by normalized digits or exact to_number match
+        const { data: callFetch, error: callFetchErr } = await supabaseAdmin
           .from('calls')
           .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
-          .in('to_number', assignedNumbers)
           .gte('started_at', startTime.toISOString())
-          .lte('started_at', endTime.toISOString()) : { data: [] as any[] };
-        const digQuery = (assignedDigits && assignedDigits.length > 0) ? await supabaseAdmin
-          .from('calls')
-          .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
-          .in('to_number_digits', assignedDigits)
-          .gte('started_at', startTime.toISOString())
-          .lte('started_at', endTime.toISOString()) : { data: [] as any[] };
-        const callRows = (numQuery.data || []).concat(digQuery.data || []);
+          .lte('started_at', endTime.toISOString())
+          .limit(5000);
+        if (callFetchErr) throw callFetchErr;
+        const callRows = (callFetch || []).filter((c: any) => {
+          const n = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
+          if (n && assignedDigits.includes(n)) return true;
+          if (c.to_number && assignedNumbers.includes(c.to_number)) return true;
+          return false;
+        });
         // Aggregate in JS
         const map = new Map<string, any>();
         for (const c of callRows) {
@@ -1547,19 +1543,19 @@ app.get('/api/admin/orgs/:orgId/metrics', async (req, res) => {
       console.error(`[org_metrics_totals] rpc failed org=${orgId} range=${range} dbMs=${dbMs} err=${fmtErr(err)}`);
       // Fallback: compute totals in Node.js by querying calls table
       try {
-        const numQuery = (assignedNumbers && assignedNumbers.length > 0) ? await supabaseAdmin
+        const { data: callFetch, error: callFetchErr } = await supabaseAdmin
           .from('calls')
           .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
-          .in('to_number', assignedNumbers)
           .gte('started_at', startTime.toISOString())
-          .lte('started_at', endTime.toISOString()) : { data: [] as any[] };
-        const digQuery = (assignedDigits && assignedDigits.length > 0) ? await supabaseAdmin
-          .from('calls')
-          .select('to_number,to_number_digits,status,duration,answered_at,ended_at,started_at')
-          .in('to_number_digits', assignedDigits)
-          .gte('started_at', startTime.toISOString())
-          .lte('started_at', endTime.toISOString()) : { data: [] as any[] };
-        const callRows = (numQuery.data || []).concat(digQuery.data || []);
+          .lte('started_at', endTime.toISOString())
+          .limit(5000);
+        if (callFetchErr) throw callFetchErr;
+        const callRows = (callFetch || []).filter((c: any) => {
+          const n = c.to_number_digits || normalizePhoneDigits(c.to_number || null);
+          if (n && assignedDigits.includes(n)) return true;
+          if (c.to_number && assignedNumbers.includes(c.to_number)) return true;
+          return false;
+        });
         const totalsObj = { callsToday: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgSpeedOfAnswer: 0 } as any;
         let sumHandleSecondsLocal = 0; let handleCountLocal = 0; let sumSpeedSecondsLocal = 0; let speedAnsweredCountLocal = 0;
         for (const c of callRows) {
