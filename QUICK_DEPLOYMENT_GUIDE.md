@@ -102,7 +102,9 @@ If you see errors, they will be clear like:
 
 **Fix:** 
 1. Check browser console for errors (F12 → Console tab)
-2. Check dashboard env var: `VITE_API_BASE_URL` should be set to `https://api.victorysync.com` in production
+2. Check dashboard env vars:
+	- `VITE_API_BASE_URL` should be set to `https://api.victorysync.com` in production.
+	- If hosting the site under a subpath (for example `/dashboard`), set `VITE_BASE_PATH=/dashboard/` during build so the generated asset links point to the correct subpath (e.g., `/dashboard/assets/...`).
 3. Verify frontend is deployed to `https://dashboard.victorysync.com`
 
 ---

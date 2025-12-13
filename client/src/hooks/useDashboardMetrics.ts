@@ -37,10 +37,7 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       const headers: Record<string, string> = {};
       if (user && user.id) headers['x-user-id'] = user.id;
 
-      const res = await fetch(url.toString(), { cache: 'no-store', headers });
-      if (!res.ok) throw new Error(`API error: ${res.statusText}`);
-      
-      const json = await res.json();
+      const json = await fetchJson(url.toString(), { headers });
       const metrics = json.metrics || {
         total_calls: 0,
         answered_calls: 0,
@@ -59,10 +56,12 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       let assignedPhones: Array<{ id: string; number: string; label?: string | null }> = [];
       if (orgId) {
         try {
-          const orgRes = await fetch(buildApiUrl(`/api/admin/orgs/${orgId}`), { cache: 'no-store', headers });
-          if (orgRes.ok) {
-            const orgData = await orgRes.json();
+          try {
+            const orgData = await fetchJson(buildApiUrl(`/api/admin/orgs/${orgId}`), { headers });
             assignedPhones = orgData.phones || [];
+          } catch (e) {
+            // keep assignedPhones empty on failure
+            console.warn('Failed to fetch assigned phones:', e);
           }
         } catch (e) {
           console.warn('Failed to fetch assigned phones:', e);

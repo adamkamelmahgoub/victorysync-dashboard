@@ -31,7 +31,9 @@ export const TEST_ORG_ID = "d6b7bbde-54bb-4782-989d-cf9093f8cadf";
 // overridden by `VITE_API_BASE_URL` environment variable (e.g. for staging).
 // If you need to use a different host for local development, set
 // `VITE_API_BASE_URL` when running the client.
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'https://api.victorysync.com';
+// Default to same-origin when not explicitly set; this avoids making API calls
+// to the production API host when running the static client locally.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
 /**
  * Build a full API URL from a path

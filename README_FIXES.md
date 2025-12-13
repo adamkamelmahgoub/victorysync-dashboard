@@ -47,6 +47,9 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 Now the client makes API calls to:
 - **Development:** `/api/...` → `http://localhost:4000/api/...`
 - **Production:** Set `VITE_API_BASE_URL` environment variable
+ - **Production:** Set `VITE_API_BASE_URL` environment variable
+ - **Hosting on subpath:** If you host the site under a subpath (example: `/dashboard`), set `VITE_BASE_PATH` during build time:
+    - Example: `VITE_BASE_PATH=/dashboard/ VITE_API_BASE_URL=https://api.victorysync.com npm run build`
 
 ### 2. Rebuilt Client
 ```bash

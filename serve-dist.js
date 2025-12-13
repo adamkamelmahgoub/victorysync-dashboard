@@ -10,6 +10,9 @@ const path = require('path');
 const url = require('url');
 
 const PORT = 3000;
+const BASE_PATH = process.env.VITE_BASE_PATH ?? '/';
+// Normalize base path to always end with a slash, and ensure it starts with a slash.
+const normalizedBase = (BASE_PATH.startsWith('/') ? BASE_PATH : '/' + BASE_PATH).replace(/([^/])$/, '$1/')
 const DIST_DIR = path.join(__dirname, 'client/dist');
 
 console.log(`[server] Starting client server on port ${PORT}`);
@@ -23,6 +26,20 @@ const server = http.createServer((req, res) => {
   // Default to index.html for root
   if (pathname === '/') {
     pathname = '/index.html';
+  }
+
+  // If running behind a reverse proxy or hosting under a subpath (e.g., /dashboard),
+  // strip the base path from the incoming request so we serve the correct static
+  // file from the dist directory. We assume VITE_BASE_PATH was used during
+  // the build to prefix asset links.
+  if (normalizedBase !== '/' && (pathname === normalizedBase.slice(0, -1) || pathname.startsWith(normalizedBase))) {
+    if (pathname === normalizedBase.slice(0, -1)) {
+      // Example: base '/dashboard' and request '/dashboard' -> serve '/index.html'
+      pathname = '/';
+    } else {
+      // Remove the base prefix, keep the leading slash for the remaining path.
+      pathname = '/' + pathname.slice(normalizedBase.length);
+    }
   }
 
   // Construct the file path

@@ -5,7 +5,26 @@ type Json = any;
 
 async function fetchJson(path: string, init?: RequestInit) {
   const url = path.startsWith("http") ? path : buildApiUrl(path);
-  const res = await fetch(url, { cache: (init && (init as any).cache) || 'no-store', ...init });
+  // Use a generous timeout to avoid indefinite fetch hangs in the browser
+  const timeoutMs = 10000; // 10s
+
+  async function fetchWithTimeout(u: string, i?: RequestInit, t = timeoutMs) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), t);
+    try {
+      const res = await fetch(u, { cache: (i && (i as any).cache) || 'no-store', ...i, signal: controller.signal });
+      return res;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        throw new Error(`Request timeout after ${t}ms: ${u}`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(id);
+    }
+  }
+
+  const res = await fetchWithTimeout(url, init);
   if (!res.ok) {
     // Try to parse JSON body for structured error details
     let detail: string = res.statusText;
