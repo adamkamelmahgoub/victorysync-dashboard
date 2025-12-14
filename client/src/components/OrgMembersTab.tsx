@@ -84,7 +84,8 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
 
   async function handleRemove(memberUserId: string | undefined) {
     if (!window.confirm('Remove this member?')) return;
-    if (!isOrgAdmin) { setError('Only organization admins can remove members'); return; }
+    // Only block removal when we've completed the admin check and the user is not an admin.
+    if (adminCheckDone && !isOrgAdmin) { setError('Only organization admins can remove members'); return; }
     if (!memberUserId) { setError('Invalid member'); return; }
     if (apiUnavailable) { setError('Members API unavailable; cannot remove members'); return; }
     try {
@@ -164,7 +165,7 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
                   <button
                     className="text-red-500 hover:underline text-xs"
                     onClick={() => handleRemove(member.userId || member.id)}
-                    disabled={apiUnavailable}
+                    disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
                   >
                     Remove
                   </button>
