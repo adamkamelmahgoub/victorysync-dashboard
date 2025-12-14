@@ -29,8 +29,13 @@ export default function OrgManagePage() {
           // parse server error if possible
           let body: any = null;
           try { body = await resp.json(); } catch (_) { body = await resp.text().catch(() => null); }
-          const msg = (body && (body.error || body.detail || body.message)) || `${resp.status} ${resp.statusText}`;
-          setOrgError(msg?.toString?.() || String(msg));
+          const rawMsg = (body && (body.error || body.detail || body.message)) || `${resp.status} ${resp.statusText}`;
+          // Make a friendlier error message for the UI
+          let friendly = 'Failed to load org';
+          if (rawMsg && rawMsg.toString().toLowerCase().includes('org_not_found')) friendly = 'Organization not found (404)';
+          else if (/\b404\b/.test(rawMsg?.toString?.())) friendly = 'Organization endpoint not found (404)';
+          else if (/\b403\b/.test(rawMsg?.toString?.())) friendly = 'Access forbidden (403)';
+          setOrgError(friendly);
           // Try fallback: org-scoped members endpoint which should work for org admins
           try {
             const mresp = await fetch(`/api/orgs/${orgId}/members`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });

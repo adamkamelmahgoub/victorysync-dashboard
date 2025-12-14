@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { ApiKeysTab } from './ApiKeysTab';
 import { fetchJson } from '../lib/apiClient';
+import { supabase } from '../lib/supabaseClient';
 
 export default function OrganizationSettingsTab({ orgId, isOrgAdmin, adminCheckDone }: { orgId: string; isOrgAdmin: boolean; adminCheckDone?: boolean }) {
   const { user } = useAuth();
@@ -80,8 +81,22 @@ export default function OrganizationSettingsTab({ orgId, isOrgAdmin, adminCheckD
         body: JSON.stringify({ name: orgName })
       });
       if (!res.ok) {
+        // Try to parse server error
         const j = await res.json().catch(() => null);
-        throw new Error((j && j.detail) || 'Failed to update org');
+        const detail = (j && (j.detail || j.error || j.message)) || `${res.status} ${res.statusText}`;
+        // If server endpoint missing (404) or update not applied (no org row), try Supabase client upsert fallback
+        if (res.status === 404 || detail?.toString?.().toLowerCase().includes('org_not_found')) {
+          try {
+            const { data: up, error: upErr } = await supabase.from('organizations').upsert({ id: orgId, name: orgName }, { onConflict: 'id' }).select().maybeSingle();
+            if (upErr) throw upErr;
+            setEditing(false);
+            setError(null);
+            return;
+          } catch (supErr:any) {
+            throw new Error((supErr && supErr.message) || 'Failed to update org (supabase fallback)');
+          }
+        }
+        throw new Error(detail || 'Failed to update org');
       }
       setEditing(false);
     } catch (e: any) { setError(e.message || 'Update failed'); }
