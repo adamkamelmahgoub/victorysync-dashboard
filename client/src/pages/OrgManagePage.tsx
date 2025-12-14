@@ -103,7 +103,7 @@ export default function OrgManagePage() {
           <h1 className="text-2xl font-bold inline">Manage Organization {orgName}</h1>
           <button className="ml-4 text-sm text-gray-400 hover:underline" onClick={() => recheckAdmin()}>Re-check admin status</button>
         </div>
-        <OrganizationTabs orgId={orgId} isOrgAdmin={isOrgAdmin} />
+        <OrganizationTabs orgId={orgId} isOrgAdmin={isOrgAdmin} adminCheckDone={adminCheckDone} />
       </div>
     </div>
   );

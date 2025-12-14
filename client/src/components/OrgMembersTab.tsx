@@ -59,7 +59,8 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
     setLastInviteResult(null);
     setInviting(true);
     setError(null);
-    if (!isOrgAdmin) { setError('Only organization admins can invite members'); setInviting(false); return; }
+    // When adminCheckDone is true, the check completed and we should disallow non-admins.
+    if (adminCheckDone && !isOrgAdmin) { setError('Only organization admins can invite members'); setInviting(false); return; }
     if (apiUnavailable) { setError('Members API unavailable; cannot invite'); setInviting(false); return; }
     if (!inviteEmail || !inviteEmail.trim()) { setError('Please enter an email to invite'); setInviting(false); return; }
     try {
@@ -140,7 +141,7 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
       </form>
       {error && <div className="text-red-500 mb-2">{error}</div>}
       {inviteSuccess && <div className="text-green-400 mb-2">{inviteSuccess}</div>}
-      <div className="text-xs text-gray-500 mb-2">Debug: isOrgAdmin={String(isOrgAdmin)}, apiUnavailable={String(apiUnavailable)}, inviting={String(inviting)}, inviteEmail="{inviteEmail}", inviteDisabled={String(inviteDisabled)}</div>
+      <div className="text-xs text-gray-500 mb-2">Debug: isOrgAdmin={String(isOrgAdmin)}, adminCheckDone={String(adminCheckDone)}, apiUnavailable={String(apiUnavailable)}, inviting={String(inviting)}, inviteEmail="{inviteEmail}", inviteDisabled={String(inviteDisabled)}</div>
 +      {lastInviteAttempt && <div className="text-sm text-gray-400 mb-1">Last invite attempt: {lastInviteAttempt}</div>}
 +      {lastInviteResult && <div className="text-sm text-gray-300 mb-2">Last invite result: {lastInviteResult}</div>}
       {loading ? (
