@@ -20,6 +20,8 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
   const [inviteRole, setInviteRole] = useState('agent');
   const [inviting, setInviting] = useState(false);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [lastInviteAttempt, setLastInviteAttempt] = useState<string | null>(null);
+  const [lastInviteResult, setLastInviteResult] = useState<string | null>(null);
 
   useEffect(() => {
     fetchMembers();
@@ -50,6 +52,8 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
     // Debug logging to help diagnose "button does nothing" issues
     // eslint-disable-next-line no-console
     console.debug('[OrgMembersTab] handleInvite start', { isOrgAdmin, apiUnavailable, inviteEmail });
+    setLastInviteAttempt(JSON.stringify({ ts: new Date().toISOString(), isOrgAdmin, apiUnavailable, inviteEmail }));
+    setLastInviteResult(null);
     setInviting(true);
     setError(null);
     if (!isOrgAdmin) { setError('Only organization admins can invite members'); setInviting(false); return; }
@@ -58,9 +62,15 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
     try {
       const json = await createOrgMember(orgId, inviteEmail, inviteRole, user?.id || undefined);
       if (json?.error) setError(json.error);
-      else setInviteSuccess(`Invited ${inviteEmail} as ${inviteRole}`);
+      else {
+        const msg = `Invited ${inviteEmail} as ${inviteRole}`;
+        setInviteSuccess(msg);
+        setLastInviteResult(msg);
+      }
     } catch (e: any) {
-      setError(e?.message || 'Failed to invite user');
+      const emsg = e?.message || 'Failed to invite user';
+      setError(emsg);
+      setLastInviteResult(`error: ${emsg}`);
     }
     setInviteEmail('');
     setInviteRole('agent');
@@ -122,6 +132,8 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
       </form>
       {error && <div className="text-red-500 mb-2">{error}</div>}
       {inviteSuccess && <div className="text-green-400 mb-2">{inviteSuccess}</div>}
++      {lastInviteAttempt && <div className="text-sm text-gray-400 mb-1">Last invite attempt: {lastInviteAttempt}</div>}
++      {lastInviteResult && <div className="text-sm text-gray-300 mb-2">Last invite result: {lastInviteResult}</div>}
       {loading ? (
         <div>Loading...</div>
       ) : (
