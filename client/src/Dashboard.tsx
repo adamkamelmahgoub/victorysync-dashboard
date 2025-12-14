@@ -186,6 +186,14 @@ export const Dashboard: FC = () => {
                 </button>
               </div>
             )}
+            {/* Visible debug badge (temporary) */}
+            <div className="ml-3 px-3 py-1.5 bg-slate-800/60 border border-slate-700 rounded text-xs text-slate-300">
+              <div className="flex gap-2 items-center">
+                <div className="text-[11px]">CanManage: <span className={`font-mono ${canManage ? 'text-emerald-300' : 'text-rose-400'}`}>{String(canManage)}</span></div>
+                <div className="text-[11px]">Org: <span className="font-mono">{effectiveOrgId ?? 'none'}</span></div>
+                <div className="text-[11px]">membersFetch: <span className="font-mono">{membersDebug.status ?? 'n/a'}</span></div>
+              </div>
+            </div>
             {/* Debug info (visible when ?debug=1) */}
             {searchParams.get('debug') === '1' && (
               <div className="ml-3 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-xs text-slate-300 max-w-xs break-words">
