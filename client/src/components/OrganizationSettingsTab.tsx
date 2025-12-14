@@ -119,18 +119,18 @@ export default function OrganizationSettingsTab({ orgId, isOrgAdmin, adminCheckD
           <div className="text-xs text-slate-400">Manage your organization</div>
         </div>
         <div className="mt-3 space-y-2">
-          <div className="flex gap-2 items-center">
-            <input className="px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm text-slate-200" value={orgName} onChange={e => setOrgName(e.target.value)} disabled={!editing} />
+          <div className="flex gap-3 items-center">
+            <input className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 w-80" value={orgName} onChange={e => setOrgName(e.target.value)} disabled={!editing} />
             {!editing ? (
-              <button className="px-3 py-1 text-xs bg-emerald-500/20 text-emerald-300 rounded" onClick={() => setEditing(true)}>Edit</button>
+              <button className="px-3 py-1 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded" onClick={() => setEditing(true)}>Edit</button>
             ) : (
               <div className="flex gap-2">
-                <button className="px-3 py-1 text-xs bg-slate-800 rounded" onClick={() => { setEditing(false); fetch(`/api/admin/orgs/${orgId}`); }}>Cancel</button>
-                <button className="px-3 py-1 text-xs bg-emerald-500/30 text-emerald-300 rounded" onClick={handleSave}>Save</button>
+                <button className="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded" onClick={() => { setEditing(false); fetch(`/api/admin/orgs/${orgId}`); }}>Cancel</button>
+                <button className="px-3 py-1 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded" onClick={handleSave}>Save</button>
               </div>
             )}
           </div>
-          {error && <div className="text-xs text-rose-400">{error}</div>}
+          {error && <div className="text-sm text-rose-400">{error}</div>}
         </div>
       </div>
 

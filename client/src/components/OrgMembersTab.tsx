@@ -99,81 +99,90 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
   return (
     <div className="p-4">
       {apiUnavailable && (
-        <div className="mb-4 p-3 bg-red-100 text-red-800 rounded">Members API unavailable (404). Server endpoints may not be deployed; management actions are disabled.</div>
+        <div className="mb-4 p-3 bg-rose-900/30 text-rose-300 rounded">Members API unavailable (404). Server endpoints may not be deployed; management actions are disabled.</div>
       )}
-      <h2 className="text-lg font-bold mb-4">Members</h2>
-      <form onSubmit={handleInvite} className="mb-6 flex gap-2 items-end">
-        <div>
-          <label className="block text-xs font-semibold mb-1">Email</label>
-          <input
-            className="p-2 rounded bg-gray-900 border border-gray-700"
-            value={inviteEmail}
-            onChange={e => { setInviteEmail(e.target.value); if (error) setError(null); if (inviteSuccess) setInviteSuccess(null); }}
-            onInput={e => { const v = (e.target as HTMLInputElement).value; setInviteEmail(v); if (error) setError(null); if (inviteSuccess) setInviteSuccess(null); }}
-            onBlur={e => { const v = (e.target as HTMLInputElement).value; setInviteEmail(v); }}
-            type="email"
-          />
-          <div className="mt-2">
-            <button type="button" className="text-xs text-gray-400 hover:underline" onClick={() => setInviteEmail(user?.email || '')}>Use my email</button>
+      <div className="bg-slate-900/70 rounded-lg p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-bold">Members</h2>
+          <div className="text-sm text-gray-400">Manage organization members and pending invites</div>
+        </div>
+        <form onSubmit={handleInvite} className="mb-2 grid grid-cols-3 gap-3 items-end">
+          <div>
+            <label className="block text-xs font-semibold mb-1">Email</label>
+            <input
+              className="p-2 rounded bg-slate-800 border border-slate-700 w-full text-sm text-slate-200"
+              value={inviteEmail}
+              onChange={e => { setInviteEmail(e.target.value); if (error) setError(null); if (inviteSuccess) setInviteSuccess(null); }}
+              type="email"
+            />
+            <div className="mt-2">
+              <button type="button" className="text-xs text-gray-400 hover:underline" onClick={() => setInviteEmail(user?.email || '')}>Use my email</button>
+            </div>
           </div>
-          {!inviteEmail && <div className="text-xs text-gray-500 mt-1">Enter an email to enable Invite</div>}
-        </div>
-        <div>
-          <label className="block text-xs font-semibold mb-1">Role</label>
-          <select
-            className="p-2 rounded bg-gray-900 border border-gray-700"
-            value={inviteRole}
-            onChange={e => setInviteRole(e.target.value)}
-          >
-            <option value="org_admin">Org Admin</option>
-            <option value="org_manager">Org Manager</option>
-            <option value="agent">Agent</option>
-          </select>
-        </div>
-        <button
-          type="submit"
-          data-testid="invite-button"
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-          onClick={(e) => { /* also call onClick debug in case native submit is blocked */ handleInvite(e as any); }}
-          disabled={inviteDisabled}
-        >
-          {inviting ? 'Inviting...' : 'Invite'}
-        </button>
-      </form>
-      {error && <div className="text-red-500 mb-2">{error}</div>}
-      {inviteSuccess && <div className="text-green-400 mb-2">{inviteSuccess}</div>}
-      <div className="text-xs text-gray-500 mb-2">Debug: isOrgAdmin={String(isOrgAdmin)}, adminCheckDone={String(adminCheckDone)}, apiUnavailable={String(apiUnavailable)}, inviting={String(inviting)}, inviteEmail="{inviteEmail}", inviteDisabled={String(inviteDisabled)}</div>
-+      {lastInviteAttempt && <div className="text-sm text-gray-400 mb-1">Last invite attempt: {lastInviteAttempt}</div>}
-+      {lastInviteResult && <div className="text-sm text-gray-300 mb-2">Last invite result: {lastInviteResult}</div>}
+          <div>
+            <label className="block text-xs font-semibold mb-1">Role</label>
+            <select
+              className="p-2 rounded bg-slate-800 border border-slate-700 w-full text-sm text-slate-200"
+              value={inviteRole}
+              onChange={e => setInviteRole(e.target.value)}
+            >
+              <option value="org_admin">Org Admin</option>
+              <option value="org_manager">Org Manager</option>
+              <option value="agent">Agent</option>
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              data-testid="invite-button"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded"
+              onClick={(e) => { /* also call onClick debug in case native submit is blocked */ handleInvite(e as any); }}
+              disabled={inviteDisabled}
+            >
+              {inviting ? 'Inviting...' : 'Invite'}
+            </button>
+            <button type="button" className="py-2 px-3 text-sm bg-slate-800 rounded" onClick={() => { setInviteEmail(''); setInviteRole('agent'); setError(null); }}>Clear</button>
+          </div>
+        </form>
+        {error && <div className="text-rose-400 mb-2">{error}</div>}
+        {inviteSuccess && <div className="text-emerald-300 mb-2">{inviteSuccess}</div>}
+      </div>
+
+      <div className="text-xs text-gray-500 mb-2">Debug: isOrgAdmin={String(isOrgAdmin)}, adminCheckDone={String(adminCheckDone)}, apiUnavailable={String(apiUnavailable)}, inviting={String(inviting)}, inviteEmail={String(inviteEmail)}, inviteDisabled={String(inviteDisabled)}</div>
+      {lastInviteAttempt && <div className="text-sm text-gray-400 mb-1">Last invite attempt: {lastInviteAttempt}</div>}
+      {lastInviteResult && <div className="text-sm text-gray-300 mb-2">Last invite result: {lastInviteResult}</div>}
+
       {loading ? (
-        <div>Loading...</div>
+        <div className="py-6 text-center text-sm text-gray-400">Loading members...</div>
       ) : (
-        <table className="w-full text-left bg-gray-900 rounded">
-          <thead>
-            <tr>
-              <th className="p-2">Email</th>
-              <th className="p-2">Role</th>
-              <th className="p-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map(member => (
-              <tr key={member.id} className="border-t border-gray-800">
-                <td className="p-2">{member.email}</td>
-                <td className="p-2">{member.role}{member.pending_invite ? ' (invited)' : ''}</td>
-                <td className="p-2">
-                  <button
-                    className="text-red-500 hover:underline text-xs"
-                    onClick={() => handleRemove(member.userId || member.id)}
-                    disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
-                  >
-                    Remove
-                  </button>
-                </td>
+        <div className="bg-slate-900/70 rounded shadow-sm overflow-hidden">
+          <table className="w-full text-left">
+            <thead className="bg-slate-900/60">
+              <tr>
+                <th className="p-3 text-sm text-slate-300">Email</th>
+                <th className="p-3 text-sm text-slate-300">Role</th>
+                <th className="p-3 text-sm text-slate-300">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {members.map(member => (
+                <tr key={member.id} className="border-t border-slate-800">
+                  <td className="p-3 text-slate-200">{member.email}</td>
+                  <td className="p-3 text-slate-200">{member.role}{member.pending_invite ? ' (invited)' : ''}</td>
+                  <td className="p-3">
+                    <button
+                      className="px-2 py-1 text-sm bg-rose-700 text-white rounded"
+                      onClick={() => handleRemove(member.userId || member.id)}
+                      disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

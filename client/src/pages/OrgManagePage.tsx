@@ -157,11 +157,23 @@ export default function OrgManagePage() {
     <div className="min-h-screen bg-slate-950 p-8 text-slate-50">
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
-          <button onClick={() => navigate('/dashboard')} className="text-sm text-slate-400 mr-2">← Back</button>
-          
-          <h1 className="text-2xl font-bold inline">Manage Organization {orgName ?? <span className="text-rose-400">(Failed to load org)</span>}</h1>
-          {orgError && <div className="ml-4 inline text-sm text-rose-400">{orgError}</div>}
-          <button className="ml-4 text-sm text-gray-400 hover:underline" onClick={() => recheckAdmin()}>Re-check admin status</button>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <button onClick={() => navigate('/dashboard')} className="text-sm text-slate-400">← Back</button>
+              <div>
+                <h1 className="text-2xl font-bold">{orgName || 'Organization'}</h1>
+                {orgError && <div className="text-xs text-rose-400 mt-1">{orgError}</div>}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button className="text-sm text-gray-400 hover:underline" onClick={() => recheckAdmin()}>Re-check admin status</button>
+              {adminCheckDone ? (
+                <div className={`text-xs px-2 py-1 rounded ${isOrgAdmin ? 'bg-emerald-800 text-emerald-200' : 'bg-slate-800 text-slate-300'}`}>{isOrgAdmin ? 'Admin' : 'Member'}</div>
+              ) : (
+                <div className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400">Checking...</div>
+              )}
+            </div>
+          </div>
         </div>
         <OrganizationTabs orgId={orgId} isOrgAdmin={isOrgAdmin} adminCheckDone={adminCheckDone} />
       </div>

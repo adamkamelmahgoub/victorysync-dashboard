@@ -1311,6 +1311,48 @@ app.post('/api/admin/mightycall/sync', async (_req, res) => {
   }
 });
 
+// GET /api/orgs/:orgId/agent-extensions - list agent extensions for an org
+app.get('/api/orgs/:orgId/agent-extensions', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    // Allow org members, org admins, and platform admins/managers
+    const isMember = !!(await supabaseAdmin.from('org_users').select('id').eq('org_id', orgId).eq('user_id', actorId).maybeSingle().then(r => r.data));
+    const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    const { data, error } = await supabaseAdmin.from('agent_extensions').select('user_id, extension').eq('org_id', orgId);
+    if (error) throw error;
+    res.json({ extensions: data || [] });
+  } catch (err: any) {
+    console.error('agent_extensions_failed:', fmtErr(err));
+    res.status(500).json({ error: 'agent_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/orgs/:orgId/agents/:userId/extension - set agent extension (org_admin or managers with permission, platform_admin allowed)
+app.post('/api/orgs/:orgId/agents/:userId/extension', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId, userId } = req.params;
+    const { extension } = req.body || {};
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const allowed = (await isPlatformAdmin(actorId)) || (await isOrgAdmin(actorId, orgId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    if (!extension) return res.status(400).json({ error: 'missing_required_fields' });
+
+    const payload = { org_id: orgId, user_id: userId, extension };
+    const { data, error } = await supabaseAdmin.from('agent_extensions').upsert(payload, { onConflict: 'org_id,user_id' }).select().maybeSingle();
+    if (error) throw error;
+    res.json({ extension: data });
+  } catch (err: any) {
+    console.error('set_agent_extension_failed:', fmtErr(err));
+    res.status(500).json({ error: 'set_agent_extension_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
 // GET /api/admin/orgs/:orgId - detailed org info: members (with email), phones, stats
 app.get('/api/admin/orgs/:orgId', async (req, res) => {
   try {
@@ -1561,7 +1603,12 @@ app.get('/api/orgs/:orgId/members', async (req, res) => {
       } catch (e) {
         membership = null;
       }
-      if (!membership) return res.status(403).json({ error: 'forbidden' });
+      const actorIsPlatformAdmin = actorId && (await isPlatformAdmin(actorId));
+      const actorIsPlatformManager = actorId && (await isPlatformManagerWith(actorId, 'can_manage_orgs'));
+      if (!membership && !actorIsPlatformAdmin && !actorIsPlatformManager) {
+        console.warn('[org_members] access denied for actor', actorId, 'membership:', membership, 'platformAdmin:', actorIsPlatformAdmin, 'platformManager:', actorIsPlatformManager);
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
     // Try to read members from `org_users`, fall back to legacy `organization_members`.
     let rows: any[] = [];
@@ -1623,7 +1670,11 @@ app.post('/api/orgs/:orgId/members', async (req, res) => {
     const { orgId } = req.params;
     const { email, role } = req.body || {};
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
-    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    // Allow platform admins to manage members as well as org admins
+    if (!((actorId && (await isPlatformAdmin(actorId))) || (await isOrgAdmin(actorId, orgId)))) {
+      console.warn('[org_add_member] permission denied for actor', actorId, 'orgId:', orgId);
+      return res.status(403).json({ error: 'forbidden' });
+    }
     if (!email || !role) return res.status(400).json({ error: 'missing_required_fields' });
 
     // Find user by email
@@ -1677,7 +1728,11 @@ app.delete('/api/orgs/:orgId/members/:userId', async (req, res) => {
     const actorId = req.header('x-user-id') || null;
     const { orgId, userId } = req.params;
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
-    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    // Allow platform admins to remove members as well as org admins
+    if (!((actorId && (await isPlatformAdmin(actorId))) || (await isOrgAdmin(actorId, orgId)))) {
+      console.warn('[org_remove_member] permission denied for actor', actorId, 'orgId:', orgId);
+      return res.status(403).json({ error: 'forbidden' });
+    }
     // Try deleting an org_user by user_id first
     try {
       const { data: delData, error: delErr } = await supabaseAdmin.from('org_users').delete().eq('org_id', orgId).eq('user_id', userId).select();
