@@ -1721,12 +1721,39 @@ app.put('/api/orgs/:orgId', async (req, res) => {
     const { orgId } = req.params;
     const { name } = req.body || {};
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
-    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    try {
+      const isAdmin = await isOrgAdmin(actorId, orgId);
+      if (!isAdmin) {
+        console.warn('[update_org] forbidden: user not org admin', { actorId, orgId });
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    } catch (permErr) {
+      console.error('[update_org] permission check failed:', fmtErr(permErr));
+      return res.status(500).json({ error: 'permission_check_failed', detail: fmtErr(permErr) });
+    }
     if (!name || typeof name !== 'string') return res.status(400).json({ error: 'missing_required_fields', detail: 'name is required' });
 
-    const { data, error } = await supabaseAdmin.from('organizations').update({ name }).eq('id', orgId).select().maybeSingle();
-    if (error) throw error;
-    res.json({ org: data });
+    // Try to update existing org row
+    try {
+      const { data, error } = await supabaseAdmin.from('organizations').update({ name }).eq('id', orgId).select().maybeSingle();
+      if (error) {
+        // If update failed because row missing, attempt upsert to create it
+        console.warn('[update_org] update error, attempting upsert:', fmtErr(error));
+        const { data: up, error: upErr } = await supabaseAdmin.from('organizations').upsert({ id: orgId, name }, { onConflict: 'id' }).select().maybeSingle();
+        if (upErr) throw upErr;
+        return res.json({ org: up });
+      }
+      if (!data) {
+        // no row updated -> try upsert
+        const { data: up, error: upErr } = await supabaseAdmin.from('organizations').upsert({ id: orgId, name }, { onConflict: 'id' }).select().maybeSingle();
+        if (upErr) throw upErr;
+        return res.json({ org: up });
+      }
+      return res.json({ org: data });
+    } catch (e:any) {
+      console.error('[update_org] failed:', fmtErr(e));
+      return res.status(500).json({ error: 'update_org_failed', detail: fmtErr(e) });
+    }
   } catch (e: any) {
     console.error('update_org_failed:', fmtErr(e));
     res.status(500).json({ error: 'update_org_failed', detail: fmtErr(e) });
