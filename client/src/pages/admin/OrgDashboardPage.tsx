@@ -180,6 +180,9 @@ export function OrgDashboardPage() {
             <h1 className="text-3xl font-bold mb-1">{org.name}</h1>
             <p className="text-sm text-slate-400">Organization dashboard</p>
           </div>
+            <div>
+              <button onClick={() => navigate(`/orgs/${orgId}/manage`)} className="px-3 py-1.5 bg-emerald-700/20 text-emerald-300 rounded text-sm hover:bg-emerald-700/30">Manage</button>
+            </div>
         </div>
 
         {/* Controls */}

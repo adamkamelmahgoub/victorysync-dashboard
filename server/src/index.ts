@@ -1418,6 +1418,25 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
   }
 });
 
+// Allow org admins to update their organization settings (e.g., name)
+app.put('/api/orgs/:orgId', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    const { name } = req.body || {};
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    if (!name || typeof name !== 'string') return res.status(400).json({ error: 'missing_required_fields', detail: 'name is required' });
+
+    const { data, error } = await supabaseAdmin.from('organizations').update({ name }).eq('id', orgId).select().maybeSingle();
+    if (error) throw error;
+    res.json({ org: data });
+  } catch (e: any) {
+    console.error('update_org_failed:', fmtErr(e));
+    res.status(500).json({ error: 'update_org_failed', detail: fmtErr(e) });
+  }
+});
+
 // GET /api/admin/orgs/:orgId/phone-metrics - per-phone metrics for this org
 app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
   try {

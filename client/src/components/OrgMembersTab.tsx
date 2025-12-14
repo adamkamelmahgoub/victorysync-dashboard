@@ -8,7 +8,7 @@ interface Member {
   role: string;
 }
 
-export default function OrgMembersTab({ orgId }: { orgId: string }) {
+export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; isOrgAdmin?: boolean }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +41,7 @@ export default function OrgMembersTab({ orgId }: { orgId: string }) {
     e.preventDefault();
     setInviting(true);
     setError(null);
+    if (!isOrgAdmin) { setError('Only organization admins can invite members'); setInviting(false); return; }
     // 1. Find user by email
     const { data: user, error: userErr } = await supabase
       .from('users')
@@ -67,6 +68,7 @@ export default function OrgMembersTab({ orgId }: { orgId: string }) {
 
   async function handleRemove(memberId: string) {
     if (!window.confirm('Remove this member?')) return;
+    if (!isOrgAdmin) { setError('Only organization admins can remove members'); return; }
     await supabase.from('organization_members').delete().eq('id', memberId);
     fetchMembers();
   }
@@ -100,7 +102,7 @@ export default function OrgMembersTab({ orgId }: { orgId: string }) {
         <button
           type="submit"
           className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-          disabled={inviting}
+          disabled={inviting || !isOrgAdmin}
         >
           {inviting ? 'Inviting...' : 'Invite'}
         </button>

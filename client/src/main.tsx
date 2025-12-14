@@ -17,6 +17,8 @@ import { AdminOrgOverviewPage } from "./pages/admin/AdminOrgOverviewPage";
 import AdminApiKeysPage from "./pages/admin/AdminApiKeysPage";
 import { OrgDashboardPage } from "./pages/admin/OrgDashboardPage";
 import { AdminOperationsPage } from "./pages/admin/AdminOperationsPage";
+import OrgManagePage from './pages/OrgManagePage';
+import OrgAdminRoute from './components/OrgAdminRoute';
 import ErrorBoundary from "./components/ErrorBoundary";
 
 // Global error handlers (dev/testing only behind a flag)
@@ -105,6 +107,14 @@ function AppRouter() {
           <AdminRoute>
             <OrgDashboardPage />
           </AdminRoute>
+        }
+      />
+      <Route
+        path="/orgs/:orgId/manage"
+        element={
+          <OrgAdminRoute>
+            <OrgManagePage />
+          </OrgAdminRoute>
         }
       />
       <Route

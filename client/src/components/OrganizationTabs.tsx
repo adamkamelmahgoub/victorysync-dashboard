@@ -1,11 +1,11 @@
 import { useState } from 'react';
 
 import OrgMembersTab from './OrgMembersTab';
-
 import PhoneNumbersTab from './PhoneNumbersTab';
 import AgentsTab from './AgentsTab';
+import OrganizationSettingsTab from './OrganizationSettingsTab';
 
-export default function OrganizationTabs({ orgId }: { orgId: string }) {
+export default function OrganizationTabs({ orgId, isOrgAdmin }: { orgId: string; isOrgAdmin: boolean }) {
   const [tab, setTab] = useState<'members' | 'phones' | 'agents' | 'settings'>('members');
 
   return (
@@ -37,10 +37,10 @@ export default function OrganizationTabs({ orgId }: { orgId: string }) {
         </button>
       </div>
       <div>
-        {tab === 'members' && <OrgMembersTab orgId={orgId} />}
+        {tab === 'members' && <OrgMembersTab orgId={orgId} isOrgAdmin={isOrgAdmin} />}
         {tab === 'phones' && <PhoneNumbersTab orgId={orgId} />}
         {tab === 'agents' && <AgentsTab orgId={orgId} />}
-        {/* TODO: Add SettingsTab */}
+        {tab === 'settings' && <OrganizationSettingsTab orgId={orgId} isOrgAdmin={isOrgAdmin} />}
       </div>
     </div>
   );
