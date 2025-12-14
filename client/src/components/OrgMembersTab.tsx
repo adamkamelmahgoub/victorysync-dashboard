@@ -107,8 +107,13 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
             className="p-2 rounded bg-gray-900 border border-gray-700"
             value={inviteEmail}
             onChange={e => { setInviteEmail(e.target.value); if (error) setError(null); if (inviteSuccess) setInviteSuccess(null); }}
+            onInput={e => { const v = (e.target as HTMLInputElement).value; setInviteEmail(v); if (error) setError(null); if (inviteSuccess) setInviteSuccess(null); }}
+            onBlur={e => { const v = (e.target as HTMLInputElement).value; setInviteEmail(v); }}
             type="email"
           />
+          <div className="mt-2">
+            <button type="button" className="text-xs text-gray-400 hover:underline" onClick={() => setInviteEmail(user?.email || '')}>Use my email</button>
+          </div>
           {!inviteEmail && <div className="text-xs text-gray-500 mt-1">Enter an email to enable Invite</div>}
         </div>
         <div>
