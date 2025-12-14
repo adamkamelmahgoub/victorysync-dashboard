@@ -23,6 +23,19 @@ export default function OrganizationSettingsTab({ orgId, isOrgAdmin, adminCheckD
           const msg = (body && (body.error || body.detail || body.message)) || `${res.status} ${res.statusText}`;
           // Attempt a lightweight fallback: if admin endpoint missing, try org-scoped members endpoint
           if (res.status === 404) {
+            // Try org-scoped endpoint as a fallback (works during staggered deployments)
+            try {
+              const orgRes = await fetch(`/api/orgs/${orgId}`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
+              if (orgRes.ok) {
+                const oj = await orgRes.json().catch(() => ({}));
+                setOrgName(oj.name || 'Organization');
+                setError(null);
+                return;
+              }
+            } catch (_) {
+              // ignore
+            }
+            // as a last resort, try members endpoint to infer a name
             try {
               const mres = await fetch(`/api/orgs/${orgId}/members`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
               if (mres.ok) {
