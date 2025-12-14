@@ -1328,15 +1328,27 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
       // deployments or partial schema rollouts.
       console.warn('[admin_org_detail] org row not found, attempting membership-based fallback for org:', orgId);
       try {
-        const { data: m1, error: m1Err } = await supabaseAdmin.from('org_users').select('id').eq('org_id', orgId).limit(1);
-        if (!m1Err && m1 && m1.length > 0) {
-          org = { id: orgId, name: `Organization ${orgId.slice(0,8)}`, created_at: null } as any;
-        } else {
-          const { data: m2, error: m2Err } = await supabaseAdmin.from('organization_members').select('id').eq('org_id', orgId).limit(1);
-          if (!m2Err && m2 && m2.length > 0) {
-            org = { id: orgId, name: `Organization ${orgId.slice(0,8)}`, created_at: null } as any;
-            console.warn('[admin_org_detail] legacy organization_members present; using fallback org object for:', orgId);
+        // Check for evidence the org exists in several places: org_users, legacy organization_members,
+        // assigned phone mappings, pending invites, or api keys. Any positive hit lets us synthesize
+        // a minimal org object so the admin UI can function during partial rollouts.
+        const checks = [
+          supabaseAdmin.from('org_users').select('id').eq('org_id', orgId).limit(1),
+          supabaseAdmin.from('organization_members').select('id').eq('org_id', orgId).limit(1),
+          supabaseAdmin.from('org_phone_numbers').select('phone_number_id').eq('org_id', orgId).limit(1),
+          supabaseAdmin.from('org_invites').select('id').eq('org_id', orgId).limit(1),
+          supabaseAdmin.from('org_api_keys').select('id').eq('org_id', orgId).limit(1),
+        ];
+        const results = await Promise.allSettled(checks);
+        const found = results.some(r => {
+          if (r.status === 'fulfilled') {
+            const v: any = (r as any).value;
+            if (Array.isArray(v.data) && v.data.length > 0) return true;
           }
+          return false;
+        });
+        if (found) {
+          org = { id: orgId, name: `Organization ${orgId.slice(0,8)}`, created_at: null } as any;
+          console.warn('[admin_org_detail] synthesized org object from membership/related data for:', orgId);
         }
       } catch (e) {
         console.warn('[admin_org_detail] membership fallback failed:', fmtErr(e));
