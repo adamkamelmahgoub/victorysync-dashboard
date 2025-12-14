@@ -1480,6 +1480,21 @@ app.get('/api/orgs/:orgId/members', async (req, res) => {
         out.push({ id: r.id, user_id: r.user_id, email: null, role: r.role, created_at: r.created_at });
       }
     }
+    // Also include pending invites (if any) so the UI can show invite status
+    try {
+      const { data: invites, error: invitesErr } = await supabaseAdmin
+        .from('org_invites')
+        .select('id, org_id, email, role, invited_by, invited_at')
+        .eq('org_id', orgId)
+        .order('invited_at', { ascending: true });
+      if (!invitesErr && invites && invites.length) {
+        for (const inv of invites) {
+          out.push({ id: inv.id, user_id: null, email: inv.email, role: inv.role, invited_by: inv.invited_by, invited_at: inv.invited_at, pending_invite: true });
+        }
+      }
+    } catch (e) {
+      // ignore if invites table missing in older deployments
+    }
     res.json({ members: out });
   } catch (e: any) {
     console.error('org_members_failed:', fmtErr(e));
@@ -1499,7 +1514,21 @@ app.post('/api/orgs/:orgId/members', async (req, res) => {
 
     // Find user by email
     const { data: u, error: uErr } = await supabaseAdmin.from('users').select('id').eq('email', email).maybeSingle();
-    if (uErr || !u) return res.status(404).json({ error: 'user_not_found' });
+    if (uErr || !u) {
+      // Create a pending invite instead of failing when the user doesn't exist yet.
+      try {
+        const { data: inv, error: invErr } = await supabaseAdmin
+          .from('org_invites')
+          .upsert({ org_id: orgId, email, role, invited_by: actorId }, { onConflict: 'org_id,email' })
+          .select()
+          .maybeSingle();
+        if (invErr) throw invErr;
+        return res.status(201).json({ invite: inv });
+      } catch (e) {
+        // If invites table does not exist on this deployment, fall back to explicit error
+        return res.status(404).json({ error: 'user_not_found' });
+      }
+    }
 
     const payload = { user_id: u.id, org_id: orgId, role };
     // Upsert into both `org_users` and legacy `organization_members` to remain compatible
