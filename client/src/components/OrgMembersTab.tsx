@@ -10,7 +10,7 @@ interface Member {
   role: string;
 }
 
-export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; isOrgAdmin?: boolean }) {
+export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { orgId: string; isOrgAdmin?: boolean; adminCheckDone?: boolean }) {
   const { user } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,7 +22,9 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [lastInviteAttempt, setLastInviteAttempt] = useState<string | null>(null);
   const [lastInviteResult, setLastInviteResult] = useState<string | null>(null);
-  const inviteDisabled = inviting || !isOrgAdmin || apiUnavailable || !inviteEmail.trim();
+  // Allow sending an invite if admin check hasn't completed yet (server will enforce permissions),
+  // but disable when we've completed the check and the actor is confirmed not an admin.
+  const inviteDisabled = inviting || apiUnavailable || !inviteEmail.trim() || (adminCheckDone && !isOrgAdmin);
 
   useEffect(() => {
     fetchMembers();

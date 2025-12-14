@@ -10,6 +10,7 @@ export default function OrgManagePage() {
   const navigate = useNavigate();
   const [orgName, setOrgName] = useState<string | null>(null);
   const [isOrgAdmin, setIsOrgAdmin] = useState(false);
+  const [adminCheckDone, setAdminCheckDone] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -61,7 +62,8 @@ export default function OrgManagePage() {
           }
           return null;
         }
-        await checkAdmin();
+            await checkAdmin();
+            setAdminCheckDone(true);
       } catch (e) {
         // ignore
       } finally { setLoading(false); }

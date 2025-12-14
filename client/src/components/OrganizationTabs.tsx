@@ -5,7 +5,7 @@ import PhoneNumbersTab from './PhoneNumbersTab';
 import AgentsTab from './AgentsTab';
 import OrganizationSettingsTab from './OrganizationSettingsTab';
 
-export default function OrganizationTabs({ orgId, isOrgAdmin }: { orgId: string; isOrgAdmin: boolean }) {
+export default function OrganizationTabs({ orgId, isOrgAdmin, adminCheckDone }: { orgId: string; isOrgAdmin: boolean; adminCheckDone?: boolean }) {
   const [tab, setTab] = useState<'members' | 'phones' | 'agents' | 'settings'>('members');
 
   return (
@@ -37,7 +37,7 @@ export default function OrganizationTabs({ orgId, isOrgAdmin }: { orgId: string;
         </button>
       </div>
       <div>
-        {tab === 'members' && <OrgMembersTab orgId={orgId} isOrgAdmin={isOrgAdmin} />}
+        {tab === 'members' && <OrgMembersTab orgId={orgId} isOrgAdmin={isOrgAdmin} adminCheckDone={adminCheckDone} />}
         {tab === 'phones' && <PhoneNumbersTab orgId={orgId} />}
         {tab === 'agents' && <AgentsTab orgId={orgId} />}
         {tab === 'settings' && <OrganizationSettingsTab orgId={orgId} isOrgAdmin={isOrgAdmin} />}
