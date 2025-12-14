@@ -1324,12 +1324,30 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     if (!org) return res.status(404).json({ error: 'org_not_found' });
 
     // members from `org_users` (canonical in this deployment)
-    const { data: memberships, error: memErr } = await supabaseAdmin
-      .from('org_users')
-      .select('id, org_id, user_id, role, mightycall_extension, created_at')
-      .eq('org_id', orgId)
-      .order('created_at', { ascending: false });
-    if (memErr) throw memErr;
+    let memberships: any[] = [];
+    try {
+      const { data: m1, error: m1Err } = await supabaseAdmin
+        .from('org_users')
+        .select('id, org_id, user_id, role, mightycall_extension, created_at')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: false });
+      if (!m1Err && m1 && m1.length > 0) memberships = m1;
+      else {
+        // Fallback to legacy `organization_members` if present
+        const { data: m2, error: m2Err } = await supabaseAdmin
+          .from('organization_members')
+          .select('id, org_id, user_id, role, created_at')
+          .eq('org_id', orgId)
+          .order('created_at', { ascending: false });
+        if (!m2Err && m2) {
+          memberships = m2;
+          console.warn('[admin_orgs] used legacy organization_members fallback for org:', orgId);
+        }
+      }
+    } catch (e) {
+      console.warn('[admin_orgs] membership lookup failed, continuing with empty members:', fmtErr(e));
+      memberships = [];
+    }
 
     const members: Array<any> = [];
     for (const m of (memberships || [])) {
