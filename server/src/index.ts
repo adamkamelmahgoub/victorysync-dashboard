@@ -1515,17 +1515,28 @@ app.post('/api/orgs/:orgId/members', async (req, res) => {
     // Find user by email
     const { data: u, error: uErr } = await supabaseAdmin.from('users').select('id').eq('email', email).maybeSingle();
     if (uErr || !u) {
-      // Create a pending invite instead of failing when the user doesn't exist yet.
+      // Create a pending invite and send an email invitation via Supabase Auth
       try {
+        // First, send the invitation email via Supabase Auth
+        const { data: authInvite, error: authInvErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+          data: { org_id: orgId, role }
+        });
+        if (authInvErr) {
+          console.warn('[org_add_member] Supabase auth invite failed:', fmtErr(authInvErr));
+          // Email invite failed, but still create a DB record so admin can retry later
+        }
+
+        // Also create a database record for tracking
         const { data: inv, error: invErr } = await supabaseAdmin
           .from('org_invites')
           .upsert({ org_id: orgId, email, role, invited_by: actorId }, { onConflict: 'org_id,email' })
           .select()
           .maybeSingle();
         if (invErr) throw invErr;
-        return res.status(201).json({ invite: inv });
+        return res.status(201).json({ invite: inv, email_sent: !authInvErr });
       } catch (e) {
         // If invites table does not exist on this deployment, fall back to explicit error
+        console.error('[org_add_member] Failed to create invite:', fmtErr(e));
         return res.status(404).json({ error: 'user_not_found' });
       }
     }
