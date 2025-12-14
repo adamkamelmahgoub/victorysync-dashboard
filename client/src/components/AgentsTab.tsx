@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { getOrgMembers } from '../lib/apiClient';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Agent {
   id: string;
@@ -11,6 +12,7 @@ interface Agent {
 }
 
 export default function AgentsTab({ orgId }: { orgId: string }) {
+  const { user } = useAuth();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,14 +30,18 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
     setError(null);
     // Use server endpoint to get members and filter agents/org_managers
     try {
-      const json = await getOrgMembers(orgId);
+      const json = await getOrgMembers(orgId, user?.id);
       const rows = json.members || [];
       const filtered = (rows || []).filter((r: any) => ['agent', 'org_manager'].includes(r.role));
       setAgents(filtered.map((m: any) => ({ id: m.user_id, email: m.email || '', role: m.role, extension: '' })));
     } catch (e: any) {
       if (e?.status === 404) {
         setApiUnavailable(true);
-        setError('Members API unavailable (404). Server endpoints may not be deployed.');
+        setError('Members API unavailable (404). Server endpoints may not be deployed; agent list may be incomplete.');
+      } else if (e?.status === 401) {
+        setError('Unauthenticated. Please sign in and try again.');
+      } else if (e?.status === 403) {
+        setError('Access forbidden. You lack the permissions to view agents.');
       } else {
         setError(e?.message || 'Failed to load agents');
       }
@@ -118,7 +124,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                       <button
                         className="text-emerald-400 hover:underline text-xs mr-2"
                         onClick={() => handleSave(agent)}
-                        disabled={apiUnavailable}
+                        disabled={apiUnavailable || !!error && (error.includes('Unauthenticated') || error.includes('Access forbidden'))}
                       >
                         Save
                       </button>
@@ -133,7 +139,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                     <button
                       className="text-blue-400 hover:underline text-xs"
                       onClick={() => handleEdit(agent.id, agent.extension || '')}
-                      disabled={apiUnavailable}
+                      disabled={apiUnavailable || !!error && (error.includes('Unauthenticated') || error.includes('Access forbidden'))}
                     >
                       Edit
                     </button>

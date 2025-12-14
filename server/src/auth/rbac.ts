@@ -99,19 +99,55 @@ export async function isOrgManagerWith(
   permission: keyof typeof permissionColumns
 ): Promise<boolean> {
   try {
-    const { data: member, error: memberErr } = await supabaseAdmin
-      .from("org_users")
-      .select("org_id, user_id, role")
-      .eq("user_id", userId)
-      .eq("org_id", orgId)
-      .maybeSingle();
-    if (memberErr || !member || member.role !== "org_manager") return false;
+    // Look up member record (legacy `org_users` / modern `org_members` may vary)
+    // Try legacy `org_users` table first, then modern `org_members` as a fallback
+    let member: any = null;
+    try {
+      const { data: m1, error: memberErr } = await supabaseAdmin
+        .from("org_users")
+        .select("id, org_id, user_id, role")
+        .eq("user_id", userId)
+        .eq("org_id", orgId)
+        .maybeSingle();
+      if (m1 && m1.role === 'org_manager') member = m1;
+    } catch (e) {
+      // ignore
+    }
+    if (!member) {
+      try {
+        const { data: m2, error: memberErr2 } = await supabaseAdmin
+          .from("org_members")
+          .select("id, org_id, user_id, role")
+          .eq("user_id", userId)
+          .eq("org_id", orgId)
+          .maybeSingle();
+        if (m2 && m2.role === 'org_manager') member = m2;
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (!member) return false;
 
-    // For now, treat org_manager role as sufficient for manager permissions.
-    // The project uses `org_manager_permissions` keyed by org_member_id in some places;
-    // mapping that to `org_users` ids varies across deployments. Keep this simple
-    // to avoid querying a non-existent `org_members` table.
-    return true;
+    // Try to consult explicit manager permissions table (modern schema)
+    try {
+      const { data: perms, error: permsErr } = await supabaseAdmin
+        .from("org_manager_permissions")
+        .select(permission)
+        .eq("org_member_id", member.id)
+        .maybeSingle();
+      if (permsErr) {
+        // If the table or column is missing in this deployment, fall back to legacy behavior
+        console.log('[isOrgManagerWith] org_manager_permissions lookup failed, falling back to role-only behavior', permsErr);
+        return true;
+      }
+      // If there is no explicit permissions row, deny by default (admins should set manager perms)
+      if (!perms) return false;
+      return Boolean((perms as any)[permission]) === true;
+    } catch (e) {
+      // If any error occurs querying permissions, be permissive for backward-compatibility
+      console.log('[isOrgManagerWith] perms table query exception, falling back to role-only behavior', e);
+      return true;
+    }
   } catch (err) {
     console.error("isOrgManagerWith check failed:", err);
     return false;

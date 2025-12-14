@@ -66,7 +66,8 @@ export default function OrgManagePage() {
             } catch (e) {
               setOrgName(null);
             }
-            throw new Error(msg);
+            // Throw the parsed server message (if available) so callers see a useful error
+            throw new Error(rawMsg || 'Failed to load org');
         }
         const j = await resp.json();
         setOrgName(j.name || 'Organization');
