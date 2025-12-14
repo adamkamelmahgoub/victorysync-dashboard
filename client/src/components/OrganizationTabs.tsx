@@ -40,7 +40,7 @@ export default function OrganizationTabs({ orgId, isOrgAdmin, adminCheckDone }: 
         {tab === 'members' && <OrgMembersTab orgId={orgId} isOrgAdmin={isOrgAdmin} adminCheckDone={adminCheckDone} />}
         {tab === 'phones' && <PhoneNumbersTab orgId={orgId} />}
         {tab === 'agents' && <AgentsTab orgId={orgId} />}
-        {tab === 'settings' && <OrganizationSettingsTab orgId={orgId} isOrgAdmin={isOrgAdmin} />}
+        {tab === 'settings' && <OrganizationSettingsTab orgId={orgId} isOrgAdmin={isOrgAdmin} adminCheckDone={adminCheckDone} />}
       </div>
     </div>
   );

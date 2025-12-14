@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { ApiKeysTab } from './ApiKeysTab';
 import { fetchJson } from '../lib/apiClient';
 
-export default function OrganizationSettingsTab({ orgId, isOrgAdmin }: { orgId: string; isOrgAdmin: boolean }) {
+export default function OrganizationSettingsTab({ orgId, isOrgAdmin, adminCheckDone }: { orgId: string; isOrgAdmin: boolean; adminCheckDone?: boolean }) {
   const { user } = useAuth();
   const [orgName, setOrgName] = useState('');
   const [editing, setEditing] = useState(false);
@@ -62,7 +62,7 @@ export default function OrganizationSettingsTab({ orgId, isOrgAdmin }: { orgId: 
     } catch (e: any) { setError(e.message || 'Update failed'); }
   };
 
-  if (!isOrgAdmin) {
+  if (adminCheckDone && !isOrgAdmin) {
     return (
       <div className="rounded-2xl bg-slate-900/80 p-4 ring-1 ring-slate-800">
         <h3 className="text-sm font-medium text-slate-200">Settings</h3>

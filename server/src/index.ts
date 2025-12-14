@@ -1701,6 +1701,87 @@ app.put('/api/orgs/:orgId', async (req, res) => {
   }
 });
 
+// GET /api/orgs/:orgId - org-scoped info (for org admins/managers)
+app.get('/api/orgs/:orgId', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    // ensure actor belongs to org (org_users or legacy organization_members)
+    let membership: any = null;
+    try {
+      const { data: m1, error: m1Err } = await supabaseAdmin
+        .from('org_users')
+        .select('id, role')
+        .eq('org_id', orgId)
+        .eq('user_id', actorId)
+        .maybeSingle();
+      if (!m1Err && m1) membership = m1;
+      else {
+        const { data: m2, error: m2Err } = await supabaseAdmin
+          .from('organization_members')
+          .select('id, role, user_id')
+          .eq('org_id', orgId)
+          .eq('user_id', actorId)
+          .maybeSingle();
+        if (!m2Err && m2) membership = m2;
+      }
+    } catch (e) {
+      membership = null;
+    }
+    if (!membership) return res.status(403).json({ error: 'forbidden' });
+
+    // Load org
+    const { data: org, error: orgErr } = await supabaseAdmin.from('organizations').select('id, name, created_at').eq('id', orgId).maybeSingle();
+    if (orgErr) throw orgErr;
+    if (!org) return res.status(404).json({ error: 'org_not_found' });
+
+    // Phones assigned
+    let phones: any[] = [];
+    try {
+      const { phones: assigned } = await getAssignedPhoneNumbersForOrg(orgId);
+      phones = (assigned || []).map((p: any) => ({ id: p.id, number: p.number, label: p.label ?? null, number_digits: p.number_digits ?? null, created_at: p.created_at }));
+    } catch (err) {
+      console.warn('[org_get] assigned phones helper failed:', fmtErr(err));
+      phones = [];
+    }
+
+    // Stats (safe RPC with fallback)
+    const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
+    const startTime = todayStart; const endTime = new Date().toISOString();
+    let totals:any = null; let totalsErr:any = null;
+    try {
+      const result = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: startTime, _end: endTime });
+      totals = result.data; totalsErr = result.error;
+    } catch (e) {
+      totalsErr = e;
+    }
+    let stats = { total_calls: 0, answered_calls: 0, missed_calls: 0, answer_rate_pct: 0 };
+    if (!totalsErr && totals && Array.isArray(totals)) {
+      let totalCalls = 0, answeredCalls = 0, missedCalls = 0;
+      for (const r of totals) { totalCalls += Number(r.calls_count||0); answeredCalls += Number(r.answered_count||0); missedCalls += Number(r.missed_count||0); }
+      const answerRate = totalCalls > 0 ? Math.round((answeredCalls/totalCalls)*100) : 0;
+      stats = { total_calls: totalCalls, answered_calls: answeredCalls, missed_calls: missedCalls, answer_rate_pct: answerRate };
+    } else if (totalsErr) {
+      console.warn('[org_get] rpc failed, falling back to computeTotalsFromCalls:', fmtErr(totalsErr));
+      try {
+        const assignedNumbers = (phones || []).map((p:any)=>p.number).filter(Boolean);
+        const assignedDigits = (phones || []).map((p:any)=>p.number_digits).filter(Boolean);
+        const totalsFallback = await computeTotalsFromCalls(orgId, new Date(todayStart), new Date(), assignedNumbers, assignedDigits);
+        stats = { total_calls: totalsFallback.callsToday, answered_calls: totalsFallback.answeredCalls, missed_calls: totalsFallback.missedCalls, answer_rate_pct: totalsFallback.answerRate };
+      } catch (e) {
+        console.warn('[org_get] fallback computeTotalsFromCalls failed:', fmtErr(e));
+      }
+    }
+
+    res.json({ org, phones, stats, membership });
+  } catch (err:any) {
+    console.error('org_get_failed:', err?.message ?? err);
+    res.status(500).json({ error: 'org_get_failed', detail: err?.message ?? 'unknown_error' });
+  }
+});
+
 // GET /api/admin/orgs/:orgId/phone-metrics - per-phone metrics for this org
 app.get('/api/admin/orgs/:orgId/phone-metrics', async (req, res) => {
   try {
