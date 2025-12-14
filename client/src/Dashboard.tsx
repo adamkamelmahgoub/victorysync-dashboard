@@ -39,17 +39,27 @@ export const Dashboard: FC = () => {
         const status = resp.status;
         let snippet = null;
         try {
-          const j = await resp.json();
-          snippet = JSON.stringify(j?.members?.slice(0, 5) || j, null, 2).slice(0, 500);
-          const me = (j.members || []).find((m: any) => m.user_id === user.id);
-          if (me && (me.role === 'org_admin' || me.role === 'org_manager')) { if (mounted) setCanManage(true); }
-          else if (mounted) setCanManage(false);
+            // If endpoint missing (404) or otherwise unavailable, try a local fallback
+            if (resp.status === 404) {
+              const fallback = isAdmin || userRole === 'org_admin' || userRole === 'org_manager' || (user?.user_metadata?.org_id === effectiveOrgId);
+              if (mounted) setCanManage(fallback);
+              if (mounted) setMembersDebug({ status: resp.status, bodySnippet: null });
+              return;
+            }
+            if (mounted) setCanManage(false);
+            if (mounted) setMembersDebug({ status: resp.status, bodySnippet: null });
+            return;
         } catch (e) {
           // could not parse JSON
           const txt = await resp.text().catch(() => '');
           snippet = txt.slice(0, 500);
           if (mounted) setCanManage(false);
         }
+          const j = await resp.json();
+          snippet = JSON.stringify(j?.members?.slice(0, 5) || j, null, 2).slice(0, 500);
+          const me = (j.members || []).find((m: any) => m.user_id === user.id);
+          if (me && (me.role === 'org_admin' || me.role === 'org_manager')) { if (mounted) setCanManage(true); }
+          else if (mounted) setCanManage(false);
         if (mounted) setMembersDebug({ status, bodySnippet: snippet });
       } catch (e) { if (mounted) setCanManage(false); }
     })();
