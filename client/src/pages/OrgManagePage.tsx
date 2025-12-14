@@ -22,9 +22,46 @@ export default function OrgManagePage() {
         if (!resp.ok) throw new Error('Failed to fetch org');
         const j = await resp.json();
         setOrgName(j.name || 'Organization');
-        // Check if current user is org admin via org_users table
-        const { data, error } = await supabase.from('org_users').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
-        if (!error && data && (data.role === 'org_admin' || data.role === 'org_manager')) setIsOrgAdmin(true);
+        // Prefer server check for membership (works with legacy tables and RBAC)
+        async function checkAdmin() {
+          try {
+            const mresp = await fetch(`/api/orgs/${orgId}/members`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
+            if (mresp.ok) {
+              const mj = await mresp.json();
+              const me = (mj.members || []).find((m: any) => m.user_id === user.id);
+              if (me && (me.role === 'org_admin' || me.role === 'org_manager')) { setIsOrgAdmin(true); return me.role; }
+              return null;
+            }
+            // members API may not be deployed yet; fall back to client-side check
+            if (mresp.status === 404) {
+              // Try both modern and legacy membership tables via Supabase client
+              try {
+                const { data: d1, error: e1 } = await supabase.from('org_users').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
+                if (!e1 && d1 && (d1.role === 'org_admin' || d1.role === 'org_manager')) { setIsOrgAdmin(true); return d1.role; }
+              } catch (_) {
+                // ignore
+              }
+              try {
+                const { data: d2, error: e2 } = await supabase.from('organization_members').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
+                if (!e2 && d2 && (d2.role === 'org_admin' || d2.role === 'org_manager')) { setIsOrgAdmin(true); return d2.role; }
+              } catch (_) {
+                // ignore (table may not exist or RLS prevents access)
+              }
+            }
+          } catch (e) {
+            // fallback to supabase client as a last resort
+            try {
+              const { data, error } = await supabase.from('org_users').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
+              if (!error && data && (data.role === 'org_admin' || data.role === 'org_manager')) { setIsOrgAdmin(true); return data.role; }
+            } catch (_) {}
+            try {
+              const { data: d2, error: e2 } = await supabase.from('organization_members').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
+              if (!e2 && d2 && (d2.role === 'org_admin' || d2.role === 'org_manager')) { setIsOrgAdmin(true); return d2.role; }
+            } catch (_) {}
+          }
+          return null;
+        }
+        await checkAdmin();
       } catch (e) {
         // ignore
       } finally { setLoading(false); }
