@@ -144,6 +144,17 @@ export const Dashboard: FC = () => {
                 )}
               </div>
             )}
+            {/* Manage button for org admins/managers */}
+            {((isAdmin && paramOrgId) || (!isAdmin && (userRole === 'org_admin' || userRole === 'org_manager'))) && (
+              <div>
+                <button
+                  onClick={() => navigate(`/orgs/${isAdmin ? paramOrgId : userOrgId}/manage`)}
+                  className="ml-3 px-3 py-1.5 bg-emerald-700/20 text-emerald-300 rounded text-sm hover:bg-emerald-700/30"
+                >
+                  Manage
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
