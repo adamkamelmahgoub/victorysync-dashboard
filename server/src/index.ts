@@ -1316,13 +1316,33 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
   try {
     console.info('[admin_org_detail] start for request');
     const { orgId } = req.params;
-    const { data: org, error: orgErr } = await supabaseAdmin
+    let { data: org, error: orgErr } = await supabaseAdmin
       .from('organizations')
       .select('id, name, created_at')
       .eq('id', orgId)
       .maybeSingle();
     if (orgErr) throw orgErr;
-    if (!org) return res.status(404).json({ error: 'org_not_found' });
+    if (!org) {
+      // If the canonical organizations row is missing, try to infer existence
+      // from membership tables so the Manage UI can still function during
+      // deployments or partial schema rollouts.
+      console.warn('[admin_org_detail] org row not found, attempting membership-based fallback for org:', orgId);
+      try {
+        const { data: m1, error: m1Err } = await supabaseAdmin.from('org_users').select('id').eq('org_id', orgId).limit(1);
+        if (!m1Err && m1 && m1.length > 0) {
+          org = { id: orgId, name: `Organization ${orgId.slice(0,8)}`, created_at: null } as any;
+        } else {
+          const { data: m2, error: m2Err } = await supabaseAdmin.from('organization_members').select('id').eq('org_id', orgId).limit(1);
+          if (!m2Err && m2 && m2.length > 0) {
+            org = { id: orgId, name: `Organization ${orgId.slice(0,8)}`, created_at: null } as any;
+            console.warn('[admin_org_detail] legacy organization_members present; using fallback org object for:', orgId);
+          }
+        }
+      } catch (e) {
+        console.warn('[admin_org_detail] membership fallback failed:', fmtErr(e));
+      }
+      if (!org) return res.status(404).json({ error: 'org_not_found' });
+    }
     console.info('[admin_org_detail] org found:', orgId);
 
     // members from `org_users` (canonical in this deployment)
@@ -1732,10 +1752,27 @@ app.get('/api/orgs/:orgId', async (req, res) => {
     }
     if (!membership) return res.status(403).json({ error: 'forbidden' });
 
-    // Load org
-    const { data: org, error: orgErr } = await supabaseAdmin.from('organizations').select('id, name, created_at').eq('id', orgId).maybeSingle();
+    // Load org (with membership-based fallback to avoid 404 during rollouts)
+    let { data: org, error: orgErr } = await supabaseAdmin.from('organizations').select('id, name, created_at').eq('id', orgId).maybeSingle();
     if (orgErr) throw orgErr;
-    if (!org) return res.status(404).json({ error: 'org_not_found' });
+    if (!org) {
+      console.warn('[org_get] org row not found, attempting membership-based fallback for org:', orgId);
+      try {
+        const { data: m1, error: m1Err } = await supabaseAdmin.from('org_users').select('id').eq('org_id', orgId).limit(1);
+        if (!m1Err && m1 && m1.length > 0) {
+          org = { id: orgId, name: `Organization ${orgId.slice(0,8)}`, created_at: null } as any;
+        } else {
+          const { data: m2, error: m2Err } = await supabaseAdmin.from('organization_members').select('id').eq('org_id', orgId).limit(1);
+          if (!m2Err && m2 && m2.length > 0) {
+            org = { id: orgId, name: `Organization ${orgId.slice(0,8)}`, created_at: null } as any;
+            console.warn('[org_get] legacy organization_members present; using fallback org object for:', orgId);
+          }
+        }
+      } catch (e) {
+        console.warn('[org_get] membership fallback failed:', fmtErr(e));
+      }
+      if (!org) return res.status(404).json({ error: 'org_not_found' });
+    }
 
     // Phones assigned
     let phones: any[] = [];
