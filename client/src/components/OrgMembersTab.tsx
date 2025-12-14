@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
 import { getOrgMembers, createOrgMember, deleteOrgMember } from '../lib/apiClient';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Member {
   id: string; // org_user id
@@ -11,6 +11,7 @@ interface Member {
 }
 
 export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; isOrgAdmin?: boolean }) {
+  const { user } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +28,6 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
     setLoading(true);
     setError(null);
     try {
-      const user = supabase.auth.user();
       const result = await getOrgMembers(orgId, user?.id);
       const list = (result.members || []).map((m: any) => ({ id: m.id, userId: m.user_id, email: m.email || '', role: m.role }));
       setMembers(list);
@@ -43,7 +43,6 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
     setError(null);
     if (!isOrgAdmin) { setError('Only organization admins can invite members'); setInviting(false); return; }
     try {
-      const user = supabase.auth.user();
       const json = await createOrgMember(orgId, inviteEmail, inviteRole, user?.id || undefined);
       if (json?.error) setError(json.error);
     } catch (e: any) {
@@ -60,7 +59,6 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
     if (!isOrgAdmin) { setError('Only organization admins can remove members'); return; }
     if (!memberUserId) { setError('Invalid member'); return; }
     try {
-      const user = supabase.auth.user();
       await deleteOrgMember(orgId, memberUserId || '', user?.id || undefined);
     } catch (e: any) {
       setError(e?.message || 'Failed to remove member');

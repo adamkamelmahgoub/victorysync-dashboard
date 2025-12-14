@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { getOrgMembers } from '../lib/apiClient';
 
 interface Agent {
   id: string;
@@ -24,19 +25,15 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
   async function fetchAgents() {
     setLoading(true);
     setError(null);
-    // Get agents and org_managers for this org
-    const { data, error } = await supabase
-      .from('organization_members')
-      .select('id, role, user_id, users: user_id (email), agent_extensions: user_id (extension)')
-      .eq('org_id', orgId)
-      .in('role', ['agent', 'org_manager']);
-    if (error) setError(error.message);
-    else setAgents((data || []).map((m: any) => ({
-      id: m.id,
-      email: m.users?.email || '',
-      role: m.role,
-      extension: m.agent_extensions?.extension || '',
-    })));
+    // Use server endpoint to get members and filter agents/org_managers
+    try {
+      const json = await getOrgMembers(orgId);
+      const rows = json.members || [];
+      const filtered = (rows || []).filter((r: any) => ['agent', 'org_manager'].includes(r.role));
+      setAgents(filtered.map((m: any) => ({ id: m.user_id, email: m.email || '', role: m.role, extension: '' })));
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load agents');
+    }
     setLoading(false);
   }
 
