@@ -34,8 +34,11 @@ export const Dashboard: FC = () => {
       if (!effectiveOrgId || !user) { if (mounted) setCanManage(false); return; }
       if (isAdmin && paramOrgId) { if (mounted) setCanManage(true); return; }
       try {
-        const { data, error } = await supabase.from('org_users').select('role').eq('org_id', effectiveOrgId).eq('user_id', user.id).maybeSingle();
-        if (!error && data && (data.role === 'org_admin' || data.role === 'org_manager')) { if (mounted) setCanManage(true); }
+        const resp = await fetch(`/api/orgs/${effectiveOrgId}/members`, { headers: { 'x-user-id': user.id || '' }, cache: 'no-store' });
+        if (!resp.ok) { if (mounted) setCanManage(false); return; }
+        const j = await resp.json();
+        const me = (j.members || []).find((m: any) => m.user_id === user.id);
+        if (me && (me.role === 'org_admin' || me.role === 'org_manager')) { if (mounted) setCanManage(true); }
         else if (mounted) setCanManage(false);
       } catch (e) { if (mounted) setCanManage(false); }
     })();
