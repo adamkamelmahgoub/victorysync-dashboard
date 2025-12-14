@@ -1553,20 +1553,36 @@ app.delete('/api/orgs/:orgId/members/:userId', async (req, res) => {
     const { orgId, userId } = req.params;
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
     if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
-
-    // Delete from both `org_users` and legacy `organization_members` (ignore missing table)
+    // Try deleting an org_user by user_id first
     try {
-      const { error } = await supabaseAdmin.from('org_users').delete().eq('org_id', orgId).eq('user_id', userId);
-      if (error) throw error;
+      const { data: delData, error: delErr } = await supabaseAdmin.from('org_users').delete().eq('org_id', orgId).eq('user_id', userId).select();
+      if (!delErr && delData && delData.length > 0) {
+        // Also remove legacy row if present
+        try { await supabaseAdmin.from('organization_members').delete().eq('org_id', orgId).eq('user_id', userId); } catch(e) {}
+        return res.status(204).send();
+      }
+    } catch (e) {
+      // ignore and try deleting invite
+    }
+
+    // If no org_user deleted, try deleting an invite by id (support passing invite id in place of userId)
+    try {
+      const { data: invDel, error: invErr } = await supabaseAdmin.from('org_invites').delete().eq('org_id', orgId).eq('id', userId).select();
+      if (!invErr && invDel && invDel.length > 0) return res.status(204).send();
     } catch (e) {
       // ignore
     }
+
+    // Fallback: attempt legacy deletion by user_id
     try {
       await supabaseAdmin.from('organization_members').delete().eq('org_id', orgId).eq('user_id', userId);
+      return res.status(204).send();
     } catch (e) {
       // ignore
     }
-    res.status(204).send();
+
+    // Nothing deleted
+    res.status(404).json({ error: 'member_or_invite_not_found' });
   } catch (e: any) {
     console.error('org_delete_member_failed:', fmtErr(e));
     res.status(500).json({ error: 'org_delete_member_failed', detail: fmtErr(e) });

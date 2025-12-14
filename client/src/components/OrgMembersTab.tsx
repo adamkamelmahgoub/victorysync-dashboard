@@ -159,11 +159,11 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
             {members.map(member => (
               <tr key={member.id} className="border-t border-gray-800">
                 <td className="p-2">{member.email}</td>
-                <td className="p-2">{member.role}</td>
+                <td className="p-2">{member.role}{member.pending_invite ? ' (invited)' : ''}</td>
                 <td className="p-2">
                   <button
                     className="text-red-500 hover:underline text-xs"
-                    onClick={() => handleRemove(member.userId)}
+                    onClick={() => handleRemove(member.userId || member.id)}
                     disabled={apiUnavailable}
                   >
                     Remove
