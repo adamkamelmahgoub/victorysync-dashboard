@@ -27,6 +27,7 @@ export const Dashboard: FC = () => {
   const { metrics, loading, error, retry } = useDashboardMetrics(effectiveOrgId);
 
   const [canManage, setCanManage] = useState(false);
+  const [membersDebug, setMembersDebug] = useState<{ status: number | null; bodySnippet: string | null }>({ status: null, bodySnippet: null });
 
   useEffect(() => {
     let mounted = true;
@@ -35,11 +36,21 @@ export const Dashboard: FC = () => {
       if (isAdmin && paramOrgId) { if (mounted) setCanManage(true); return; }
       try {
         const resp = await fetch(`/api/orgs/${effectiveOrgId}/members`, { headers: { 'x-user-id': user.id || '' }, cache: 'no-store' });
-        if (!resp.ok) { if (mounted) setCanManage(false); return; }
-        const j = await resp.json();
-        const me = (j.members || []).find((m: any) => m.user_id === user.id);
-        if (me && (me.role === 'org_admin' || me.role === 'org_manager')) { if (mounted) setCanManage(true); }
-        else if (mounted) setCanManage(false);
+        const status = resp.status;
+        let snippet = null;
+        try {
+          const j = await resp.json();
+          snippet = JSON.stringify(j?.members?.slice(0, 5) || j, null, 2).slice(0, 500);
+          const me = (j.members || []).find((m: any) => m.user_id === user.id);
+          if (me && (me.role === 'org_admin' || me.role === 'org_manager')) { if (mounted) setCanManage(true); }
+          else if (mounted) setCanManage(false);
+        } catch (e) {
+          // could not parse JSON
+          const txt = await resp.text().catch(() => '');
+          snippet = txt.slice(0, 500);
+          if (mounted) setCanManage(false);
+        }
+        if (mounted) setMembersDebug({ status, bodySnippet: snippet });
       } catch (e) { if (mounted) setCanManage(false); }
     })();
     return () => { mounted = false; };
@@ -173,6 +184,13 @@ export const Dashboard: FC = () => {
                 >
                   Manage
                 </button>
+              </div>
+            )}
+            {/* Debug info (visible when ?debug=1) */}
+            {searchParams.get('debug') === '1' && (
+              <div className="ml-3 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-xs text-slate-300 max-w-xs break-words">
+                <div className="font-mono text-[11px]">members fetch: {membersDebug.status ?? 'n/a'}</div>
+                {membersDebug.bodySnippet && <pre className="text-[11px] mt-1 whitespace-pre-wrap">{membersDebug.bodySnippet}</pre>}
               </div>
             )}
           </div>
