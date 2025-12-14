@@ -14,6 +14,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [apiUnavailable, setApiUnavailable] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [newExt, setNewExt] = useState('');
 
@@ -32,7 +33,12 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       const filtered = (rows || []).filter((r: any) => ['agent', 'org_manager'].includes(r.role));
       setAgents(filtered.map((m: any) => ({ id: m.user_id, email: m.email || '', role: m.role, extension: '' })));
     } catch (e: any) {
-      setError(e?.message || 'Failed to load agents');
+      if (e?.status === 404) {
+        setApiUnavailable(true);
+        setError('Members API unavailable (404). Server endpoints may not be deployed.');
+      } else {
+        setError(e?.message || 'Failed to load agents');
+      }
     }
     setLoading(false);
   }
@@ -74,6 +80,9 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
   return (
     <div className="p-4">
       <h2 className="text-lg font-bold mb-4">Agents & Extensions</h2>
+      {apiUnavailable && (
+        <div className="mb-4 p-3 bg-red-100 text-red-800 rounded">Members API unavailable (404). Server endpoints may not be deployed; agent list may be incomplete.</div>
+      )}
       {error && <div className="text-red-500 mb-2">{error}</div>}
       {loading ? (
         <div>Loading...</div>
@@ -109,6 +118,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                       <button
                         className="text-emerald-400 hover:underline text-xs mr-2"
                         onClick={() => handleSave(agent)}
+                        disabled={apiUnavailable}
                       >
                         Save
                       </button>
@@ -123,6 +133,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                     <button
                       className="text-blue-400 hover:underline text-xs"
                       onClick={() => handleEdit(agent.id, agent.extension || '')}
+                      disabled={apiUnavailable}
                     >
                       Edit
                     </button>
