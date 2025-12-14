@@ -22,6 +22,7 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [lastInviteAttempt, setLastInviteAttempt] = useState<string | null>(null);
   const [lastInviteResult, setLastInviteResult] = useState<string | null>(null);
+  const inviteDisabled = inviting || !isOrgAdmin || apiUnavailable || !inviteEmail.trim();
 
   useEffect(() => {
     fetchMembers();
@@ -125,13 +126,14 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
           data-testid="invite-button"
           className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
           onClick={(e) => { /* also call onClick debug in case native submit is blocked */ handleInvite(e as any); }}
-          disabled={inviting || !isOrgAdmin || apiUnavailable || !inviteEmail.trim()}
+          disabled={inviteDisabled}
         >
           {inviting ? 'Inviting...' : 'Invite'}
         </button>
       </form>
       {error && <div className="text-red-500 mb-2">{error}</div>}
       {inviteSuccess && <div className="text-green-400 mb-2">{inviteSuccess}</div>}
+      <div className="text-xs text-gray-500 mb-2">Debug: isOrgAdmin={String(isOrgAdmin)}, apiUnavailable={String(apiUnavailable)}, inviting={String(inviting)}, inviteEmail="{inviteEmail}", inviteDisabled={String(inviteDisabled)}</div>
 +      {lastInviteAttempt && <div className="text-sm text-gray-400 mb-1">Last invite attempt: {lastInviteAttempt}</div>}
 +      {lastInviteResult && <div className="text-sm text-gray-300 mb-2">Last invite result: {lastInviteResult}</div>}
       {loading ? (
