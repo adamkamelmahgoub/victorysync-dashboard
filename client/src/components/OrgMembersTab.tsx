@@ -47,6 +47,9 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
+    // Debug logging to help diagnose "button does nothing" issues
+    // eslint-disable-next-line no-console
+    console.debug('[OrgMembersTab] handleInvite start', { isOrgAdmin, apiUnavailable, inviteEmail });
     setInviting(true);
     setError(null);
     if (!isOrgAdmin) { setError('Only organization admins can invite members'); setInviting(false); return; }
@@ -92,7 +95,6 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
             value={inviteEmail}
             onChange={e => { setInviteEmail(e.target.value); if (error) setError(null); if (inviteSuccess) setInviteSuccess(null); }}
             type="email"
-            required
           />
           {!inviteEmail && <div className="text-xs text-gray-500 mt-1">Enter an email to enable Invite</div>}
         </div>
@@ -110,7 +112,9 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
         </div>
         <button
           type="submit"
+          data-testid="invite-button"
           className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+          onClick={(e) => { /* also call onClick debug in case native submit is blocked */ handleInvite(e as any); }}
           disabled={inviting || !isOrgAdmin || apiUnavailable || !inviteEmail.trim()}
         >
           {inviting ? 'Inviting...' : 'Invite'}
