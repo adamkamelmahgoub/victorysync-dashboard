@@ -1,4 +1,4 @@
-import type { FC } from "react";
+import React, { FC, useEffect, useState } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
 import { useDashboardMetrics } from "./hooks/useDashboardMetrics";
@@ -25,6 +25,23 @@ export const Dashboard: FC = () => {
   const effectiveOrgId = isAdmin ? (paramOrgId ? decodeURIComponent(paramOrgId) : null) : userOrgId;
   
   const { metrics, loading, error, retry } = useDashboardMetrics(effectiveOrgId);
+
+  const [canManage, setCanManage] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!effectiveOrgId || !user) { if (mounted) setCanManage(false); return; }
+      if (isAdmin && paramOrgId) { if (mounted) setCanManage(true); return; }
+      try {
+        const { data, error } = await supabase.from('org_users').select('role').eq('org_id', effectiveOrgId).eq('user_id', user.id).maybeSingle();
+        if (!error && data && (data.role === 'org_admin' || data.role === 'org_manager')) { if (mounted) setCanManage(true); }
+        else if (mounted) setCanManage(false);
+      } catch (e) { if (mounted) setCanManage(false); }
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveOrgId, user]);
 
   const handleSignOut = async () => {
     await signOut();
