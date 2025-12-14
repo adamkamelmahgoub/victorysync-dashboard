@@ -1314,6 +1314,7 @@ app.post('/api/admin/mightycall/sync', async (_req, res) => {
 // GET /api/admin/orgs/:orgId - detailed org info: members (with email), phones, stats
 app.get('/api/admin/orgs/:orgId', async (req, res) => {
   try {
+    console.info('[admin_org_detail] start for request');
     const { orgId } = req.params;
     const { data: org, error: orgErr } = await supabaseAdmin
       .from('organizations')
@@ -1322,6 +1323,7 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
       .maybeSingle();
     if (orgErr) throw orgErr;
     if (!org) return res.status(404).json({ error: 'org_not_found' });
+    console.info('[admin_org_detail] org found:', orgId);
 
     // members from `org_users` (canonical in this deployment)
     let memberships: any[] = [];
@@ -1372,6 +1374,7 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
       console.warn('org_phone_numbers helper failed:', fmtErr(err));
       phones = [];
     }
+    console.info('[admin_org_detail] phones loaded:', (phones || []).length);
 
     // stats (calls today) - reuse logic
     const todayStart = new Date(new Date().setHours(0,0,0,0)).toISOString();
@@ -1407,8 +1410,13 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     if (totalsErr) {
       console.warn('[org_detail] get_org_phone_metrics failed:', fmtErr(totalsErr));
       // Fallback to compute totals from calls if RPC fails
-      const totalsFallback = await computeTotalsFromCalls(orgId, new Date(todayStart), new Date(), assignedNumbers, assignedDigits);
-      return res.json({ org, members, phones: phones || [], stats: { total_calls: totalsFallback.callsToday, answered_calls: totalsFallback.answeredCalls, missed_calls: totalsFallback.missedCalls, answer_rate_pct: totalsFallback.answerRate } });
+      try {
+        const totalsFallback = await computeTotalsFromCalls(orgId, new Date(todayStart), new Date(), assignedNumbers, assignedDigits);
+        return res.json({ org, members, phones: phones || [], stats: { total_calls: totalsFallback.callsToday, answered_calls: totalsFallback.answeredCalls, missed_calls: totalsFallback.missedCalls, answer_rate_pct: totalsFallback.answerRate } });
+      } catch (fallbackErr) {
+        console.warn('[org_detail] computeTotalsFromCalls fallback failed:', fmtErr(fallbackErr));
+        return res.json({ org, members, phones: phones || [], stats: { total_calls: 0, answered_calls: 0, missed_calls: 0, answer_rate_pct: 0 } });
+      }
     }
     const rows = (totals || []) as any[];
     let totalCalls = 0, answeredCalls = 0, missedCalls = 0;
@@ -1422,13 +1430,22 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
     // Determine if requesting user can edit phone numbers
     const requestUserId = req.header('x-user-id') || null;
     const isDev = process.env.NODE_ENV !== 'production';
-    const canEditPhoneNumbers = !requestUserId ? false : 
-      (isDev) || // Allow in dev if userId provided
-      (await isPlatformAdmin(requestUserId)) ||
-      (await isPlatformManagerWith(requestUserId, 'can_manage_phone_numbers_global')) ||
-      (await isOrgAdmin(requestUserId, orgId)) ||
-      (await isOrgManagerWith(requestUserId, orgId, 'can_manage_phone_numbers'));
+    let canEditPhoneNumbers = false;
+    if (requestUserId) {
+      try {
+        canEditPhoneNumbers = isDev ||
+          (await isPlatformAdmin(requestUserId)) ||
+          (await isPlatformManagerWith(requestUserId, 'can_manage_phone_numbers_global')) ||
+          (await isOrgAdmin(requestUserId, orgId)) ||
+          (await isOrgManagerWith(requestUserId, orgId, 'can_manage_phone_numbers'));
+      } catch (permErr) {
+        console.warn('[admin_org_detail] permission checks failed, defaulting to no edit permissions:', fmtErr(permErr));
+        canEditPhoneNumbers = false;
+      }
+    }
+    console.info('[admin_org_detail] permissions checked: canEditPhoneNumbers=', canEditPhoneNumbers);
 
+    console.info('[admin_org_detail] success for org:', orgId, 'stats:', { totalCalls, answeredCalls, missedCalls });
     res.json({ org, members, phones: phones || [], stats: { total_calls: totalCalls, answered_calls: answeredCalls, missed_calls: missedCalls, answer_rate_pct: answerRate }, permissions: { canEditPhoneNumbers } });
   } catch (err: any) {
     console.error('admin_org_detail_failed:', err?.message ?? err);
