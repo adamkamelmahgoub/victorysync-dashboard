@@ -1453,6 +1453,53 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
   }
 });
 
+// Temporary diagnostic endpoint for debugging org issues in production.
+// Protected by DIAG_TOKEN environment variable — set DIAG_TOKEN to a secret value before using.
+app.get('/api/admin/orgs/:orgId/diag', async (req, res) => {
+  const token = req.query.diag_token as string | undefined;
+  if (!process.env.DIAG_TOKEN || token !== process.env.DIAG_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const { orgId } = req.params;
+    const out: any = { orgId };
+
+    // Check org exists
+    const { data: org, error: orgErr } = await supabaseAdmin.from('organizations').select('id,name').eq('id', orgId).maybeSingle();
+    out.org = org || null; out.orgErr = orgErr ? fmtErr(orgErr) : null;
+
+    // Count members in org_users and legacy organization_members
+    const { data: ou, error: ouErr } = await supabaseAdmin.from('org_users').select('id', { count: 'exact' }).eq('org_id', orgId);
+    out.org_users_count = Array.isArray(ou) ? ou.length : null; out.org_users_err = ouErr ? fmtErr(ouErr) : null;
+    const { data: lm, error: lmErr } = await supabaseAdmin.from('organization_members').select('id', { count: 'exact' }).eq('org_id', orgId);
+    out.legacy_members_count = Array.isArray(lm) ? lm.length : null; out.legacy_members_err = lmErr ? fmtErr(lmErr) : null;
+
+    // Assigned phones
+    try {
+      const { phones: assigned } = await getAssignedPhoneNumbersForOrg(orgId);
+      out.assignedPhones = (assigned || []).map((p:any)=>({ id: p.id, number: p.number, number_digits: p.number_digits }));
+    } catch (e) {
+      out.assignedPhones = null; out.assignedPhonesErr = fmtErr(e);
+    }
+
+    // RPC test for the last minute
+    try {
+      const start = new Date(Date.now()-1000*60).toISOString();
+      const end = new Date().toISOString();
+      const rpcRes = await supabaseAdmin.rpc('get_org_phone_metrics', { _org_id: orgId, _start: start, _end: end });
+      out.rpc = { ok: !rpcRes.error, dataPreview: Array.isArray(rpcRes.data) ? rpcRes.data.slice(0,5) : rpcRes.data, error: rpcRes.error ? fmtErr(rpcRes.error) : null };
+    } catch (e) {
+      out.rpc = { ok: false, error: fmtErr(e) };
+    }
+
+    // Check service role availability
+    out.supabase_service_role_present = !!process.env.SUPABASE_SERVICE_ROLE || !!process.env.SUPABASE_URL;
+
+    res.json(out);
+  } catch (err:any) {
+    console.error('admin_org_diag_failed:', err?.message ?? err);
+    res.status(500).json({ error: 'admin_org_diag_failed', detail: err?.message ?? 'unknown_error' });
+  }
+});
+
 // GET /api/orgs/:orgId/members - list org members (org-scoped)
 app.get('/api/orgs/:orgId/members', async (req, res) => {
   try {
