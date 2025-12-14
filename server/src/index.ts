@@ -1425,20 +1425,50 @@ app.get('/api/orgs/:orgId/members', async (req, res) => {
     const { orgId } = req.params;
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
     // Ensure requester belongs to org
-    const { data: membership, error: mErr } = await supabaseAdmin
-      .from('org_users')
-      .select('id, role')
-      .eq('org_id', orgId)
-      .eq('user_id', actorId)
-      .maybeSingle();
-    if (mErr || !membership) return res.status(403).json({ error: 'forbidden' });
+      // Support legacy `organization_members` table as well as `org_users`.
+      let membership: any = null;
+      try {
+        const { data: m1, error: m1Err } = await supabaseAdmin
+          .from('org_users')
+          .select('id, role')
+          .eq('org_id', orgId)
+          .eq('user_id', actorId)
+          .maybeSingle();
+        if (!m1Err && m1) membership = m1;
+        else {
+          const { data: m2, error: m2Err } = await supabaseAdmin
+            .from('organization_members')
+            .select('id, role, user_id')
+            .eq('org_id', orgId)
+            .eq('user_id', actorId)
+            .maybeSingle();
+          if (!m2Err && m2) membership = m2;
+        }
+      } catch (e) {
+        membership = null;
+      }
+      if (!membership) return res.status(403).json({ error: 'forbidden' });
 
-    const { data: rows, error } = await supabaseAdmin
-      .from('org_users')
-      .select('id, org_id, user_id, role, created_at')
-      .eq('org_id', orgId)
-      .order('created_at', { ascending: true });
-    if (error) throw error;
+    // Try to read members from `org_users`, fall back to legacy `organization_members`.
+    let rows: any[] = [];
+    try {
+      const { data: r1, error: r1Err } = await supabaseAdmin
+        .from('org_users')
+        .select('id, org_id, user_id, role, created_at')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: true });
+      if (!r1Err && r1 && r1.length > 0) rows = r1;
+      else {
+        const { data: r2, error: r2Err } = await supabaseAdmin
+          .from('organization_members')
+          .select('id, org_id, user_id, role, created_at')
+          .eq('org_id', orgId)
+          .order('created_at', { ascending: true });
+        if (!r2Err && r2) rows = r2;
+      }
+    } catch (e) {
+      rows = [];
+    }
 
     // Enrich with user emails
     const out: any[] = [];
@@ -1472,8 +1502,14 @@ app.post('/api/orgs/:orgId/members', async (req, res) => {
     if (uErr || !u) return res.status(404).json({ error: 'user_not_found' });
 
     const payload = { user_id: u.id, org_id: orgId, role };
+    // Upsert into both `org_users` and legacy `organization_members` to remain compatible
     const { data, error } = await supabaseAdmin.from('org_users').upsert(payload, { onConflict: 'org_id,user_id' }).select().maybeSingle();
     if (error) throw error;
+    try {
+      await supabaseAdmin.from('organization_members').upsert(payload, { onConflict: 'org_id,user_id' });
+    } catch (e) {
+      // Non-fatal: some deployments may not have the legacy table
+    }
     res.json({ org_user: data });
   } catch (e: any) {
     console.error('org_add_member_failed:', fmtErr(e));
@@ -1489,8 +1525,18 @@ app.delete('/api/orgs/:orgId/members/:userId', async (req, res) => {
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
     if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
 
-    const { error } = await supabaseAdmin.from('org_users').delete().eq('org_id', orgId).eq('user_id', userId);
-    if (error) throw error;
+    // Delete from both `org_users` and legacy `organization_members` (ignore missing table)
+    try {
+      const { error } = await supabaseAdmin.from('org_users').delete().eq('org_id', orgId).eq('user_id', userId);
+      if (error) throw error;
+    } catch (e) {
+      // ignore
+    }
+    try {
+      await supabaseAdmin.from('organization_members').delete().eq('org_id', orgId).eq('user_id', userId);
+    } catch (e) {
+      // ignore
+    }
     res.status(204).send();
   } catch (e: any) {
     console.error('org_delete_member_failed:', fmtErr(e));
