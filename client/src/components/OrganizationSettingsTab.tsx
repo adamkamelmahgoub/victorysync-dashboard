@@ -16,7 +16,27 @@ export default function OrganizationSettingsTab({ orgId, isOrgAdmin }: { orgId: 
       try {
         setLoading(true);
         const res = await fetch(`/api/admin/orgs/${orgId}`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
-        if (!res.ok) throw new Error('Failed to fetch org');
+        if (!res.ok) {
+          // try to parse error body for helpful message
+          let body: any = null;
+          try { body = await res.json(); } catch (_) { body = await res.text().catch(() => null); }
+          const msg = (body && (body.error || body.detail || body.message)) || `${res.status} ${res.statusText}`;
+          // Attempt a lightweight fallback: if admin endpoint missing, try org-scoped members endpoint
+          if (res.status === 404) {
+            try {
+              const mres = await fetch(`/api/orgs/${orgId}/members`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
+              if (mres.ok) {
+                const mj = await mres.json();
+                setOrgName((mj.org && mj.org.name) || 'Organization');
+                setError(null);
+                return;
+              }
+            } catch (_) {
+              // ignore
+            }
+          }
+          throw new Error(msg);
+        }
         const j = await res.json();
         setOrgName(j.name || '');
         setError(null);

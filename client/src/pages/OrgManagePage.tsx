@@ -20,7 +20,32 @@ export default function OrgManagePage() {
         setLoading(true);
         // Fetch org details
         const resp = await fetch(`/api/admin/orgs/${orgId}`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
-        if (!resp.ok) throw new Error('Failed to fetch org');
+        if (!resp.ok) {
+          // parse server error if possible
+          let body: any = null;
+          try { body = await resp.json(); } catch (_) { body = await resp.text().catch(() => null); }
+          const msg = (body && (body.error || body.detail || body.message)) || `${resp.status} ${resp.statusText}`;
+          // Try fallback: org-scoped members endpoint which should work for org admins
+          try {
+            const mresp = await fetch(`/api/orgs/${orgId}/members`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
+            if (mresp.ok) {
+              const mj = await mresp.json();
+              setOrgName((mj.org && mj.org.name) || 'Organization');
+            } else {
+              // as a last resort, try fetching list of orgs and find by id
+              try {
+                const listRes = await fetch(`/api/admin/orgs`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
+                if (listRes.ok) {
+                  const lj = await listRes.json();
+                  const found = (lj.orgs || []).find((o: any) => o.id === orgId);
+                  if (found) setOrgName(found.name || 'Organization');
+                  else setOrgName(null);
+                } else setOrgName(null);
+              } catch (_) { setOrgName(null); }
+            }
+          } catch (_) { setOrgName(null); }
+          throw new Error(msg);
+        }
         const j = await resp.json();
         setOrgName(j.name || 'Organization');
         // Prefer server check for membership (works with legacy tables and RBAC)
@@ -65,7 +90,8 @@ export default function OrgManagePage() {
             await checkAdmin();
             setAdminCheckDone(true);
       } catch (e) {
-        // ignore
+        // Surface a visible placeholder and allow the rest of the page to function
+        console.warn('org fetch failed:', e);
       } finally { setLoading(false); }
     };
     load();
@@ -100,7 +126,7 @@ export default function OrgManagePage() {
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
           <button onClick={() => navigate('/dashboard')} className="text-sm text-slate-400 mr-2">← Back</button>
-          <h1 className="text-2xl font-bold inline">Manage Organization {orgName}</h1>
+          <h1 className="text-2xl font-bold inline">Manage Organization {orgName ?? <span className="text-rose-400">(Failed to load org)</span>}</h1>
           <button className="ml-4 text-sm text-gray-400 hover:underline" onClick={() => recheckAdmin()}>Re-check admin status</button>
         </div>
         <OrganizationTabs orgId={orgId} isOrgAdmin={isOrgAdmin} adminCheckDone={adminCheckDone} />
