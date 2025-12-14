@@ -61,6 +61,7 @@ export async function fetchJson(path: string, init?: RequestInit) {
     err.detail = detail;
     throw err;
   }
+  if (res.status === 204) return null as any;
   return res.json() as Promise<Json>;
 }
 
@@ -158,3 +159,19 @@ export default {
   getCallSeries,
   getQueueSummary,
 };
+
+// Org members (org admins can manage)
+export async function getOrgMembers(orgId: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function createOrgMember(orgId: string, email: string, role: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ email, role })
+  });
+}
+
+export async function deleteOrgMember(orgId: string, targetUserId: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(targetUserId)}`, { method: 'DELETE', headers: { 'x-user-id': userId || '' } });
+}

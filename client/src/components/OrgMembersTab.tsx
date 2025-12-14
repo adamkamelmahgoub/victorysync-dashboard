@@ -1,9 +1,11 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { getOrgMembers, createOrgMember, deleteOrgMember } from '../lib/apiClient';
 
 interface Member {
-  id: string;
+  id: string; // org_user id
+  userId?: string; // user id
   email: string;
   role: string;
 }
@@ -24,16 +26,14 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
   async function fetchMembers() {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase
-      .from('organization_members')
-      .select('id, role, user_id: user_id, users: user_id (email)')
-      .eq('org_id', orgId);
-    if (error) setError(error.message);
-    else setMembers((data || []).map((m: any) => ({
-      id: m.id,
-      email: m.users?.email || '',
-      role: m.role,
-    })));
+    try {
+      const user = supabase.auth.user();
+      const result = await getOrgMembers(orgId, user?.id);
+      const list = (result.members || []).map((m: any) => ({ id: m.id, userId: m.user_id, email: m.email || '', role: m.role }));
+      setMembers(list);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load members');
+    }
     setLoading(false);
   }
 
@@ -42,34 +42,29 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
     setInviting(true);
     setError(null);
     if (!isOrgAdmin) { setError('Only organization admins can invite members'); setInviting(false); return; }
-    // 1. Find user by email
-    const { data: user, error: userErr } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', inviteEmail)
-      .single();
-    if (userErr || !user) {
-      setError('User not found');
-      setInviting(false);
-      return;
+    try {
+      const user = supabase.auth.user();
+      const json = await createOrgMember(orgId, inviteEmail, inviteRole, user?.id || undefined);
+      if (json?.error) setError(json.error);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to invite user');
     }
-    // 2. Insert into organization_members
-    const { error: insertErr } = await supabase.from('organization_members').insert({
-      org_id: orgId,
-      user_id: user.id,
-      role: inviteRole,
-    });
-    if (insertErr) setError(insertErr.message);
     setInviteEmail('');
     setInviteRole('agent');
     setInviting(false);
     fetchMembers();
   }
 
-  async function handleRemove(memberId: string) {
+  async function handleRemove(memberUserId: string | undefined) {
     if (!window.confirm('Remove this member?')) return;
     if (!isOrgAdmin) { setError('Only organization admins can remove members'); return; }
-    await supabase.from('organization_members').delete().eq('id', memberId);
+    if (!memberUserId) { setError('Invalid member'); return; }
+    try {
+      const user = supabase.auth.user();
+      await deleteOrgMember(orgId, memberUserId || '', user?.id || undefined);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to remove member');
+    }
     fetchMembers();
   }
 
@@ -127,7 +122,7 @@ export default function OrgMembersTab({ orgId, isOrgAdmin }: { orgId: string; is
                 <td className="p-2">
                   <button
                     className="text-red-500 hover:underline text-xs"
-                    onClick={() => handleRemove(member.id)}
+                    onClick={() => handleRemove(member.userId)}
                   >
                     Remove
                   </button>

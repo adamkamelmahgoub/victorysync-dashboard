@@ -1418,6 +1418,86 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
   }
 });
 
+// GET /api/orgs/:orgId/members - list org members (org-scoped)
+app.get('/api/orgs/:orgId/members', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    // Ensure requester belongs to org
+    const { data: membership, error: mErr } = await supabaseAdmin
+      .from('org_users')
+      .select('id, role')
+      .eq('org_id', orgId)
+      .eq('user_id', actorId)
+      .maybeSingle();
+    if (mErr || !membership) return res.status(403).json({ error: 'forbidden' });
+
+    const { data: rows, error } = await supabaseAdmin
+      .from('org_users')
+      .select('id, org_id, user_id, role, created_at')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+
+    // Enrich with user emails
+    const out: any[] = [];
+    for (const r of rows || []) {
+      try {
+        const { data: udata, error: uerr } = await supabaseAdmin.auth.admin.getUserById(r.user_id);
+        out.push({ id: r.id, user_id: r.user_id, email: uerr || !udata ? null : (udata.user.email || null), role: r.role, created_at: r.created_at });
+      } catch (e) {
+        out.push({ id: r.id, user_id: r.user_id, email: null, role: r.role, created_at: r.created_at });
+      }
+    }
+    res.json({ members: out });
+  } catch (e: any) {
+    console.error('org_members_failed:', fmtErr(e));
+    res.status(500).json({ error: 'org_members_failed', detail: fmtErr(e) });
+  }
+});
+
+// POST /api/orgs/:orgId/members - add a user to the org (org-admin only)
+app.post('/api/orgs/:orgId/members', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    const { email, role } = req.body || {};
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    if (!email || !role) return res.status(400).json({ error: 'missing_required_fields' });
+
+    // Find user by email
+    const { data: u, error: uErr } = await supabaseAdmin.from('users').select('id').eq('email', email).maybeSingle();
+    if (uErr || !u) return res.status(404).json({ error: 'user_not_found' });
+
+    const payload = { user_id: u.id, org_id: orgId, role };
+    const { data, error } = await supabaseAdmin.from('org_users').upsert(payload, { onConflict: 'org_id,user_id' }).select().maybeSingle();
+    if (error) throw error;
+    res.json({ org_user: data });
+  } catch (e: any) {
+    console.error('org_add_member_failed:', fmtErr(e));
+    res.status(500).json({ error: 'org_add_member_failed', detail: fmtErr(e) });
+  }
+});
+
+// DELETE /api/orgs/:orgId/members/:userId - remove a member from the org (org-admin only)
+app.delete('/api/orgs/:orgId/members/:userId', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId, userId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { error } = await supabaseAdmin.from('org_users').delete().eq('org_id', orgId).eq('user_id', userId);
+    if (error) throw error;
+    res.status(204).send();
+  } catch (e: any) {
+    console.error('org_delete_member_failed:', fmtErr(e));
+    res.status(500).json({ error: 'org_delete_member_failed', detail: fmtErr(e) });
+  }
+});
+
 // Allow org admins to update their organization settings (e.g., name)
 app.put('/api/orgs/:orgId', async (req, res) => {
   try {
