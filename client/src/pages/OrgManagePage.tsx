@@ -19,9 +19,13 @@ export default function OrgManagePage() {
     const load = async () => {
       try {
         setLoading(true);
-        // Fetch org details
-        const resp = await fetch(`/api/admin/orgs/${orgId}`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
-        if (!resp.ok) {
+          // Try org-scoped endpoint first (works for org admins during rollouts)
+          let resp = await fetch(`/api/orgs/${orgId}`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
+          if (!resp.ok) {
+            // fallback to admin endpoint if org-scoped not available or returns error
+            resp = await fetch(`/api/admin/orgs/${orgId}`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
+          }
+          if (!resp.ok) {
           // parse server error if possible
           let body: any = null;
           try { body = await resp.json(); } catch (_) { body = await resp.text().catch(() => null); }
@@ -46,7 +50,18 @@ export default function OrgManagePage() {
               } catch (_) { setOrgName(null); }
             }
           } catch (_) { setOrgName(null); }
-          throw new Error(msg);
+            // If server endpoints are missing (404/NOT_FOUND), fall back to client-side Supabase queries
+            try {
+              const { data: orgRow, error: orgErr } = await supabase.from('organizations').select('id,name').eq('id', orgId).maybeSingle();
+              if (!orgErr && orgRow) {
+                setOrgName(orgRow.name || 'Organization');
+              } else {
+                setOrgName(null);
+              }
+            } catch (e) {
+              setOrgName(null);
+            }
+            throw new Error(msg);
         }
         const j = await resp.json();
         setOrgName(j.name || 'Organization');
@@ -96,6 +111,13 @@ export default function OrgManagePage() {
         // Surface a visible placeholder and allow the rest of the page to function
         console.warn('org fetch failed:', e);
         setOrgError((e && (e as any).message) || 'Failed to fetch org');
+        // As an additional fallback, attempt to read org and membership directly from Supabase client
+        try {
+          const { data: orgRow, error: orgErr } = await supabase.from('organizations').select('id,name').eq('id', orgId).maybeSingle();
+          if (!orgErr && orgRow) setOrgName(orgRow.name || 'Organization');
+          // Ensure adminCheckDone runs
+          await recheckAdmin();
+        } catch (_) {}
       } finally { setLoading(false); }
     };
     load();
@@ -130,50 +152,7 @@ export default function OrgManagePage() {
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
           <button onClick={() => navigate('/dashboard')} className="text-sm text-slate-400 mr-2">← Back</button>
-          const j = await resp.json();
-          setOrgName(j.name || 'Organization');
-          setOrgError(null);
-          // Prefer server check for membership (works with legacy tables and RBAC)
-          async function checkAdmin() {
-            try {
-              const mresp = await fetch(`/api/orgs/${orgId}/members`, { headers: { 'x-user-id': user?.id || '' }, cache: 'no-store' });
-              if (mresp.ok) {
-                const mj = await mresp.json();
-                const me = (mj.members || []).find((m: any) => m.user_id === user.id);
-                if (me && (me.role === 'org_admin' || me.role === 'org_manager')) { setIsOrgAdmin(true); return me.role; }
-                return null;
-              }
-              // members API may not be deployed yet; fall back to client-side check
-              if (mresp.status === 404) {
-                // Try both modern and legacy membership tables via Supabase client
-                try {
-                  const { data: d1, error: e1 } = await supabase.from('org_users').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
-                  if (!e1 && d1 && (d1.role === 'org_admin' || d1.role === 'org_manager')) { setIsOrgAdmin(true); return d1.role; }
-                } catch (_) {
-                  // ignore
-                }
-                try {
-                  const { data: d2, error: e2 } = await supabase.from('organization_members').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
-                  if (!e2 && d2 && (d2.role === 'org_admin' || d2.role === 'org_manager')) { setIsOrgAdmin(true); return d2.role; }
-                } catch (_) {
-                  // ignore (table may not exist or RLS prevents access)
-                }
-              }
-            } catch (e) {
-              // fallback to supabase client as a last resort
-              try {
-                const { data, error } = await supabase.from('org_users').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
-                if (!error && data && (data.role === 'org_admin' || data.role === 'org_manager')) { setIsOrgAdmin(true); return data.role; }
-              } catch (_) {}
-              try {
-                const { data: d2, error: e2 } = await supabase.from('organization_members').select('role').eq('org_id', orgId).eq('user_id', user.id).maybeSingle();
-                if (!e2 && d2 && (d2.role === 'org_admin' || d2.role === 'org_manager')) { setIsOrgAdmin(true); return d2.role; }
-              } catch (_) {}
-            }
-            return null;
-          }
-          await checkAdmin();
-          setAdminCheckDone(true);
+          
           <h1 className="text-2xl font-bold inline">Manage Organization {orgName ?? <span className="text-rose-400">(Failed to load org)</span>}</h1>
           {orgError && <div className="ml-4 inline text-sm text-rose-400">{orgError}</div>}
           <button className="ml-4 text-sm text-gray-400 hover:underline" onClick={() => recheckAdmin()}>Re-check admin status</button>

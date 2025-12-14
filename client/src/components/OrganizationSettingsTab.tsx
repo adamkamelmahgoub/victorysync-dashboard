@@ -48,6 +48,18 @@ export default function OrganizationSettingsTab({ orgId, isOrgAdmin, adminCheckD
               // ignore
             }
           }
+          // If the admin/org endpoints return 404 or are missing, try supabase client as a fallback
+          try {
+            const { data: orgRow, error: orgErr } = await (await import('../lib/supabaseClient')).supabase.from('organizations').select('id,name').eq('id', orgId).maybeSingle();
+            if (!orgErr && orgRow) {
+              setOrgName(orgRow.name || 'Organization');
+              setError(null);
+              setLoading(false);
+              return;
+            }
+          } catch (_) {
+            // ignore
+          }
           throw new Error(msg);
         }
         const j = await res.json();
