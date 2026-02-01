@@ -1,0 +1,10 @@
+✗ Role 'admin': Invalid API key
+✗ Role 'member': Invalid API key
+✗ Role 'owner': Invalid API key
+✗ Role 'editor': Invalid API key
+
+=== Setting up phone assignment ===
+Error: {
+  message: 'Invalid API key',
+  hint: 'Double check your Supabase `anon` or `service_role` API key.'
+}

@@ -32,7 +32,9 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { SettingsPage } from "./pages/SettingsPage";
 import { NumbersPage } from "./pages/NumbersPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import ReportsPageEnhanced from "./pages/ReportsPageEnhanced";
 import { RecordingsPage } from "./pages/RecordingsPage";
+import UserSettingsPage from "./pages/UserSettingsPage";
 import { SMSPage } from "./pages/SMSPage";
 import { SupportPage } from "./pages/SupportPage";
 import { TeamPage } from "./pages/TeamPage";
@@ -138,7 +140,15 @@ function AppRouter() {
         path="/reports"
         element={
           <ProtectedRoute>
-            <ReportsPage />
+            <ReportsPageEnhanced />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/account-settings"
+        element={
+          <ProtectedRoute>
+            <UserSettingsPage />
           </ProtectedRoute>
         }
       />
@@ -270,7 +280,7 @@ function AppRouter() {
         path="/admin/reports"
         element={
           <AdminRoute>
-            <AdminReportsPage />
+            <ReportsPageEnhanced />
           </AdminRoute>
         }
       />

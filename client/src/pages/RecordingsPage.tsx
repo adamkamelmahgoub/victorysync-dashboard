@@ -8,6 +8,7 @@ export function RecordingsPage() {
   const [recordings, setRecordings] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [playingUrls, setPlayingUrls] = useState<Record<string, string>>({});
   const [startDate, setStartDate] = useState(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [message, setMessage] = useState<string | null>(null);
@@ -21,7 +22,7 @@ export function RecordingsPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const response = await fetch(`http://localhost:4000/api/mightycall/recordings?limit=50&org_id=${selectedOrgId}`, {
+      const response = await fetch(`http://localhost:4000/api/recordings?limit=50&org_id=${selectedOrgId}`, {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
@@ -34,6 +35,45 @@ export function RecordingsPage() {
       setMessage(err?.message || 'Error fetching recordings');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchRecordingBlob = async (id: string) => {
+    if (!user) throw new Error('not_authenticated');
+    const resp = await fetch(`http://localhost:4000/api/recordings/${id}/download`, {
+      headers: { 'x-user-id': user.id }
+    });
+    if (!resp.ok) throw new Error('failed_to_fetch_recording');
+    return await resp.blob();
+  };
+
+  const handlePlay = async (r: any) => {
+    try {
+      const blob = await fetchRecordingBlob(r.id);
+      const url = URL.createObjectURL(blob);
+      setPlayingUrls(prev => ({ ...prev, [r.id]: url }));
+      setTimeout(() => {
+        const el = document.getElementById(`audio-${r.id}`) as HTMLAudioElement | null;
+        el?.play();
+      }, 150);
+    } catch (e: any) {
+      setMessage('Failed to load recording');
+    }
+  };
+
+  const handleDownload = async (r: any) => {
+    try {
+      const blob = await fetchRecordingBlob(r.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${r.id}.mp3`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (e: any) {
+      setMessage('Download failed');
     }
   };
 
@@ -123,18 +163,31 @@ export function RecordingsPage() {
                     <div key={r.id} className="bg-gradient-to-br from-slate-800/50 to-slate-900 rounded-lg p-5 ring-1 ring-slate-700 hover:ring-slate-600 transition">
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex-1">
-                          <h4 className="font-semibold text-white text-sm">{r.phone_numbers?.number || 'Recording'}</h4>
-                          <p className="text-xs text-slate-400 mt-1">{r.recording_date || r.created_at}</p>
+                          <h4 className="font-semibold text-white text-sm">
+                            {r.from_number && r.to_number ? `${r.from_number} → ${r.to_number}` : 'Recording'}
+                          </h4>
+                          <p className="text-xs text-slate-400 mt-1">{r.recording_date ? new Date(r.recording_date).toLocaleDateString() : 'No date'}</p>
+                          {r.org_name && (
+                            <p className="text-xs text-cyan-400 mt-1">Org: <span className="font-medium">{r.org_name}</span></p>
+                          )}
                         </div>
-                        <span className="inline-block px-2 py-1 rounded-md text-xs font-medium bg-emerald-900/40 text-emerald-300 whitespace-nowrap">
-                          Ready
-                        </span>
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="inline-block px-2 py-1 rounded-md text-xs font-medium bg-emerald-900/40 text-emerald-300 whitespace-nowrap">Ready</div>
+                          <div className="flex gap-2">
+                            <button onClick={() => handlePlay(r)} className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-white transition">Play</button>
+                            <button onClick={() => handleDownload(r)} className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-white transition">Download</button>
+                          </div>
+                        </div>
                       </div>
                       {r.duration_seconds && (
                         <div className="pt-3 border-t border-slate-700">
-                          <p className="text-xs text-slate-500">
-                            Duration: {Math.floor(r.duration_seconds / 60)}m {r.duration_seconds % 60}s
-                          </p>
+                          <p className="text-xs text-slate-500">Duration: {Math.floor(r.duration_seconds / 60)}m {r.duration_seconds % 60}s</p>
+                        </div>
+                      )}
+
+                      {playingUrls[r.id] && (
+                        <div className="pt-3">
+                          <audio id={`audio-${r.id}`} controls src={playingUrls[r.id]} className="w-full mt-2" />
                         </div>
                       )}
                     </div>

@@ -244,7 +244,8 @@ export async function syncMightyCallPhoneNumbers(supabaseAdminClient: any, overr
   const numbers = await fetchMightyCallPhoneNumbers(token);
   if (!Array.isArray(numbers) || numbers.length === 0) return { upserted: 0 };
 
-  const rows = numbers.map(n => ({ external_id: n.externalId, e164: n.e164, number: n.number, number_digits: n.numberDigits, label: n.label, is_active: n.isActive }));
+  // Only upsert columns that exist in the schema
+  const rows = numbers.map(n => ({ external_id: n.externalId, number: n.number, label: n.label }));
 
   // Perform per-row upsert with fallback to update-by-number when unique-number conflicts arise
   let upserted = 0;
@@ -419,6 +420,24 @@ export async function fetchMightyCallCalls(accessToken: string, filters?: any): 
       try { json = JSON.parse(text || 'null'); } catch (e) { lastFailure = { url: urlWithParams, body: text }; console.warn('[MightyCall] calls parse failed', lastFailure); continue; }
 
       const list = json?.data?.calls ?? json?.calls ?? json?.data ?? [];
+      // Debug: inspect response shape and list size
+      try {
+        console.log('[MightyCall] calls raw response keys:', Object.keys(json || {}));
+        console.log('[MightyCall] calls list length:', Array.isArray(list) ? list.length : 'not-an-array');
+        if (Array.isArray(list) && list.length > 0) console.log('[MightyCall] calls sample:', JSON.stringify(list.slice(0, 3), null, 2));
+        else {
+          // When list is empty, log a small snippet of the response body to discover where call items might be.
+          try {
+            const snippet = JSON.stringify(json || {}).slice(0, 2000);
+            console.log('[MightyCall] calls raw body snippet (truncated):', snippet);
+          } catch (e) {
+            console.warn('[MightyCall] failed to stringify raw json snippet', e);
+          }
+        }
+      } catch (e) {
+        console.warn('[MightyCall] failed to log calls response', e);
+      }
+
       if (!Array.isArray(list)) { console.warn('[MightyCall] unexpected calls response shape', { url: urlWithParams, body: json }); return []; }
       console.log(`[MightyCall] successfully fetched calls from ${ep}`);
       return list as any[];
@@ -759,26 +778,35 @@ export async function syncMightyCallCallHistory(supabaseAdminClient: any, orgId:
 
   let callsSynced = 0;
 
+  // Always log fetched calls count so we can diagnose why zero rows are being synced
+  try {
+    console.log('[MightyCall sync] fetched calls count:', Array.isArray(calls) ? calls.length : 0);
+    if (Array.isArray(calls) && calls.length > 0) {
+      console.log('[MightyCall sync] calls sample:', JSON.stringify(calls.slice(0, 3), null, 2));
+    }
+  } catch (e) {
+    console.warn('[MightyCall sync] failed to stringify calls sample', e);
+  }
+
   if (calls.length > 0) {
     const callRows = calls.map((c: any) => ({
       org_id: orgId,
-      external_id: c.id ?? c.callId,
       from_number: c.from ?? c.from_number,
       to_number: c.to ?? c.to_number,
-      direction: c.direction ?? (c.from ? 'inbound' : 'outbound'),
       status: c.status ?? c.callStatus,
       duration_seconds: c.duration ?? 0,
-      call_date: c.dateTimeUtc ?? c.timestamp ?? new Date().toISOString(),
-      recording_url: c.recordingUrl ?? null,
-      metadata: c
+      started_at: c.dateTimeUtc ?? c.timestamp ?? new Date().toISOString(),
+      ended_at: c.endedAt ?? c.ended_at ?? null,
+      created_at: new Date().toISOString()
     }));
 
     const { error } = await supabaseAdminClient
-      .from('call_history')
-      .upsert(callRows, { onConflict: 'org_id,external_id' });
+      .from('calls')
+      .insert(callRows)
+      .select();
 
     if (!error) callsSynced = callRows.length;
-    else console.warn('[MightyCall] call history sync error', error);
+    else console.warn('[MightyCall] call history insert error', error);
   }
 
   return { callsSynced };

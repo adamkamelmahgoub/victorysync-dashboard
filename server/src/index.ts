@@ -46,6 +46,7 @@ import {
   syncSMSLog
 } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgManagerWith } from './auth/rbac';
+import { Readable } from 'stream';
 
 // Extend Express Request interface to include apiKeyScope
 declare global {
@@ -171,7 +172,7 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
     if (phoneIds.size > 0) {
       const { data: pdata, error: perr } = await supabaseAdmin
         .from('phone_numbers')
-        .select('id, number, number_digits, label')
+        .select('id, number, label')
         .in('id', Array.from(phoneIds));
       if (!perr && pdata) {
         for (const p of pdata) phonesById[p.id] = p;
@@ -186,7 +187,7 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
     if (phoneNumberStrings.length > 0) {
       const { data: pdata, error: perr } = await supabaseAdmin
         .from('phone_numbers')
-        .select('id, number, number_digits, label')
+        .select('id, number, label')
         .in('number', phoneNumberStrings as string[]);
       if (!perr && pdata) {
         for (const p of pdata) phonesByNumber[p.number] = p;
@@ -255,7 +256,7 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
     
     const { data: phones, error: phoneErr } = await supabaseAdmin
       .from('phone_numbers')
-      .select('id, number, number_digits, label')
+      .select('id, number, label')
       .in('id', phoneIds);
 
     if (phoneErr) {
@@ -265,7 +266,7 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
 
     const phoneList = phones || [];
     const numbers = phoneList.map(p => p.number).filter(Boolean);
-    const digits = phoneList.map(p => p.number_digits).filter(Boolean);
+    const digits = phoneList.map(p => (p.number || '').replace(/\D/g, '')).filter(Boolean);
 
     return { phones: phoneList, numbers, digits };
   } catch (e) {
@@ -943,7 +944,8 @@ app.get('/api/admin/phone-numbers', async (req, res) => {
     const orgId = req.query.orgId as string | undefined;
     const unassignedOnly = (req.query.unassignedOnly as string | undefined) === 'true';
 
-    let q = supabaseAdmin.from('phone_numbers').select('id, number, e164, number_digits, label, org_id, client_id, is_active').order('created_at', { ascending: true });
+    // Select basic columns that always exist
+    let q = supabaseAdmin.from('phone_numbers').select('id, number, label, org_id').order('created_at', { ascending: true });
     if (unassignedOnly) q = q.is('org_id', null);
     if (orgId) q = q.eq('org_id', orgId);
 
@@ -994,10 +996,10 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
 
     const phoneIds = orgPhones.map(op => op.phone_number_id).filter(Boolean);
 
-    // Get phone details
+    // Get phone details - select only columns that definitely exist
     const { data: phones, error: phoneErr } = await supabaseAdmin
       .from('phone_numbers')
-      .select('id, number, label, number_digits, e164, created_at, updated_at, is_active')
+      .select('id, number, label, created_at')
       .in('id', phoneIds);
 
     if (phoneErr) throw phoneErr;
@@ -1006,11 +1008,8 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
       id: p.id,
       number: p.number,
       label: p.label ?? null,
-      number_digits: p.number_digits ?? null,
-      e164: p.e164 ?? null,
       is_active: p.is_active ?? true,
-      created_at: p.created_at,
-      updated_at: p.updated_at
+      created_at: p.created_at
     }));
 
     res.json({
@@ -1123,23 +1122,83 @@ app.get('/api/admin/users/:userId/platform-permissions', async (req, res) => {
   }
 });
 
-// GET /api/user/profile - get current user's profile with global role
+// GET /api/user/profile - get current user's profile with full data (auth + metadata)
 app.get('/api/user/profile', async (req, res) => {
   try {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
-    const { data: profile, error } = await supabaseAdmin
-      .from('profiles')
-      .select('id, global_role')
+    // Get user from auth.users with metadata
+    const { data: user, error: userErr } = await supabaseAdmin
+      .from('auth.users')
+      .select('id, email, user_metadata')
       .eq('id', userId)
-      .maybeSingle();
+      .single();
 
-    if (error) throw error;
-    res.json({ profile: profile || { id: userId, global_role: null } });
+    if (userErr || !user) {
+      // Fallback to profiles table if auth.users not available
+      const { data: profile, error } = await supabaseAdmin
+        .from('profiles')
+        .select('id, global_role')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error) throw error;
+      return res.json({ profile: profile || { id: userId, global_role: null } });
+    }
+
+    // Return enhanced user profile with metadata
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        full_name: (user.user_metadata as any)?.full_name || '',
+        phone_number: (user.user_metadata as any)?.phone_number || '',
+        profile_pic_url: (user.user_metadata as any)?.profile_pic_url || ''
+      },
+      profile: { id: userId, global_role: null }
+    });
   } catch (err: any) {
     console.error('get_user_profile_failed:', fmtErr(err));
     res.status(500).json({ error: 'get_user_profile_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// PUT /api/user/profile - Update user profile
+app.put('/api/user/profile', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { full_name, email, phone_number } = req.body;
+
+    const updatePayload: any = {
+      user_metadata: {
+        full_name: full_name || '',
+        phone_number: phone_number || ''
+      }
+    };
+
+    if (email) {
+      updatePayload.email = email;
+    }
+
+    const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, updatePayload);
+
+    if (error) throw error;
+
+    res.json({
+      user: {
+        id: data.user.id,
+        email: data.user.email,
+        full_name: (data.user.user_metadata as any)?.full_name || '',
+        phone_number: (data.user.user_metadata as any)?.phone_number || '',
+        profile_pic_url: (data.user.user_metadata as any)?.profile_pic_url || ''
+      }
+    });
+  } catch (err: any) {
+    console.error('user_profile_update_failed:', fmtErr(err));
+    res.status(500).json({ error: 'user_profile_update_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
@@ -1150,7 +1209,7 @@ app.get('/api/user/orgs', async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
     const { data: rows, error } = await supabaseAdmin
-      .from('org_members')
+      .from('org_users')
       .select('org_id')
       .eq('user_id', userId);
     if (error) throw error;
@@ -1190,7 +1249,7 @@ app.post('/api/user/onboard', async (req, res) => {
 
     // ensure membership
     const payload = { org_id: org.id, user_id: userId, role: 'org_admin' };
-    const { error: upErr } = await supabaseAdmin.from('org_members').upsert(payload, { onConflict: 'org_id,user_id' });
+    const { error: upErr } = await supabaseAdmin.from('org_users').upsert(payload, { onConflict: 'org_id,user_id' });
     if (upErr) console.warn('onboard_membership_upsert_warning:', fmtErr(upErr));
 
     res.status(201).json({ org });
@@ -1671,7 +1730,7 @@ app.delete('/api/admin/orgs/:orgId/integrations/:integrationId', async (req, res
   }
 });
 
-// POST /api/admin/mightycall/sync - fetch from MightyCall and upsert phone numbers + extensions
+// POST /api/admin/mightycall/sync - fetch from MightyCall and upsert phone numbers + extensions + calls
 app.post('/api/admin/mightycall/sync', async (_req, res) => {
   try {
     const actorId = _req.header('x-user-id') || null;
@@ -1681,7 +1740,7 @@ app.post('/api/admin/mightycall/sync', async (_req, res) => {
 
     try {
       // Use integration helper to sync phone numbers into `phone_numbers` table
-      const result = await syncMightyCallPhoneNumbers(supabaseAdmin);
+      const phoneResult = await syncMightyCallPhoneNumbers(supabaseAdmin);
       // Also fetch extensions to upsert
       const exts = await fetchMightyCallExtensions();
 
@@ -1692,7 +1751,21 @@ app.post('/api/admin/mightycall/sync', async (_req, res) => {
         if (error) console.warn('extension upsert failed', error);
       }
 
-      res.json({ success: true, phones: result.upserted || 0, extensions: exts.length });
+      // Sync calls for all organizations that have MightyCall configured
+      let callsSynced = 0;
+      const { data: orgs } = await supabaseAdmin.from('organizations').select('id');
+      if (orgs && orgs.length > 0) {
+        for (const org of orgs) {
+          try {
+            const callResult = await syncMightyCallCallHistory(supabaseAdmin, org.id);
+            callsSynced += callResult.callsSynced;
+          } catch (callErr) {
+            console.warn(`[MightyCall] Failed to sync calls for org ${org.id}:`, callErr);
+          }
+        }
+      }
+
+      res.json({ success: true, phones: phoneResult.upserted || 0, extensions: exts.length, calls: callsSynced });
     } catch (mcErr: any) {
       // If MightyCall fails, return error with details
       console.error('mightycall_sync_failed:', fmtErr(mcErr));
@@ -4509,6 +4582,59 @@ app.get("/s/series", async (req, res) => {
       }
     });
 
+      // Stream/download a single recording by call id. Proxies the remote `recording_url` so
+      // frontend can fetch with `x-user-id` header and not expose external URLs or auth.
+      app.get('/api/recordings/:id/download', async (req, res) => {
+        try {
+          const actorId = req.header('x-user-id') || null;
+          if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+          const { id } = req.params;
+          if (!id) return res.status(400).json({ error: 'missing_id' });
+
+          const { data: call, error } = await supabaseAdmin
+            .from('calls')
+            .select('id, recording_url, recording_file_name')
+            .eq('id', id)
+            .maybeSingle();
+
+          if (error) {
+            console.error('[recordings/download] db lookup failed:', error);
+            return res.status(500).json({ error: 'db_lookup_failed' });
+          }
+          if (!call || !call.recording_url) {
+            return res.status(404).json({ error: 'recording_not_found' });
+          }
+
+          const recordingUrl = call.recording_url;
+          // Fetch remote asset
+          const fetched = await fetch(recordingUrl);
+          if (!fetched.ok) {
+            console.error('[recordings/download] remote fetch failed:', fetched.status);
+            return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
+          }
+
+          // Convert Web stream to Node stream when possible and pipe to response
+          const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
+          const filename = call.recording_file_name || `${id}.mp3`;
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+          if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
+            const nodeStream = Readable.fromWeb((fetched as any).body);
+            nodeStream.pipe(res);
+          } else {
+            // Fallback: buffer into memory and send (may be larger for big files)
+            const arr = await fetched.arrayBuffer();
+            const buf = Buffer.from(arr);
+            res.send(buf);
+          }
+        } catch (e: any) {
+          console.error('[recordings/download] error:', e?.message ?? e);
+          res.status(500).json({ error: 'download_failed', detail: e?.message ?? String(e) });
+        }
+      });
+
     // Get SMS messages - admin sees all orgs, clients see only their org
     app.get('/api/sms/messages', async (req, res) => {
       try {
@@ -5537,6 +5663,65 @@ app.get('/api/mightycall/sync/jobs', apiKeyAuthMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/mightycall/test-connection?org_id=...&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+// Attempts to obtain a MightyCall access token and fetch a small sample of calls and recordings.
+app.get('/api/mightycall/test-connection', apiKeyAuthMiddleware, async (req, res) => {
+  try {
+    const orgId = req.query.org_id as string | undefined;
+    const actorId = req.header('x-user-id') || null;
+
+    if (!orgId) return res.status(400).json({ error: 'org_id required' });
+
+    // Permission: allow platform API key or platform admin or org admin
+    const usingApiKey = !!req.apiKeyScope;
+    if (!usingApiKey && !actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!usingApiKey && actorId && !(await isPlatformAdmin(actorId) || await isOrgAdmin(actorId, orgId))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    // Attempt to load per-org integration creds
+    let overrideCreds: any = undefined;
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      if (integ && integ.credentials) {
+        overrideCreds = { clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined, clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined };
+      }
+    } catch (ie) {
+      console.warn('[MightyCall Test] failed to load org integration:', ie);
+    }
+
+    const startDate = (req.query.startDate as string) || new Date().toISOString().split('T')[0];
+    const endDate = (req.query.endDate as string) || startDate;
+
+    const { getMightyCallAccessToken, fetchMightyCallCalls, fetchMightyCallRecordings } = await import('./integrations/mightycall');
+
+    // Get token
+    let token: string | null = null;
+    try {
+      token = await getMightyCallAccessToken(overrideCreds);
+    } catch (e: any) {
+      console.error('[MightyCall Test] failed to obtain token:', e?.message ?? e);
+      return res.status(502).json({ error: 'auth_failed', detail: e?.message ?? String(e) });
+    }
+
+    // Fetch calls and recordings (small sample)
+    try {
+      const calls = await fetchMightyCallCalls(token, { dateStart: startDate, dateEnd: endDate, limit: 20 });
+      const recs = await fetchMightyCallRecordings(token, [], startDate, endDate);
+
+      return res.json({ success: true, calls_count: calls.length, recordings_count: recs.length, calls_sample: calls.slice(0, 5), recordings_sample: recs.slice(0, 5) });
+    } catch (e: any) {
+      console.error('[MightyCall Test] fetch failed:', e?.message ?? e);
+      return res.status(502).json({ error: 'fetch_failed', detail: e?.message ?? String(e) });
+    }
+
+  } catch (err: any) {
+    console.error('[MightyCall Test] unexpected error:', err);
+    res.status(500).json({ error: 'unexpected', detail: err?.message ?? String(err) });
+  }
+});
+
 // Global error handlers to catch issues before they crash silently
 process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
   console.error('[UNHANDLED REJECTION]', reason instanceof Error ? reason.message : reason);
@@ -6206,24 +6391,323 @@ app.post('/api/admin/assign-package', async (req, res) => {
   }
 });
 
-// Handle SIGTERM for graceful shutdown
+// POST /api/user/change-password - Change user password
+app.post('/api/user/change-password', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
-process.on('SIGTERM', () => {
-  console.log('[shutdown] SIGTERM received, closing server...');
-  server.close(() => {
-    console.log('[shutdown] Server closed');
-    process.exit(0);
-  });
+    const { new_password } = req.body;
+
+    if (!new_password || new_password.length < 8) {
+      return res.status(400).json({ error: 'password_too_short' });
+    }
+
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: new_password
+    });
+
+    if (error) throw error;
+
+    res.json({ success: true, message: 'password_changed' });
+  } catch (err: any) {
+    console.error('password_change_failed:', fmtErr(err));
+    res.status(500).json({ error: 'password_change_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
 });
 
-// Handle SIGINT for graceful shutdown
-process.on('SIGINT', () => {
-  console.log('[shutdown] SIGINT received, closing server...');
-  server.close(() => {
-    console.log('[shutdown] Server closed');
-    process.exit(0);
-  });
+// POST /api/user/upload-profile-pic - Upload profile picture
+app.post('/api/user/upload-profile-pic', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { image_data } = req.body;
+    if (!image_data) return res.status(400).json({ error: 'no_image_provided' });
+
+    const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      user_metadata: {
+        profile_pic_url: image_data
+      }
+    });
+
+    if (error) throw error;
+
+    res.json({ success: true, url: image_data });
+  } catch (err: any) {
+    console.error('profile_pic_upload_failed:', fmtErr(err));
+    res.status(500).json({ error: 'profile_pic_upload_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
 });
+
+// POST /api/user/upload-org-logo - Upload organization logo
+app.post('/api/user/upload-org-logo', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { image_data } = req.body;
+    if (!image_data) return res.status(400).json({ error: 'no_image_provided' });
+
+    // Get user's primary org
+    const { data: memberships } = await supabaseAdmin
+      .from('org_members')
+      .select('org_id')
+      .eq('user_id', userId)
+      .limit(1);
+
+    if (!memberships || memberships.length === 0) {
+      return res.status(404).json({ error: 'no_org_found' });
+    }
+
+    const orgId = memberships[0].org_id;
+
+    // Update org with logo
+    const { data: org, error } = await supabaseAdmin
+      .from('organizations')
+      .update({ logo_url: image_data, updated_at: new Date().toISOString() })
+      .eq('id', orgId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, org });
+  } catch (err: any) {
+    console.error('org_logo_upload_failed:', fmtErr(err));
+    res.status(500).json({ error: 'org_logo_upload_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// GET /api/call-stats - Get call statistics and KPIs
+app.get('/api/call-stats', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const orgId = req.query.org_id as string;
+    const phoneNumber = req.query.phone_number as string; // Optional: filter by phone number
+    const startDate = req.query.start_date as string;
+    const endDate = req.query.end_date as string;
+
+    if (!orgId) return res.status(400).json({ error: 'org_id_required' });
+
+    // Check if user is a platform admin or org member
+    const isAdmin = await isPlatformAdmin(userId);
+    const isMember = await isOrgMember(userId, orgId);
+    
+    if (!isAdmin && !isMember) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    // Collect assigned phone numbers for the user (for filtering if non-admin)
+    let assignedPhoneNumbers: string[] = [];
+    
+    if (!isAdmin) {
+      // Get user's assigned phone numbers
+      const { data: assignments } = await supabaseAdmin
+        .from('user_phone_assignments')
+        .select('phone_number_id')
+        .eq('user_id', userId);
+      
+      const assignedPhoneIds = (assignments || []).map(a => a.phone_number_id).filter(Boolean);
+      
+      if (assignedPhoneIds.length === 0) {
+        // No assignments, return empty stats
+        return res.json({
+          stats: { totalCalls: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgWaitTime: 0, totalDuration: 0, avgDuration: 0, answerRate: 0, totalRevenue: 0, avgRevenue: 0 },
+          calls: []
+        });
+      }
+      
+      // Get the actual phone numbers
+      const { data: phones } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('number')
+        .in('id', assignedPhoneIds);
+      
+      assignedPhoneNumbers = (phones || []).map(p => p.number).filter(Boolean);
+      
+      if (assignedPhoneNumbers.length === 0) {
+        // No phone numbers found for assignments, return empty stats
+        return res.json({
+          stats: { totalCalls: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgWaitTime: 0, totalDuration: 0, avgDuration: 0, answerRate: 0, totalRevenue: 0, avgRevenue: 0 },
+          calls: []
+        });
+      }
+    }
+    
+    // Fetch calls for the org within date range
+    let q = supabaseAdmin.from('calls').select('*').eq('org_id', orgId);
+    
+    // For non-admin clients: filter by assigned phone numbers (to_number only)
+    if (!isAdmin && assignedPhoneNumbers.length > 0) {
+      q = q.in('to_number', assignedPhoneNumbers);
+    } else if (phoneNumber) {
+      // Admin can optionally filter by phone number
+      q = q.eq('to_number', phoneNumber);
+    }
+    
+    if (startDate) q = q.gte('started_at', startDate);
+    if (endDate) q = q.lte('started_at', endDate);
+
+    const { data: calls, error } = await q;
+    if (error) throw error;
+
+    // If there are no rows in `calls`, fall back to aggregating from `mightycall_recordings`
+    // This ensures the Reports page can show real KPIs when the calls sync returned empty.
+    let finalCalls = calls || [];
+    if ((!finalCalls || finalCalls.length === 0)) {
+      try {
+        let recQ = supabaseAdmin
+          .from('mightycall_recordings')
+          .select('*')
+          .eq('org_id', orgId)
+          .order('recording_date', { ascending: false })
+          .limit(100);
+
+        // For non-admin clients: also filter recordings by assigned phone numbers
+        if (!isAdmin && assignedPhoneNumbers.length > 0) {
+          recQ = recQ.in('to_number', assignedPhoneNumbers);
+        }
+
+        if (startDate) recQ = recQ.gte('recording_date', startDate);
+        if (endDate) recQ = recQ.lte('recording_date', endDate);
+
+        const { data: recs, error: recErr } = await recQ;
+        if (!recErr && Array.isArray(recs) && recs.length > 0) {
+          // Synthesize call-like rows from recordings
+          finalCalls = recs.map((r: any) => ({
+            org_id: r.org_id,
+            from_number: r.from_number || null,
+            to_number: r.to_number || null,
+            status: 'answered',
+            duration_seconds: r.duration_seconds ?? 0,
+            started_at: r.recording_date,
+            ended_at: r.recording_date,
+            recording_url: r.recording_url,
+            recording_id: r.id,
+            metadata: r
+          }));
+        }
+      } catch (e) {
+        console.warn('call_stats_recordings_fallback_failed:', (e as any)?.message || e);
+      }
+    }
+
+    // Calculate KPIs
+    const totalCalls = finalCalls?.length || 0;
+    const answeredCalls = finalCalls?.filter((c: any) => (c.status || '').toString().toLowerCase() === 'answered').length || 0;
+    const missedCalls = finalCalls?.filter((c: any) => (c.status || '').toString().toLowerCase() === 'missed').length || 0;
+    const answerRate = totalCalls > 0 ? (answeredCalls / totalCalls) * 100 : 0;
+
+    // Calculate durations (in seconds)
+    const totalDuration = finalCalls?.reduce((sum: number, c: any) => sum + (c.duration_seconds || 0), 0) || 0;
+    const avgDuration = totalCalls > 0 ? totalDuration / totalCalls : 0;
+    const avgHandleTime = answeredCalls > 0 ? totalDuration / answeredCalls : 0;
+    const avgWaitTime = finalCalls?.reduce((sum: number, c: any) => sum + (c.listen_time_seconds || 0), 0) || 0;
+
+    // Calculate revenue (best-effort - recordings won't have revenue)
+    const totalRevenue = finalCalls?.reduce((sum: number, c: any) => sum + (c.revenue_generated || 0), 0) || 0;
+    const avgRevenue = answeredCalls > 0 ? totalRevenue / answeredCalls : 0;
+
+    res.json({
+      stats: {
+        totalCalls,
+        answeredCalls,
+        missedCalls,
+        avgHandleTime,
+        avgWaitTime,
+        totalDuration,
+        avgDuration,
+        answerRate,
+        totalRevenue,
+        avgRevenue
+      },
+      calls: (finalCalls || []).slice(0, 100)
+    });
+  } catch (err: any) {
+    console.error('call_stats_failed:', fmtErr(err));
+    res.status(500).json({ error: 'call_stats_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// GET /api/recordings - Get recordings with org details
+app.get('/api/recordings', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const orgId = req.query.org_id as string;
+    const limit = parseInt(req.query.limit as string) || 50;
+
+    if (!orgId) return res.status(400).json({ error: 'org_id_required' });
+
+    // Fetch recordings
+    let q = supabaseAdmin
+      .from('mightycall_recordings')
+      .select('*')
+      .eq('org_id', orgId)
+      .order('recording_date', { ascending: false })
+      .limit(limit);
+
+    const { data: recordings, error } = await q;
+    if (error) throw error;
+
+    // Enrich with org data
+    const { data: org } = await supabaseAdmin
+      .from('organizations')
+      .select('id, name')
+      .eq('id', orgId)
+      .single();
+
+    const enriched = (recordings || []).map((rec: any) => ({
+      ...rec,
+      org_name: org?.name || 'Unknown Org'
+    }));
+
+    res.json({ recordings: enriched });
+  } catch (err: any) {
+    console.error('recordings_fetch_failed:', fmtErr(err));
+    res.status(500).json({ error: 'recordings_fetch_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// During interactive debugging we may receive SIGINT/SIGTERM from the environment
+// (file watchers, dev tooling). To allow introspection without the process
+// immediately exiting, handle signals in a non-fatal way when the
+// `SKIP_FATAL_SIGNAL_EXIT` env var is set to "true". In normal operation the
+// original graceful shutdown behavior remains.
+if (process.env.SKIP_FATAL_SIGNAL_EXIT === 'true') {
+  console.log('[startup] SKIP_FATAL_SIGNAL_EXIT=true — SIGINT/SIGTERM will be logged but not exit the process');
+  process.on('SIGTERM', () => {
+    console.log('[shutdown-debug] SIGTERM received (ignored for debug)');
+  });
+  process.on('SIGINT', () => {
+    console.log('[shutdown-debug] SIGINT received (ignored for debug)');
+  });
+} else {
+  // Handle SIGTERM for graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('[shutdown] SIGTERM received, closing server...');
+    server.close(() => {
+      console.log('[shutdown] Server closed');
+      process.exit(0);
+    });
+  });
+
+  // Handle SIGINT for graceful shutdown
+  process.on('SIGINT', () => {
+    console.log('[shutdown] SIGINT received, closing server...');
+    server.close(() => {
+      console.log('[shutdown] Server closed');
+      process.exit(0);
+    });
+  });
+}
+
+// Log that we're fully ready
+console.log('[startup] *** ALL STARTUP CHECKS PASSED - Server is fully operational ***');
 
 // Log that we're fully ready
 console.log('[startup] *** ALL STARTUP CHECKS PASSED - Server is fully operational ***');

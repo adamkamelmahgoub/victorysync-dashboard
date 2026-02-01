@@ -63,7 +63,17 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-slate-700">
+      <div className="p-4 border-t border-slate-700 space-y-2">
+        <button
+          onClick={() => navigate('/account-settings')}
+          className={`w-full text-left px-4 py-2 rounded-lg font-medium transition-all text-sm ${
+            currentPath === '/account-settings'
+              ? 'bg-cyan-600 text-white'
+              : 'text-slate-300 hover:bg-slate-800 hover:text-cyan-300'
+          }`}
+        >
+          ⚙️ Account Settings
+        </button>
         <button
           onClick={() => signOut()}
           className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all text-sm font-medium"

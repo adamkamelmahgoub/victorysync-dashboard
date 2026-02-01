@@ -123,20 +123,41 @@ export function ReportsPage() {
                   <p className="text-slate-400">No reports found. Try syncing data.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {reports.slice(0, 50).map((r: any) => (
-                    <div key={r.id} className="bg-gradient-to-br from-slate-800/50 to-slate-900 rounded-lg p-5 ring-1 ring-slate-700 hover:ring-slate-600 transition">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-white text-sm">{r.report_type || 'Report'}</h4>
-                          <p className="text-xs text-slate-400 mt-2">{r.report_date || r.created_at}</p>
-                        </div>
-                        <span className="inline-block px-2 py-1 rounded-md text-xs font-medium bg-blue-900/40 text-blue-300 whitespace-nowrap">
-                          Report
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-700">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">From Number</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">To Number</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Status</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300">Duration</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reports.slice(0, 100).map((r: any) => (
+                        <tr key={r.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition">
+                          <td className="px-4 py-3 text-white font-medium">{r.from_number || '—'}</td>
+                          <td className="px-4 py-3 text-white">{r.to_number || '—'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                              r.status === 'answered' ? 'bg-emerald-900/40 text-emerald-300' :
+                              r.status === 'missed' ? 'bg-red-900/40 text-red-300' :
+                              'bg-slate-900/40 text-slate-300'
+                            }`}>
+                              {r.status || 'unknown'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center text-slate-300">
+                            {r.duration ? `${Math.floor(r.duration / 60)}m ${r.duration % 60}s` : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-400 text-xs">
+                            {r.report_date || r.started_at ? new Date(r.report_date || r.started_at).toLocaleString() : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

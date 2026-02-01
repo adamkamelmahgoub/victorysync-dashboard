@@ -103,7 +103,7 @@ export async function fetchMightyCallPhoneNumbers(): Promise<MightyCallPhoneNumb
 }
 
 export async function listActivePhoneNumbersFromDB(supabaseClient: any) {
-  return supabaseClient.from('phone_numbers').select('id, number, label, org_id, is_active').eq('is_active', true);
+  return supabaseClient.from('phone_numbers').select('id, number, label, org_id').order('created_at', { ascending: false });
 }
 
 export default { getAuthToken, fetchMightyCallPhoneNumbers, listActivePhoneNumbersFromDB };
