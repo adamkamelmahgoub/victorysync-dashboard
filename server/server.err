@@ -1,0 +1,2 @@
+call_history_list_failed: Could not find the table 'public.call_history' in the schema cache
+voicemails_list_failed: Could not find the table 'public.voicemail_logs' in the schema cache

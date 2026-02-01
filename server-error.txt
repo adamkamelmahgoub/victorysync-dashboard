@@ -1,0 +1,7 @@
+[MightyCall] extensions request failed {
+  url: 'https://ccapi.mightycall.com/v4/extensions',
+  status: 404,
+  body: '<html><body><h1>404 Not Found</h1>\n' +
+    'The requested URL was not found.\n' +
+    '</body></html>\n'
+}

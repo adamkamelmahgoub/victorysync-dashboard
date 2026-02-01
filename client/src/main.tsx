@@ -8,18 +8,42 @@ import {
 } from "react-router-dom";
 import "./index.css";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { OrgProvider, useOrg } from "./contexts/OrgContext";
 import { ToastProvider } from "./contexts/ToastContext";
-import { Dashboard } from "./Dashboard";
+import DashboardNewV3 from "./pages/DashboardNewV3";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminUsersPage } from "./pages/admin/AdminUsersPage";
 import AdminOrgsPage from "./pages/admin/AdminOrgsPage";
 import { AdminOrgOverviewPage } from "./pages/admin/AdminOrgOverviewPage";
 import AdminApiKeysPage from "./pages/admin/AdminApiKeysPage";
+import AdminMightyCallPage from "./pages/admin/AdminMightyCallPage";
 import { OrgDashboardPage } from "./pages/admin/OrgDashboardPage";
 import { AdminOperationsPage } from "./pages/admin/AdminOperationsPage";
+import AdminSupportPage from "./pages/admin/AdminSupportPage";
+import AdminNumberChangeRequestsPage from "./pages/admin/AdminNumberChangeRequestsPage";
+import AdminReportsPage from "./pages/admin/AdminReportsPage";
+import AdminRecordingsPage from "./pages/admin/AdminRecordingsPage";
+import AdminSMSPage from "./pages/admin/AdminSMSPage";
+import { AdminBillingPage } from "./pages/admin/AdminBillingPage";
+import { AdminBillingPageV2 } from "./pages/admin/AdminBillingPageV2";
 import OrgManagePage from './pages/OrgManagePage';
 import OrgAdminRoute from './components/OrgAdminRoute';
 import ErrorBoundary from "./components/ErrorBoundary";
+import { SettingsPage } from "./pages/SettingsPage";
+import { NumbersPage } from "./pages/NumbersPage";
+import { ReportsPage } from "./pages/ReportsPage";
+import { RecordingsPage } from "./pages/RecordingsPage";
+import { SMSPage } from "./pages/SMSPage";
+import { SupportPage } from "./pages/SupportPage";
+import { TeamPage } from "./pages/TeamPage";
+import { DebugAuthPage } from "./pages/DebugAuthPage";
+
+declare global {
+  interface Window {
+    __lastResourceError?: any;
+    __lastPromiseRejection?: any;
+  }
+}
 
 // Global error handlers (dev/testing only behind a flag)
 if ((import.meta as any).env && (import.meta as any).env.VITE_DEBUG_API === 'true') {
@@ -37,9 +61,10 @@ if ((import.meta as any).env && (import.meta as any).env.VITE_DEBUG_API === 'tru
 }
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const { user, loading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { loading: orgLoading } = useOrg();
 
-  if (loading) {
+  if (authLoading || orgLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">
         Loading...
@@ -67,7 +92,7 @@ function AdminRoute({ children }: { children: JSX.Element }) {
   }
 
   if (!user || (role !== "admin" && role !== "platform_admin")) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return children;
@@ -78,10 +103,86 @@ function AppRouter() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <DashboardNewV3 />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/dashboard"
         element={
           <ProtectedRoute>
-            <Dashboard />
+            <DashboardNewV3 />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <SettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/numbers"
+        element={
+          <ProtectedRoute>
+            <NumbersPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <ReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/recordings"
+        element={
+          <ProtectedRoute>
+            <RecordingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/sms"
+        element={
+          <ProtectedRoute>
+            <SMSPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/support"
+        element={
+          <ProtectedRoute>
+            <SupportPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing"
+        element={<Navigate to="/dashboard" replace />}
+      />
+      <Route
+        path="/team"
+        element={
+          <ProtectedRoute>
+            <TeamPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/debug-auth"
+        element={
+          <ProtectedRoute>
+            <DebugAuthPage />
           </ProtectedRoute>
         }
       />
@@ -141,6 +242,62 @@ function AppRouter() {
           </AdminRoute>
         }
       />
+      <Route
+        path="/admin/mightycall"
+        element={
+          <AdminRoute>
+            <AdminMightyCallPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/support"
+        element={
+          <AdminRoute>
+            <AdminSupportPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/number-change-requests"
+        element={
+          <AdminRoute>
+            <AdminNumberChangeRequestsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/reports"
+        element={
+          <AdminRoute>
+            <AdminReportsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/recordings"
+        element={
+          <AdminRoute>
+            <AdminRecordingsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/sms"
+        element={
+          <AdminRoute>
+            <AdminSMSPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/billing"
+        element={
+          <AdminRoute>
+            <AdminBillingPageV2 />
+          </AdminRoute>
+        }
+      />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
@@ -149,14 +306,16 @@ function AppRouter() {
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <AuthProvider>
-      <BrowserRouter>
-        <ErrorBoundary>
-          {/* ToastProvider provides a simple global toast UI */}
-          <ToastProvider>
-            <AppRouter />
-          </ToastProvider>
-        </ErrorBoundary>
-      </BrowserRouter>
+      <OrgProvider>
+        <BrowserRouter>
+          <ErrorBoundary>
+            {/* ToastProvider provides a simple global toast UI */}
+            <ToastProvider>
+              <AppRouter />
+            </ToastProvider>
+          </ErrorBoundary>
+        </BrowserRouter>
+      </OrgProvider>
     </AuthProvider>
   </StrictMode>
 );

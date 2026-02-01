@@ -1,0 +1,152 @@
+[env] Loaded MightyCall envs: {
+  MIGHTYCALL_API_KEY: true,
+  MIGHTYCALL_USER_KEY: true,
+  MIGHTYCALL_BASE_URL: 'https://ccapi.mightycall.com/v4'
+}
+[startup] Starting Express server on port 4000...
+[startup] app.listen() returned, server object created
+[startup] *** Server is ready and listening for connections ***
+[startup] *** ALL STARTUP CHECKS PASSED - Server is fully operational ***
+[startup] Express app.listen() callback fired
+Metrics API listening on port 4000
+[startup] Event loop is spinning
+[isPlatformAdmin] userId: 5a055f52-9ff8-49d3-9583-9903d5350c3e global_role: platform_admin
+[MightyCall] raw phonenumbers response: {
+  "data": {
+    "phoneNumbers": [
+      {
+        "number": "+12122357403",
+        "isEnabled": true,
+        "isPrimary": false,
+        "isTollFree": false,
+        "isInternational": false,
+        "smsMode": "Enabled",
+        "numberMessagingVerified": true,
+        "isMmsEnabled": true,
+        "callRecordingMode": "Both, OutgoingBeepDisabled",
+        "description": null,
+        "label": "KLINUS",
+        "mayText": true,
+        "mayCall": true,
+        "lastUsed": true,
+        "objectGuid": "f22e242b-7cb3-4661-8f0d-2ea08ff368e1",
+        "doNotOriginate": false
+      },
+      {
+        "number": "+13123194556",
+        "isEnabled": true,
+        "isPrimary": false,
+        "isTollFree": false,
+        "isInternational": false,
+        "smsMode": "Enabled",
+        "numberMessagingVerified": true,
+        "isMmsEnabled": true,
+        "callRecordingMode": "Both, OutgoingBeepDisabled",
+        "description": null,
+        "label": "GenX",
+        "mayText": true,
+        "mayCall": true,
+        "objectGuid": "14c89104-8695-428d-bdcc-78d6f2583cf0",
+        "doNotOriginate": false
+      },
+      {
+        "number": "+17323286846",
+        "isEnabled": true,
+        "isPrimary": false,
+        "isTollFree": false,
+        "isInternational": false,
+        "smsMode": "Enabled",
+        "numberMessagingVerified": true,
+        "isMmsEnabled": true,
+        "callRecordingMode": "Both, OutgoingBeepDisabled",
+        "description": null,
+        "label": "HILLSIDE KITCHENS",
+        "mayText": true,
+        "mayCall": true,
+        "objectGuid": "f1cfb4c4-de07-4968-8ddd-c9f38c651f4a",
+        "doNotOriginate": false
+      },
+      {
+        "number": "+18482161220",
+        "isEnabled": true,
+        "isPrimary": false,
+        "isTollFree": false,
+        "isInternational": false,
+        "smsMode": "Enabled",
+        "numberMessagingVerified": true,
+        "isMmsEnabled": true,
+        "callRecordingMode": "Both",
+        "description": null,
+        "label": "VictorySync",
+        "mayText": true,
+        "mayCall": true,
+        "objectGuid": "f4fb9363-27c0-4232-8cbf-48e837bc1b07",
+        "doNotOriginate": false
+      }
+    ],
+    "deletedPhoneNumbers": [
+      {
+        "number": "+12122357403",
+        "isEnabled": true,
+        "isPrimary": false,
+        "isTollFree": false,
+        "isInternational": false,
+        "smsMode": "Disabled",
+        "numberMessagingVerified": false,
+        "isMmsEnabled": true,
+        "callRecordingMode": "Both, OutgoingBeepDisabled",
+        "description": null,
+        "label": "KLINUS",
+        "mayText": true,
+        "mayCall": true,
+        "whenDeleted": "2026-01-14T14:04:12.6341039Z",
+        "objectGuid": "765dd2cb-3cd6-454c-b03d-6ef43065cab9",
+        "doNotOriginate": false
+      },
+      {
+        "number": "+12122357403",
+        "isEnabled": true,
+        "isPrimary": false,
+        "isTollFree": false,
+        "isInternational": false,
+        "smsMode": "Capable",
+        "numberMessagingVerified": false,
+        "isMmsEnabled": true,
+        "callRecordingMode": "Both, OutgoingBeepDisabled",
+        "description": null,
+        "label": "Local",
+        "mayText": true,
+        "mayCall": true,
+        "whenDeleted": "2026-01-14T14:10:03.9536748Z",
+        "objectGuid": "61a053c1-69aa-4742-b757-537040762122",
+        "doNotOriginate": false
+      },
+      {
+        "number": "+16318926207",
+        "isEnabled": true,
+        "isPrimary": false,
+        "isTollFree": false,
+        "isInternational": false,
+        "smsMode": "Enabled",
+        "numberMessagingVerified": false,
+        "isMmsEnabled": true,
+        "callRecordingMode": "Both, OutgoingBeepDisabled",
+        "description": null,
+        "label": "Local",
+        "mayText": true,
+        "mayCall": true,
+        "whenDeleted": "2025-12-01T19:58:27.3212038Z",
+        "objectGuid": "5744a5a3-f550-42ec-acbe-b05027399c34",
+        "doNotOriginate": false
+      }
+    ],
+    "total": 4
+  },
+  "isSuccess": true
+}
+[MightyCall] successfully fetched from /api/phonenumbers
+[isPlatformAdmin] userId: 5a055f52-9ff8-49d3-9583-9903d5350c3e global_role: platform_admin
+[isPlatformAdmin] userId: 5a055f52-9ff8-49d3-9583-9903d5350c3e global_role: platform_admin
+[isPlatformAdmin] userId: 5a055f52-9ff8-49d3-9583-9903d5350c3e global_role: platform_admin
+[isPlatformAdmin] userId: 5a055f52-9ff8-49d3-9583-9903d5350c3e global_role: platform_admin
+[isPlatformAdmin] userId: 5a055f52-9ff8-49d3-9583-9903d5350c3e global_role: platform_admin

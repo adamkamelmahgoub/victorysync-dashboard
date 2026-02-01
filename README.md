@@ -1,41 +1,91 @@
-# victorysync-dashboard
+# VictorySync Dashboard
 
-This repository contains a small demo app with a Node/Express backend that reads metrics from Supabase and a Vite + React + TypeScript + Tailwind frontend that shows a live KPI dashboard.
+This repository contains a full-stack application with a Supabase backend and a Vite + React + TypeScript frontend that provides an all-in-one client hub for VictorySync services.
 
-IMPORTANT: You must fill real values into the server `.env` before starting the server.
+## Features
 
-## Project layout
+- **Dashboard**: Live call performance metrics
+- **Numbers**: Manage phone numbers and submit change requests
+- **Team**: Invite and manage team members
+- **Billing**: Stripe-powered subscription management
+- **Support**: Calendly integration and support ticket system
+- **Settings**: Organization configuration
 
-- `server/` - Node + TypeScript Express API that reads the `client_metrics_today` view from Supabase
-- `client/` - Vite + React + TypeScript + Tailwind app that displays the dashboard card
+## Project Layout
 
-## Quick start (Windows PowerShell)
+- `client/` - Vite + React + TypeScript + Tailwind frontend
+- `server/` - Node + TypeScript Express API (legacy)
+- `supabase/` - Database migrations and edge functions
 
-1. Server
+## Setup Instructions
 
-```powershell
-cd server
-npm install
-# edit .env and set SUPABASE_URL and SUPABASE_SERVICE_KEY
-npm run dev
-```
+### 1. Database Setup
 
-Server will run on port 4000 by default.
+1. Run the migrations in order:
+   - `001_add_to_number_digits.sql` through `007_extend_org_schema_and_add_modules.sql`
 
-2. Client
+2. Enable RLS on all tables and set up policies as defined in `007_extend_org_schema_and_add_modules.sql`
 
-```powershell
+### 2. Supabase Edge Functions
+
+Deploy the edge functions in `supabase/functions/`:
+
+- `create_checkout_session`
+- `create_billing_portal_session`
+- `stripe_webhook`
+
+Set the following environment variables in Supabase:
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_STARTER`
+- `STRIPE_PRICE_GROWTH`
+- `STRIPE_PRICE_SCALE`
+- `SITE_URL`
+
+### 3. Client Setup
+
+```bash
 cd client
 npm install
 npm run dev
 ```
 
-Vite dev server will run on port 3000 by default. Open the page (or visit the deployed dashboard at https://dashboard.victorysync.com) and it will render the Dashboard.
+### 4. Server Setup (if needed)
 
-## Notes
+```bash
+cd server
+npm install
+# Set SUPABASE_URL and SUPABASE_SERVICE_KEY in .env
+npm run dev
+```
 
-- The server expects a Supabase view named `client_metrics_today` with columns: `org_id`, `total_calls`, `answered_calls`, `answer_rate_pct`, `avg_wait_seconds`.
-- Replace the placeholder `ORG_ID` in `client/src/Dashboard.tsx` (the constant at the top of the file) with a real org id to fetch metrics.
-- Do NOT commit real service keys into git. Keep `.env` out of source control.
+## Environment Variables
 
-If you'd like, I can also run `npm install` in each folder and start the dev servers for you, or add a single root-level workspace script to start both concurrently. Tell me which you'd prefer.
+### Client (.env)
+
+```
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_anon_key
+```
+
+### Server (.env)
+
+```
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_KEY=your_service_key
+```
+
+## Security
+
+- All data access is scoped by `org_id` with RLS policies
+- Only org admins can manage members, billing, and settings
+- Audit logs track all critical actions
+- Provider tokens are never exposed to the client
+
+## Development
+
+- TypeScript strict mode enabled
+- ESLint and Prettier configured
+- Tailwind CSS for styling
+- Supabase for backend services

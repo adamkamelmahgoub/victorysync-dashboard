@@ -30,7 +30,13 @@ export function useQueueSummary(orgId: string | null | undefined): UseQueueSumma
         setError(null);
         const q = await getQueueSummary({ orgId: orgId ?? undefined });
         if (!cancelled) {
-          setQueues(q || []);
+            // Ensure names are strings to satisfy QueueSummary.name: string
+            setQueues((q || []).map((it: any) => ({
+              name: it?.name ?? '',
+              totalCalls: it?.totalCalls ?? it?.total_calls ?? 0,
+              answered: it?.answered ?? 0,
+              missed: it?.missed ?? 0,
+            })));
         }
       } catch (e: any) {
         if (!cancelled) {

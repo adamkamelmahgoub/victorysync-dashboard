@@ -7,7 +7,7 @@ interface OrgSettings {
   service_level_target_seconds: number;
 }
 
-export default function ServiceLevelTargetBlock({ orgId, canEdit }: { orgId: string | null, canEdit: boolean }) {
+export default function ServiceLevelTargetBlock({ orgId, canEdit }: { orgId: string | null, canEdit?: boolean, answerRate?: number, avgWait?: number }) {
   const [settings, setSettings] = useState<OrgSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);

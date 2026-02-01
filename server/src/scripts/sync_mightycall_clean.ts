@@ -1,5 +1,5 @@
 import '../config/env';
-import { getMightyCallAccessToken, fetchMightyCallPhoneNumbers } from '../integrations/mightycall';
+import { getMightyCallAccessToken, fetchMightyCallPhoneNumbers, syncMightyCallPhoneNumbers } from '../integrations/mightycall';
 import { getSupabaseAdminClient } from '../lib/supabaseClient';
 
 async function main() {
@@ -18,25 +18,9 @@ async function main() {
       process.exit(0);
     }
 
-    const rows = numbers.map(n => ({
-      external_id: n.externalId,
-      e164: n.e164,
-      number: n.number,
-      number_digits: n.numberDigits,
-      label: n.label,
-      is_active: n.isActive,
-    }));
-
-    const { data, error } = await supabase
-      .from('phone_numbers')
-      .upsert(rows, { onConflict: 'external_id' });
-
-    if (error) {
-      console.error('[MightyCall sync] upsert error', error);
-      throw error;
-    }
-
-    console.info('[MightyCall sync] upserted', (data as any)?.length ?? rows.length, 'rows into phone_numbers');
+    // Delegate to integration helper which handles upsert/update edge-cases
+    const { upserted } = await syncMightyCallPhoneNumbers(supabase as any);
+    console.info('[MightyCall sync] upserted', upserted, 'rows into phone_numbers');
     console.info('[MightyCall sync] complete');
     process.exit(0);
   } catch (err) {

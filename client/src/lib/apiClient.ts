@@ -165,6 +165,35 @@ export async function getOrgMembers(orgId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members`, { headers: { 'x-user-id': userId || '' } });
 }
 
+// MightyCall sync helpers
+export async function triggerMightyCallPhoneNumberSync(userId?: string) {
+  return await fetchJson(`/api/mightycall/sync/phone-numbers`, { method: 'POST', headers: { 'x-user-id': userId || '' } });
+}
+
+export async function triggerMightyCallReportsSync(orgId: string, startDate?: string, endDate?: string, userId?: string) {
+  return await fetchJson(`/api/mightycall/sync/reports`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ orgId, startDate, endDate })
+  });
+}
+
+export async function triggerMightyCallRecordingsSync(orgId: string, startDate?: string, endDate?: string, userId?: string) {
+  return await fetchJson(`/api/mightycall/sync/recordings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ orgId, startDate, endDate })
+  });
+}
+
+export async function listMightyCallSyncJobs(params?: { orgId?: string; status?: string; limit?: number }, userId?: string) {
+  const q = new URLSearchParams();
+  if (params?.orgId) q.set('orgId', params.orgId);
+  if (params?.status) q.set('status', params.status);
+  if (params?.limit) q.set('limit', String(params.limit));
+  return await fetchJson(`/api/mightycall/sync/jobs?${q.toString()}`, { headers: { 'x-user-id': userId || '' } });
+}
+
 export async function createOrgMember(orgId: string, email: string, role: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
@@ -174,4 +203,20 @@ export async function createOrgMember(orgId: string, email: string, role: string
 
 export async function deleteOrgMember(orgId: string, targetUserId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(targetUserId)}`, { method: 'DELETE', headers: { 'x-user-id': userId || '' } });
+}
+// Organization integrations (MightyCall, etc.)
+export async function getOrgIntegrations(orgId: string, userId?: string) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/integrations`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function saveOrgIntegration(orgId: string, data: { integration_type: string; label?: string; credentials: any }, userId?: string) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/integrations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify(data)
+  });
+}
+
+export async function deleteOrgIntegration(orgId: string, integrationId: string, userId?: string) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/integrations/${encodeURIComponent(integrationId)}`, { method: 'DELETE', headers: { 'x-user-id': userId || '' } });
 }

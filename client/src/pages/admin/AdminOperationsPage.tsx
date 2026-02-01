@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import AdminTopNav from '../../components/AdminTopNav';
+import { PageLayout } from '../../components/PageLayout';
 import { ApiKeysTab } from '../../components/ApiKeysTab';
 import { buildApiUrl } from '../../config';
 
@@ -43,41 +44,32 @@ export function AdminOperationsPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-950 text-slate-50">
-        <div className="max-w-6xl mx-auto px-4 py-8">
-          <div className="text-center py-12">
-            <p className="text-slate-400">Loading...</p>
-          </div>
+      <PageLayout title="Operations" description="Manage API keys, phone numbers, and organization settings">
+        <div className="text-center py-12">
+          <p className="text-slate-400">Loading...</p>
         </div>
-      </main>
+      </PageLayout>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50">
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
-        {/* Header */}
-        <header>
-          <p className="text-xs font-semibold text-emerald-400 uppercase tracking-[0.18em]">Admin</p>
-          <h1 className="text-2xl font-semibold tracking-tight">Operations</h1>
-          <p className="text-xs text-slate-400 mt-1">Manage API keys, phone numbers, and organization settings</p>
-        </header>
-
+    <PageLayout title="Operations" description="Manage API keys, phone numbers, and organization settings">
+      <div className="space-y-6">
         <AdminTopNav />
 
-        {/* Organization Selector */}
+        {/* Organization Selector Card */}
         {orgs.length > 0 && (
-          <div className="border-b border-slate-700">
-            <div className="text-sm font-semibold text-slate-300 mb-3">Select Organization</div>
-            <div className="flex gap-2 flex-wrap pb-4">
+          <div className="bg-slate-900 rounded-lg p-6 border border-slate-700">
+            <h3 className="text-sm font-semibold text-white mb-4">Select Organization</h3>
+            <div className="flex gap-3 flex-wrap">
               {orgs.map((org) => (
                 <button
                   key={org.id}
                   onClick={() => setSelectedOrgId(org.id)}
-                  className={`px-3 py-1.5 text-sm rounded transition ${
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition duration-200 border ${
                     selectedOrgId === org.id
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/50'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                      : 'bg-slate-950 text-slate-300 hover:bg-slate-800 border-slate-700 hover:border-slate-600'
                   }`}
                 >
                   {org.name}
@@ -87,31 +79,33 @@ export function AdminOperationsPage() {
           </div>
         )}
 
-        {/* Tab Navigation */}
-        <div className="border-b border-slate-700 flex gap-8">
-          <button
-            onClick={() => setActiveTab('api-keys')}
-            className={`px-4 py-3 border-b-2 transition font-medium text-sm ${
-              activeTab === 'api-keys'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-300'
-            }`}
-          >
-            API Keys
-          </button>
-        </div>
+        {/* Tab Navigation Card */}
+        <div className="bg-slate-900 rounded-lg border border-slate-700 overflow-hidden">
+          <div className="px-6 border-b border-slate-700">
+            <button
+              onClick={() => setActiveTab('api-keys')}
+              className={`px-0 py-4 border-b-2 transition font-medium text-sm ${
+                activeTab === 'api-keys'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-300'
+              }`}
+            >
+              API Keys
+            </button>
+          </div>
 
-        {/* Content */}
-        <div className="bg-slate-900/50 rounded-lg border border-slate-700 p-6">
-          {activeTab === 'api-keys' && selectedOrgId && (
-            <section>
-              <h2 className="text-lg font-semibold mb-4">API Keys</h2>
-              <ApiKeysTab orgId={selectedOrgId} isOrgAdmin={true} />
-            </section>
-          )}
+          {/* Content Section */}
+          <div className="p-6">
+            {activeTab === 'api-keys' && selectedOrgId && (
+              <section>
+                <h2 className="text-lg font-semibold text-white mb-6">API Keys Management</h2>
+                <ApiKeysTab orgId={selectedOrgId} isOrgAdmin={true} />
+              </section>
+            )}
+          </div>
         </div>
       </div>
-    </main>
+    </PageLayout>
   );
 }
 

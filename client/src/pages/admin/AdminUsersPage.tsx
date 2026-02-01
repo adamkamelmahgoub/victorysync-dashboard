@@ -2,6 +2,7 @@ import type { FC } from "react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminTopNav from '../../components/AdminTopNav';
+import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../contexts/ToastContext";
 import { API_BASE_URL, buildApiUrl } from "../../config";
@@ -419,16 +420,11 @@ export const AdminUsersPage: FC = () => {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50">
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+    <PageLayout title="User Management">
+      <div className="space-y-6">
         <header className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold text-emerald-400 uppercase tracking-[0.18em]">
-              Admin
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              User management
-            </h1>
+            <h1 className="text-xl font-semibold">User Management</h1>
             <p className="text-xs text-slate-400 mt-1">
               Create new users and manage organization assignments.
             </p>
@@ -458,7 +454,7 @@ export const AdminUsersPage: FC = () => {
 
               {createSuccess && (
                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-300 mb-3">
-                  ✓ User created successfully!
+                  User created successfully
                 </div>
               )}
 
@@ -547,7 +543,7 @@ export const AdminUsersPage: FC = () => {
               <div className="space-y-3">
                   {assignSuccess && (
                     <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-300">
-                      ✓ User assigned successfully!
+                      User assigned successfully
                     </div>
                   )}
                 <div>
@@ -896,14 +892,15 @@ export const AdminUsersPage: FC = () => {
             )}
           </div>
         </section>
+
+        {showPlatformModal && (
+          <PlatformPermissionsModal
+            userId={showPlatformModal.userId}
+            email={showPlatformModal.email}
+            onClose={() => setShowPlatformModal(null)}
+          />
+        )}
       </div>
-    {showPlatformModal && (
-      <PlatformPermissionsModal
-        userId={showPlatformModal.userId}
-        email={showPlatformModal.email}
-        onClose={() => setShowPlatformModal(null)}
-      />
-    )}
-    </main>
+    </PageLayout>
   );
 };

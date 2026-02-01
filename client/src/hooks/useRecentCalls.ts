@@ -32,7 +32,17 @@ export function useRecentCalls(orgId: string | null | undefined): UseRecentCalls
         setError(null);
         const items = await getRecentCalls({ orgId: orgId ?? undefined, limit: 50 });
         if (!cancelled) {
-          setCalls(items || []);
+          const normalized = (items || []).map((it: any) => ({
+            id: it.id,
+            direction: it.direction ?? null,
+            status: it.status ?? null,
+            fromNumber: it.from_number ?? it.fromNumber ?? null,
+            toNumber: it.to_number ?? it.toNumber ?? null,
+            startedAt: it.started_at ?? it.startedAt ?? '',
+            queueName: it.queue_name ?? it.queueName ?? null,
+            agentName: it.agent_name ?? it.agentName ?? null,
+          }));
+          setCalls(normalized);
         }
       } catch (e: any) {
         if (!cancelled) {

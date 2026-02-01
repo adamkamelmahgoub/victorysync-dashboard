@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { PageLayout } from '../../components/PageLayout';
 // Server-side admin actions use API endpoints, not client-side Supabase
 import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL, buildApiUrl } from '../../config';
@@ -737,16 +738,11 @@ export default function AdminOrgsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50">
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+    <PageLayout title="Organizations">
+      <div className="space-y-6">
         <header className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold text-emerald-400 uppercase tracking-[0.18em]">
-              Admin
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Organizations
-            </h1>
+            <h1 className="text-xl font-semibold">Organizations</h1>
             <p className="text-xs text-slate-400 mt-1">
               Create and manage organizations, view members and call metrics.
             </p>
@@ -772,7 +768,7 @@ export default function AdminOrgsPage() {
 
             {createSuccess && (
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-300">
-                ✓ Organization created successfully!
+                Organization created successfully
               </div>
             )}
 
@@ -858,6 +854,6 @@ export default function AdminOrgsPage() {
           onPhonesUpdated={() => fetchOrgs()}
         />
       )}
-    </main>
+    </PageLayout>
   );
-}
+};

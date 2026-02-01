@@ -92,6 +92,39 @@ export async function isOrgAdmin(
   }
 }
 
+/** Check if user is a member of an organization (any role) */
+export async function isOrgMember(
+  userId: string,
+  orgId: string
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("org_users")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("org_id", orgId)
+      .maybeSingle();
+    if (error || !data) {
+      // Try legacy org_members table as fallback
+      try {
+        const { data: data2, error: error2 } = await supabaseAdmin
+          .from("org_members")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("org_id", orgId)
+          .maybeSingle();
+        return !error2 && !!data2;
+      } catch (e) {
+        return false;
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error("isOrgMember check failed:", err);
+    return false;
+  }
+}
+
 /** Check if user is org manager with specific permission for an org */
 export async function isOrgManagerWith(
   userId: string,

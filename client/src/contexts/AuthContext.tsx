@@ -5,19 +5,22 @@ import { supabase } from "../lib/supabaseClient";
 
 type AuthContextValue = {
   user: User | null;
-  orgId: string | null;
+  orgs: Array<{ id: string; name: string }>;
+  selectedOrgId: string | null;
   loading: boolean;
   globalRole: string | null;
   refreshProfile: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
+  setSelectedOrgId: (id: string | null) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [globalRole, setGlobalRole] = useState<string | null>(null);
 
@@ -34,17 +37,28 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         } else if (r && r.data && r.data.session?.user) {
           const user = r.data.session.user;
           setUser(user);
-          setOrgId(user.user_metadata?.org_id ?? null);
-          // fetch profile global_role for this user (don't block auth init)
-          supabase
-            .from('profiles')
-            .select('global_role')
-            .eq('id', user.id)
-            .maybeSingle()
-            .then(({ data: pData, error: pErr }) => {
-              if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
-            })
-            .catch(() => {});
+          // Try to read canonical profile from backend and orgs list
+          try {
+            const profileRes = await fetch('http://localhost:4000/api/user/profile', { headers: { 'x-user-id': user.id } });
+            if (profileRes.ok) {
+              const profileData = await profileRes.json();
+              if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
+            }
+          } catch (e) {
+            console.warn('[AuthContext] init fetch profile failed', e);
+          }
+          try {
+            const orgsRes = await fetch('http://localhost:4000/api/user/orgs', { headers: { 'x-user-id': user.id } });
+            if (orgsRes.ok) {
+              const j = await orgsRes.json();
+              const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
+              setOrgs(list);
+              const isAdmin = (user.user_metadata?.global_role === 'platform_admin');
+              if (isAdmin) setSelectedOrgId(null); else setSelectedOrgId(list.length > 0 ? list[0].id : null);
+            }
+          } catch (e) {
+            console.warn('[AuthContext] init fetch orgs failed', e);
+          }
         }
       } catch (error) {
         console.error("Error initializing auth:", error);
@@ -61,20 +75,27 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       const sub = supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
           setUser(session.user);
-          setOrgId(session.user.user_metadata?.org_id ?? null);
-          // refresh profile global_role on auth change (don't block the callback)
-          supabase
-            .from('profiles')
-            .select('global_role')
-            .eq('id', session.user.id)
-            .maybeSingle()
-            .then(({ data: pData, error: pErr }) => {
-              if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
-            })
-            .catch(() => {});
+          try {
+            const profileRes = await fetch('http://localhost:4000/api/user/profile', { headers: { 'x-user-id': session.user.id } });
+            if (profileRes.ok) {
+              const profileData = await profileRes.json();
+              if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
+            }
+          } catch (e) { /* ignore */ }
+          try {
+            const orgsRes = await fetch('http://localhost:4000/api/user/orgs', { headers: { 'x-user-id': session.user.id } });
+            if (orgsRes.ok) {
+              const j = await orgsRes.json();
+              const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
+              setOrgs(list);
+              const isAdmin = (session.user.user_metadata?.global_role === 'platform_admin');
+              if (isAdmin) setSelectedOrgId(null); else setSelectedOrgId(list.length > 0 ? list[0].id : null);
+            }
+          } catch (e) { /* ignore */ }
         } else {
           setUser(null);
-          setOrgId(null);
+          setOrgs([]);
+          setSelectedOrgId(null);
           setGlobalRole(null);
         }
         setLoading(false);
@@ -119,7 +140,34 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       if (data && data.user) {
         console.log('[AuthContext] Sign in successful, setting user:', data.user.email);
         setUser(data.user);
-        setOrgId(data.user.user_metadata?.org_id ?? null);
+        const role = data.user.user_metadata?.global_role ?? null;
+        setGlobalRole(role);
+
+        // Fetch profile from backend to get canonical global_role
+        try {
+          const profileRes = await fetch('http://localhost:4000/api/user/profile', {
+            headers: { 'x-user-id': data.user.id }
+          });
+          if (profileRes.ok) {
+            const profileData = await profileRes.json();
+            if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
+          }
+        } catch (profileErr) {
+          console.warn('[AuthContext] Failed to fetch profile:', profileErr);
+        }
+
+        // Fetch orgs for user
+        try {
+          const orgsRes = await fetch('http://localhost:4000/api/user/orgs', { headers: { 'x-user-id': data.user.id } });
+          if (orgsRes.ok) {
+            const j = await orgsRes.json();
+            const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
+            setOrgs(list);
+            if (data.user.user_metadata?.global_role === 'platform_admin') setSelectedOrgId(null); else setSelectedOrgId(list.length > 0 ? list[0].id : null);
+          }
+        } catch (e) {
+          console.warn('[AuthContext] Failed to fetch orgs:', e);
+        }
       }
 
       if (!data || !data.user) {
@@ -138,7 +186,8 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     try {
       await supabase.auth.signOut();
       setUser(null);
-      setOrgId(null);
+      setOrgs([]);
+      setSelectedOrgId(null);
       setGlobalRole(null);
     } catch (err) {
       console.error("Sign out error:", err);
@@ -148,19 +197,23 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const refreshProfile = async () => {
     try {
       if (!user) return;
-      const { data: pData, error: pErr } = await supabase
-        .from('profiles')
-        .select('global_role')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (!pErr && pData) setGlobalRole(pData.global_role ?? null);
+      // Fetch latest user profile from backend which has global_role from database
+      const response = await fetch('http://localhost:4000/api/user/profile', {
+        headers: { 'x-user-id': user.id }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.profile) {
+          setGlobalRole(data.profile.global_role ?? null);
+        }
+      }
     } catch (e) {
-      // ignore
+      console.warn('[AuthContext] Failed to refresh profile:', e);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, orgId, loading, globalRole, refreshProfile, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, globalRole, refreshProfile, signIn, signOut, setSelectedOrgId }}>
       {children}
     </AuthContext.Provider>
   );

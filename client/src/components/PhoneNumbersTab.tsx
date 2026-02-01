@@ -12,18 +12,41 @@ interface PhoneNumber {
   created_at: string;
 }
 
+interface PhoneNumberRequest {
+  id: string;
+  requested_number: string;
+  requested_label?: string | null;
+  reason?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+}
+
 export default function PhoneNumbersTab({ orgId }: { orgId: string }) {
   const [numbers, setNumbers] = useState<PhoneNumber[]>([]);
+  const [requests, setRequests] = useState<PhoneNumberRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newNumber, setNewNumber] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [adding, setAdding] = useState(false);
+  const [showRequestForm, setShowRequestForm] = useState(false);
+  const [requestForm, setRequestForm] = useState({
+    requested_number: '',
+    requested_label: '',
+    reason: ''
+  });
+  const [submittingRequest, setSubmittingRequest] = useState(false);
 
   useEffect(() => {
     fetchNumbers();
+    fetchRequests();
     // eslint-disable-next-line
   }, [orgId]);
+
+  async function fetchRequests() {
+    // Placeholder: many deployments don't have a requests table yet; return empty list
+    setRequests([]);
+  }
 
   async function fetchNumbers() {
     setLoading(true);

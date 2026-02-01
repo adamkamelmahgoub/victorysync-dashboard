@@ -2,6 +2,7 @@ import type { FC } from "react";
 import { useState, useEffect } from "react";
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from "react-router-dom";
+import { PageLayout } from '../../components/PageLayout';
 import { API_BASE_URL, buildApiUrl } from '../../config';
 
 type OrgMetrics = {
@@ -45,30 +46,9 @@ export const AdminOrgOverviewPage: FC = () => {
   }, []);
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50">
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
-        {/* Header */}
-        <header className="flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-emerald-400 uppercase tracking-[0.18em]">
-              Admin
-            </p>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Organization overview
-            </h1>
-            <p className="text-xs text-slate-400 mt-1">
-              Today's metrics across all organizations.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate("/dashboard")}
-            className="px-4 py-2 text-sm text-slate-300 hover:text-emerald-400 transition"
-          >
-            ← Back
-          </button>
-        </header>
-
-        {/* Error banner */}
+    <PageLayout title="Organization Overview" description="Today's metrics across all organizations.">
+      <div className="space-y-6">
+        {/* Metrics Grid */}
         {error && (
           <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300">
             {error}
@@ -159,6 +139,6 @@ export const AdminOrgOverviewPage: FC = () => {
           )}
         </div>
       </div>
-    </main>
+    </PageLayout>
   );
 };

@@ -8,6 +8,7 @@ interface Member {
   userId?: string; // user id
   email: string;
   role: string;
+  pending_invite?: boolean;
 }
 
 export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { orgId: string; isOrgAdmin?: boolean; adminCheckDone?: boolean }) {

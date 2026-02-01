@@ -7,6 +7,51 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Runtime error catcher: display import/eval errors in a non-invasive overlay
+      (function(){
+        function ensureOverlay(){
+          var id = 'vite-error-overlay';
+          var el = document.getElementById(id);
+          if (!el) {
+            el = document.createElement('div');
+            el.id = id;
+            el.style.position = 'fixed';
+            el.style.left = '12px';
+            el.style.right = '12px';
+            el.style.top = '12px';
+            el.style.zIndex = '99999';
+            el.style.maxHeight = '40vh';
+            el.style.overflow = 'auto';
+            el.style.padding = '16px';
+            el.style.borderRadius = '8px';
+            el.style.background = 'rgba(43,2,26,0.95)';
+            el.style.color = '#ffeef0';
+            el.style.fontFamily = 'monospace';
+            el.style.whiteSpace = 'pre-wrap';
+            el.style.boxShadow = '0 6px 24px rgba(0,0,0,0.6)';
+            document.body.appendChild(el);
+          }
+          return el;
+        }
+
+        function show(msg){
+          try{
+            var overlay = ensureOverlay();
+            overlay.textContent = String(msg).replace(/</g,'&lt;');
+            overlay.style.display = 'block';
+          }catch(e){ console.error(e); }
+        }
+
+        window.addEventListener('error', function(ev){
+          show('[Error] ' + (ev.message || ev.error || ev.type));
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(ev){
+          show('[UnhandledRejection] ' + (ev.reason && (ev.reason.message || ev.reason)));
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
