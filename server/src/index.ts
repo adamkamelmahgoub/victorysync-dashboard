@@ -986,55 +986,49 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
     }
 
     console.log('[get_org_phone_numbers] params:', { orgId, actorId, isDev });
-    // Get phones assigned to this org via org_phone_numbers table (modern approach)
+    // Get ONLY explicitly assigned phones from org_phone_numbers table
     const { data: orgPhones, error: opErr } = await supabaseAdmin
       .from('org_phone_numbers')
-      .select('phone_number_id')
+      .select('id, org_id, phone_number_id, phone_number, label, created_at')
       .eq('org_id', orgId);
 
     if (opErr) throw opErr;
     console.log('[get_org_phone_numbers] org_phone_numbers rows:', (orgPhones || []).length);
 
+    // Collect phone IDs to look up full details
     const phoneIds = new Set<string>();
-    if (orgPhones && Array.isArray(orgPhones)) {
-      for (const op of orgPhones) {
-        if (op.phone_number_id) phoneIds.add(op.phone_number_id);
-      }
-    }
-
-    // Also check for legacy approach: phones with org_id column set directly
-    const { data: legacyPhones, error: lpErr } = await supabaseAdmin
-      .from('phone_numbers')
-      .select('id')
-      .eq('org_id', orgId);
-
-    if (lpErr) throw lpErr;
-    console.log('[get_org_phone_numbers] legacy phone_numbers rows:', (legacyPhones || []).length);
-    if (legacyPhones && Array.isArray(legacyPhones)) {
-      for (const p of legacyPhones) {
-        if (p.id) phoneIds.add(p.id);
-      }
+    for (const op of (orgPhones || [])) {
+      if (op.phone_number_id) phoneIds.add(op.phone_number_id);
     }
 
     if (phoneIds.size === 0) {
       return res.json({ phone_numbers: [], numbers: [] });
     }
 
-    // Get phone details for all found IDs
-    const { data: phones, error: phoneErr } = await supabaseAdmin
+    // Get full phone details from phone_numbers table
+    const { data: phoneDetails, error: phoneErr } = await supabaseAdmin
       .from('phone_numbers')
       .select('id, number, label, created_at')
       .in('id', Array.from(phoneIds));
 
     if (phoneErr) throw phoneErr;
 
-    const mapped = (phones || []).map((p: any) => ({
-      id: p.id,
-      number: p.number,
-      label: p.label ?? null,
-      is_active: p.is_active ?? true,
-      created_at: p.created_at
-    }));
+    // Map phone details with org_phone_numbers labels (use org label if set, else fall back to phone label, else default to VictorySync LLC)
+    const detailsById: Record<string, any> = {};
+    for (const p of (phoneDetails || [])) {
+      detailsById[p.id] = p;
+    }
+
+    const mapped = (orgPhones || []).map((op: any) => {
+      const details = detailsById[op.phone_number_id];
+      return {
+        id: op.phone_number_id,
+        number: details?.number || op.phone_number || 'unknown',
+        label: op.label || details?.label || 'VictorySync LLC',
+        is_active: true,
+        created_at: op.created_at
+      };
+    });
 
     res.json({
       phone_numbers: mapped,
@@ -1386,7 +1380,7 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
             console.log('[assign_phone_numbers] attempting to reassign phone to this org via UPDATE...');
             const { error: updateErr } = await supabaseAdmin
               .from('org_phone_numbers')
-              .update({ org_id: orgId })
+              .update({ org_id: orgId, phone_number_id: phoneId })
               .eq('phone_number', numberStr)
               .select('id');
             if (!updateErr) {
