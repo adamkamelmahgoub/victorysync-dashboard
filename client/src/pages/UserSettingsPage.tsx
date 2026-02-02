@@ -10,6 +10,11 @@ export default function UserSettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [profilePicPreview, setProfilePicPreview] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [apiKeys, setApiKeys] = useState<any[]>([]);
+  const [loadingApiKeys, setLoadingApiKeys] = useState(false);
+  const [generatingKey, setGeneratingKey] = useState(false);
+  const [newKeyLabel, setNewKeyLabel] = useState('');
+  const [showNewKeyPlaintext, setShowNewKeyPlaintext] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -24,7 +29,10 @@ export default function UserSettingsPage() {
   });
 
   useEffect(() => {
-    if (user) fetchProfile();
+    if (user) {
+      fetchProfile();
+      loadApiKeys();
+    }
   }, [user]);
 
   const fetchProfile = async () => {
@@ -54,6 +62,83 @@ export default function UserSettingsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadApiKeys = async () => {
+    if (!user) return;
+    setLoadingApiKeys(true);
+    try {
+      const response = await fetch(`http://localhost:4000/api/admin/users/${user.id}/api-keys`, {
+        headers: { 'x-user-id': user.id }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setApiKeys(data.api_keys || []);
+      }
+    } catch (err: any) {
+      console.error('Failed to load API keys:', err);
+    } finally {
+      setLoadingApiKeys(false);
+    }
+  };
+
+  const generateApiKey = async () => {
+    if (!user || !newKeyLabel) {
+      setMessage('Please enter a label for the API key');
+      return;
+    }
+    setGeneratingKey(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`http://localhost:4000/api/admin/users/${user.id}/api-keys`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id
+        },
+        body: JSON.stringify({ label: newKeyLabel })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setShowNewKeyPlaintext(data.plaintext);
+        setNewKeyLabel('');
+        setMessage('API key generated! Copy it now - it won\'t be shown again.');
+        loadApiKeys();
+      } else {
+        const error = await response.json();
+        setMessage(error.error || 'Failed to generate API key');
+      }
+    } catch (err: any) {
+      setMessage(err.message || 'Error generating API key');
+    } finally {
+      setGeneratingKey(false);
+    }
+  };
+
+  const revokeApiKey = async (keyId: string) => {
+    if (!user) return;
+    if (!confirm('Are you sure you want to revoke this API key?')) return;
+    
+    try {
+      const response = await fetch(`http://localhost:4000/api/admin/users/${user.id}/api-keys/${keyId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-id': user.id }
+      });
+      if (response.ok) {
+        setMessage('API key revoked');
+        loadApiKeys();
+      } else {
+        setMessage('Failed to revoke API key');
+      }
+    } catch (err: any) {
+      setMessage(err.message || 'Error revoking API key');
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setMessage('Copied to clipboard!');
+    setTimeout(() => setMessage(null), 2000);
   };
 
   const handleProfileChange = (field: string, value: string) => {
@@ -223,7 +308,7 @@ export default function UserSettingsPage() {
       <div className="max-w-4xl mx-auto space-y-6">
         {message && (
           <div className={`p-4 rounded-lg border ${
-            message.includes('success') || message.includes('successfully')
+            message.includes('success') || message.includes('successfully') || message.includes('Copied') || message.includes('generated')
               ? 'bg-emerald-900/20 border-emerald-700 text-emerald-300'
               : 'bg-red-900/20 border-red-700 text-red-300'
           }`}>
@@ -340,6 +425,103 @@ export default function UserSettingsPage() {
                 {saving ? 'Uploading...' : 'Upload Logo'}
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* API Keys Management */}
+        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
+          <h2 className="text-lg font-semibold text-white mb-6">API Keys</h2>
+          <p className="text-sm text-slate-400 mb-6">Generate and manage API keys for programmatic access to your account</p>
+
+          {/* Generate New Key */}
+          <div className="mb-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+            <label className="block text-sm font-semibold text-slate-300 mb-3">Generate New API Key</label>
+            <div className="flex gap-3">
+              <input
+                type="text"
+                placeholder="Label (e.g., 'Production', 'Testing')"
+                value={newKeyLabel}
+                onChange={(e) => setNewKeyLabel(e.target.value)}
+                className="flex-1 px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+              />
+              <button
+                onClick={generateApiKey}
+                disabled={generatingKey || !newKeyLabel}
+                className="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-600 text-white rounded-lg font-semibold transition whitespace-nowrap"
+              >
+                {generatingKey ? 'Generating...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+
+          {/* Show New Key Plaintext */}
+          {showNewKeyPlaintext && (
+            <div className="mb-8 p-4 bg-amber-900/30 border border-amber-700 rounded-lg">
+              <p className="text-sm font-semibold text-amber-300 mb-3">⚠️ Save Your API Key</p>
+              <p className="text-sm text-amber-200 mb-3">This is the only time you'll see this key. Copy it and store it securely.</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={showNewKeyPlaintext}
+                  readOnly
+                  className="flex-1 px-4 py-2 bg-slate-900 border border-amber-700 rounded-lg text-amber-300 font-mono text-sm"
+                />
+                <button
+                  onClick={() => copyToClipboard(showNewKeyPlaintext)}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold transition"
+                >
+                  Copy
+                </button>
+              </div>
+              <button
+                onClick={() => setShowNewKeyPlaintext(null)}
+                className="mt-3 text-sm text-amber-300 hover:text-amber-200"
+              >
+                I've saved it safely
+              </button>
+            </div>
+          )}
+
+          {/* API Keys List */}
+          <div>
+            <h3 className="text-sm font-semibold text-slate-300 mb-4">Active Keys</h3>
+            {loadingApiKeys ? (
+              <p className="text-slate-400 text-sm">Loading keys...</p>
+            ) : apiKeys.length === 0 ? (
+              <p className="text-slate-400 text-sm">No API keys yet. Generate one above to get started.</p>
+            ) : (
+              <div className="space-y-2">
+                {apiKeys.map((key) => (
+                  <div
+                    key={key.id}
+                    className="flex items-center justify-between p-4 bg-slate-800/50 rounded-lg border border-slate-700"
+                  >
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-white">{key.label}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="font-mono text-xs text-slate-400">
+                          {key.key_prefix}...
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          Created: {new Date(key.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {key.last_used_at && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Last used: {new Date(key.last_used_at).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => revokeApiKey(key.id)}
+                      className="ml-4 px-3 py-1 text-sm bg-red-600 hover:bg-red-700 text-white rounded transition"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
