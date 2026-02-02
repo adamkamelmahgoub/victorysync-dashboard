@@ -6566,27 +6566,37 @@ app.get('/api/call-stats', async (req, res) => {
           .order('recording_date', { ascending: false })
           .limit(100);
 
-        // For non-admin clients: also filter recordings by assigned phone numbers
-        if (!isAdmin && assignedPhoneNumbers.length > 0) {
-          recQ = recQ.in('to_number', assignedPhoneNumbers);
-        }
-
         if (startDate) recQ = recQ.gte('recording_date', startDate);
         if (endDate) recQ = recQ.lte('recording_date', endDate);
 
         const { data: recs, error: recErr } = await recQ;
         if (!recErr && Array.isArray(recs) && recs.length > 0) {
+          // Filter recordings by assigned phone numbers if non-admin
+          let filteredRecs = recs;
+          if (!isAdmin && assignedPhoneNumbers.length > 0) {
+            filteredRecs = recs.filter((r: any) => {
+              // Extract phone numbers from recording - try direct columns first, then metadata
+              const fromNumber = r.from_number || (r.metadata && r.metadata.from_number) || null;
+              const toNumber = r.to_number || (r.metadata && r.metadata.to_number) || null;
+              
+              // Check if either number matches assigned phones
+              return (fromNumber && assignedPhoneNumbers.includes(fromNumber)) || 
+                     (toNumber && assignedPhoneNumbers.includes(toNumber));
+            });
+          }
+
           // Synthesize call-like rows from recordings
-          finalCalls = recs.map((r: any) => ({
+          finalCalls = filteredRecs.map((r: any) => ({
             org_id: r.org_id,
-            from_number: r.from_number || null,
-            to_number: r.to_number || null,
+            from_number: r.from_number || (r.metadata && r.metadata.from_number) || null,
+            to_number: r.to_number || (r.metadata && r.metadata.to_number) || null,
             status: 'answered',
             duration_seconds: r.duration_seconds ?? 0,
             started_at: r.recording_date,
             ended_at: r.recording_date,
             recording_url: r.recording_url,
             recording_id: r.id,
+            recording_date: r.recording_date,
             metadata: r
           }));
         }

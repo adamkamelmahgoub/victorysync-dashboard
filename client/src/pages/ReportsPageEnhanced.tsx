@@ -23,38 +23,50 @@ export default function ReportsPageEnhanced() {
   const [startDate, setStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [message, setMessage] = useState<string | null>(null);
-  const [selectedOrg, setSelectedOrg] = useState<string | null>(selectedOrgId || (orgs.length > 0 ? orgs[0].id : null));
+  const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
 
+  // Initialize org from auth context
   useEffect(() => {
-    // Update selected org if selectedOrgId or orgs change (wait for auth to finish loading)
-    if (!authLoading) {
-      const orgToUse = selectedOrgId || (orgs.length > 0 ? orgs[0].id : null);
-      setSelectedOrg(orgToUse);
-      console.log('ReportsPageEnhanced: selectedOrgId=', selectedOrgId, 'orgs=', orgs, 'orgToUse=', orgToUse);
+    if (selectedOrgId) {
+      setSelectedOrg(selectedOrgId);
+    } else if (!authLoading && orgs.length > 0) {
+      setSelectedOrg(orgs[0].id);
     }
   }, [selectedOrgId, orgs, authLoading]);
 
+  // Fetch data when org is set or date range changes
   useEffect(() => {
-    if (selectedOrg) fetchCallStats();
-  }, [selectedOrg, startDate, endDate]);
+    if (selectedOrg && user) {
+      fetchCallStats();
+    }
+  }, [selectedOrg, startDate, endDate, user]);
 
   const fetchCallStats = async () => {
-    if (!selectedOrg || !user) return;
+    if (!selectedOrg || !user) {
+      console.log('Skipping fetch: selectedOrg=', selectedOrg, 'user=', user?.id);
+      return;
+    }
     setLoading(true);
     setMessage(null);
+    console.log(`Fetching call-stats for org=${selectedOrg}, user=${user.id}`);
     try {
-      const response = await fetch(
-        `http://localhost:4000/api/call-stats?org_id=${selectedOrg}&start_date=${startDate}&end_date=${endDate}`,
-        { headers: { 'x-user-id': user.id } }
-      );
+      const url = `http://localhost:4000/api/call-stats?org_id=${selectedOrg}&start_date=${startDate}&end_date=${endDate}`;
+      const response = await fetch(url, { 
+        headers: { 'x-user-id': user.id },
+        cache: 'no-store'
+      });
       if (response.ok) {
         const data = await response.json();
+        console.log('Received call-stats:', data);
         setStats(data.stats);
         setCalls(data.calls || []);
       } else {
-        setMessage('Failed to fetch call statistics');
+        const errorText = await response.text();
+        console.error('Response error:', response.status, errorText);
+        setMessage(`Failed to fetch call statistics (${response.status})`);
       }
     } catch (err: any) {
+      console.error('Fetch error:', err);
       setMessage(err?.message || 'Error fetching statistics');
     } finally {
       setLoading(false);
@@ -194,30 +206,36 @@ export default function ReportsPageEnhanced() {
                           </tr>
                         </thead>
                         <tbody>
-                          {calls.slice(0, 100).map((call: any) => (
-                            <tr key={call.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition">
-                              <td className="px-4 py-3 text-white font-medium">{call.from_number || '—'}</td>
-                              <td className="px-4 py-3 text-white">{call.to_number || '—'}</td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                                  call.status === 'answered' || call.status === 'Answered' ? 'bg-emerald-900/40 text-emerald-300' :
-                                  call.status === 'missed' || call.status === 'Missed' ? 'bg-red-900/40 text-red-300' :
-                                  'bg-slate-900/40 text-slate-300'
-                                }`}>
-                                  {call.status || 'Unknown'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-center text-slate-300">
-                                {Math.floor((call.duration_seconds || 0) / 60)}m {(call.duration_seconds || 0) % 60}s
-                              </td>
-                              <td className="px-4 py-3 text-right text-slate-300">
-                                ${(call.revenue_generated || 0).toFixed(2)}
-                              </td>
-                              <td className="px-4 py-3 text-slate-400 text-xs">
-                                {call.started_at ? new Date(call.started_at).toLocaleDateString() : '—'}
-                              </td>
-                            </tr>
-                          ))}
+                          {calls.slice(0, 100).map((call: any) => {
+                            // Use actual recording date if available, fallback to started_at
+                            const callDate = call.recording_date || call.started_at || call.date;
+                            const duration = call.duration_seconds || 0;
+                            
+                            return (
+                              <tr key={call.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition">
+                                <td className="px-4 py-3 text-white font-medium">{call.from_number || '—'}</td>
+                                <td className="px-4 py-3 text-white">{call.to_number || '—'}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                                    call.status === 'answered' || call.status === 'Answered' ? 'bg-emerald-900/40 text-emerald-300' :
+                                    call.status === 'missed' || call.status === 'Missed' ? 'bg-red-900/40 text-red-300' :
+                                    'bg-slate-900/40 text-slate-300'
+                                  }`}>
+                                    {call.status || 'Unknown'}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-center text-slate-300">
+                                  {Math.floor(duration / 60)}m {duration % 60}s
+                                </td>
+                                <td className="px-4 py-3 text-right text-slate-300">
+                                  ${(call.revenue_generated || 0).toFixed(2)}
+                                </td>
+                                <td className="px-4 py-3 text-slate-400 text-xs">
+                                  {callDate ? new Date(callDate).toLocaleString() : '—'}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
