@@ -120,11 +120,17 @@ router.get('/users/:userId/api-keys', async (req, res) => {
     const { data: apiKeys, error } = await supabaseAdmin
       .from('user_api_keys')
       .select('id, label, created_at, last_used_at, key_hash')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
 
     if (error) {
+      // If table doesn't exist yet, return empty array
+      if (error.message && error.message.includes('does not exist')) {
+        console.log('[GET /api/admin/users/:userId/api-keys] user_api_keys table not found, returning empty list');
+        return res.json({ api_keys: [] });
+      }
       console.error('[GET /api/admin/users/:userId/api-keys] Error fetching API keys:', error);
-      return res.status(500).json({ error: 'Failed to fetch API keys' });
+      return res.status(500).json({ error: 'Failed to fetch API keys', detail: error.message });
     }
 
     // Return only partial key for security
@@ -139,7 +145,7 @@ router.get('/users/:userId/api-keys', async (req, res) => {
     res.json({ api_keys: safeApiKeys });
   } catch (err) {
     console.error('[GET /api/admin/users/:userId/api-keys] Unexpected error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error', detail: String(err) });
   }
 });
 
@@ -153,18 +159,21 @@ router.post('/users/:userId/api-keys', async (req, res) => {
   }
 
   try {
-    // Check if user is allowed to generate API keys
+    // Check if user is allowed to generate API keys (gracefully handle missing column)
     const { data: userSettings, error: userError } = await supabaseAdmin
       .from('users')
       .select('can_generate_api_keys')
       .eq('id', userId)
       .maybeSingle();
 
-    if (userError || !userSettings || !userSettings.can_generate_api_keys) {
+    // If can_generate_api_keys column doesn't exist or is not set, default to true
+    const canGenerate = !userError && userSettings ? userSettings.can_generate_api_keys !== false : true;
+    
+    if (!canGenerate) {
       return res.status(403).json({ error: 'User is not allowed to generate API keys' });
     }
 
-    const plaintextKey = crypto.randomBytes(32).toString('hex'); // Generate a random hex string
+    const plaintextKey = crypto.randomBytes(32).toString('hex');
     const hashedKey = hashApiKey(plaintextKey);
 
     const { data, error } = await supabaseAdmin
@@ -172,7 +181,35 @@ router.post('/users/:userId/api-keys', async (req, res) => {
       .insert({
         user_id: userId,
         label: label,
-        key_hash: hashedKey,
+        key_hash: hashedKey
+      })
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      // If table doesn't exist, return helpful error
+      if (error.message && error.message.includes('does not exist')) {
+        console.log('[POST /api/admin/users/:userId/api-keys] user_api_keys table not found');
+        return res.status(503).json({ error: 'API keys feature not yet available', detail: 'Database not initialized' });
+      }
+      console.error('[POST /api/admin/users/:userId/api-keys] Error creating API key:', error);
+      return res.status(500).json({ error: 'Failed to create API key', detail: error.message });
+    }
+
+    res.json({
+      success: true,
+      api_key: {
+        id: data?.id || crypto.randomUUID(),
+        label: label,
+        created_at: new Date().toISOString()
+      },
+      plaintext: plaintextKey
+    });
+  } catch (err) {
+    console.error('[POST /api/admin/users/:userId/api-keys] Unexpected error:', err);
+    res.status(500).json({ error: 'Internal server error', detail: String(err) });
+  }
+});,
       })
       .select();
 

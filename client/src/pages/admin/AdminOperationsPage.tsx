@@ -764,7 +764,6 @@ export function AdminOperationsPage() {
                     </div>
                   )}
                 </div>
-                </div>
               </>
             ) : (
               <div className="p-5 text-center py-12">
