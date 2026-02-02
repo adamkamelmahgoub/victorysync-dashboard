@@ -143,6 +143,7 @@ async function apiKeyAuthMiddleware(req: any, res: any, next: any) {
 // Works with schema that stores phone_number_id referencing phone_numbers.id.
 async function getAssignedPhoneNumbersForOrg(orgId: string) {
   try {
+    console.log('[getAssignedPhoneNumbersForOrg] called for orgId:', orgId);
     // Fetch mapping rows (supports both modern phone_number_id and legacy phone_number columns)
     const { data: rows, error: rowsErr } = await supabaseAdmin
       .from('org_phone_numbers')
@@ -177,6 +178,7 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
       if (!perr && pdata) {
         for (const p of pdata) phonesById[p.id] = p;
       }
+      console.log('[getAssignedPhoneNumbersForOrg] phonesById keys:', Object.keys(phonesById));
     }
 
     // Collect legacy phone_number strings to look up in phone_numbers table
@@ -192,6 +194,7 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
       if (!perr && pdata) {
         for (const p of pdata) phonesByNumber[p.number] = p;
       }
+      console.log('[getAssignedPhoneNumbersForOrg] phonesByNumber keys:', Object.keys(phonesByNumber));
     }
 
     const phones: Array<{ id: string; number: string; number_digits?: string | null; label?: string | null; created_at?: string }> = [];
@@ -982,25 +985,46 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
       }
     }
 
-    // Get phones assigned to this org via org_phone_numbers table
+    console.log('[get_org_phone_numbers] params:', { orgId, actorId, isDev });
+    // Get phones assigned to this org via org_phone_numbers table (modern approach)
     const { data: orgPhones, error: opErr } = await supabaseAdmin
       .from('org_phone_numbers')
       .select('phone_number_id')
       .eq('org_id', orgId);
 
     if (opErr) throw opErr;
+    console.log('[get_org_phone_numbers] org_phone_numbers rows:', (orgPhones || []).length);
 
-    if (!orgPhones || orgPhones.length === 0) {
+    const phoneIds = new Set<string>();
+    if (orgPhones && Array.isArray(orgPhones)) {
+      for (const op of orgPhones) {
+        if (op.phone_number_id) phoneIds.add(op.phone_number_id);
+      }
+    }
+
+    // Also check for legacy approach: phones with org_id column set directly
+    const { data: legacyPhones, error: lpErr } = await supabaseAdmin
+      .from('phone_numbers')
+      .select('id')
+      .eq('org_id', orgId);
+
+    if (lpErr) throw lpErr;
+    console.log('[get_org_phone_numbers] legacy phone_numbers rows:', (legacyPhones || []).length);
+    if (legacyPhones && Array.isArray(legacyPhones)) {
+      for (const p of legacyPhones) {
+        if (p.id) phoneIds.add(p.id);
+      }
+    }
+
+    if (phoneIds.size === 0) {
       return res.json({ phone_numbers: [], numbers: [] });
     }
 
-    const phoneIds = orgPhones.map(op => op.phone_number_id).filter(Boolean);
-
-    // Get phone details - select only columns that definitely exist
+    // Get phone details for all found IDs
     const { data: phones, error: phoneErr } = await supabaseAdmin
       .from('phone_numbers')
       .select('id, number, label, created_at')
-      .in('id', phoneIds);
+      .in('id', Array.from(phoneIds));
 
     if (phoneErr) throw phoneErr;
 
@@ -1339,9 +1363,13 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
       // Try modern schema first (phone_number_id)
       try {
         console.log('[assign_phone_numbers] trying modern schema for phoneId:', phoneId);
+        const numberStr = idToNumber[phoneId];
+        if (!numberStr) {
+          console.warn('[assign_phone_numbers] phoneId', phoneId, 'cannot be resolved to phone number, will try legacy');
+        }
         const { error: modernErr } = await supabaseAdmin
           .from('org_phone_numbers')
-          .insert({ org_id: orgId, phone_number_id: phoneId });
+          .insert({ org_id: orgId, phone_number_id: phoneId, phone_number: numberStr || '' });
         
         if (!modernErr) {
           console.log('[assign_phone_numbers] ✓ successfully assigned via modern schema:', phoneId);
