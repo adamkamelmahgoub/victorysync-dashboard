@@ -29,3 +29,4 @@ yarn-error.log*
 .vercel
 # Local server log (no real content useful to repo)
 server/server-log.txt
+.env*.local

@@ -1041,6 +1041,53 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
   }
 });
 
+// GET /api/orgs/:orgId/recordings - Get recordings for an organization (scoped by assigned phone numbers)
+app.get('/api/orgs/:orgId/recordings', async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const actorId = req.header('x-user-id') || null;
+    const isDev = process.env.NODE_ENV !== 'production' || req.header('x-dev-bypass') === 'true';
+    const limit = parseInt(req.query.limit as string) || 10000;
+
+    // Org members can view their org's recordings, or if in dev mode
+    if (actorId && !isDev) {
+      const isMember = await isOrgMember(actorId, orgId);
+      if (!isMember && !(await isPlatformAdmin(actorId))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    // Get assigned phone numbers for this org
+    const { phones: assignedPhones } = await getAssignedPhoneNumbersForOrg(orgId);
+    
+    if (!assignedPhones || assignedPhones.length === 0) {
+      return res.json({ recordings: [] });
+    }
+
+    // Extract phone number strings
+    const phoneNumbers = assignedPhones.map((p: any) => p.number).filter(Boolean);
+    
+    if (phoneNumbers.length === 0) {
+      return res.json({ recordings: [] });
+    }
+
+    // Fetch recordings that match org's phone numbers
+    const { data: recordings, error } = await supabaseAdmin
+      .from('mightycall_recordings')
+      .select('*')
+      .in('phone_number', phoneNumbers)
+      .order('started_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    res.json({ recordings: recordings || [] });
+  } catch (err: any) {
+    console.error('[get_org_recordings] error:', fmtErr(err));
+    res.status(500).json({ error: 'fetch_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
 // Legacy single-org unassign handler removed: unassignment now uses `org_phone_numbers` mapping.
 // See later handler which deletes from `org_phone_numbers` for the many-to-many model.
 
