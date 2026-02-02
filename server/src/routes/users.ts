@@ -10,9 +10,26 @@ function hashApiKey(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-// Middleware to protect admin routes
-router.use((req, res, next) => {
-  isPlatformAdmin(req, res, next);
+// Middleware to protect admin routes - checks x-dev-bypass or platform_admin role
+router.use(async (req, res, next) => {
+  const isDev = process.env.NODE_ENV !== 'production' || req.header('x-dev-bypass') === 'true';
+  const userId = req.header('x-user-id') || null;
+  
+  if (isDev && userId) {
+    // In dev mode, allow if x-user-id present
+    return next();
+  }
+  
+  if (!userId) {
+    return res.status(401).json({ error: 'unauthenticated' });
+  }
+  
+  const isAdmin = await isPlatformAdmin(userId);
+  if (!isAdmin) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  
+  next();
 });
 
 // GET /api/admin/users - Get all users

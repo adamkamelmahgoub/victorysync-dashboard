@@ -1645,6 +1645,8 @@ app.get('/api/admin/mightycall/sync', async (_req, res) => {
   }
 });
 
+// debug route removed
+
 // GET /api/admin/orgs/:orgId/integrations - get integrations for org (org_admin or platform_admin)
 app.get('/api/admin/orgs/:orgId/integrations', async (req, res) => {
   try {
