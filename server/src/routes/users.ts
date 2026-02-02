@@ -209,20 +209,6 @@ router.post('/users/:userId/api-keys', async (req, res) => {
     console.error('[POST /api/admin/users/:userId/api-keys] Unexpected error:', err);
     res.status(500).json({ error: 'Internal server error', detail: String(err) });
   }
-});,
-      })
-      .select();
-
-    if (error) {
-      console.error('[POST /api/admin/users/:userId/api-keys] Error generating API key:', error);
-      return res.status(500).json({ error: 'Failed to generate API key' });
-    }
-
-    res.json({ success: true, api_key: data[0], api_key_plaintext: plaintextKey });
-  } catch (err) {
-    console.error('[POST /api/admin/users/:userId/api-keys] Unexpected error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 // DELETE /api/admin/users/:userId/api-keys/:apiKeyId - Revoke an API key
