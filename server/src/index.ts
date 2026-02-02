@@ -3969,7 +3969,7 @@ app.get("/s/series", async (req, res) => {
 
         const orgId = req.query.org_id as string;
         const userId = req.query.user_id as string;
-        const limit = parseInt(req.query.limit as string) || 50;
+        const limit = parseInt(req.query.limit as string) || 10000; // Default to 10000 for full results
         const offset = parseInt(req.query.offset as string) || 0;
 
         let query = supabaseAdmin
@@ -4036,7 +4036,7 @@ app.get("/s/series", async (req, res) => {
         }
 
         const orgId = req.query.org_id as string;
-        const limit = parseInt(req.query.limit as string) || 50;
+        const limit = parseInt(req.query.limit as string) || 10000; // Default to 10000 for full results
 
         let query = supabaseAdmin
           .from('invoices')
@@ -4311,7 +4311,7 @@ app.get("/s/series", async (req, res) => {
 
         const orgId = req.query.org_id as string;
         const phoneNumberId = req.query.phone_number_id as string;
-        const limit = parseInt(req.query.limit as string) || 50;
+        const limit = parseInt(req.query.limit as string) || 10000; // Default to 10000 for full results
 
         let query = supabaseAdmin
           .from('mightycall_recordings')
@@ -6685,11 +6685,11 @@ app.get('/api/recordings', async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
     const orgId = req.query.org_id as string;
-    const limit = parseInt(req.query.limit as string) || 50;
+    const limit = parseInt(req.query.limit as string) || 10000; // Default to 10000 for full results
 
     if (!orgId) return res.status(400).json({ error: 'org_id_required' });
 
-    // Fetch recordings
+    // Fetch recordings - no limit imposed, fetch all available
     let q = supabaseAdmin
       .from('mightycall_recordings')
       .select('*')
