@@ -31,7 +31,7 @@ export default function UserSettingsPage() {
   useEffect(() => {
     if (user) {
       fetchProfile();
-      loadApiKeys();
+      // loadApiKeys(); // TODO: user_api_keys table needs migration in production
     }
   }, [user]);
 
@@ -428,7 +428,8 @@ export default function UserSettingsPage() {
           </div>
         </div>
 
-        {/* API Keys Management */}
+        {/* API Keys Management - DISABLED: requires database migration */}
+        {false && (
         <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
           <h2 className="text-lg font-semibold text-white mb-6">API Keys</h2>
           <p className="text-sm text-slate-400 mb-6">Generate and manage API keys for programmatic access to your account</p>
@@ -524,6 +525,7 @@ export default function UserSettingsPage() {
             )}
           </div>
         </div>
+        )}
 
         {/* Change Password */}
         <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
