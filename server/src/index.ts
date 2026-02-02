@@ -1041,7 +1041,7 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
   }
 });
 
-// GET /api/orgs/:orgId/recordings - Get recordings for an organization (scoped by assigned phone numbers)
+// GET /api/orgs/:orgId/recordings - Get recordings for an organization
 app.get('/api/orgs/:orgId/recordings', async (req, res) => {
   try {
     const { orgId } = req.params;
@@ -1057,26 +1057,12 @@ app.get('/api/orgs/:orgId/recordings', async (req, res) => {
       }
     }
 
-    // Get assigned phone numbers for this org
-    const { phones: assignedPhones } = await getAssignedPhoneNumbersForOrg(orgId);
-    
-    if (!assignedPhones || assignedPhones.length === 0) {
-      return res.json({ recordings: [] });
-    }
-
-    // Extract phone number strings
-    const phoneNumbers = assignedPhones.map((p: any) => p.number).filter(Boolean);
-    
-    if (phoneNumbers.length === 0) {
-      return res.json({ recordings: [] });
-    }
-
-    // Fetch recordings that match org's phone numbers
+    // Fetch recordings for this org from mightycall_recordings table
     const { data: recordings, error } = await supabaseAdmin
       .from('mightycall_recordings')
       .select('*')
-      .in('phone_number', phoneNumbers)
-      .order('started_at', { ascending: false })
+      .eq('org_id', orgId)
+      .order('recording_date', { ascending: false })
       .limit(limit);
 
     if (error) throw error;
