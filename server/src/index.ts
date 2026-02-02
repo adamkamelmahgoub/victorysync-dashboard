@@ -1377,12 +1377,25 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
           assigned = true;
         } else {
           const modernMsg = (modernErr as any)?.message || String(modernErr);
-          
+          console.error('[assign_phone_numbers] modern schema error FULL:', JSON.stringify(modernErr, null, 2));
+          console.error('[assign_phone_numbers] modern schema error message:', modernMsg);
           // Check if it's a duplicate - that's OK
           if (modernMsg && (modernMsg.includes('duplicate key') || modernMsg.includes('already exists') || modernMsg.includes('unique constraint'))) {
             console.log('[assign_phone_numbers] phone already assigned (via modern schema):', phoneId);
-            successCount++;
-            assigned = true;
+            // Try to UPDATE the existing row to reassign it to this org instead
+            console.log('[assign_phone_numbers] attempting to reassign phone to this org via UPDATE...');
+            const { error: updateErr } = await supabaseAdmin
+              .from('org_phone_numbers')
+              .update({ org_id: orgId })
+              .eq('phone_number', numberStr)
+              .select('id');
+            if (!updateErr) {
+              console.log('[assign_phone_numbers] ✓ successfully reassigned via UPDATE:', phoneId);
+              successCount++;
+              assigned = true;
+            } else {
+              console.warn('[assign_phone_numbers] UPDATE also failed:', (updateErr as any)?.message || String(updateErr));
+            }
           } else if (modernMsg && modernMsg.includes('column "phone_number_id" does not exist')) {
             // Schema doesn't have phone_number_id, will try legacy below
             console.log('[assign_phone_numbers] modern schema not available, will try legacy for:', phoneId);
