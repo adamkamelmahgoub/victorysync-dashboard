@@ -97,6 +97,45 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
     fetchMembers();
   }
 
+  async function handleAcceptInvite(inviteId: string) {
+    setError(null);
+    try {
+      const response = await fetch(`/api/orgs/${orgId}/invites/${inviteId}/accept`, {
+        method: 'POST',
+        headers: { 'x-user-id': user?.id || '' },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: 'Failed to accept invite' }));
+        setError(body.error || 'Failed to accept invite');
+        return;
+      }
+      setInviteSuccess('Invite accepted successfully!');
+      fetchMembers();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to accept invite');
+    }
+  }
+
+  async function handleRejectInvite(inviteId: string) {
+    if (!window.confirm('Reject this invite? You will not be able to join this organization.')) return;
+    setError(null);
+    try {
+      const response = await fetch(`/api/orgs/${orgId}/invites/${inviteId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-id': user?.id || '' },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: 'Failed to reject invite' }));
+        setError(body.error || 'Failed to reject invite');
+        return;
+      }
+      setInviteSuccess('Invite rejected');
+      fetchMembers();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to reject invite');
+    }
+  }
+
   return (
     <div className="p-4">
       {apiUnavailable && (
@@ -169,15 +208,44 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
               {members.map(member => (
                 <tr key={member.id} className="border-t border-slate-800">
                   <td className="p-3 text-slate-200">{member.email}</td>
-                  <td className="p-3 text-slate-200">{member.role}{member.pending_invite ? ' (invited)' : ''}</td>
                   <td className="p-3">
-                    <button
-                      className="px-2 py-1 text-sm bg-rose-700 text-white rounded"
-                      onClick={() => handleRemove(member.userId || member.id)}
-                      disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
-                    >
-                      Remove
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-200">{member.role}</span>
+                      {member.pending_invite && (
+                        <span className="text-xs bg-yellow-900/50 text-yellow-300 px-2 py-1 rounded">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="p-3 flex gap-2">
+                    {member.pending_invite && !apiUnavailable ? (
+                      <>
+                        <button
+                          className="px-2 py-1 text-xs bg-emerald-700 text-white rounded hover:bg-emerald-600 transition-colors"
+                          onClick={() => handleAcceptInvite(member.id)}
+                          title="Accept this invite"
+                        >
+                          Accept
+                        </button>
+                        <button
+                          className="px-2 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-600 transition-colors"
+                          onClick={() => handleRejectInvite(member.id)}
+                          title="Reject this invite"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="px-2 py-1 text-sm bg-rose-700 text-white rounded hover:bg-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => handleRemove(member.userId || member.id)}
+                        disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
+                        title={apiUnavailable || (adminCheckDone && !isOrgAdmin) ? 'No permission' : 'Remove member'}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

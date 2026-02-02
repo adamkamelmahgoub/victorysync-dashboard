@@ -2703,6 +2703,105 @@ app.delete('/api/orgs/:orgId/members/:userId', async (req, res) => {
   }
 });
 
+// POST /api/orgs/:orgId/invites/:inviteId/accept - accept a member invite
+app.post('/api/orgs/:orgId/invites/:inviteId/accept', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId, inviteId } = req.params;
+    
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    // Get the invite details
+    const { data: invite, error: inviteErr } = await supabaseAdmin
+      .from('org_invites')
+      .select('*')
+      .eq('id', inviteId)
+      .eq('org_id', orgId)
+      .maybeSingle();
+
+    if (inviteErr || !invite) {
+      return res.status(404).json({ error: 'invite_not_found' });
+    }
+
+    // Verify the user accepting the invite has the same email
+    const { data: currentUser, error: userErr } = await supabaseAdmin.auth.admin.getUserById(actorId);
+    if (userErr || !currentUser || currentUser.user.email !== invite.email) {
+      return res.status(403).json({ error: 'forbidden', detail: 'Can only accept invites for your email address' });
+    }
+
+    // Create org_users entry
+    const { data: orgUser, error: createErr } = await supabaseAdmin
+      .from('org_users')
+      .upsert({
+        org_id: orgId,
+        user_id: actorId,
+        role: invite.role
+      }, { onConflict: 'org_id,user_id' })
+      .select()
+      .maybeSingle();
+
+    if (createErr) throw createErr;
+
+    // Also create legacy organization_members entry if needed
+    try {
+      await supabaseAdmin.from('organization_members').upsert({
+        org_id: orgId,
+        user_id: actorId,
+        role: invite.role
+      }, { onConflict: 'org_id,user_id' });
+    } catch (e) {
+      // Non-fatal: some deployments may not have this table
+    }
+
+    // Delete the invite
+    await supabaseAdmin.from('org_invites').delete().eq('id', inviteId);
+
+    res.json({ org_user: orgUser, message: 'Invite accepted successfully' });
+  } catch (e: any) {
+    console.error('accept_invite_failed:', fmtErr(e));
+    res.status(500).json({ error: 'accept_invite_failed', detail: fmtErr(e) });
+  }
+});
+
+// DELETE /api/orgs/:orgId/invites/:inviteId - reject/delete an invite
+app.delete('/api/orgs/:orgId/invites/:inviteId', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId, inviteId } = req.params;
+
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    // Get the invite
+    const { data: invite, error: inviteErr } = await supabaseAdmin
+      .from('org_invites')
+      .select('*')
+      .eq('id', inviteId)
+      .eq('org_id', orgId)
+      .maybeSingle();
+
+    if (inviteErr || !invite) {
+      return res.status(404).json({ error: 'invite_not_found' });
+    }
+
+    // Allow the invite recipient or an org admin to reject/delete the invite
+    const isAdmin = await isOrgAdmin(actorId, orgId) || (await isPlatformAdmin(actorId));
+    const { data: currentUser, error: userErr } = await supabaseAdmin.auth.admin.getUserById(actorId);
+    const isRecipient = !userErr && currentUser && currentUser.user.email === invite.email;
+
+    if (!isAdmin && !isRecipient) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    // Delete the invite
+    await supabaseAdmin.from('org_invites').delete().eq('id', inviteId);
+
+    res.status(204).send();
+  } catch (e: any) {
+    console.error('reject_invite_failed:', fmtErr(e));
+    res.status(500).json({ error: 'reject_invite_failed', detail: fmtErr(e) });
+  }
+});
+
 // Allow org admins to update their organization settings (e.g., name)
 app.put('/api/orgs/:orgId', async (req, res) => {
   try {
