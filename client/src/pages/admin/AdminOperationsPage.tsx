@@ -27,6 +27,22 @@ interface Phone {
   label: string | null;
 }
 
+interface User {
+  id: string;
+  email: string;
+  role: string;
+  created_at: string;
+  can_generate_api_keys: boolean; // New field
+}
+
+interface ApiKey {
+  id: string;
+  label: string;
+  created_at: string;
+  last_used_at: string | null;
+  key_prefix: string; // First 8 chars of key for display
+}
+
 export function AdminOperationsPage() {
   const { user } = useAuth();
   const toast = (() => {
@@ -37,7 +53,7 @@ export function AdminOperationsPage() {
     }
   })();
 
-  const [activeTab, setActiveTab] = useState<'organizations' | 'users' | 'phone-numbers'>('organizations');
+  const [activeTab, setActiveTab] = useState<'details' | 'members' | 'phones' | 'users'>('details');
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +76,18 @@ export function AdminOperationsPage() {
   const [toAdd, setToAdd] = useState<string[]>([]);
   const [toRemove, setToRemove] = useState<string[]>([]);
   const [savingPhones, setSavingPhones] = useState(false);
+
+  // All Users
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userError, setUserError] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+
+  // User API Keys
+  const [userApiKeys, setUserApiKeys] = useState<ApiKey[]>([]);
+  const [apiKeyLoading, setApiKeyLoading] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [generatingApiKey, setGeneratingApiKey] = useState(false);
 
   // Load orgs on mount
   useEffect(() => {
@@ -138,6 +166,101 @@ export function AdminOperationsPage() {
       console.error('Load phones error:', err);
     } finally {
       setPhoneLoading(false);
+    }
+  };
+
+  const loadAllUsers = async () => {
+    setLoadingUsers(true);
+    setUserError(null);
+    try {
+      const res = await fetch(buildApiUrl('/api/admin/users'), {
+        cache: 'no-store',
+        headers: { 'x-user-id': user?.id || '' }
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || 'Failed to fetch users');
+      setAllUsers(j.users || []);
+    } catch (err: any) {
+      setUserError(err?.message || 'Failed to load users');
+      console.error('Load users error:', err);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  const loadUserApiKeys = async (userId: string) => {
+    setApiKeyLoading(true);
+    setApiKeyError(null);
+    try {
+      const res = await fetch(buildApiUrl(`/api/admin/users/${userId}/api-keys`), {
+        cache: 'no-store',
+        headers: { 'x-user-id': user?.id || '' }
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || 'Failed to fetch API keys');
+      setUserApiKeys(j.api_keys || []);
+    } catch (err: any) {
+      setApiKeyError(err?.message || 'Failed to load API keys');
+      console.error('Load API keys error:', err);
+    } finally {
+      setApiKeyLoading(false);
+    }
+  };
+
+  const handleToggleApiKeyGeneration = async (targetUser: User, canGenerate: boolean) => {
+    try {
+      const res = await fetch(buildApiUrl(`/api/admin/users/${targetUser.id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+        body: JSON.stringify({ can_generate_api_keys: canGenerate }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || 'Failed to update user setting');
+      if (toast?.push) toast.push('User setting updated', 'success');
+      await loadAllUsers(); // Refresh user list to reflect change
+    } catch (err: any) {
+      console.error('Toggle API key generation error:', err);
+      if (toast?.push) toast.push(err?.message || 'Failed to update user setting', 'error');
+    }
+  };
+
+  const handleGenerateApiKey = async (targetUserId: string, label: string) => {
+    if (!label.trim()) {
+      if (toast?.push) toast.push('API Key label is required', 'error');
+      return;
+    }
+    try {
+      setGeneratingApiKey(true);
+      const res = await fetch(buildApiUrl(`/api/admin/users/${targetUserId}/api-keys`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+        body: JSON.stringify({ label }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || 'Failed to generate API key');
+      if (toast?.push) toast.push(`API Key generated: ${j.api_key_plaintext}`, 'success', 10000);
+      await loadUserApiKeys(targetUserId);
+    } catch (err: any) {
+      console.error('Generate API key error:', err);
+      if (toast?.push) toast.push(err?.message || 'Failed to generate API key', 'error');
+    } finally {
+      setGeneratingApiKey(false);
+    }
+  };
+
+  const handleRevokeApiKey = async (targetUserId: string, apiKeyId: string) => {
+    try {
+      const res = await fetch(buildApiUrl(`/api/admin/users/${targetUserId}/api-keys/${apiKeyId}`), {
+        method: 'DELETE',
+        headers: { 'x-user-id': user?.id || '' },
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.detail || 'Failed to revoke API key');
+      if (toast?.push) toast.push('API Key revoked', 'success');
+      await loadUserApiKeys(targetUserId);
+    } catch (err: any) {
+      console.error('Revoke API key error:', err);
+      if (toast?.push) toast.push(err?.message || 'Failed to revoke API key', 'error');
     }
   };
 
@@ -338,13 +461,16 @@ export function AdminOperationsPage() {
 
                 {/* Tabs */}
                 <div className="border-b border-slate-700 px-5 flex gap-8">
-                  {['organizations', 'users', 'phone-numbers'].map((tab) => (
+                  {['details', 'members', 'phones', 'users'].map((tab) => (
                     <button
                       key={tab}
                       onClick={() => {
                         setActiveTab(tab as any);
-                        if (tab === 'phone-numbers' && allPhones.length === 0) {
+                        if (tab === 'phones' && allPhones.length === 0) {
                           loadAllPhones();
+                        }
+                        if (tab === 'users' && allUsers.length === 0) {
+                          loadAllUsers();
                         }
                       }}
                       className={`py-4 border-b-2 transition font-medium text-sm ${
@@ -353,9 +479,10 @@ export function AdminOperationsPage() {
                           : 'border-transparent text-slate-400 hover:text-slate-300'
                       }`}
                     >
-                      {tab === 'organizations' && 'Details'}
-                      {tab === 'users' && 'Members'}
-                      {tab === 'phone-numbers' && 'Phone Numbers'}
+                      {tab === 'details' && 'Details'}
+                      {tab === 'members' && 'Members'}
+                      {tab === 'phones' && 'Phone Numbers'}
+                      {tab === 'users' && 'Users'}
                     </button>
                   ))}
                 </div>
@@ -364,7 +491,7 @@ export function AdminOperationsPage() {
                 <div className="p-5">
                   {orgLoading ? (
                     <div className="text-xs text-slate-400 text-center py-8">Loading...</div>
-                  ) : activeTab === 'organizations' ? (
+                  ) : activeTab === 'details' ? (
                     <div className="space-y-4">
                       <div>
                         <h3 className="font-semibold text-sm mb-3">Organization Details</h3>
@@ -382,7 +509,7 @@ export function AdminOperationsPage() {
                         </div>
                       </div>
                     </div>
-                  ) : activeTab === 'users' ? (
+                  ) : activeTab === 'members' ? (
                     <div className="space-y-3">
                       <h3 className="font-semibold text-sm">Members</h3>
                       {orgMembers.length === 0 ? (
@@ -414,7 +541,7 @@ export function AdminOperationsPage() {
                         </div>
                       )}
                     </div>
-                  ) : (
+                  ) : activeTab === 'phones' ? (
                     <div className="space-y-3">
                       <h3 className="font-semibold text-sm mb-4">Assign Phone Numbers</h3>
                       {phonesLoading ? (
@@ -505,7 +632,138 @@ export function AdminOperationsPage() {
                         </div>
                       )}
                     </div>
+                  ) : activeTab === 'users' ? (
+                    <div className="space-y-4">
+                      <h3 className="font-semibold text-sm">Users</h3>
+                      {loadingUsers ? (
+                        <div className="text-xs text-slate-400 text-center py-8">Loading users...</div>
+                      ) : userError ? (
+                        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
+                          {userError}
+                        </div>
+                      ) : allUsers.length === 0 ? (
+                        <div className="text-xs text-slate-400 text-center py-8">No users found</div>
+                      ) : (
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]">
+                          {/* User List */}
+                          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
+                            {allUsers.map((u) => (
+                              <button
+                                key={u.id}
+                                onClick={() => {
+                                  setSelectedUser(u);
+                                  loadUserApiKeys(u.id);
+                                }}
+                                className={`w-full flex flex-col items-start rounded-lg p-3 transition text-left text-sm font-medium ${
+                                  selectedUser?.id === u.id
+                                    ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+                                    : 'bg-slate-800/30 hover:bg-slate-800/50 text-slate-200 border border-slate-700/30'
+                                }`}
+                              >
+                                <span className="font-semibold">{u.email}</span>
+                                <span className="text-xs text-slate-400 capitalize">Role: {u.role}</span>
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* User Details / Settings */}
+                          {selectedUser && (
+                            <div className="space-y-4">
+                              <h4 className="font-semibold text-sm border-b border-slate-700 pb-2 mb-3">{selectedUser.email} Details</h4>
+
+                              {/* API Key Generation Toggle */}
+                              <div className="flex items-center justify-between">
+                                <label htmlFor="canGenerateApiKeys" className="text-sm text-slate-300">
+                                  Allow API Key Generation
+                                </label>
+                                <input
+                                  type="checkbox"
+                                  id="canGenerateApiKeys"
+                                  checked={selectedUser.can_generate_api_keys}
+                                  onChange={(e) => handleToggleApiKeyGeneration(selectedUser, e.target.checked)}
+                                  className="form-checkbox h-4 w-4 text-emerald-600 bg-slate-700 border-slate-600 rounded focus:ring-emerald-500"
+                                />
+                              </div>
+
+                              {/* API Keys Section */}
+                              <div className="space-y-3 pt-4 border-t border-slate-700">
+                                <h4 className="font-semibold text-sm">API Keys</h4>
+                                {selectedUser.can_generate_api_keys ? (
+                                  <div className="space-y-3">
+                                    {/* Generate New API Key */}
+                                    <form onSubmit={(e) => {
+                                      e.preventDefault();
+                                      const form = e.target as HTMLFormElement;
+                                      const labelInput = form.elements.namedItem('newApiKeyLabel') as HTMLInputElement;
+                                      if (labelInput) {
+                                        handleGenerateApiKey(selectedUser.id, labelInput.value);
+                                        labelInput.value = ''; // Clear input
+                                      }
+                                    }} className="flex gap-2">
+                                      <input
+                                        type="text"
+                                        name="newApiKeyLabel"
+                                        placeholder="API Key Label (e.g., My App)"
+                                        className="flex-1 px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 placeholder-slate-600 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                                        disabled={generatingApiKey}
+                                      />
+                                      <button
+                                        type="submit"
+                                        disabled={generatingApiKey}
+                                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 text-white font-semibold rounded-lg text-sm transition"
+                                      >
+                                        {generatingApiKey ? 'Generating...' : 'Generate Key'}
+                                      </button>
+                                    </form>
+
+                                    {apiKeyError && (
+                                      <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
+                                        {apiKeyError}
+                                      </div>
+                                    )}
+
+                                    {/* Existing API Keys List */}
+                                    {apiKeyLoading ? (
+                                      <div className="text-xs text-slate-400 text-center py-4">Loading API keys...</div>
+                                    ) : userApiKeys.length === 0 ? (
+                                      <div className="text-xs text-slate-400 text-center py-4">No API keys generated.</div>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        {userApiKeys.map((key) => (
+                                          <div key={key.id} className="flex items-center justify-between bg-slate-800/30 border border-slate-700/30 rounded-lg p-3 text-xs">
+                                            <div>
+                                              <div className="font-medium text-slate-200">{key.label} <span className="text-slate-500">({key.key_prefix}...)</span></div>
+                                              <div className="text-slate-500 mt-0.5">Created: {new Date(key.created_at).toLocaleDateString()}</div>
+                                              {key.last_used_at && <div className="text-slate-500">Last Used: {new Date(key.last_used_at).toLocaleDateString()}</div>}
+                                            </div>
+                                            <button
+                                              onClick={() => handleRevokeApiKey(selectedUser.id, key.id)}
+                                              className="text-red-400 hover:text-red-300 text-xs ml-2"
+                                            >
+                                              Revoke
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="text-xs text-slate-400 text-center py-4">
+                                    API key generation is disabled for this user.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-5 text-center py-12">
+                      <p className="text-slate-400">Select an organization to view details</p>
+                    </div>
                   )}
+                </div>
                 </div>
               </>
             ) : (

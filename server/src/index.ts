@@ -46,6 +46,7 @@ import {
   syncSMSLog
 } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgManagerWith } from './auth/rbac';
+import usersRouter from './routes/users';
 import { Readable } from 'stream';
 
 // Extend Express Request interface to include apiKeyScope
@@ -6717,6 +6718,9 @@ app.get('/api/recordings', async (req, res) => {
     res.status(500).json({ error: 'recordings_fetch_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
+
+// Register the users router for admin endpoints
+app.use('/api/admin', usersRouter);
 
 // During interactive debugging we may receive SIGINT/SIGTERM from the environment
 // (file watchers, dev tooling). To allow introspection without the process
