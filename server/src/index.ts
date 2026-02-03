@@ -4819,19 +4819,12 @@ app.get("/s/series", async (req, res) => {
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
 
-        // Try mightycall_sms_messages first, fallback to sms_logs
-        let tableName = 'mightycall_sms_messages';
-        let query = supabaseAdmin
-          .from(tableName)
-          .select('*, organizations(name, id)')
-          .order('created_at', { ascending: false })
-          .limit(limit);
-
-        // If org_id is provided in query, use it (admin filtering)
+        // Determine which orgIds to query
+        let targetOrgIds: string[] = [];
         if (orgId) {
-          query = query.eq('org_id', orgId);
+          targetOrgIds = [orgId];
         } else if (!isAdmin) {
-          // Non-admin: only show their org
+          // Non-admin: only show their orgs
           const { data: userOrgs } = await supabaseAdmin
             .from('org_members')
             .select('org_id')
@@ -4840,11 +4833,46 @@ app.get("/s/series", async (req, res) => {
           if (!userOrgs || userOrgs.length === 0) {
             return res.json({ messages: [] });
           }
-          
-          const orgIds = userOrgs.map(o => o.org_id);
-          query = query.in('org_id', orgIds);
+          targetOrgIds = userOrgs.map(o => o.org_id);
         }
-        // If isAdmin and no orgId filter, show all
+        // If isAdmin and no orgId filter, we'll get all orgs
+
+        // Build phone filter for non-admin users
+        let allowedPhoneIds: string[] | null = null;
+        if (!isAdmin && targetOrgIds.length > 0) {
+          // Get user's assigned phones for their org(s)
+          const phonesByOrg: Record<string, string[]> = {};
+          for (const oId of targetOrgIds) {
+            const { phones } = await getUserAssignedPhoneNumbers(oId, userId);
+            phonesByOrg[oId] = phones.map(p => p.id).filter(Boolean);
+          }
+          const allPhoneIds = Object.values(phonesByOrg).flat();
+          if (allPhoneIds.length > 0) {
+            allowedPhoneIds = allPhoneIds;
+          }
+        }
+
+        // Try mightycall_sms_messages first, fallback to sms_logs
+        let tableName = 'mightycall_sms_messages';
+        let query = supabaseAdmin
+          .from(tableName)
+          .select('*, organizations(name, id)')
+          .order('created_at', { ascending: false })
+          .limit(limit);
+
+        // Add org filter
+        if (targetOrgIds.length > 0) {
+          query = query.in('org_id', targetOrgIds);
+        }
+        
+        // Add phone filter for non-admin
+        if (!isAdmin && allowedPhoneIds) {
+          if (allowedPhoneIds.length === 0) {
+            // User has no assigned phones in their org(s)
+            return res.json({ messages: [] });
+          }
+          query = query.in('phone_number_id', allowedPhoneIds);
+        }
 
         let { data, error } = await query;
 
@@ -4859,20 +4887,17 @@ app.get("/s/series", async (req, res) => {
             .order('sent_at', { ascending: false })
             .limit(limit);
 
-          if (orgId) {
-            query = query.eq('org_id', orgId);
-          } else if (!isAdmin) {
-            const { data: userOrgs } = await supabaseAdmin
-              .from('org_members')
-              .select('org_id')
-              .eq('user_id', userId);
-            
-            if (!userOrgs || userOrgs.length === 0) {
+          if (targetOrgIds.length > 0) {
+            query = query.in('org_id', targetOrgIds);
+          }
+
+          // Also apply phone filter for non-admin in fallback
+          if (!isAdmin && allowedPhoneIds) {
+            if (allowedPhoneIds.length === 0) {
+              // User has no assigned phones in their org(s)
               return res.json({ messages: [] });
             }
-            
-            const orgIds = userOrgs.map(o => o.org_id);
-            query = query.in('org_id', orgIds);
+            query = query.in('phone_number_id', allowedPhoneIds);
           }
 
           ({ data, error } = await query);
@@ -6812,7 +6837,7 @@ app.get('/api/call-stats', async (req, res) => {
   }
 });
 
-// GET /api/recordings - Get recordings with org details
+// GET /api/recordings - Get recordings with org details (filtered by user's assigned numbers)
 app.get('/api/recordings', async (req, res) => {
   try {
     const userId = req.header('x-user-id') || null;
@@ -6823,13 +6848,31 @@ app.get('/api/recordings', async (req, res) => {
 
     if (!orgId) return res.status(400).json({ error: 'org_id_required' });
 
-    // Fetch recordings - no limit imposed, fetch all available
+    // Check if user is platform admin
+    const isAdmin = await isPlatformAdmin(userId);
+    
+    // If non-admin, get user's assigned phones within this org
+    let allowedPhoneIds: string[] | null = null;
+    if (!isAdmin) {
+      const { phones } = await getUserAssignedPhoneNumbers(orgId, userId);
+      allowedPhoneIds = phones.map(p => p.id).filter(Boolean);
+    }
+
+    // Fetch recordings
     let q = supabaseAdmin
       .from('mightycall_recordings')
       .select('*')
       .eq('org_id', orgId)
       .order('recording_date', { ascending: false })
       .limit(limit);
+
+    // If non-admin and has allowed phones, filter by phone_number_id
+    if (!isAdmin && allowedPhoneIds && allowedPhoneIds.length > 0) {
+      q = q.in('phone_number_id', allowedPhoneIds);
+    } else if (!isAdmin && (!allowedPhoneIds || allowedPhoneIds.length === 0)) {
+      // Non-admin with no assigned phones - return empty
+      return res.json({ recordings: [] });
+    }
 
     const { data: recordings, error } = await q;
     if (error) throw error;

@@ -25,6 +25,32 @@ export function ReportsPage() {
   const [statusFilter, setStatusFilter] = useState('all'); // 'completed', 'failed', 'all'
   const [message, setMessage] = useState<string | null>(null);
 
+  const loadDemoRecordings = () => {
+    const demo = [
+      {
+        id: `demo-1-${Date.now()}`,
+        phone_number: '+17323286846',
+        direction: 'inbound' as const,
+        duration: 45,
+        status: 'completed',
+        started_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+        from_number: '+15551234567',
+        to_number: '+17323286846',
+      },
+      {
+        id: `demo-2-${Date.now()}`,
+        phone_number: '+12122357403',
+        direction: 'outbound' as const,
+        duration: 75,
+        status: 'completed',
+        started_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+        from_number: '+12122357403',
+        to_number: '+15559876543',
+      }
+    ];
+    setRecordings(demo as any);
+  };
+
   useEffect(() => {
     if (selectedOrgId) fetchRecordings();
   }, [selectedOrgId]);
@@ -225,8 +251,11 @@ export function ReportsPage() {
                   <p className="text-slate-400">Loading recordings...</p>
                 </div>
               ) : filteredRecordings.length === 0 ? (
-                <div className="p-8 text-center">
+                <div className="p-8 text-center space-y-3">
                   <p className="text-slate-400">{recordings.length === 0 ? 'No recordings found. Try syncing data.' : 'No recordings match the selected filters.'}</p>
+                  {recordings.length === 0 && (
+                    <button onClick={loadDemoRecordings} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md">Load demo recordings</button>
+                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
