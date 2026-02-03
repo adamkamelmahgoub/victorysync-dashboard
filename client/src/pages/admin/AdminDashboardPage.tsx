@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { PageLayout } from '../../components/PageLayout';
+import { buildApiUrl } from '../../config';
 
 interface TabConfig {
   id: string;
@@ -94,7 +95,7 @@ const AdminDashboardPage: React.FC = () => {
 
   const fetchOrganizations = async () => {
     try {
-      const res = await fetch('http://localhost:4000/api/admin/orgs', {
+      const res = await fetch(buildApiUrl('/api/admin/orgs'), {
         headers: { 'x-user-id': user?.id || '' },
         cache: 'no-store'
       });
@@ -130,7 +131,7 @@ const AdminDashboardPage: React.FC = () => {
     if (!selectedOrg) return;
     setMembersLoading(true);
     try {
-      const res = await fetch(`http://localhost:4000/api/orgs/${selectedOrg}/members`, {
+      const res = await fetch(buildApiUrl(`/api/orgs/${selectedOrg}/members`), {
         headers: { 'x-user-id': user?.id || '' },
         cache: 'no-store'
       });
@@ -151,7 +152,7 @@ const AdminDashboardPage: React.FC = () => {
     setSuccess(null);
 
     try {
-      const res = await fetch('http://localhost:4000/api/admin/users', {
+      const res = await fetch(buildApiUrl('/api/admin/users'), {
         method: 'POST',
         headers: {
           'x-user-id': user?.id || '',
@@ -192,7 +193,7 @@ const AdminDashboardPage: React.FC = () => {
     setSuccess(null);
 
     try {
-      const res = await fetch(`http://localhost:4000/api/orgs/${inviteOrgId}/members`, {
+      const res = await fetch(buildApiUrl(`/api/orgs/${inviteOrgId}/members`), {
         method: 'POST',
         headers: {
           'x-user-id': user?.id || '',
@@ -227,7 +228,7 @@ const AdminDashboardPage: React.FC = () => {
   const removeMember = async (userId: string) => {
     if (!selectedOrg) return;
     try {
-      const res = await fetch(`http://localhost:4000/api/orgs/${selectedOrg}/members/${userId}`, {
+      const res = await fetch(buildApiUrl(`/api/orgs/${selectedOrg}/members/${userId}`), {
         method: 'DELETE',
         headers: { 'x-user-id': user?.id || '' }
       });

@@ -2,6 +2,7 @@ import React, { FC, useState, useEffect } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
+import { buildApiUrl } from '../../config';
 
 interface ChangeRequest {
   id: string;
@@ -32,7 +33,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
 
   const fetchOrgs = async () => {
     try {
-      const response = await fetch('http://localhost:4000/api/admin/orgs', {
+      const response = await fetch(buildApiUrl('/api/admin/orgs'), {
         headers: {
           'x-user-id': userId || '',
           'Content-Type': 'application/json'
@@ -52,7 +53,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
   const fetchRequests = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:4000/api/admin/number-requests', {
+      const response = await fetch(buildApiUrl('/api/admin/number-requests'), {
         headers: {
           'x-user-id': userId || '',
           'Content-Type': 'application/json'
@@ -79,7 +80,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
     if (!selectedRequest) return;
 
     try {
-      const response = await fetch(`http://localhost:4000/api/admin/number-requests/${selectedRequest.id}`, {
+      const response = await fetch(buildApiUrl(`/api/admin/number-requests/${selectedRequest.id}`), {
         method: 'PATCH',
         headers: {
           'x-user-id': userId || '',

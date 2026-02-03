@@ -7,6 +7,7 @@ import { CallsOverTimeChart } from "../components/CallsOverTimeChart";
 import { RecentActivityList } from "../components/RecentActivityList";
 import { QueueStatus } from "../components/QueueStatus";
 import ServiceLevelTargetBlock from "../components/ServiceLevelTargetBlock";
+import { buildApiUrl } from "../config";
 
 export const Dashboard: FC = () => {
   const navigate = useNavigate();
@@ -37,7 +38,7 @@ export const Dashboard: FC = () => {
       if (!effectiveOrgId || !user) { if (mounted) setCanManage(false); return; }
       if (isAdmin && paramOrgId) { if (mounted) setCanManage(true); return; }
       try {
-        const resp = await fetch(`http://localhost:4000/api/org-members?org_id=${encodeURIComponent(effectiveOrgId)}`, {
+        const resp = await fetch(buildApiUrl(`/api/org-members?org_id=${encodeURIComponent(effectiveOrgId)}`), {
           headers: { 'x-user-id': user.id || '' }
         });
         let status = resp.status;

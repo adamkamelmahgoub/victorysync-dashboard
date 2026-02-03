@@ -1,6 +1,7 @@
 import React, { FC, useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
+import { buildApiUrl } from '../config';
 
 interface Ticket {
   id: string;
@@ -38,7 +39,7 @@ const SupportPage: FC = () => {
   const fetchTickets = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:4000/api/support/tickets', {
+      const response = await fetch(buildApiUrl('/api/support/tickets'), {
         headers: {
           'x-user-id': userId || '',
           'Content-Type': 'application/json'
@@ -68,7 +69,7 @@ const SupportPage: FC = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:4000/api/support/tickets', {
+      const response = await fetch(buildApiUrl('/api/support/tickets'), {
         method: 'POST',
         headers: {
           'x-user-id': userId || '',
@@ -109,7 +110,7 @@ const SupportPage: FC = () => {
     try {
       setSending(true);
       const response = await fetch(
-        `http://localhost:4000/api/support/tickets/${selectedTicket.id}/messages`,
+        buildApiUrl(`/api/support/tickets/${selectedTicket.id}/messages`),
         {
           method: 'POST',
           headers: {

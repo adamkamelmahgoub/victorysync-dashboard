@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
+import { buildApiUrl } from '../config';
 
 interface CallStats {
   totalCalls: number;
@@ -50,7 +51,7 @@ export default function ReportsPageEnhanced() {
     setMessage(null);
     console.log(`Fetching call-stats for org=${selectedOrg}, user=${user.id}`);
     try {
-      const url = `http://localhost:4000/api/call-stats?org_id=${selectedOrg}&start_date=${startDate}&end_date=${endDate}`;
+      const url = buildApiUrl(`/api/call-stats?org_id=${selectedOrg}&start_date=${startDate}&end_date=${endDate}`);
       const response = await fetch(url, { 
         headers: { 'x-user-id': user.id },
         cache: 'no-store'

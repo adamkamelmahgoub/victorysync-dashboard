@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { triggerMightyCallPhoneNumberSync } from '../lib/apiClient';
 import { getOrgPhoneNumbers } from '../lib/phonesApi';
 import { PageLayout } from '../components/PageLayout';
+import { buildApiUrl } from '../config';
 
 interface Recording {
   id: string;
@@ -206,7 +207,7 @@ const NumbersPage: FC = () => {
     try {
       setSubmitting(true);
       
-      const response = await fetch('http://localhost:4000/api/support/tickets', {
+      const response = await fetch(buildApiUrl('/api/support/tickets'), {
         method: 'POST',
         headers: {
           'x-user-id': userId || '',

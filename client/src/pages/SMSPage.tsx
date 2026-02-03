@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
+import { buildApiUrl } from '../config';
 
 export function SMSPage() {
   const { user, selectedOrgId } = useAuth();
@@ -17,7 +18,7 @@ export function SMSPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const response = await fetch(`http://localhost:4000/api/sms/messages?limit=100&org_id=${selectedOrgId}`, {
+      const response = await fetch(buildApiUrl(`/api/sms/messages?limit=100&org_id=${selectedOrgId}`), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {

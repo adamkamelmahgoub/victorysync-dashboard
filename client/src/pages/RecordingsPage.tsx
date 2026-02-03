@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { triggerMightyCallRecordingsSync } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
+import { buildApiUrl } from '../config';
 
 export function RecordingsPage() {
   const { user, selectedOrgId } = useAuth();
@@ -22,7 +23,7 @@ export function RecordingsPage() {
     setLoading(true);
     setMessage(null);
     try {
-      const response = await fetch(`http://localhost:4000/api/recordings?limit=50&org_id=${selectedOrgId}`, {
+      const response = await fetch(buildApiUrl(`/api/recordings?limit=50&org_id=${selectedOrgId}`), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
@@ -40,7 +41,7 @@ export function RecordingsPage() {
 
   const fetchRecordingBlob = async (id: string) => {
     if (!user) throw new Error('not_authenticated');
-    const resp = await fetch(`http://localhost:4000/api/recordings/${id}/download`, {
+    const resp = await fetch(buildApiUrl(`/api/recordings/${id}/download`), {
       headers: { 'x-user-id': user.id }
     });
     if (!resp.ok) throw new Error('failed_to_fetch_recording');
