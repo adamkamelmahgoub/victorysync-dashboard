@@ -178,7 +178,11 @@ export async function syncMightyCallPhoneNumbers(
   return { synced: phones.length, upserted: phones.length };
 }
 
-// --- STUBS FOR MISSING SYNC FUNCTIONS (to fix build) ---
+// --- SYNC FUNCTIONS FOR MIGHTYCALL DATA ---
+
+/**
+ * Sync MightyCall reports and recordings for an organization
+ */
 export async function syncMightyCallReports(
   supabaseAdminClient: any,
   orgId: string,
@@ -187,9 +191,73 @@ export async function syncMightyCallReports(
   endDate?: string,
   overrideCreds?: any
 ): Promise<{ reportsSynced: number; recordingsSynced: number }> {
-  return { reportsSynced: 0, recordingsSynced: 0 };
+  try {
+    const token = await getMightyCallAccessToken(overrideCreds);
+    const start = startDate || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const end = endDate || new Date().toISOString().split('T')[0];
+
+    // Fetch reports (journal entries with type=Call)
+    const reports = await fetchMightyCallJournalRequests(token, { 
+      from: `${start}T00:00:00Z`, 
+      to: `${end}T23:59:59Z`, 
+      type: 'Call', 
+      pageSize: '1000', 
+      page: '1' 
+    }).catch(() => []);
+
+    let reportsSynced = 0;
+    if (Array.isArray(reports) && reports.length > 0) {
+      const reportRows = reports.map((r: any) => ({
+        org_id: orgId,
+        phone_number_id: null,
+        report_type: 'calls',
+        report_date: (r.created || r.dateTimeUtc || new Date()).toString().split('T')[0],
+        data: r
+      }));
+
+      const { error } = await supabaseAdminClient
+        .from('mightycall_reports')
+        .insert(reportRows)
+        .select();
+
+      if (!error) reportsSynced = reportRows.length;
+      else console.warn('[MightyCall] reports insert failed:', error);
+    }
+
+    // Fetch and sync recordings
+    let recordingsSynced = 0;
+    const recordings = await fetchMightyCallRecordings(token, phoneNumberIds, start, end).catch(() => []);
+    if (Array.isArray(recordings) && recordings.length > 0) {
+      const recRows = recordings.map((r: any) => ({
+        org_id: orgId,
+        phone_number_id: null,
+        call_id: r.callId || r.id,
+        recording_url: r.recordingUrl,
+        duration_seconds: r.duration,
+        recording_date: r.date,
+        metadata: r.metadata || r
+      }));
+
+      const { error } = await supabaseAdminClient
+        .from('mightycall_recordings')
+        .insert(recRows)
+        .select();
+
+      if (!error) recordingsSynced = recRows.length;
+      else console.warn('[MightyCall] recordings insert failed:', error);
+    }
+
+    console.log(`[MightyCall] Synced reports: ${reportsSynced}, recordings: ${recordingsSynced}`);
+    return { reportsSynced, recordingsSynced };
+  } catch (e: any) {
+    console.warn('[MightyCall] syncMightyCallReports error:', e?.message);
+    return { reportsSynced: 0, recordingsSynced: 0 };
+  }
 }
 
+/**
+ * Sync MightyCall recordings for an organization
+ */
 export async function syncMightyCallRecordings(
   supabaseAdminClient: any,
   orgId: string,
@@ -198,15 +266,82 @@ export async function syncMightyCallRecordings(
   endDate?: string,
   overrideCreds?: any
 ): Promise<{ recordingsSynced: number }> {
-  return { recordingsSynced: 0 };
+  try {
+    const token = await getMightyCallAccessToken(overrideCreds);
+    const start = startDate || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const end = endDate || new Date().toISOString().split('T')[0];
+
+    const recordings = await fetchMightyCallRecordings(token, phoneNumberIds, start, end).catch(() => []);
+
+    let recordingsSynced = 0;
+    if (Array.isArray(recordings) && recordings.length > 0) {
+      const recRows = recordings.map((r: any) => ({
+        org_id: orgId,
+        phone_number_id: null,
+        call_id: r.callId || r.id,
+        recording_url: r.recordingUrl,
+        duration_seconds: r.duration,
+        recording_date: r.date,
+        metadata: r.metadata || r
+      }));
+
+      const { error } = await supabaseAdminClient
+        .from('mightycall_recordings')
+        .insert(recRows)
+        .select();
+
+      if (!error) recordingsSynced = recRows.length;
+      else console.warn('[MightyCall] recordings insert failed:', error);
+    }
+
+    console.log(`[MightyCall] Synced recordings: ${recordingsSynced}`);
+    return { recordingsSynced };
+  } catch (e: any) {
+    console.warn('[MightyCall] syncMightyCallRecordings error:', e?.message);
+    return { recordingsSynced: 0 };
+  }
 }
 
+/**
+ * Sync MightyCall SMS messages for an organization
+ */
 export async function syncMightyCallSMS(
   supabaseAdminClient: any,
   orgId: string,
   overrideCreds?: any
 ): Promise<{ smsSynced: number }> {
-  return { smsSynced: 0 };
+  try {
+    const token = await getMightyCallAccessToken(overrideCreds);
+    const messages = await fetchMightyCallSMS(token).catch(() => []);
+
+    let smsSynced = 0;
+    if (Array.isArray(messages) && messages.length > 0) {
+      const smsRows = messages.map((m: any) => ({
+        org_id: orgId,
+        from_number: m.client?.address || m.from || null,
+        to_number: m.businessNumber?.number || m.to || null,
+        message_text: m.textModel?.text || m.text || null,
+        direction: m.direction || 'inbound',
+        status: m.status || 'received',
+        received_at: m.created || new Date().toISOString(),
+        metadata: m
+      }));
+
+      const { error } = await supabaseAdminClient
+        .from('mightycall_sms_messages')
+        .insert(smsRows)
+        .select();
+
+      if (!error) smsSynced = smsRows.length;
+      else console.warn('[MightyCall] SMS insert failed:', error);
+    }
+
+    console.log(`[MightyCall] Synced SMS: ${smsSynced}`);
+    return { smsSynced };
+  } catch (e: any) {
+    console.warn('[MightyCall] syncMightyCallSMS error:', e?.message);
+    return { smsSynced: 0 };
+  }
 }
 
           export async function syncMightyCallCallHistory(supabaseAdminClient: any, orgId: string, filters?: any): Promise<{ callsSynced: number }> {

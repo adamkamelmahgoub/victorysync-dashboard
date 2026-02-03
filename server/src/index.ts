@@ -972,6 +972,8 @@ app.get('/api/admin/phone-numbers', async (req, res) => {
 });
 
 // GET /api/orgs/:orgId/phone-numbers - get phone numbers assigned to an organization
+// For admins: returns ALL phone numbers in the system
+// For regular users: returns only explicitly assigned numbers
 app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
   try {
     const { orgId } = req.params;
@@ -986,8 +988,27 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
       }
     }
 
-    console.log('[get_org_phone_numbers] params:', { orgId, actorId, isDev });
-    // Get ONLY explicitly assigned phones from org_phone_numbers table
+    const isAdmin = actorId && await isPlatformAdmin(actorId);
+    console.log('[get_org_phone_numbers] params:', { orgId, actorId, isDev, isAdmin });
+
+    // Admins see ALL phone numbers; regular users see only assigned numbers
+    if (isAdmin) {
+      // Admin: return ALL phone numbers
+      const { data: allPhones, error: phoneErr } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('id, number, label, created_at');
+      if (phoneErr) throw phoneErr;
+      const mapped = (allPhones || []).map((p: any) => ({
+        id: p.id,
+        number: p.number || 'unknown',
+        label: p.label || 'VictorySync LLC',
+        is_active: true,
+        created_at: p.created_at
+      }));
+      return res.json({ phone_numbers: mapped, numbers: mapped });
+    }
+
+    // Regular user: Get ONLY explicitly assigned phones from org_phone_numbers table
     const { data: orgPhones, error: opErr } = await supabaseAdmin
       .from('org_phone_numbers')
       .select('id, org_id, phone_number_id, phone_number, label, created_at')
