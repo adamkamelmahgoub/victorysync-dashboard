@@ -1,5 +1,5 @@
 import '../config/env';
-import { getMightyCallAccessToken, fetchMightyCallReports, fetchMightyCallRecordings } from '../integrations/mightycall';
+import { getMightyCallAccessToken, fetchMightyCallRecordings } from '../integrations/mightycall';
 
 async function main() {
   try {
@@ -8,10 +8,6 @@ async function main() {
 
     const start = '2026-01-25';
     const end = '2026-02-01';
-    console.log('[test] fetching reports...');
-    const reports = await fetchMightyCallReports(token, [], start, end);
-    console.log('[test] reports count:', reports.length);
-    console.log(JSON.stringify((reports || []).slice(0,3), null, 2));
 
     console.log('[test] fetching recordings...');
     const recs = await fetchMightyCallRecordings(token, [], start, end);

@@ -46,7 +46,7 @@ async function checkSchema() {
     .from('information_schema.constraint_column_usage')
     .select('*')
     .eq('table_name', 'mightycall_reports')
-    .catch(() => ({ data: null }));
+    // .catch removed: use try/catch above
 
   console.log('[check] Constraints:', constraints);
 }
