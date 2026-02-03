@@ -82,9 +82,9 @@ export const RecentActivityList: FC<RecentActivityListProps> = ({ orgId }) => {
                     Agent: {call.agentName}
                   </div>
                 )}
-                <div className="text-slate-500 text-[10px] mt-0.5">
-                  {time}
-                </div>
+                {/* Show org and duration if available */}
+                <div className="text-slate-500 text-xs mt-0.5">{call.orgName || (call.orgId ? `Org: ${call.orgId}` : null)}</div>
+                <div className="text-slate-500 text-[10px] mt-0.5">{time} {call.duration ? `· ${Math.floor(call.duration/60)}m ${call.duration%60}s` : ''}</div>
               </div>
               <div className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap ml-2 ${pillClass}`}>
                 {pillText}

@@ -8,8 +8,11 @@ export type RecentCall = {
   fromNumber: string | null;
   toNumber: string | null;
   startedAt: string;
+  duration?: number | null;
   queueName: string | null;
   agentName?: string | null;
+  orgId?: string | null;
+  orgName?: string | null;
 };
 
 type UseRecentCallsResult = {
@@ -39,8 +42,11 @@ export function useRecentCalls(orgId: string | null | undefined): UseRecentCalls
             fromNumber: it.from_number ?? it.fromNumber ?? null,
             toNumber: it.to_number ?? it.toNumber ?? null,
             startedAt: it.started_at ?? it.startedAt ?? '',
+            duration: it.duration ?? it.call_duration ?? null,
             queueName: it.queue_name ?? it.queueName ?? null,
             agentName: it.agent_name ?? it.agentName ?? null,
+            orgId: it.org_id ?? null,
+            orgName: it.org_name ?? null,
           }));
           setCalls(normalized);
         }

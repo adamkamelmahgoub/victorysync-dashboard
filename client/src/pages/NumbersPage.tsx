@@ -6,11 +6,13 @@ import { PageLayout } from '../components/PageLayout';
 
 interface Recording {
   id: string;
-  phone_number: string;
+  phone_number_id?: string;
+  phone_number?: string;
   direction: 'inbound' | 'outbound';
   duration: number;
   status: string;
   started_at: string;
+  recording_date?: string;
   from_number?: string;
   to_number?: string;
 }
@@ -27,10 +29,48 @@ const NumbersPage: FC = () => {
   const [requestDetails, setRequestDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [selectedPhoneId, setSelectedPhoneId] = useState<string | null>(null);
+  const [filteredRecordings, setFilteredRecordings] = useState<Recording[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    fetchNumbers();
+    // Ensure admin status is evaluated first, then load numbers so auto-assignment
+    // can run when we know the user is an admin.
+    (async () => {
+      await checkAdminStatus();
+      await fetchNumbers();
+    })();
   }, [selectedOrgId, userId]);
+
+  useEffect(() => {
+    // Filter recordings by selected phone
+    if (selectedPhoneId) {
+      const filtered = recordings.filter(r => {
+        const recPhoneId = r.phone_number_id || r.phone_number;
+        return recPhoneId === selectedPhoneId;
+      });
+      setFilteredRecordings(filtered);
+    } else {
+      setFilteredRecordings(recordings);
+    }
+  }, [selectedPhoneId, recordings]);
+
+  const checkAdminStatus = async () => {
+    if (!userId) return;
+    try {
+      // Check if user is platform admin by their role
+      const response = await fetch(`/api/users/${userId}`, {
+        headers: { 'x-user-id': userId }
+      }).catch(() => null);
+      
+      if (response?.ok) {
+        const data = await response.json();
+        setIsAdmin(data.global_role === 'platform_admin' || data.is_admin === true);
+      }
+    } catch (error) {
+      console.error('Error checking admin status:', error);
+    }
+  };
 
   const fetchNumbers = async () => {
     if (!selectedOrgId || !userId) {
@@ -42,6 +82,11 @@ const NumbersPage: FC = () => {
       setLoading(true);
       const data = await getOrgPhoneNumbers(selectedOrgId, userId);
       setNumbers(data || []);
+      
+      // NOTE: auto-assignment is handled in a separate effect that runs when
+      // `isAdmin` and `numbers` are both populated to avoid a race condition
+      // where `isAdmin` may not be known yet when numbers are first fetched.
+      
       // Fetch recordings for these numbers
       await fetchRecordings();
     } catch (error) {
@@ -52,17 +97,63 @@ const NumbersPage: FC = () => {
     }
   };
 
+  const autoAssignPhonesToAdmin = async (phoneNumbers: any[]) => {
+    if (!userId || !isAdmin) return;
+    try {
+      for (const phone of phoneNumbers) {
+        await fetch(`/api/admin/assign-phone-to-user`, {
+          method: 'POST',
+          headers: {
+            'x-user-id': userId,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            phone_number_id: phone.id
+          })
+        }).catch(() => {
+          // Silently fail individual assignments
+        });
+      }
+    } catch (error) {
+      console.error('Error auto-assigning phones:', error);
+    }
+  };
+
+  // When numbers are loaded and the user is an admin, ensure each phone
+  // number is assigned to the admin user. Run once per numbers change.
+  useEffect(() => {
+    if (!isAdmin || !userId || !numbers || numbers.length === 0) return;
+    // Fire-and-forget; individual failures are silenced by the helper
+    autoAssignPhonesToAdmin(numbers);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, userId, numbers]);
+
   const fetchRecordings = async () => {
     if (!selectedOrgId || !userId) return;
     
     try {
       setRecordingsLoading(true);
-      const response = await fetch(`/api/orgs/${selectedOrgId}/recordings`, {
+      const response = await fetch(`/api/recordings?org_id=${selectedOrgId}&limit=100`, {
         headers: { 'x-user-id': userId }
       });
       if (response.ok) {
         const data = await response.json();
-        setRecordings(data.recordings || []);
+        const recs = (data.recordings || []).map((r: any) => ({
+          ...r,
+          direction: r.direction || (r.inbound ? 'inbound' : 'outbound'),
+          status: r.status || 'completed',
+          started_at: r.recording_date || r.started_at || new Date().toISOString()
+        }));
+        setRecordings(recs);
+        
+        // Auto-select first phone if not already selected
+        if (recs.length > 0 && !selectedPhoneId) {
+          const firstPhoneId = recs[0].phone_number_id || recs[0].phone_number;
+          if (firstPhoneId) {
+            setSelectedPhoneId(firstPhoneId);
+          }
+        }
       }
     } catch (error) {
       console.error('Error fetching recordings:', error);
@@ -75,6 +166,7 @@ const NumbersPage: FC = () => {
     if (!numbers || numbers.length === 0) return;
     const demo: Recording[] = numbers.map((n: any, i: number) => ({
       id: `demo-${i}-${Date.now()}`,
+      phone_number_id: n.id,
       phone_number: n.number || n.phone_number,
       direction: i % 2 === 0 ? 'inbound' : 'outbound',
       duration: 30 + i * 10,
@@ -84,6 +176,9 @@ const NumbersPage: FC = () => {
       to_number: n.number || n.phone_number,
     }));
     setRecordings(demo);
+    if (demo.length > 0) {
+      setSelectedPhoneId(demo[0].phone_number_id || null);
+    }
   };
 
   const handleSync = async () => {
@@ -140,6 +235,10 @@ const NumbersPage: FC = () => {
       setSubmitting(false);
     }
   };
+
+  const uniquePhoneNumbers = Array.from(new Set(
+    recordings.map(r => r.phone_number_id || r.phone_number).filter(Boolean)
+  ));
 
   return (
     <PageLayout title="Phone Numbers" description="Manage and sync your phone numbers">
@@ -203,7 +302,7 @@ const NumbersPage: FC = () => {
           </div>
 
           {/* Main Content: Phone Numbers Grid */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-6">
             <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-white">Your Phone Numbers</h2>
@@ -223,7 +322,8 @@ const NumbersPage: FC = () => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {numbers.map((num) => (
-                    <div key={num.id} className="bg-gradient-to-br from-slate-800/50 to-slate-900 rounded-lg p-5 ring-1 ring-slate-700 hover:ring-slate-600 transition">
+                    <div key={num.id} className="bg-gradient-to-br from-slate-800/50 to-slate-900 rounded-lg p-5 ring-1 ring-slate-700 hover:ring-slate-600 transition cursor-pointer"
+                      onClick={() => setSelectedPhoneId(num.id)}>
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div>
                           <h4 className="text-lg font-bold text-white">{num.number || num.phone_number}</h4>
@@ -252,12 +352,33 @@ const NumbersPage: FC = () => {
               )}
             </div>
 
+            {/* Filter by Phone Number */}
+            {uniquePhoneNumbers.length > 0 && (
+              <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
+                <label className="block text-sm font-semibold text-slate-300 mb-3">Filter by Phone Number</label>
+                <select
+                  value={selectedPhoneId || ''}
+                  onChange={(e) => setSelectedPhoneId(e.target.value || null)}
+                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
+                >
+                  <option value="">All Phone Numbers ({uniquePhoneNumbers.length})</option>
+                  {uniquePhoneNumbers.map((phoneId) => (
+                    <option key={phoneId} value={phoneId || ''}>
+                      {phoneId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Call Recordings for these numbers */}
             <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-white">Recent Calls</h2>
+                <h2 className="text-xl font-semibold text-white">
+                  {selectedPhoneId ? `Calls for ${selectedPhoneId}` : 'Recent Calls'}
+                </h2>
                 <span className="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800/60 text-slate-300 ring-1 ring-slate-700">
-                  {recordingsLoading ? '...' : recordings.length} calls
+                  {recordingsLoading ? '...' : filteredRecordings.length} calls
                 </span>
               </div>
 
@@ -265,50 +386,40 @@ const NumbersPage: FC = () => {
                 <div className="p-8 text-center">
                   <p className="text-slate-400">Loading call data...</p>
                 </div>
-              ) : recordings.length === 0 ? (
+              ) : filteredRecordings.length === 0 ? (
                 <div className="p-8 text-center space-y-4">
-                  <p className="text-slate-400">No call recordings yet</p>
-                  <div>
-                    <button
-                      onClick={loadDemoData}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md"
-                    >
-                      Load demo recordings
-                    </button>
-                  </div>
+                  <p className="text-slate-400">No call recordings found</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-700">
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Phone</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Direction</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">From</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">To</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">From (Caller)</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">To (Number)</th>
                         <th className="px-4 py-3 text-center text-xs font-semibold text-slate-300">Duration</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Status</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300">Date & Time</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {recordings.slice(0, 20).map((rec) => (
+                      {filteredRecordings.slice(0, 50).map((rec) => (
                         <tr key={rec.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition">
-                          <td className="px-4 py-3 text-white font-medium font-mono text-xs">{rec.phone_number}</td>
                           <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                            <span className={`px-2 py-1 rounded-md text-xs font-medium inline-block ${
                               rec.direction === 'inbound' ? 'bg-blue-900/40 text-blue-300' : 'bg-emerald-900/40 text-emerald-300'
                             }`}>
                               {rec.direction === 'inbound' ? '↓ Inbound' : '↑ Outbound'}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-slate-300 font-mono text-xs">{rec.from_number || '—'}</td>
-                          <td className="px-4 py-3 text-slate-300 font-mono text-xs">{rec.to_number || '—'}</td>
+                          <td className="px-4 py-3 text-slate-300 font-mono text-xs font-bold">{rec.from_number || '—'}</td>
+                          <td className="px-4 py-3 text-slate-300 font-mono text-xs font-bold">{rec.to_number || rec.phone_number_id || '—'}</td>
                           <td className="px-4 py-3 text-center text-slate-300">
                             {rec.duration ? `${Math.floor(rec.duration / 60)}m ${rec.duration % 60}s` : '—'}
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                            <span className={`px-2 py-1 rounded-md text-xs font-medium inline-block ${
                               rec.status === 'completed' ? 'bg-emerald-900/40 text-emerald-300' :
                               rec.status === 'failed' ? 'bg-red-900/40 text-red-300' :
                               'bg-slate-900/40 text-slate-300'
