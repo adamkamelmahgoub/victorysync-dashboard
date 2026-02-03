@@ -2,6 +2,7 @@ import type { FC, ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
+import { buildApiUrl } from "../config";
 
 type AuthContextValue = {
   user: User | null;
@@ -39,7 +40,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
           setUser(user);
           // Try to read canonical profile from backend and orgs list
           try {
-            const profileRes = await fetch('http://localhost:4000/api/user/profile', { headers: { 'x-user-id': user.id } });
+            const profileRes = await fetch(buildApiUrl('/api/user/profile'), { headers: { 'x-user-id': user.id } });
             if (profileRes.ok) {
               const profileData = await profileRes.json();
               if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
@@ -48,7 +49,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
             console.warn('[AuthContext] init fetch profile failed', e);
           }
           try {
-            const orgsRes = await fetch('http://localhost:4000/api/user/orgs', { headers: { 'x-user-id': user.id } });
+            const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': user.id } });
             if (orgsRes.ok) {
               const j = await orgsRes.json();
               const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
@@ -76,14 +77,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         if (session?.user) {
           setUser(session.user);
           try {
-            const profileRes = await fetch('http://localhost:4000/api/user/profile', { headers: { 'x-user-id': session.user.id } });
+            const profileRes = await fetch(buildApiUrl('/api/user/profile'), { headers: { 'x-user-id': session.user.id } });
             if (profileRes.ok) {
               const profileData = await profileRes.json();
               if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
             }
           } catch (e) { /* ignore */ }
           try {
-            const orgsRes = await fetch('http://localhost:4000/api/user/orgs', { headers: { 'x-user-id': session.user.id } });
+            const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': session.user.id } });
             if (orgsRes.ok) {
               const j = await orgsRes.json();
               const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
@@ -145,7 +146,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
         // Fetch profile from backend to get canonical global_role
         try {
-          const profileRes = await fetch('http://localhost:4000/api/user/profile', {
+          const profileRes = await fetch(buildApiUrl('/api/user/profile'), {
             headers: { 'x-user-id': data.user.id }
           });
           if (profileRes.ok) {
@@ -158,7 +159,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
         // Fetch orgs for user
         try {
-          const orgsRes = await fetch('http://localhost:4000/api/user/orgs', { headers: { 'x-user-id': data.user.id } });
+          const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': data.user.id } });
           if (orgsRes.ok) {
             const j = await orgsRes.json();
             const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
@@ -198,7 +199,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     try {
       if (!user) return;
       // Fetch latest user profile from backend which has global_role from database
-      const response = await fetch('http://localhost:4000/api/user/profile', {
+      const response = await fetch(buildApiUrl('/api/user/profile'), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
