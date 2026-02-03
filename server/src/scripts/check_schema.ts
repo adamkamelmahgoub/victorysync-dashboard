@@ -10,17 +10,31 @@ async function checkSchema() {
   console.log('[check] mightycall_reports query result:', error || 'OK');
 
   // Query the information_schema directly
-  const { data: columns, error: columnsError } = await supabaseAdmin.rpc('get_table_schema', { table_name: 'mightycall_reports' }).catch(() => ({ data: null, error: 'rpc not available' }));
+  let columns: any = null;
+  let columnsError: any = null;
+  try {
+    const res = await supabaseAdmin.rpc('get_table_schema', { table_name: 'mightycall_reports' });
+    columns = (res as any).data ?? null;
+    columnsError = (res as any).error ?? null;
+  } catch (e) {
+    columns = null;
+    columnsError = 'rpc not available';
+  }
 
   if (columnsError || !columns) {
     console.log('[check] Could not get schema via RPC, trying direct query...');
     
     // Try raw SQL if available
-    const { data: tableInfo } = await supabaseAdmin
-      .from('information_schema.tables')
-      .select('*')
-      .eq('table_name', 'mightycall_reports')
-      .catch(() => ({ data: null }));
+    let tableInfo: any = null;
+    try {
+      const r = await supabaseAdmin
+        .from('information_schema.tables')
+        .select('*')
+        .eq('table_name', 'mightycall_reports');
+      tableInfo = (r as any).data ?? null;
+    } catch (e) {
+      tableInfo = null;
+    }
 
     console.log('[check] Table info:', tableInfo);
   } else {

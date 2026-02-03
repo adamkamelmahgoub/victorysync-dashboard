@@ -11,19 +11,31 @@ async function dropConstraint() {
   console.log('[fix] Attempting to drop mightycall_recordings FK constraint...');
   
   // Use raw SQL via Supabase
-  const { data, error } = await supabaseAdmin.rpc('exec_raw_sql', {
-    sql: 'ALTER TABLE public.mightycall_recordings DROP CONSTRAINT IF EXISTS mightycall_recordings_call_id_fkey;'
-  }).catch(() => ({ error: { message: 'RPC not available' } }));
+  let rpcError: any = null;
+  try {
+    const res = await supabaseAdmin.rpc('exec_raw_sql', {
+      sql: 'ALTER TABLE public.mightycall_recordings DROP CONSTRAINT IF EXISTS mightycall_recordings_call_id_fkey;'
+    });
+    rpcError = (res as any).error ?? null;
+  } catch (e) {
+    rpcError = { message: 'RPC not available' };
+  }
 
-  if (error) {
-    console.log('[fix] RPC not available - ' + error.message);
+  if (rpcError) {
+    console.log('[fix] RPC not available - ' + (rpcError.message || rpcError));
     console.log('[fix] Trying via Postgres...');
-    
+
     // Alternative: try creating a simple function
-    const { error: creationError } = await supabaseAdmin.rpc('exec_sql', {
-      command: 'ALTER TABLE public.mightycall_recordings DROP CONSTRAINT IF EXISTS mightycall_recordings_call_id_fkey;'
-    }).catch(() => ({ error: { message: 'SQL RPC failed' } }));
-    
+    let creationError: any = null;
+    try {
+      const cr = await supabaseAdmin.rpc('exec_sql', {
+        command: 'ALTER TABLE public.mightycall_recordings DROP CONSTRAINT IF EXISTS mightycall_recordings_call_id_fkey;'
+      });
+      creationError = (cr as any).error ?? null;
+    } catch (e) {
+      creationError = { message: 'SQL RPC failed' };
+    }
+
     if (creationError) {
       console.log('[FIX] ⚠️ Could not auto-drop constraint via RPC');
       console.log('[FIX] MANUAL FIX REQUIRED:');

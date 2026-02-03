@@ -14,11 +14,17 @@ async function fixFKConstraint() {
   try {
     // Drop the FK constraint
     console.log('[fixFK] Step 1: Dropping FK constraint mightycall_recordings_call_id_fkey...');
-    const { data: dropData, error: dropError } = await supabase.rpc('exec', {
-      sql: 'ALTER TABLE public.mightycall_recordings DROP CONSTRAINT IF EXISTS mightycall_recordings_call_id_fkey'
-    }).catch(() => ({ error: { message: 'Method not available' } }));
-    
-    if (dropError && !dropError.message.includes('not available')) {
+    let dropError: any = null;
+    try {
+      const dropRes = await supabase.rpc('exec', {
+        sql: 'ALTER TABLE public.mightycall_recordings DROP CONSTRAINT IF EXISTS mightycall_recordings_call_id_fkey'
+      });
+      dropError = (dropRes as any).error ?? null;
+    } catch (e) {
+      dropError = { message: 'Method not available' };
+    }
+
+    if (dropError && !String(dropError.message || '').includes('not available')) {
       console.log('[fixFK] Error dropping constraint:', dropError.message);
     } else if (dropError) {
       console.log('[fixFK] RPC not available, will need manual fix');
@@ -28,11 +34,17 @@ async function fixFKConstraint() {
 
     // Make call_id nullable
     console.log('[fixFK] Step 2: Making call_id nullable...');
-    const { data: nullData, error: nullError } = await supabase.rpc('exec', {
-      sql: 'ALTER TABLE public.mightycall_recordings ALTER COLUMN call_id DROP NOT NULL'
-    }).catch(() => ({ error: { message: 'Method not available' } }));
+    let nullError: any = null;
+    try {
+      const nullRes = await supabase.rpc('exec', {
+        sql: 'ALTER TABLE public.mightycall_recordings ALTER COLUMN call_id DROP NOT NULL'
+      });
+      nullError = (nullRes as any).error ?? null;
+    } catch (e) {
+      nullError = { message: 'Method not available' };
+    }
 
-    if (nullError && !nullError.message.includes('not available')) {
+    if (nullError && !String(nullError.message || '').includes('not available')) {
       console.log('[fixFK] Error making nullable:', nullError.message);
     } else if (nullError) {
       console.log('[fixFK] RPC not available for nullable change');

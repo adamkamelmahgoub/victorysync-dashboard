@@ -12,11 +12,17 @@ async function checkTableSchema() {
   
   try {
     // Query the information_schema to see constraints
-    const { data, error } = await supabase.rpc('get_table_constraints', {
-      table_name: 'mightycall_recordings',
-      schema_name: 'public'
-    }).catch(() => null);
-    
+    let data: any = null;
+    try {
+      const res = await supabase.rpc('get_table_constraints', {
+        table_name: 'mightycall_recordings',
+        schema_name: 'public'
+      });
+      data = (res as any).data ?? null;
+    } catch (e) {
+      data = null;
+    }
+
     if (data) {
       console.log('[check] Constraints found:', JSON.stringify(data, null, 2));
     } else {

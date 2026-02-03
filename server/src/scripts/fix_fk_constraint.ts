@@ -5,15 +5,18 @@ import { supabaseAdmin } from '../lib/supabaseClient';
 async function fix() {
   console.log('[fix] Dropping FK constraint on mightycall_recordings.call_id...');
   
-  const { error } = await supabaseAdmin.rpc('exec_sql', {
-    sql: 'ALTER TABLE public.mightycall_recordings DROP CONSTRAINT IF EXISTS mightycall_recordings_call_id_fkey;'
-  }).catch(async () => {
-    // If RPC is not available, try direct SQL via query
+  let rpcErr: any = null;
+  try {
+    const res = await supabaseAdmin.rpc('exec_sql', {
+      sql: 'ALTER TABLE public.mightycall_recordings DROP CONSTRAINT IF EXISTS mightycall_recordings_call_id_fkey;'
+    });
+    rpcErr = (res as any).error ?? null;
+  } catch (e) {
     console.log('[fix] RPC not available, trying direct approach...');
-    return { error: true };
-  });
+    rpcErr = { message: 'rpc not available' };
+  }
 
-  if (!error) {
+  if (!rpcErr) {
     console.log('[fix] ✓ FK constraint dropped successfully');
   } else {
     console.log('[fix] ✗ Could not drop FK via RPC, will try manual SQL...');

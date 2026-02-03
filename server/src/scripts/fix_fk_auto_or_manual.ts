@@ -13,7 +13,7 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 async function applyFix() {
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabase = createClient(supabaseUrl as string, supabaseKey as string);
   
   console.log('[fixFK] Attempting to fix FK constraint...');
   
