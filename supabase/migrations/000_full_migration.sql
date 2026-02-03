@@ -122,15 +122,24 @@ CREATE TABLE IF NOT EXISTS public.mightycall_reports (
 CREATE TABLE IF NOT EXISTS public.mightycall_sms_messages (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   org_id uuid REFERENCES public.organizations(id) ON DELETE CASCADE,
+  phone_id uuid REFERENCES public.phone_numbers(id) ON DELETE SET NULL,
   external_id text,
+  external_sms_id text,
   from_number text,
   to_number text,
+  sender text,
+  recipient text,
   direction text,
   status text,
+  message_text text,
   body text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  message_date timestamptz,
   sent_at timestamptz,
   created_at timestamptz DEFAULT now(),
-  UNIQUE(org_id, external_id)
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE(org_id, external_id),
+  UNIQUE(org_id, external_sms_id)
 );
 
 CREATE TABLE IF NOT EXISTS public.org_integrations (

@@ -40,6 +40,7 @@ import { SMSPage } from "./pages/SMSPage";
 import { SupportPage } from "./pages/SupportPage";
 import { TeamPage } from "./pages/TeamPage";
 import { DebugAuthPage } from "./pages/DebugAuthPage";
+import { APIKeysPage } from "./pages/APIKeysPage";
 
 declare global {
   interface Window {
@@ -142,6 +143,14 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <ReportsPageEnhanced />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/api-keys"
+        element={
+          <ProtectedRoute>
+            <APIKeysPage />
           </ProtectedRoute>
         }
       />

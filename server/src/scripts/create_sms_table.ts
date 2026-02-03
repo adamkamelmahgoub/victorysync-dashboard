@@ -15,6 +15,7 @@ async function main() {
         phone_id uuid REFERENCES public.phone_numbers(id) ON DELETE SET NULL,
         external_id text,
         external_sms_id text,
+        message_text text,
         from_number text,
         to_number text,
         sender text,
@@ -23,6 +24,7 @@ async function main() {
         status text,
         message text,
         body text,
+        metadata jsonb DEFAULT '{}'::jsonb,
         message_date timestamptz,
         sent_at timestamptz,
         created_at timestamptz DEFAULT now(),
@@ -38,14 +40,15 @@ async function main() {
     // Execute using rpc or by attempting an insert to trigger table check
     // Since we can't execute raw SQL directly, we'll attempt to insert
     // which will fail with a clear error if the table doesn't exist
-    const testInsert = await supabaseAdmin.from('mightycall_sms_messages').insert({
+      const testInsert = await supabaseAdmin.from('mightycall_sms_messages').insert({
       org_id: null,
       external_id: 'test-create',
       from_number: '+1234567890',
       to_number: '+0987654321',
       direction: 'inbound',
       status: 'received',
-      message: 'test',
+        message: 'test',
+        metadata: {},
       created_at: new Date().toISOString(),
     }).select().limit(1);
 
