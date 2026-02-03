@@ -6,6 +6,7 @@ import {
   Route,
   Navigate,
 } from "react-router-dom";
+import { Analytics } from "@vercel/analytics/react";
 import "./index.css";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { OrgProvider, useOrg } from "./contexts/OrgContext";
@@ -331,6 +332,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
             {/* ToastProvider provides a simple global toast UI */}
             <ToastProvider>
               <AppRouter />
+              <Analytics />
             </ToastProvider>
           </ErrorBoundary>
         </BrowserRouter>
