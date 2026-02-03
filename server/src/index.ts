@@ -1200,6 +1200,7 @@ app.get('/api/user/profile', async (req, res) => {
     }
 
     // Return enhanced user profile with metadata
+    const globalRole = (user.user_metadata as any)?.global_role || null;
     res.json({
       user: {
         id: user.id,
@@ -1208,7 +1209,7 @@ app.get('/api/user/profile', async (req, res) => {
         phone_number: (user.user_metadata as any)?.phone_number || '',
         profile_pic_url: (user.user_metadata as any)?.profile_pic_url || ''
       },
-      profile: { id: userId, global_role: null }
+      profile: { id: userId, global_role: globalRole }
     });
   } catch (err: any) {
     console.error('get_user_profile_failed:', fmtErr(err));
@@ -1260,6 +1261,25 @@ app.get('/api/user/orgs', async (req, res) => {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
+    // Check if user is a platform admin first (has elevated org access)
+    const { data: user, error: userErr } = await supabaseAdmin
+      .from('auth.users')
+      .select('id, user_metadata')
+      .eq('id', userId)
+      .single();
+    
+    const isPlatformAdmin = user && (user.user_metadata as any)?.global_role === 'platform_admin';
+
+    // If platform admin, return all organizations
+    if (isPlatformAdmin) {
+      const { data: allOrgs, error: allOrgErr } = await supabaseAdmin
+        .from('organizations')
+        .select('*');
+      if (allOrgErr) throw allOrgErr;
+      return res.json({ orgs: allOrgs || [] });
+    }
+
+    // Regular users: get from org_users
     const { data: rows, error } = await supabaseAdmin
       .from('org_users')
       .select('org_id')
