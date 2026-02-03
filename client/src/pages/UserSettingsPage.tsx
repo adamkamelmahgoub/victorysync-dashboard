@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { PageLayout } from '../components/PageLayout';
-
+import { PageLayout } from '../components/PageLayout';import { buildApiUrl } from '../config';
 export default function UserSettingsPage() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<any>(null);
@@ -39,7 +38,7 @@ export default function UserSettingsPage() {
     if (!user) return;
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:4000/api/user/profile', {
+      const response = await fetch(buildApiUrl('/api/user/profile'), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
@@ -68,7 +67,7 @@ export default function UserSettingsPage() {
     if (!user) return;
     setLoadingApiKeys(true);
     try {
-      const response = await fetch(`http://localhost:4000/api/admin/users/${user.id}/api-keys`, {
+      const response = await fetch(buildApiUrl(`/api/admin/users/${user.id}/api-keys`), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
@@ -90,7 +89,7 @@ export default function UserSettingsPage() {
     setGeneratingKey(true);
     setMessage(null);
     try {
-      const response = await fetch(`http://localhost:4000/api/admin/users/${user.id}/api-keys`, {
+      const response = await fetch(buildApiUrl(`/api/admin/users/${user.id}/api-keys`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -120,7 +119,7 @@ export default function UserSettingsPage() {
     if (!confirm('Are you sure you want to revoke this API key?')) return;
     
     try {
-      const response = await fetch(`http://localhost:4000/api/admin/users/${user.id}/api-keys/${keyId}`, {
+      const response = await fetch(buildApiUrl(`/api/admin/users/${user.id}/api-keys/${keyId}`), {
         method: 'DELETE',
         headers: { 'x-user-id': user.id }
       });
@@ -176,7 +175,7 @@ export default function UserSettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const response = await fetch('http://localhost:4000/api/user/profile', {
+      const response = await fetch(buildApiUrl('/api/user/profile'), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -203,7 +202,7 @@ export default function UserSettingsPage() {
     if (!user || !profilePicPreview) return;
     setSaving(true);
     try {
-      const response = await fetch('http://localhost:4000/api/user/upload-profile-pic', {
+      const response = await fetch(buildApiUrl('/api/user/upload-profile-pic'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -230,7 +229,7 @@ export default function UserSettingsPage() {
     if (!user || !logoPreview) return;
     setSaving(true);
     try {
-      const response = await fetch('http://localhost:4000/api/user/upload-org-logo', {
+      const response = await fetch(buildApiUrl('/api/user/upload-org-logo'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -266,7 +265,7 @@ export default function UserSettingsPage() {
     setSaving(true);
     setMessage(null);
     try {
-      const response = await fetch('http://localhost:4000/api/user/change-password', {
+      const response = await fetch(buildApiUrl('/api/user/change-password'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

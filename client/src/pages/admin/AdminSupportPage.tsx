@@ -2,6 +2,7 @@ import React, { FC, useState, useEffect } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
+import { buildApiUrl } from '../../config';
 
 interface Message {
   id: string;
@@ -40,7 +41,7 @@ const AdminSupportPage: FC = () => {
   const fetchTickets = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:4000/api/admin/support/tickets', {
+      const response = await fetch(buildApiUrl('/api/admin/support/tickets'), {
         headers: {
           'x-user-id': userId || '',
           'Content-Type': 'application/json'
@@ -66,7 +67,7 @@ const AdminSupportPage: FC = () => {
 
     try {
       setSending(true);
-      const response = await fetch(`http://localhost:4000/api/admin/support/tickets/${selectedTicket.id}/messages`, {
+      const response = await fetch(buildApiUrl(`/api/admin/support/tickets/${selectedTicket.id}/messages`), {
         method: 'POST',
         headers: {
           'x-user-id': userId || '',
@@ -97,7 +98,7 @@ const AdminSupportPage: FC = () => {
     if (!selectedTicket) return;
 
     try {
-      const response = await fetch(`http://localhost:4000/api/admin/support/tickets/${selectedTicket.id}`, {
+      const response = await fetch(buildApiUrl(`/api/admin/support/tickets/${selectedTicket.id}`), {
         method: 'PATCH',
         headers: {
           'x-user-id': userId || '',

@@ -2,6 +2,7 @@ import React, { FC, useState, useEffect } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
+import { buildApiUrl } from '../../config';
 
 interface Report {
   id: string;
@@ -36,7 +37,7 @@ const AdminReportsPage: FC = () => {
 
   const fetchOrgs = async () => {
     try {
-      const response = await fetch('http://localhost:4000/api/admin/orgs', {
+      const response = await fetch(buildApiUrl('/api/admin/orgs'), {
         headers: {
           'x-user-id': userId || '',
           'x-dev-bypass': 'true'
@@ -56,7 +57,7 @@ const AdminReportsPage: FC = () => {
     try {
       setLoading(true);
       
-      let url = `http://localhost:4000/api/mightycall/reports?type=${filterType}&limit=200`;
+      let url = buildApiUrl(`/api/mightycall/reports?type=${filterType}&limit=200`);
       if (filterOrgId) {
         url += `&org_id=${filterOrgId}`;
       }
@@ -90,7 +91,7 @@ const AdminReportsPage: FC = () => {
 
     setSyncing(true);
     try {
-      const response = await fetch('http://localhost:4000/api/mightycall/sync/reports', {
+      const response = await fetch(buildApiUrl('/api/mightycall/sync/reports'), {
         method: 'POST',
         headers: {
           'x-user-id': userId || '',

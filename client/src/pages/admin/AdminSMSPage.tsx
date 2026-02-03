@@ -2,6 +2,7 @@ import React, { FC, useState, useEffect } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
+import { buildApiUrl } from '../../config';
 
 interface SMSMessage {
   id: string;
@@ -40,7 +41,7 @@ const AdminSMSPage: FC = () => {
 
   const fetchOrgs = async () => {
     try {
-      const response = await fetch('http://localhost:4000/api/admin/orgs', {
+      const response = await fetch(buildApiUrl('/api/admin/orgs'), {
         headers: {
           'x-user-id': userId || '',
           'x-dev-bypass': 'true'
@@ -60,7 +61,7 @@ const AdminSMSPage: FC = () => {
     try {
       setLoading(true);
       
-      let url = `http://localhost:4000/api/sms/messages?limit=200`;
+      let url = buildApiUrl(`/api/sms/messages?limit=200`);
       if (filterOrgId) {
         url += `&org_id=${filterOrgId}`;
       }
