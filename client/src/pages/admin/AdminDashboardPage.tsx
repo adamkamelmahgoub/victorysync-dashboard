@@ -113,7 +113,7 @@ const AdminDashboardPage: React.FC = () => {
   const fetchUsers = async () => {
     setUsersLoading(true);
     try {
-      const res = await fetch('http://localhost:4000/api/admin/users', {
+      const res = await fetch(buildApiUrl('/api/admin/users'), {
         headers: { 'x-user-id': user?.id || '' },
         cache: 'no-store'
       });

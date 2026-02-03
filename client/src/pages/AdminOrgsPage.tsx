@@ -23,7 +23,7 @@ const AdminOrgsPage: FC = () => {
   const fetchOrgs = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:4000/api/admin/orgs', {
+      const response = await fetch(buildApiUrl('/api/admin/orgs'), {
         headers: {
           'x-user-id': userId || '',
           'Content-Type': 'application/json'
@@ -50,7 +50,7 @@ const AdminOrgsPage: FC = () => {
       setSyncing(true);
       setSyncResult('');
 
-      const response = await fetch('http://localhost:4000/api/admin/mightycall/sync', {
+      const response = await fetch(buildApiUrl('/api/admin/mightycall/sync'), {
         method: 'POST',
         headers: {
           'x-user-id': userId || '',

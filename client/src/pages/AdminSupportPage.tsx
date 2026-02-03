@@ -36,7 +36,7 @@ const AdminSupportPage: FC = () => {
   const fetchTickets = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:4000/api/admin/support-tickets', {
+      const response = await fetch(buildApiUrl('/api/admin/support-tickets'), {
         headers: {
           'x-user-id': userId || '',
           'Content-Type': 'application/json'
@@ -71,7 +71,7 @@ const AdminSupportPage: FC = () => {
     try {
       setUpdating(true);
       const response = await fetch(
-        `http://localhost:4000/api/admin/support-tickets/${selectedTicket.id}`,
+        buildApiUrl(`/api/admin/support-tickets/${selectedTicket.id}`),
         {
           method: 'PATCH',
           headers: {
