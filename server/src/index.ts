@@ -6893,10 +6893,11 @@ app.get('/api/recordings', async (req, res) => {
     const isAdmin = await isPlatformAdmin(userId);
     
     // If non-admin, get user's assigned phones within this org
-    let allowedPhoneIds: string[] | null = null;
+    let allowedPhoneNumbers: string[] | null = null;
     if (!isAdmin) {
-      const { phones } = await getUserAssignedPhoneNumbers(orgId, userId);
-      allowedPhoneIds = phones.map(p => p.id).filter(Boolean);
+      const { phones, numbers } = await getUserAssignedPhoneNumbers(orgId, userId);
+      // Use actual phone numbers for filtering
+      allowedPhoneNumbers = numbers;
     }
 
     // Fetch recordings
@@ -6907,16 +6908,24 @@ app.get('/api/recordings', async (req, res) => {
       .order('recording_date', { ascending: false })
       .limit(limit);
 
-    // If non-admin and has allowed phones, filter by phone_number_id
-    if (!isAdmin && allowedPhoneIds && allowedPhoneIds.length > 0) {
-      q = q.in('phone_number_id', allowedPhoneIds);
-    } else if (!isAdmin && (!allowedPhoneIds || allowedPhoneIds.length === 0)) {
-      // Non-admin with no assigned phones - return empty
-      return res.json({ recordings: [] });
-    }
-
     const { data: recordings, error } = await q;
     if (error) throw error;
+
+    // Fetch calls to enrich recordings with phone numbers
+    const recordingIds = (recordings || []).map((r: any) => r.call_id).filter(Boolean);
+    let callsMap: any = {};
+    if (recordingIds.length > 0) {
+      const { data: calls } = await supabaseAdmin
+        .from('calls')
+        .select('id, from_number, to_number, duration_seconds, started_at, ended_at')
+        .in('id', recordingIds);
+      
+      if (calls) {
+        calls.forEach((call: any) => {
+          callsMap[call.id] = call;
+        });
+      }
+    }
 
     // Enrich with org data
     const { data: org } = await supabaseAdmin
@@ -6925,10 +6934,32 @@ app.get('/api/recordings', async (req, res) => {
       .eq('id', orgId)
       .single();
 
-    const enriched = (recordings || []).map((rec: any) => ({
-      ...rec,
-      org_name: org?.name || 'Unknown Org'
-    }));
+    // Enrich recordings with call data and filter by phone access
+    let enriched = (recordings || []).map((rec: any) => {
+      const callData = callsMap[rec.call_id] || {};
+      return {
+        ...rec,
+        org_name: org?.name || 'Unknown Org',
+        // Include call details (from_number, to_number, etc)
+        from_number: callData.from_number || rec.from_number || null,
+        to_number: callData.to_number || rec.to_number || null,
+        duration: callData.duration_seconds || rec.duration_seconds || 0,
+        call_started_at: callData.started_at || rec.recording_date,
+        call_ended_at: callData.ended_at || rec.recording_date
+      };
+    });
+
+    // Apply phone access control for non-admins
+    if (!isAdmin && allowedPhoneNumbers && allowedPhoneNumbers.length > 0) {
+      enriched = enriched.filter((rec: any) => {
+        const fromMatch = rec.from_number && allowedPhoneNumbers.includes(rec.from_number);
+        const toMatch = rec.to_number && allowedPhoneNumbers.includes(rec.to_number);
+        return fromMatch || toMatch;
+      });
+    } else if (!isAdmin) {
+      // Non-admin with no assigned phones - return empty
+      return res.json({ recordings: [] });
+    }
 
     res.json({ recordings: enriched });
   } catch (err: any) {
