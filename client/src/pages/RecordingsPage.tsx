@@ -180,9 +180,9 @@ export function RecordingsPage() {
                           </div>
                         </div>
                       </div>
-                      {r.duration_seconds && (
+                      {(r.duration || r.duration_seconds) && (
                         <div className="pt-3 border-t border-slate-700">
-                          <p className="text-xs text-slate-500">Duration: {Math.floor(r.duration_seconds / 60)}m {r.duration_seconds % 60}s</p>
+                          <p className="text-xs text-slate-500">Duration: {Math.floor((r.duration || r.duration_seconds) / 60)}m {(r.duration || r.duration_seconds) % 60}s</p>
                         </div>
                       )}
 
