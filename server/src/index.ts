@@ -5689,7 +5689,7 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
       return res.status(400).json({ error: 'orgId is required' });
     }
 
-    // Check permissions - platform admin/api key or org admin
+    // Check permissions - platform admin/api key OR org member (not just admin)
     const actorId = req.header('x-user-id') || null;
     const hasApiKey = !!req.apiKeyScope;
     
@@ -5701,10 +5701,11 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
         return res.status(403).json({ error: 'Insufficient permissions for this organization' });
       }
     } else if (actorId) {
-      // Using user authentication - must be platform admin or org admin
-      const isAdmin = await isPlatformAdmin(actorId) || await isOrgAdmin(actorId, orgId);
-      if (!isAdmin) {
-        return res.status(403).json({ error: 'Admin permissions required for this organization' });
+      // Allow platform admin OR any org member (removed admin-only requirement)
+      const isPlatAdmin = await isPlatformAdmin(actorId);
+      const isOrgMemberUser = await isOrgMember(actorId, orgId);
+      if (!isPlatAdmin && !isOrgMemberUser) {
+        return res.status(403).json({ error: 'User is not a member of this organization' });
       }
     } else {
       return res.status(401).json({ error: 'API key or user authentication required' });
@@ -5829,7 +5830,7 @@ app.post('/api/mightycall/sync/sms', apiKeyAuthMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'orgId is required' });
     }
 
-    // Check permissions - platform admin/api key or org admin
+    // Check permissions - platform admin/api key OR org member (not just admin)
     const actorId = req.header('x-user-id') || null;
     const hasApiKey = !!req.apiKeyScope;
     
@@ -5840,9 +5841,11 @@ app.post('/api/mightycall/sync/sms', apiKeyAuthMiddleware, async (req, res) => {
         return res.status(403).json({ error: 'Insufficient permissions for this organization' });
       }
     } else if (actorId) {
-      const isAdmin = await isPlatformAdmin(actorId) || await isOrgAdmin(actorId, orgId);
-      if (!isAdmin) {
-        return res.status(403).json({ error: 'Admin permissions required for this organization' });
+      // Allow platform admin OR any org member (removed admin-only requirement)
+      const isPlatAdmin = await isPlatformAdmin(actorId);
+      const isOrgMemberUser = await isOrgMember(actorId, orgId);
+      if (!isPlatAdmin && !isOrgMemberUser) {
+        return res.status(403).json({ error: 'User is not a member of this organization' });
       }
     } else {
       return res.status(401).json({ error: 'API key or user authentication required' });
@@ -5883,22 +5886,23 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
       return res.status(400).json({ error: 'orgId is required' });
     }
 
-    // Check permissions - platform admin/api key or org admin
+    // Check permissions - platform admin/api key OR org member (not just admin)
     const actorId = req.header('x-user-id') || null;
     const hasApiKey = !!req.apiKeyScope;
     
     if (hasApiKey && req.apiKeyScope) {
-      // Using API key
+      // Using API key - must be platform or org-scoped
       const hasPermission = req.apiKeyScope.scope === 'platform' ||
                            (req.apiKeyScope.scope === 'org' && req.apiKeyScope.orgId === orgId);
       if (!hasPermission) {
         return res.status(403).json({ error: 'Insufficient permissions for this organization' });
       }
     } else if (actorId) {
-      // Using user authentication - must be platform admin or org admin
-      const isAdmin = await isPlatformAdmin(actorId) || await isOrgAdmin(actorId, orgId);
-      if (!isAdmin) {
-        return res.status(403).json({ error: 'Admin permissions required for this organization' });
+      // Allow platform admin OR any org member (removed admin-only requirement)
+      const isPlatAdmin = await isPlatformAdmin(actorId);
+      const isOrgMemberUser = await isOrgMember(actorId, orgId);
+      if (!isPlatAdmin && !isOrgMemberUser) {
+        return res.status(403).json({ error: 'User is not a member of this organization' });
       }
     } else {
       return res.status(401).json({ error: 'API key or user authentication required' });

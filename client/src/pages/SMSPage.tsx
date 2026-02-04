@@ -15,8 +15,29 @@ export function SMSPage() {
   const [dateRange, setDateRange] = useState('month'); // 'week', 'month', 'all'
 
   useEffect(() => {
-    if (selectedOrgId) fetchMessages();
-  }, [selectedOrgId]);
+    if (selectedOrgId && user) {
+      autoSyncAndFetch();
+    }
+  }, [selectedOrgId, user]);
+
+  const autoSyncAndFetch = async () => {
+    if (!selectedOrgId || !user) return;
+    setSyncing(true);
+    try {
+      console.log(`[Auto-Sync] Syncing SMS for org ${selectedOrgId}...`);
+      await triggerMightyCallSMSSync(selectedOrgId, user.id);
+      console.log(`[Auto-Sync] SMS sync completed, fetching data...`);
+      // Wait a moment for data to be written to DB
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await fetchMessages();
+    } catch (err: any) {
+      console.warn('[Auto-Sync] Failed to sync SMS:', err?.message);
+      // Still try to fetch even if sync fails
+      await fetchMessages();
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const fetchMessages = async () => {
     if (!selectedOrgId || !user) return;

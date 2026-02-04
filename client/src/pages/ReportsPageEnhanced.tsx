@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
 import { buildApiUrl } from '../config';
+import { triggerMightyCallReportsSync } from '../lib/apiClient';
 
 interface CallStats {
   totalCalls: number;
@@ -21,11 +22,11 @@ export default function ReportsPageEnhanced() {
   const [stats, setStats] = useState<CallStats | null>(null);
   const [calls, setCalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [startDate, setStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [message, setMessage] = useState<string | null>(null);
   const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
-  // auto refresh removed; use manual refresh button
 
   // Initialize org from auth context
   useEffect(() => {
@@ -36,14 +37,31 @@ export default function ReportsPageEnhanced() {
     }
   }, [selectedOrgId, orgs, authLoading]);
 
-  // Fetch data when org is set or date range changes
+  // Auto-sync data when org is set
   useEffect(() => {
-    if (selectedOrg && user) {
-      fetchCallStats();
+    if (selectedOrg && user && !syncing) {
+      autoSyncAndFetch();
     }
-  }, [selectedOrg, startDate, endDate, user]);
+  }, [selectedOrg, user]);
 
-  // No auto-refresh: manual refresh via button
+  const autoSyncAndFetch = async () => {
+    if (!selectedOrg || !user) return;
+    setSyncing(true);
+    try {
+      console.log(`[Auto-Sync] Syncing reports for org ${selectedOrg}...`);
+      await triggerMightyCallReportsSync(selectedOrg, startDate, endDate, user.id);
+      console.log(`[Auto-Sync] Reports sync completed, fetching data...`);
+      // Wait a moment for data to be written to DB
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await fetchCallStats();
+    } catch (err: any) {
+      console.warn('[Auto-Sync] Failed to sync reports:', err?.message);
+      // Still try to fetch even if sync fails
+      await fetchCallStats();
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const fetchCallStats = async () => {
     if (!selectedOrg || !user) {

@@ -15,9 +15,29 @@ export function RecordingsPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (selectedOrgId) fetchRecordings();
-  }, [selectedOrgId]);
-  // Auto-refresh removed: manual refresh via button
+    if (selectedOrgId && user) {
+      autoSyncAndFetch();
+    }
+  }, [selectedOrgId, user]);
+
+  const autoSyncAndFetch = async () => {
+    if (!selectedOrgId || !user) return;
+    setSyncing(true);
+    try {
+      console.log(`[Auto-Sync] Syncing recordings for org ${selectedOrgId}...`);
+      await triggerMightyCallRecordingsSync(selectedOrgId, startDate, endDate, user.id);
+      console.log(`[Auto-Sync] Recordings sync completed, fetching data...`);
+      // Wait a moment for data to be written to DB
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await fetchRecordings();
+    } catch (err: any) {
+      console.warn('[Auto-Sync] Failed to sync recordings:', err?.message);
+      // Still try to fetch even if sync fails
+      await fetchRecordings();
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const fetchRecordings = async () => {
     if (!selectedOrgId || !user) return;
