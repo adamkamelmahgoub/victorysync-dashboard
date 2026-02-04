@@ -4803,21 +4803,37 @@ app.get("/s/series", async (req, res) => {
           const { id } = req.params;
           if (!id) return res.status(400).json({ error: 'missing_id' });
 
-          const { data: call, error } = await supabaseAdmin
-            .from('calls')
-            .select('id, recording_url, recording_file_name')
+          // First try mightycall_recordings table (primary source)
+          let { data: recording, error } = await supabaseAdmin
+            .from('mightycall_recordings')
+            .select('id, recording_url')
             .eq('id', id)
             .maybeSingle();
 
+          // If not found, try calls table as fallback
+          if (!recording && !error) {
+            const { data: call, error: callError } = await supabaseAdmin
+              .from('calls')
+              .select('id, recording_url')
+              .eq('id', id)
+              .maybeSingle();
+
+            if (callError) {
+              console.error('[recordings/download] db lookup failed:', callError);
+              return res.status(500).json({ error: 'db_lookup_failed' });
+            }
+            recording = call;
+          }
+
           if (error) {
-            console.error('[recordings/download] db lookup failed:', error);
+            console.error('[recordings/download] mightycall_recordings lookup failed:', error);
             return res.status(500).json({ error: 'db_lookup_failed' });
           }
-          if (!call || !call.recording_url) {
+          if (!recording || !recording.recording_url) {
             return res.status(404).json({ error: 'recording_not_found' });
           }
 
-          const recordingUrl = call.recording_url;
+          const recordingUrl = recording.recording_url;
           // Fetch remote asset
           const fetched = await fetch(recordingUrl);
           if (!fetched.ok) {
@@ -4827,7 +4843,7 @@ app.get("/s/series", async (req, res) => {
 
           // Convert Web stream to Node stream when possible and pipe to response
           const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
-          const filename = call.recording_file_name || `${id}.mp3`;
+          const filename = `${id}.mp3`;
           res.setHeader('Content-Type', contentType);
           res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
@@ -7128,68 +7144,7 @@ app.get('/api/recordings/filter', async (req, res) => {
 });
 
 // FIXED: GET /api/recordings/:id/download - Fixed to use mightycall_recordings instead of calls
-app.get('/api/recordings/:id/download', async (req, res) => {
-  try {
-    const actorId = req.header('x-user-id') || null;
-    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
-
-    const { id } = req.params;
-    if (!id) return res.status(400).json({ error: 'missing_id' });
-
-    // First try mightycall_recordings table (primary source)
-    let { data: recording, error: recordError } = await supabaseAdmin
-      .from('mightycall_recordings')
-      .select('id, recording_url, phone_number_id, call_id, metadata')
-      .eq('id', id)
-      .maybeSingle();
-
-    // If not found in mightycall_recordings, try calls table as fallback
-    if (!recording && !recordError) {
-      const { data: call, error: callError } = await supabaseAdmin
-        .from('calls')
-        .select('id, recording_url, recording_file_name')
-        .eq('id', id)
-        .maybeSingle();
-      
-      if (callError) {
-        console.error('[recordings/download] db lookup failed:', callError);
-        return res.status(500).json({ error: 'db_lookup_failed' });
-      }
-      recording = call as any;
-    }
-
-    if (!recording || !recording.recording_url) {
-      return res.status(404).json({ error: 'recording_not_found' });
-    }
-
-    const recordingUrl = recording.recording_url;
-    // Fetch remote asset
-    const fetched = await fetch(recordingUrl);
-    if (!fetched.ok) {
-      console.error('[recordings/download] remote fetch failed:', fetched.status);
-      return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
-    }
-
-    // Convert Web stream to Node stream when possible and pipe to response
-    const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
-    const filename = (recording as any).recording_file_name || `${id}.mp3`;
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
-      const nodeStream = Readable.fromWeb((fetched as any).body);
-      nodeStream.pipe(res);
-    } else {
-      // Fallback: buffer into memory and send (may be larger for big files)
-      const arr = await fetched.arrayBuffer();
-      const buf = Buffer.from(arr);
-      res.send(buf);
-    }
-  } catch (e: any) {
-    console.error('[recordings/download] error:', e?.message ?? e);
-    res.status(500).json({ error: 'download_failed', detail: e?.message ?? String(e) });
-  }
-});
+// NOTE: This endpoint is now handled earlier in the file (line 4798). Removing duplicate.
 
 // Register the users router for admin endpoints
 app.use('/api/admin', usersRouter);
