@@ -6911,16 +6911,37 @@ app.get('/api/recordings', async (req, res) => {
       }
     }
 
-    // Fetch recordings
-    let q = supabaseAdmin
-      .from('mightycall_recordings')
-      .select('*')
-      .eq('org_id', orgId)
-      .order('recording_date', { ascending: false })
-      .limit(limit);
+    // Fetch recordings with pagination (Supabase has 1000-row limit per query)
+    let allRecordings: any[] = [];
+    const pageSize = 1000;
+    let offset = 0;
+    let hasMore = true;
 
-    const { data: recordings, error } = await q;
-    if (error) throw error;
+    while (hasMore && allRecordings.length < limit) {
+      const remainingToFetch = limit - allRecordings.length;
+      const currentPageSize = Math.min(pageSize, remainingToFetch);
+
+      const { data: pageRecordings, error } = await supabaseAdmin
+        .from('mightycall_recordings')
+        .select('*')
+        .eq('org_id', orgId)
+        .order('recording_date', { ascending: false })
+        .range(offset, offset + currentPageSize - 1);
+
+      if (error) throw error;
+
+      if (!pageRecordings || pageRecordings.length === 0) {
+        hasMore = false;
+      } else {
+        allRecordings = allRecordings.concat(pageRecordings);
+        if (pageRecordings.length < currentPageSize) {
+          hasMore = false;
+        }
+        offset += pageSize;
+      }
+    }
+
+    const recordings = allRecordings;
 
     // Fetch calls to enrich recordings with phone numbers
     const recordingIds = (recordings || []).map((r: any) => r.call_id).filter(Boolean);
