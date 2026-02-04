@@ -5766,6 +5766,59 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
   }
 });
 
+// POST /api/mightycall/sync/sms - Sync SMS messages from MightyCall
+app.post('/api/mightycall/sync/sms', apiKeyAuthMiddleware, async (req, res) => {
+  try {
+    const { orgId } = req.body;
+
+    if (!orgId) {
+      return res.status(400).json({ error: 'orgId is required' });
+    }
+
+    // Check permissions - platform admin/api key or org admin
+    const actorId = req.header('x-user-id') || null;
+    const hasApiKey = !!req.apiKeyScope;
+    
+    if (hasApiKey && req.apiKeyScope) {
+      const hasPermission = req.apiKeyScope.scope === 'platform' ||
+                           (req.apiKeyScope.scope === 'org' && req.apiKeyScope.orgId === orgId);
+      if (!hasPermission) {
+        return res.status(403).json({ error: 'Insufficient permissions for this organization' });
+      }
+    } else if (actorId) {
+      const isAdmin = await isPlatformAdmin(actorId) || await isOrgAdmin(actorId, orgId);
+      if (!isAdmin) {
+        return res.status(403).json({ error: 'Admin permissions required for this organization' });
+      }
+    } else {
+      return res.status(401).json({ error: 'API key or user authentication required' });
+    }
+
+    console.log(`[MightyCall SMS Sync] Starting SMS sync for org ${orgId}...`);
+
+    try {
+      const { syncMightyCallSMS } = await import('./integrations/mightycall');
+      const result = await syncMightyCallSMS(supabaseAdmin, orgId);
+
+      console.log(`[MightyCall SMS Sync] SMS sync completed for org ${orgId}: ${result.smsSynced} SMS messages`);
+      res.json({
+        success: true,
+        org_id: orgId,
+        sms_synced: result.smsSynced
+      });
+    } catch (syncError: any) {
+      console.error(`[MightyCall SMS Sync] SMS sync failed for org ${orgId}:`, syncError);
+      res.status(500).json({
+        error: 'SMS sync failed',
+        detail: syncError.message
+      });
+    }
+  } catch (err: any) {
+    console.error('[MightyCall Sync SMS] error:', err);
+    res.status(500).json({ error: 'sync_failed', detail: err?.message });
+  }
+});
+
 // POST /api/mightycall/sync/recordings
 // Sync recordings from MightyCall for a specific organization (separate endpoint for recordings-only sync)
 app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, res) => {

@@ -305,18 +305,19 @@ export async function syncMightyCallRecordings(
     let recordingsSynced = 0;
     if (Array.isArray(recordings) && recordings.length > 0) {
       const recRows = recordings.map((r: any) => {
-        // Extract phone numbers from metadata
+        // Extract phone numbers from metadata - THIS IS CRITICAL FOR IDENTIFICATION
         const metadata = r.metadata || r;
         let fromNumber = null;
         let toNumber = null;
 
         if (metadata) {
-          // Try various metadata field names for from_number
-          fromNumber = metadata.businessNumber || 
-                      metadata.from_number || 
+          // Try various metadata field names for from_number - prioritize actual call data
+          fromNumber = metadata.from_number ||
+                      metadata.from ||
+                      metadata.businessNumber || 
                       metadata.caller_number || 
                       metadata.phone_number ||
-                      (metadata.from && typeof metadata.from === 'string' ? metadata.from : null);
+                      (metadata.phoneNumber && typeof metadata.phoneNumber === 'string' ? metadata.phoneNumber : null);
 
           // Try various metadata field names for to_number
           if (metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
@@ -324,9 +325,28 @@ export async function syncMightyCallRecordings(
           }
           if (!toNumber) {
             toNumber = metadata.to_number ||
+                      metadata.to ||
                       metadata.recipient ||
-                      metadata.destination_number ||
-                      metadata.to;
+                      metadata.destination_number;
+          }
+        }
+
+        // FALLBACK: if we still don't have phone numbers but have a recording URL, 
+        // attempt to extract from the URL itself as a last resort
+        // (MightyCall includes phone numbers in some recording URLs)
+        if ((!fromNumber || !toNumber) && r.recordingUrl) {
+          const urlParts = r.recordingUrl.split('_');
+          // Look for patterns like +15162621322 in the URL
+          for (const part of urlParts) {
+            if (part.startsWith('%2B') || part.startsWith('+')) {
+              const num = part.replace(/%2B/g, '+').split('?')[0];
+              if (!fromNumber) {
+                fromNumber = num;
+              } else if (!toNumber) {
+                toNumber = num;
+                break;
+              }
+            }
           }
         }
 
@@ -335,7 +355,7 @@ export async function syncMightyCallRecordings(
           phone_number_id: null,
           call_id: r.callId || r.id,
           recording_url: r.recordingUrl,
-          duration_seconds: r.duration,
+          duration_seconds: r.duration || null,
           recording_date: r.date,
           from_number: fromNumber,
           to_number: toNumber,
