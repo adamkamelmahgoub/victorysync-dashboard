@@ -6818,22 +6818,47 @@ app.get('/api/call-stats', async (req, res) => {
     // The calls table may have incomplete or null duration_seconds, so we rely on recordings
     let finalCalls: any[] = [];
     try {
-      let recQ = supabaseAdmin
-        .from('mightycall_recordings')
-        .select('*')
-        .eq('org_id', orgId)
-        .order('recording_date', { ascending: false })
-        .limit(1000);  // Get more recordings for better stats
+      // Fetch all recordings for the org within date range (using pagination for large datasets)
+      let allRecordings: any[] = [];
+      const pageSize = 1000;
+      let offset = 0;
+      let hasMore = true;
+      const maxRecordingsToFetch = 100000; // Allow up to 100k recordings for comprehensive stats
 
-      if (startDate) recQ = recQ.gte('recording_date', startDate);
-      if (endDate) recQ = recQ.lte('recording_date', endDate);
+      while (hasMore && allRecordings.length < maxRecordingsToFetch) {
+        let recQ = supabaseAdmin
+          .from('mightycall_recordings')
+          .select('*')
+          .eq('org_id', orgId)
+          .order('recording_date', { ascending: false })
+          .range(offset, offset + pageSize - 1);
 
-      const { data: recs, error: recErr } = await recQ;
-      if (!recErr && Array.isArray(recs) && recs.length > 0) {
+        if (startDate) recQ = recQ.gte('recording_date', startDate);
+        if (endDate) recQ = recQ.lte('recording_date', endDate);
+
+        const { data: recs, error: recErr } = await recQ;
+        if (recErr) {
+          console.warn('Error fetching recording page:', recErr);
+          hasMore = false;
+          break;
+        }
+
+        if (!recs || recs.length === 0) {
+          hasMore = false;
+        } else {
+          allRecordings = allRecordings.concat(recs);
+          if (recs.length < pageSize) {
+            hasMore = false;
+          }
+          offset += pageSize;
+        }
+      }
+
+      if (allRecordings.length > 0) {
         // Filter recordings by assigned phone numbers if non-admin
-        let filteredRecs = recs;
+        let filteredRecs = allRecordings;
         if (!isAdmin && assignedPhoneNumbers.length > 0) {
-          filteredRecs = recs.filter((r: any) => {
+          filteredRecs = allRecordings.filter((r: any) => {
             // Extract phone numbers from recording - try direct columns first, then metadata
             const fromNumber = r.from_number || (r.metadata && r.metadata.businessNumber) || null;
             const toNumber = r.to_number || (r.metadata && r.metadata.called?.[0]?.phone) || null;
@@ -6845,19 +6870,36 @@ app.get('/api/call-stats', async (req, res) => {
         }
 
         // Synthesize call-like rows from recordings
-        finalCalls = filteredRecs.map((r: any) => ({
-          org_id: r.org_id,
-          from_number: r.from_number || (r.metadata && r.metadata.businessNumber) || null,
-          to_number: r.to_number || (r.metadata && r.metadata.called?.[0]?.phone) || null,
-          status: 'answered',
-          duration_seconds: r.duration_seconds ?? 0,
-          started_at: r.recording_date,
-          ended_at: r.recording_date,
-          recording_url: r.recording_url,
-          recording_id: r.id,
-          recording_date: r.recording_date,
-          metadata: r
-        }));
+        finalCalls = filteredRecs.map((r: any) => {
+          // Extract best-available phone numbers
+          let fromNumber = r.from_number;
+          if (!fromNumber && r.metadata) {
+            fromNumber = r.metadata.businessNumber || r.metadata.caller_number || r.metadata.phone_number;
+          }
+
+          let toNumber = r.to_number;
+          if (!toNumber && r.metadata) {
+            if (r.metadata.called && Array.isArray(r.metadata.called) && r.metadata.called[0]) {
+              toNumber = r.metadata.called[0].phone;
+            } else {
+              toNumber = r.metadata.recipient || r.metadata.destination_number;
+            }
+          }
+
+          return {
+            org_id: r.org_id,
+            from_number: fromNumber || 'Unknown',
+            to_number: toNumber || 'Unknown',
+            status: 'answered',
+            duration_seconds: Math.max(r.duration_seconds || 0, r.duration || 0),
+            started_at: r.recording_date,
+            ended_at: r.recording_date,
+            recording_url: r.recording_url,
+            recording_id: r.id,
+            recording_date: r.recording_date,
+            metadata: r
+          };
+        });
       }
     } catch (e) {
       console.warn('call_stats_recordings_aggregation_failed:', (e as any)?.message || e);
@@ -6874,16 +6916,18 @@ app.get('/api/call-stats', async (req, res) => {
     const missedCalls = finalCalls?.filter((c: any) => (c.status || '').toString().toLowerCase() === 'missed').length || 0;
     const answerRate = totalCalls > 0 ? (answeredCalls / totalCalls) * 100 : 0;
 
-    // Calculate durations (in seconds)
-    const totalDuration = finalCalls?.reduce((sum: number, c: any) => sum + (c.duration_seconds || 0), 0) || 0;
-    const avgDuration = totalCalls > 0 ? totalDuration / totalCalls : 0;
-    const avgHandleTime = answeredCalls > 0 ? totalDuration / answeredCalls : 0;
+    // Calculate durations (in seconds) - filter out zero durations for better averages
+    const callsWithDuration = finalCalls?.filter((c: any) => (c.duration_seconds || 0) > 0) || [];
+    const totalDuration = callsWithDuration?.reduce((sum: number, c: any) => sum + (c.duration_seconds || 0), 0) || 0;
+    const avgDuration = callsWithDuration.length > 0 ? totalDuration / callsWithDuration.length : 0;
+    const avgHandleTime = callsWithDuration.length > 0 ? totalDuration / callsWithDuration.length : 0;
     const avgWaitTime = finalCalls?.reduce((sum: number, c: any) => sum + (c.listen_time_seconds || 0), 0) || 0;
 
     // Calculate revenue (best-effort - recordings won't have revenue)
     const totalRevenue = finalCalls?.reduce((sum: number, c: any) => sum + (c.revenue_generated || 0), 0) || 0;
     const avgRevenue = answeredCalls > 0 ? totalRevenue / answeredCalls : 0;
 
+    // Return stats with detailed info about data volume
     res.json({
       stats: {
         totalCalls,
@@ -6895,7 +6939,9 @@ app.get('/api/call-stats', async (req, res) => {
         avgDuration,
         answerRate,
         totalRevenue,
-        avgRevenue
+        avgRevenue,
+        dataPoints: finalCalls.length,
+        callsWithDurationData: callsWithDuration.length
       },
       calls: (finalCalls || []).slice(0, 100)
     });
