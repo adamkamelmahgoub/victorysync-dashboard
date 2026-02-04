@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
 import { buildApiUrl } from '../config';
 import { triggerMightyCallSMSSync } from '../lib/apiClient';
+import { useRealtimeSubscription } from '../lib/realtimeSubscriptions';
 
 export function SMSPage() {
   const { user, selectedOrgId } = useAuth();
@@ -19,6 +20,20 @@ export function SMSPage() {
       autoSyncAndFetch();
     }
   }, [selectedOrgId, user]);
+
+  // Subscribe to realtime SMS updates
+  useRealtimeSubscription(
+    'mightycall_sms_messages',
+    selectedOrgId,
+    () => {
+      console.log('[Realtime] New SMS message - refreshing list');
+      fetchMessages();
+    },
+    () => {
+      console.log('[Realtime] SMS updated - refreshing list');
+      fetchMessages();
+    }
+  );
 
   const autoSyncAndFetch = async () => {
     if (!selectedOrgId || !user) return;

@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { triggerMightyCallRecordingsSync } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
 import { buildApiUrl } from '../config';
+import { useRealtimeSubscription } from '../lib/realtimeSubscriptions';
 
 export function RecordingsPage() {
   const { user, selectedOrgId } = useAuth();
@@ -19,6 +20,24 @@ export function RecordingsPage() {
       autoSyncAndFetch();
     }
   }, [selectedOrgId, user]);
+
+  // Subscribe to realtime recording updates
+  useRealtimeSubscription(
+    'mightycall_recordings',
+    selectedOrgId,
+    () => {
+      console.log('[Realtime] New recording - refreshing list');
+      fetchRecordings();
+    },
+    () => {
+      console.log('[Realtime] Recording updated - refreshing list');
+      fetchRecordings();
+    },
+    () => {
+      console.log('[Realtime] Recording deleted - refreshing list');
+      fetchRecordings();
+    }
+  );
 
   const autoSyncAndFetch = async () => {
     if (!selectedOrgId || !user) return;

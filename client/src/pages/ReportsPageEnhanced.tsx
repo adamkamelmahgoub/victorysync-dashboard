@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
 import { buildApiUrl } from '../config';
 import { triggerMightyCallReportsSync } from '../lib/apiClient';
+import { useRealtimeMultiSubscription } from '../lib/realtimeSubscriptions';
 
 interface CallStats {
   totalCalls: number;
@@ -43,6 +44,17 @@ export default function ReportsPageEnhanced() {
       autoSyncAndFetch();
     }
   }, [selectedOrg, user]);
+
+  // Subscribe to realtime updates on reports and calls
+  useRealtimeMultiSubscription(
+    selectedOrg,
+    ['mightycall_reports', 'calls'],
+    (table, event, data) => {
+      console.log(`[Realtime] ${table} ${event} - refreshing stats`);
+      // Refetch stats when data changes in realtime
+      setTimeout(() => fetchCallStats(), 500);
+    }
+  );
 
   const autoSyncAndFetch = async () => {
     if (!selectedOrg || !user) return;
