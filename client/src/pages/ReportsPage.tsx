@@ -334,12 +334,3 @@ export function ReportsPage() {
 }
 
 export default ReportsPage;
-
-  // Auto-refresh every 2 seconds
-  useEffect(() => {
-    if (!selectedOrgId) return;
-    const interval = setInterval(() => {
-      fetchRecordings();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [selectedOrgId, user]);
