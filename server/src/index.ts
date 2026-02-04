@@ -4875,6 +4875,37 @@ app.get("/s/series", async (req, res) => {
             created_at: call.started_at,
             organizations: { name: 'Org', id: call.org_id }
           }));
+        } else if (data && data.length > 0) {
+          // Post-process data to extract phone numbers from metadata if not present
+          data = data.map((rec: any) => {
+            let fromNumber = rec.from_number;
+            let toNumber = rec.to_number;
+            
+            // If phone numbers are missing, try to extract from metadata
+            if ((!fromNumber || !toNumber) && rec.metadata) {
+              const meta = typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata;
+              
+              if (!fromNumber) {
+                fromNumber = meta.businessNumber || meta.from_number || meta.caller_number || meta.phone_number || meta.from;
+              }
+              
+              if (!toNumber) {
+                if (meta.called && Array.isArray(meta.called) && meta.called[0]) {
+                  toNumber = meta.called[0].phone || meta.called[0].number;
+                } else {
+                  toNumber = meta.to_number || meta.recipient || meta.destination_number || meta.to;
+                }
+              }
+            }
+            
+            return {
+              ...rec,
+              from_number: fromNumber,
+              to_number: toNumber,
+              duration_seconds: rec.duration_seconds || rec.duration || null,
+              recording_date: rec.recording_date || rec.created_at
+            };
+          });
         }
 
         res.json({ recordings: data || [] });
@@ -7019,18 +7050,28 @@ app.get('/api/call-stats', async (req, res) => {
 
         // Synthesize call-like rows from recordings
         finalCalls = filteredRecs.map((r: any) => {
+          // Parse metadata if it's a string
+          let metadata = r.metadata;
+          if (typeof metadata === 'string') {
+            try {
+              metadata = JSON.parse(metadata);
+            } catch (e) {
+              metadata = r.metadata;
+            }
+          }
+
           // Extract best-available phone numbers
           let fromNumber = r.from_number;
-          if (!fromNumber && r.metadata) {
-            fromNumber = r.metadata.businessNumber || r.metadata.caller_number || r.metadata.phone_number;
+          if (!fromNumber && metadata) {
+            fromNumber = metadata.businessNumber || metadata.from_number || metadata.caller_number || metadata.phone_number || metadata.from;
           }
 
           let toNumber = r.to_number;
-          if (!toNumber && r.metadata) {
-            if (r.metadata.called && Array.isArray(r.metadata.called) && r.metadata.called[0]) {
-              toNumber = r.metadata.called[0].phone;
+          if (!toNumber && metadata) {
+            if (metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
+              toNumber = metadata.called[0].phone || metadata.called[0].number;
             } else {
-              toNumber = r.metadata.recipient || r.metadata.destination_number;
+              toNumber = metadata.to_number || metadata.recipient || metadata.destination_number || metadata.to;
             }
           }
 
@@ -7067,9 +7108,11 @@ app.get('/api/call-stats', async (req, res) => {
     // Calculate durations (in seconds) - filter out zero durations for better averages
     const callsWithDuration = finalCalls?.filter((c: any) => (c.duration_seconds || 0) > 0) || [];
     const totalDuration = callsWithDuration?.reduce((sum: number, c: any) => sum + (c.duration_seconds || 0), 0) || 0;
-    const avgDuration = callsWithDuration.length > 0 ? totalDuration / callsWithDuration.length : 0;
-    const avgHandleTime = callsWithDuration.length > 0 ? totalDuration / callsWithDuration.length : 0;
-    const avgWaitTime = finalCalls?.reduce((sum: number, c: any) => sum + (c.listen_time_seconds || 0), 0) || 0;
+    const avgDurationSeconds = callsWithDuration.length > 0 ? totalDuration / callsWithDuration.length : 0;
+    // Convert to minutes for display
+    const avgDuration = avgDurationSeconds / 60;
+    const avgHandleTime = avgDurationSeconds / 60;
+    const avgWaitTime = 0; // MightyCall doesn't expose wait time in recordings
 
     // Calculate revenue (best-effort - recordings won't have revenue)
     const totalRevenue = finalCalls?.reduce((sum: number, c: any) => sum + (c.revenue_generated || 0), 0) || 0;
