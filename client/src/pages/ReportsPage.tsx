@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { triggerMightyCallReportsSync } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
+import { buildApiUrl } from '../config';
 
 interface Recording {
   id: string;
@@ -18,7 +19,7 @@ interface Recording {
 }
 
 export function ReportsPage() {
-  const { user, selectedOrgId } = useAuth();
+  const { user, selectedOrgId, orgs } = useAuth();
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -26,17 +27,33 @@ export function ReportsPage() {
   const [directionFilter, setDirectionFilter] = useState('all'); // 'inbound', 'outbound', 'all'
   const [statusFilter, setStatusFilter] = useState('all'); // 'completed', 'failed', 'all'
   const [message, setMessage] = useState<string | null>(null);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
 
+  // Set active org when selectedOrgId or orgs change
   useEffect(() => {
-    if (selectedOrgId) fetchRecordings();
-  }, [selectedOrgId]);
+    if (selectedOrgId) {
+      setActiveOrgId(selectedOrgId);
+    } else if (orgs && orgs.length > 0) {
+      // Auto-select first org if no org is selected
+      setActiveOrgId(orgs[0].id);
+    }
+  }, [selectedOrgId, orgs]);
+
+  // Fetch when active org changes
+  useEffect(() => {
+    if (activeOrgId) {
+      fetchRecordings();
+    }
+  }, [activeOrgId]);
 
   const fetchRecordings = async () => {
-    if (!selectedOrgId || !user) return;
+    const orgIdToUse = activeOrgId || selectedOrgId;
+    if (!orgIdToUse || !user) return;
+    
     setLoading(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/recordings?org_id=${selectedOrgId}&limit=200`, {
+      const response = await fetch(buildApiUrl(`/api/recordings?org_id=${orgIdToUse}&limit=200`), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
@@ -51,6 +68,8 @@ export function ReportsPage() {
         if (recs.length === 0) {
           setMessage('No call recordings found for this organization.');
         }
+      } else if (response.status === 403) {
+        setMessage('You do not have access to view reports for this organization.');
       } else {
         setMessage('Failed to fetch recordings');
       }
@@ -62,11 +81,12 @@ export function ReportsPage() {
   };
 
   const handleSync = async () => {
-    if (!selectedOrgId || !user) return setMessage('No org selected');
+    const orgIdToUse = activeOrgId || selectedOrgId;
+    if (!orgIdToUse || !user) return setMessage('No org selected');
     setSyncing(true);
     setMessage('Syncing reports from MightyCall...');
     try {
-      const result: any = await triggerMightyCallReportsSync(selectedOrgId, undefined, undefined, user.id);
+      const result: any = await triggerMightyCallReportsSync(orgIdToUse, undefined, undefined, user.id);
       if (result.error) {
         setMessage(`Sync error: ${result.error}`);
       } else {
@@ -130,9 +150,9 @@ export function ReportsPage() {
   return (
     <PageLayout title="Reports & Analytics" description="Call recordings and analytics for your organization">
       <div className="space-y-6">
-        {!selectedOrgId ? (
+        {!activeOrgId && (!orgs || orgs.length === 0) ? (
           <div className="bg-slate-900/80 rounded-xl p-8 ring-1 ring-slate-800 text-center">
-            <p className="text-slate-300">No organization selected</p>
+            <p className="text-slate-300">No organization available. Please contact your administrator.</p>
           </div>
         ) : (
           <>

@@ -4611,6 +4611,59 @@ app.get("/s/series", async (req, res) => {
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
 
+        // Determine which org(s) to query
+        let queryOrgIds: string[] = [];
+        
+        if (isAdmin) {
+          // Admin can see all orgs, or filter to specific org if provided
+          if (orgId) {
+            queryOrgIds = [orgId];
+          }
+          // If no orgId for admin, we'll query without org filter
+        } else {
+          // Non-admin: only show their org
+          // Try org_users table first, then org_members as fallback
+          let userOrgs: any[] = [];
+          
+          try {
+            const { data: data1, error: err1 } = await supabaseAdmin
+              .from('org_users')
+              .select('org_id')
+              .eq('user_id', userId);
+            
+            if (!err1 && data1 && data1.length > 0) {
+              userOrgs = data1;
+            } else {
+              // Fallback to org_members
+              const { data: data2 } = await supabaseAdmin
+                .from('org_members')
+                .select('org_id')
+                .eq('user_id', userId);
+              
+              if (data2 && data2.length > 0) {
+                userOrgs = data2;
+              }
+            }
+          } catch (e) {
+            console.error('[mightycall/reports] error checking user orgs:', fmtErr(e));
+          }
+          
+          if (userOrgs.length === 0) {
+            return res.json({ reports: [] });
+          }
+          
+          // If user specified an org_id, verify they have access to it
+          if (orgId) {
+            if (!userOrgs.some(o => o.org_id === orgId)) {
+              return res.status(403).json({ error: 'forbidden', detail: 'user_not_member_of_org' });
+            }
+            queryOrgIds = [orgId];
+          } else {
+            // No org specified - use user's first org or all their orgs
+            queryOrgIds = userOrgs.map(o => o.org_id);
+          }
+        }
+
         // First try mightycall_reports table
         let query = supabaseAdmin
           .from('mightycall_reports')
@@ -4619,24 +4672,15 @@ app.get("/s/series", async (req, res) => {
           .order('report_date', { ascending: false })
           .limit(limit);
 
-        // If org_id is provided in query, use it (admin filtering)
-        if (orgId) {
-          query = query.eq('org_id', orgId);
-        } else if (!isAdmin) {
-          // Non-admin: only show their org
-          const { data: userOrgs } = await supabaseAdmin
-            .from('org_members')
-            .select('org_id')
-            .eq('user_id', userId);
-          
-          if (!userOrgs || userOrgs.length === 0) {
-            return res.json({ reports: [] });
+        // Apply org filter if we have specific orgs to query
+        if (queryOrgIds.length > 0) {
+          if (queryOrgIds.length === 1) {
+            query = query.eq('org_id', queryOrgIds[0]);
+          } else {
+            query = query.in('org_id', queryOrgIds);
           }
-          
-          const orgIds = userOrgs.map(o => o.org_id);
-          query = query.in('org_id', orgIds);
         }
-        // If isAdmin and no orgId filter, show all
+        // If isAdmin and queryOrgIds is empty, no org filter is applied (shows all)
 
         let { data, error } = await query;
 
@@ -4651,20 +4695,13 @@ app.get("/s/series", async (req, res) => {
             .order('started_at', { ascending: false })
             .limit(limit);
 
-          if (orgId) {
-            callsQuery = callsQuery.eq('org_id', orgId);
-          } else if (!isAdmin) {
-            const { data: userOrgs } = await supabaseAdmin
-              .from('org_members')
-              .select('org_id')
-              .eq('user_id', userId);
-            
-            if (!userOrgs || userOrgs.length === 0) {
-              return res.json({ reports: [] });
+          // Apply org filter
+          if (queryOrgIds.length > 0) {
+            if (queryOrgIds.length === 1) {
+              callsQuery = callsQuery.eq('org_id', queryOrgIds[0]);
+            } else {
+              callsQuery = callsQuery.in('org_id', queryOrgIds);
             }
-            
-            const orgIds = userOrgs.map(o => o.org_id);
-            callsQuery = callsQuery.in('org_id', orgIds);
           }
 
           const { data: calls, error: callsError } = await callsQuery;
@@ -7009,15 +7046,22 @@ app.get('/api/recordings', async (req, res) => {
     const recordingIds = (recordings || []).map((r: any) => r.call_id).filter(Boolean);
     let callsMap: any = {};
     if (recordingIds.length > 0) {
-      const { data: calls } = await supabaseAdmin
-        .from('calls')
-        .select('id, from_number, to_number, duration_seconds, started_at, ended_at')
-        .in('id', recordingIds);
-      
-      if (calls) {
-        calls.forEach((call: any) => {
-          callsMap[call.id] = call;
-        });
+      try {
+        const { data: calls, error } = await supabaseAdmin
+          .from('calls')
+          .select('id, from_number, to_number, duration_seconds, started_at, ended_at')
+          .in('id', recordingIds);
+        
+        if (!error && calls) {
+          calls.forEach((call: any) => {
+            callsMap[call.id] = call;
+          });
+          console.debug(`[recordings_enrichment] Matched ${calls.length} calls from ${recordingIds.length} recording call_ids`);
+        } else {
+          console.debug(`[recordings_enrichment] Could not fetch calls data: ${error?.message || 'unknown error'}`);
+        }
+      } catch (e) {
+        console.debug(`[recordings_enrichment] Exception fetching calls: ${fmtErr(e)}`);
       }
     }
 
@@ -7032,9 +7076,9 @@ app.get('/api/recordings', async (req, res) => {
     let enriched = (recordings || []).map((rec: any) => {
       const callData = callsMap[rec.call_id] || {};
       
-      // Extract phone numbers - try multiple sources
-      let fromNumber = callData.from_number || rec.from_number || null;
-      let toNumber = callData.to_number || rec.to_number || null;
+      // Extract phone numbers - try multiple sources (mightycall_recordings first, then calls table)
+      let fromNumber = rec.from_number || callData.from_number || null;
+      let toNumber = rec.to_number || callData.to_number || null;
       
       // Try metadata sources if primary sources are missing
       const metadata = rec.metadata || {};
