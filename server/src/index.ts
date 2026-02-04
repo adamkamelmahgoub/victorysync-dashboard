@@ -6050,6 +6050,12 @@ setImmediate(() => {
   console.log('[startup] Event loop is spinning');
 });
 
+// Add a persistent interval to keep the event loop alive
+const keepAliveInterval = setInterval(() => {
+  // This keeps the event loop alive
+}, 30000);
+// Don't call unref() - we want to keep the process alive
+
 // ============================================
 // BILLING & INVOICING ENDPOINTS
 // ============================================
@@ -6895,12 +6901,12 @@ app.get('/api/recordings', async (req, res) => {
     // Check if user is platform admin
     const isAdmin = await isPlatformAdmin(userId);
     
-    // If non-admin, get user's assigned phones within this org
-    let allowedPhoneNumbers: string[] | null = null;
+    // If non-admin, verify they're an org member FIRST
     if (!isAdmin) {
-      const { phones, numbers } = await getUserAssignedPhoneNumbers(orgId, userId);
-      // Use actual phone numbers for filtering
-      allowedPhoneNumbers = numbers;
+      const isMember = await isOrgMember(userId, orgId);
+      if (!isMember) {
+        return res.status(403).json({ error: 'forbidden', detail: 'not_org_member' });
+      }
     }
 
     // Fetch recordings
@@ -6968,21 +6974,19 @@ app.get('/api/recordings', async (req, res) => {
     });
 
     // Apply phone access control for non-admins
-    if (!isAdmin && allowedPhoneNumbers && allowedPhoneNumbers.length > 0) {
-      // Non-admin with phone assignments - filter by those phones
-      enriched = enriched.filter((rec: any) => {
-        const fromMatch = rec.from_number && allowedPhoneNumbers.includes(rec.from_number);
-        const toMatch = rec.to_number && allowedPhoneNumbers.includes(rec.to_number);
-        return fromMatch || toMatch;
-      });
-    } else if (!isAdmin && (!allowedPhoneNumbers || allowedPhoneNumbers.length === 0)) {
-      // Non-admin with no assigned phones - check if they're an org member
-      const isMember = await isOrgMember(userId, orgId);
-      if (!isMember) {
-        // Not an org member and no phone assignments - return empty
-        return res.json({ recordings: [] });
+    if (!isAdmin) {
+      // Non-admin - check if they have assigned phones
+      const { numbers: allowedPhoneNumbers } = await getUserAssignedPhoneNumbers(orgId, userId);
+      
+      if (allowedPhoneNumbers && allowedPhoneNumbers.length > 0) {
+        // User has phone assignments - filter recordings to only assigned phones
+        enriched = enriched.filter((rec: any) => {
+          const fromMatch = rec.from_number && allowedPhoneNumbers.includes(rec.from_number);
+          const toMatch = rec.to_number && allowedPhoneNumbers.includes(rec.to_number);
+          return fromMatch || toMatch;
+        });
       }
-      // Org member without phone assignments - show all org recordings
+      // If no assigned phones, user sees all org recordings (already verified as org member above)
     }
 
     res.json({ recordings: enriched });
