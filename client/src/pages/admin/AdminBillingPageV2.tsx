@@ -239,6 +239,14 @@ export const AdminBillingPageV2: React.FC = () => {
   const [orgOptions, setOrgOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [userOptions, setUserOptions] = useState<Array<{ id: string; email?: string; display_name?: string }>>([]);
 
+  const loadData = async () => {
+    if (activeTab === 'records') {
+      await loadBillingRecords();
+    } else {
+      await loadInvoices();
+    }
+  };
+
   useEffect(() => {
     loadData();
     // load orgs and users for pickers
