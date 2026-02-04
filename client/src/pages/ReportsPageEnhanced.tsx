@@ -25,7 +25,7 @@ export default function ReportsPageEnhanced() {
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [message, setMessage] = useState<string | null>(null);
   const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  // auto refresh removed; use manual refresh button
 
   // Initialize org from auth context
   useEffect(() => {
@@ -43,16 +43,7 @@ export default function ReportsPageEnhanced() {
     }
   }, [selectedOrg, startDate, endDate, user]);
 
-  // Auto-refresh every 2 seconds
-  useEffect(() => {
-    if (!autoRefreshEnabled || !selectedOrg || !user) return;
-
-    const interval = setInterval(() => {
-      fetchCallStats();
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [autoRefreshEnabled, selectedOrg, user, startDate, endDate]);
+  // No auto-refresh: manual refresh via button
 
   const fetchCallStats = async () => {
     if (!selectedOrg || !user) {
@@ -157,15 +148,15 @@ export default function ReportsPageEnhanced() {
             <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-sm font-semibold text-white">Date Range & Refresh</h3>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoRefreshEnabled}
-                    onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-600 text-cyan-500"
-                  />
-                  <span className="text-xs text-slate-300">Auto-refresh (every 2s)</span>
-                </label>
+                <div className="flex items-end">
+                  <button
+                    onClick={() => fetchCallStats()}
+                    disabled={loading}
+                    className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-semibold text-sm transition duration-200"
+                  >
+                    {loading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>

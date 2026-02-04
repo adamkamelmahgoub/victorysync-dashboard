@@ -31,15 +31,7 @@ export function ReportsPage() {
   useEffect(() => {
     if (selectedOrgId) fetchRecordings();
   }, [selectedOrgId]);
-
-  // Auto-refresh every 2 seconds
-  useEffect(() => {
-    if (!selectedOrgId) return;
-    const interval = setInterval(() => {
-      fetchRecordings();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [selectedOrgId, user]);
+  // Auto-refresh removed: manual Refresh button available
 
   const fetchRecordings = async () => {
     if (!selectedOrgId || !user) return;
@@ -256,9 +248,18 @@ export function ReportsPage() {
             <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-white">Call Reports</h2>
-                <span className="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800/60 text-slate-300 ring-1 ring-slate-700">
-                  {loading ? '...' : filteredRecordings.length} calls
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800/60 text-slate-300 ring-1 ring-slate-700">
+                    {loading ? '...' : filteredRecordings.length} calls
+                  </span>
+                  <button
+                    onClick={() => fetchRecordings()}
+                    disabled={loading}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white"
+                  >
+                    {loading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
               </div>
 
               {loading ? (

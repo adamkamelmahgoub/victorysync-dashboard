@@ -17,14 +17,7 @@ export function RecordingsPage() {
   useEffect(() => {
     if (selectedOrgId) fetchRecordings();
   }, [selectedOrgId]);
-  // Auto-refresh every 2 seconds
-  useEffect(() => {
-    if (!selectedOrgId) return;
-    const interval = setInterval(() => {
-      fetchRecordings();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [selectedOrgId, user]);
+  // Auto-refresh removed: manual refresh via button
 
   const fetchRecordings = async () => {
     if (!selectedOrgId || !user) return;
@@ -178,6 +171,13 @@ export function RecordingsPage() {
                     className="flex-1 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
                   >
                     {syncing ? 'Syncing...' : 'Sync'}
+                  </button>
+                  <button
+                    onClick={() => fetchRecordings()}
+                    disabled={loading}
+                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-semibold text-sm transition duration-200"
+                  >
+                    {loading ? 'Refreshing...' : 'Refresh'}
                   </button>
                 </div>
               </div>
