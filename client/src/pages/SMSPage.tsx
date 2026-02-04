@@ -8,6 +8,9 @@ export function SMSPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [dateRange, setDateRange] = useState('month'); // 'week', 'month', 'all'
 
   useEffect(() => {
     if (selectedOrgId) fetchMessages();
@@ -23,7 +26,21 @@ export function SMSPage() {
       });
       if (response.ok) {
         const data = await response.json();
-        setMessages(data.messages || []);
+        let filtered = data.messages || [];
+        
+        // Apply date filtering
+        if (dateRange !== 'all') {
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          
+          filtered = filtered.filter((m: any) => {
+            const msgDate = new Date(m.created_at || m.sent_at || m.timestamp);
+            return msgDate >= start && msgDate <= end;
+          });
+        }
+        
+        setMessages(filtered);
       } else {
         setMessage('Failed to fetch SMS messages');
       }
@@ -32,6 +49,23 @@ export function SMSPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDateRangeChange = (range: string) => {
+    setDateRange(range);
+    const now = new Date();
+    const start = new Date();
+    
+    if (range === 'week') {
+      start.setDate(now.getDate() - 7);
+    } else if (range === 'month') {
+      start.setDate(now.getDate() - 30);
+    } else if (range === 'all') {
+      start.setFullYear(2020); // Far back
+    }
+    
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(now.toISOString().split('T')[0]);
   };
 
   return (
@@ -44,6 +78,57 @@ export function SMSPage() {
           </div>
         ) : (
           <>
+            {/* Filters Card */}
+            <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
+              <h3 className="text-sm font-semibold text-white mb-4">Filter Messages</h3>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-2">Quick Range</label>
+                  <select 
+                    value={dateRange}
+                    onChange={(e) => handleDateRangeChange(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
+                  >
+                    <option value="week">Last 7 Days</option>
+                    <option value="month">Last 30 Days</option>
+                    <option value="all">All Time</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-2">Start Date</label>
+                  <input 
+                    type="date" 
+                    value={startDate} 
+                    onChange={(e) => setStartDate(e.target.value)} 
+                    className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-2">End Date</label>
+                  <input 
+                    type="date" 
+                    value={endDate} 
+                    onChange={(e) => setEndDate(e.target.value)} 
+                    className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button 
+                    onClick={fetchMessages}
+                    disabled={loading}
+                    className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
+                  >
+                    {loading ? 'Loading...' : 'Apply Filter'}
+                  </button>
+                </div>
+              </div>
+              {message && (
+                <div className="mt-3 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+                  <p className="text-sm text-slate-300">{message}</p>
+                </div>
+              )}
+            </div>
+
             {/* Messages Count Card */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 rounded-lg p-6 ring-1 ring-slate-800">
