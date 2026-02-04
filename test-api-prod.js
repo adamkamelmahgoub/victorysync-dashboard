@@ -47,12 +47,12 @@ async function testUser(userId, label, orgIds=[]) {
     // small sample
     res = await req(`/api/recordings?org_id=${orgId}&limit=3`, userId);
     console.log(`/api/recordings?org_id=${orgId}&limit=3`, res.status, typeof res.body === 'object' ? `recordings=${(res.body.recordings||[]).length}` : String(res.body).slice(0,200));
-    // larger fetch to verify more data
-    res = await req(`/api/recordings?org_id=${orgId}&limit=1000`, userId);
-    console.log(`/api/recordings?org_id=${orgId}&limit=1000`, res.status, typeof res.body === 'object' ? `recordings=${(res.body.recordings||[]).length}` : String(res.body).slice(0,200));
-    // also try without limit (server may default)
+    // fetch more to verify pagination works
+    res = await req(`/api/recordings?org_id=${orgId}&limit=2000`, userId);
+    console.log(`/api/recordings?org_id=${orgId}&limit=2000`, res.status, typeof res.body === 'object' ? `recordings=${(res.body.recordings||[]).length}` : String(res.body).slice(0,200));
+    // full fetch (default 10000)
     res = await req(`/api/recordings?org_id=${orgId}`, userId);
-    console.log(`/api/recordings?org_id=${orgId}`, res.status, typeof res.body === 'object' ? `recordings=${(res.body.recordings||[]).length}` : String(res.body).slice(0,200));
+    console.log(`/api/recordings?org_id=${orgId} (no limit)`, res.status, typeof res.body === 'object' ? `recordings=${(res.body.recordings||[]).length}` : String(res.body).slice(0,200));
   }
 }
 
