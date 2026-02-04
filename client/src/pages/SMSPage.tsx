@@ -1,12 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { PageLayout } from '../components/PageLayout';
+import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
-import { triggerMightyCallSMSSync } from '../lib/apiClient';
-import { useRealtimeSubscription } from '../lib/realtimeSubscriptions';
+import { supabase as supabaseClient } from '../lib/supabaseClient';
+
+interface SMSMessage {
+  id: string;
+  org_id: string;
+  phone_number_id?: string;
+  phone_number?: string;
+  sender: string;
+  recipient: string;
+  message: string;
+  direction: 'inbound' | 'outbound';
+  status: string;
+  created_at: string;
+}
 
 export function SMSPage() {
-  const { user, selectedOrgId } = useAuth();
+  const { user } = useAuth();
+  const { currentOrg } = useOrg();
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
