@@ -6790,55 +6790,58 @@ app.get('/api/call-stats', async (req, res) => {
     const { data: calls, error } = await q;
     if (error) throw error;
 
-    // If there are no rows in `calls`, fall back to aggregating from `mightycall_recordings`
-    // This ensures the Reports page can show real KPIs when the calls sync returned empty.
-    let finalCalls = calls || [];
-    if ((!finalCalls || finalCalls.length === 0)) {
-      try {
-        let recQ = supabaseAdmin
-          .from('mightycall_recordings')
-          .select('*')
-          .eq('org_id', orgId)
-          .order('recording_date', { ascending: false })
-          .limit(100);
+    // Always aggregate from mightycall_recordings as the primary source of call duration data
+    // The calls table may have incomplete or null duration_seconds, so we rely on recordings
+    let finalCalls: any[] = [];
+    try {
+      let recQ = supabaseAdmin
+        .from('mightycall_recordings')
+        .select('*')
+        .eq('org_id', orgId)
+        .order('recording_date', { ascending: false })
+        .limit(1000);  // Get more recordings for better stats
 
-        if (startDate) recQ = recQ.gte('recording_date', startDate);
-        if (endDate) recQ = recQ.lte('recording_date', endDate);
+      if (startDate) recQ = recQ.gte('recording_date', startDate);
+      if (endDate) recQ = recQ.lte('recording_date', endDate);
 
-        const { data: recs, error: recErr } = await recQ;
-        if (!recErr && Array.isArray(recs) && recs.length > 0) {
-          // Filter recordings by assigned phone numbers if non-admin
-          let filteredRecs = recs;
-          if (!isAdmin && assignedPhoneNumbers.length > 0) {
-            filteredRecs = recs.filter((r: any) => {
-              // Extract phone numbers from recording - try direct columns first, then metadata
-              const fromNumber = r.from_number || (r.metadata && r.metadata.from_number) || null;
-              const toNumber = r.to_number || (r.metadata && r.metadata.to_number) || null;
-              
-              // Check if either number matches assigned phones
-              return (fromNumber && assignedPhoneNumbers.includes(fromNumber)) || 
-                     (toNumber && assignedPhoneNumbers.includes(toNumber));
-            });
-          }
-
-          // Synthesize call-like rows from recordings
-          finalCalls = filteredRecs.map((r: any) => ({
-            org_id: r.org_id,
-            from_number: r.from_number || (r.metadata && r.metadata.from_number) || null,
-            to_number: r.to_number || (r.metadata && r.metadata.to_number) || null,
-            status: 'answered',
-            duration_seconds: r.duration_seconds ?? 0,
-            started_at: r.recording_date,
-            ended_at: r.recording_date,
-            recording_url: r.recording_url,
-            recording_id: r.id,
-            recording_date: r.recording_date,
-            metadata: r
-          }));
+      const { data: recs, error: recErr } = await recQ;
+      if (!recErr && Array.isArray(recs) && recs.length > 0) {
+        // Filter recordings by assigned phone numbers if non-admin
+        let filteredRecs = recs;
+        if (!isAdmin && assignedPhoneNumbers.length > 0) {
+          filteredRecs = recs.filter((r: any) => {
+            // Extract phone numbers from recording - try direct columns first, then metadata
+            const fromNumber = r.from_number || (r.metadata && r.metadata.businessNumber) || null;
+            const toNumber = r.to_number || (r.metadata && r.metadata.called?.[0]?.phone) || null;
+            
+            // Check if either number matches assigned phones
+            return (fromNumber && assignedPhoneNumbers.includes(fromNumber)) || 
+                   (toNumber && assignedPhoneNumbers.includes(toNumber));
+          });
         }
-      } catch (e) {
-        console.warn('call_stats_recordings_fallback_failed:', (e as any)?.message || e);
+
+        // Synthesize call-like rows from recordings
+        finalCalls = filteredRecs.map((r: any) => ({
+          org_id: r.org_id,
+          from_number: r.from_number || (r.metadata && r.metadata.businessNumber) || null,
+          to_number: r.to_number || (r.metadata && r.metadata.called?.[0]?.phone) || null,
+          status: 'answered',
+          duration_seconds: r.duration_seconds ?? 0,
+          started_at: r.recording_date,
+          ended_at: r.recording_date,
+          recording_url: r.recording_url,
+          recording_id: r.id,
+          recording_date: r.recording_date,
+          metadata: r
+        }));
       }
+    } catch (e) {
+      console.warn('call_stats_recordings_aggregation_failed:', (e as any)?.message || e);
+    }
+
+    // If no recordings found, fall back to calls table
+    if (!finalCalls || finalCalls.length === 0) {
+      finalCalls = calls || [];
     }
 
     // Calculate KPIs
