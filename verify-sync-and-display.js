@@ -138,10 +138,13 @@ async function testSyncAndDisplay() {
       'POST',
       '/api/admin/mightycall/sync/voicemails',
       adminId,
-      { }
+      { orgId: testOrgId }
     );
     if (syncVmRes.status === 200 || syncVmRes.status === 202 || syncVmRes.status === 201) {
       console.log(`  ✅ Voicemail sync endpoint active (${syncVmRes.status})`);
+      if (syncVmRes.parsed?.voicemails !== undefined) {
+        console.log(`     Synced: ${syncVmRes.parsed.voicemails} voicemails`);
+      }
     } else {
       console.log(`  ⚠️  Voicemail sync status: ${syncVmRes.status}`);
     }
@@ -153,10 +156,13 @@ async function testSyncAndDisplay() {
       'POST',
       '/api/admin/mightycall/sync/calls',
       adminId,
-      { }
+      { orgId: testOrgId }
     );
     if (syncCallRes.status === 200 || syncCallRes.status === 202 || syncCallRes.status === 201) {
       console.log(`  ✅ Call history sync endpoint active (${syncCallRes.status})`);
+      if (syncCallRes.parsed?.calls !== undefined) {
+        console.log(`     Synced: ${syncCallRes.parsed.calls} calls`);
+      }
     } else {
       console.log(`  ⚠️  Call history sync status: ${syncCallRes.status}`);
     }
