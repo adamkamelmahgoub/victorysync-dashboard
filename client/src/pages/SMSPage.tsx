@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
 import { buildApiUrl } from '../config';
+import { triggerMightyCallSMSSync } from '../lib/apiClient';
 
 export function SMSPage() {
   const { user, selectedOrgId } = useAuth();
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
@@ -51,6 +53,23 @@ export function SMSPage() {
     }
   };
 
+  const handleSyncSMS = async () => {
+    if (!selectedOrgId || !user) return;
+    setSyncing(true);
+    setMessage(null);
+    try {
+      const result = await triggerMightyCallSMSSync(selectedOrgId, user.id);
+      setMessage('SMS sync triggered successfully! Fetching updated messages...');
+      // Refresh messages after sync
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      fetchMessages();
+    } catch (err: any) {
+      setMessage(`Failed to sync SMS: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleDateRangeChange = (range: string) => {
     setDateRange(range);
     const now = new Date();
@@ -81,7 +100,7 @@ export function SMSPage() {
             {/* Filters Card */}
             <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
               <h3 className="text-sm font-semibold text-white mb-4">Filter Messages</h3>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-2">Quick Range</label>
                   <select 
@@ -119,6 +138,15 @@ export function SMSPage() {
                     className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
                   >
                     {loading ? 'Loading...' : 'Apply Filter'}
+                  </button>
+                </div>
+                <div className="flex items-end">
+                  <button 
+                    onClick={handleSyncSMS}
+                    disabled={syncing}
+                    className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
+                  >
+                    {syncing ? 'Syncing...' : 'Sync SMS'}
                   </button>
                 </div>
               </div>

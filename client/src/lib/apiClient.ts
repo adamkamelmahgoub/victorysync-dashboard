@@ -186,6 +186,14 @@ export async function triggerMightyCallRecordingsSync(orgId: string, startDate?:
   });
 }
 
+export async function triggerMightyCallSMSSync(orgId: string, userId?: string) {
+  return await fetchJson(`/api/mightycall/sync/sms`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ orgId })
+  });
+}
+
 export async function listMightyCallSyncJobs(params?: { orgId?: string; status?: string; limit?: number }, userId?: string) {
   const q = new URLSearchParams();
   if (params?.orgId) q.set('orgId', params.orgId);
