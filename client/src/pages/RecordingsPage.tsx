@@ -1,293 +1,264 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { triggerMightyCallRecordingsSync } from '../lib/apiClient';
-import { PageLayout } from '../components/PageLayout';
+import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
-import { useRealtimeSubscription } from '../lib/realtimeSubscriptions';
+import { supabase as supabaseClient } from '../lib/supabaseClient';
+
+interface Recording {
+  id: string;
+  org_id: string;
+  call_id?: string;
+  from_number?: string;
+  to_number?: string;
+  duration: number;
+  recording_date: string;
+  url?: string;
+  created_at: string;
+}
 
 export function RecordingsPage() {
-  const { user, selectedOrgId } = useAuth();
-  const [recordings, setRecordings] = useState<any[]>([]);
+  const { user } = useAuth();
+  const { currentOrg } = useOrg();
+  const orgId = currentOrg?.id;
+
+  const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [playingUrls, setPlayingUrls] = useState<Record<string, string>>({});
-  const [startDate, setStartDate] = useState(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [playingIds, setPlayingIds] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    if (selectedOrgId && user) {
-      autoSyncAndFetch();
-    }
-  }, [selectedOrgId, user]);
-
-  // Subscribe to realtime recording updates
-  useRealtimeSubscription(
-    'mightycall_recordings',
-    selectedOrgId,
-    () => {
-      console.log('[Realtime] New recording - refreshing list');
-      fetchRecordings();
-    },
-    () => {
-      console.log('[Realtime] Recording updated - refreshing list');
-      fetchRecordings();
-    },
-    () => {
-      console.log('[Realtime] Recording deleted - refreshing list');
-      fetchRecordings();
-    }
-  );
-
-  const autoSyncAndFetch = async () => {
-    if (!selectedOrgId || !user) return;
-    setSyncing(true);
-    try {
-      console.log(`[Auto-Sync] Syncing recordings for org ${selectedOrgId}...`);
-      await triggerMightyCallRecordingsSync(selectedOrgId, startDate, endDate, user.id);
-      console.log(`[Auto-Sync] Recordings sync completed, fetching data...`);
-      // Wait a moment for data to be written to DB
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await fetchRecordings();
-    } catch (err: any) {
-      console.warn('[Auto-Sync] Failed to sync recordings:', err?.message);
-      // Still try to fetch even if sync fails
-      await fetchRecordings();
-    } finally {
-      setSyncing(false);
-    }
-  };
-
+  // Fetch recordings
   const fetchRecordings = async () => {
-    if (!selectedOrgId || !user) return;
+    if (!orgId || !user) return;
     setLoading(true);
-    setMessage(null);
+    setError(null);
     try {
-      const response = await fetch(buildApiUrl(`/api/recordings?limit=50&org_id=${selectedOrgId}`), {
-        headers: { 'x-user-id': user.id }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setRecordings(data.recordings || []);
-      } else {
-        setMessage('Failed to fetch recordings');
-      }
-    } catch (err: any) {
-      setMessage(err?.message || 'Error fetching recordings');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const applyFilters = async () => {
-    if (!selectedOrgId || !user) return;
-    setLoading(true);
-    setMessage(null);
-    try {
-      // Use /api/recordings/filter endpoint for advanced filtering
-      let url = buildApiUrl(`/api/recordings/filter?org_id=${selectedOrgId}&limit=100`);
-      if (startDate) url += `&start_date=${new Date(startDate).toISOString()}`;
-      if (endDate) url += `&end_date=${new Date(new Date(endDate).getTime() + 24*60*60*1000).toISOString()}`;
-      
-      const response = await fetch(url, {
-        headers: { 'x-user-id': user.id }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setRecordings(data.recordings || []);
-        if ((data.count || 0) > 0) {
-          setMessage(`Found ${data.count} recordings`);
-        } else {
-          setMessage('No recordings found for the selected date range');
+      const response = await fetch(
+        buildApiUrl(`/api/orgs/${orgId}/recordings`),
+        {
+          headers: {
+            'Authorization': `Bearer ${user.id}`,
+            'Content-Type': 'application/json'
+          }
         }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setRecordings(Array.isArray(data) ? data : data.recordings || []);
       } else {
-        setMessage('Failed to apply filters');
+        setError('Failed to fetch recordings');
       }
     } catch (err: any) {
-      setMessage(err?.message || 'Error applying filters');
+      setError(err?.message || 'Error fetching recordings');
+      console.error('Error fetching recordings:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchRecordingBlob = async (id: string) => {
-    if (!user) throw new Error('not_authenticated');
-    const resp = await fetch(buildApiUrl(`/api/recordings/${id}/download`), {
-      headers: { 'x-user-id': user.id }
+  // Initial load
+  useEffect(() => {
+    if (orgId && user) {
+      fetchRecordings();
+    }
+  }, [orgId, user]);
+
+  // Subscribe to realtime updates
+  useEffect(() => {
+    if (!orgId) return;
+
+    const channel = supabaseClient
+      .channel(`org-recordings-${orgId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'call_recordings',
+          filter: `org_id=eq.${orgId}`
+        },
+        () => {
+          console.log('Recording updated, refreshing...');
+          fetchRecordings();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [orgId]);
+
+  const handlePlay = (recordingId: string) => {
+    setPlayingIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(recordingId)) {
+        newSet.delete(recordingId);
+      } else {
+        newSet.add(recordingId);
+      }
+      return newSet;
     });
-    if (!resp.ok) throw new Error('failed_to_fetch_recording');
-    return await resp.blob();
   };
 
-  const handlePlay = async (r: any) => {
+  const handleDownload = async (recording: Recording) => {
     try {
-      const blob = await fetchRecordingBlob(r.id);
-      const url = URL.createObjectURL(blob);
-      setPlayingUrls(prev => ({ ...prev, [r.id]: url }));
-      setTimeout(() => {
-        const el = document.getElementById(`audio-${r.id}`) as HTMLAudioElement | null;
-        el?.play();
-      }, 150);
-    } catch (e: any) {
-      setMessage('Failed to load recording');
-    }
-  };
+      const response = await fetch(
+        buildApiUrl(`/api/orgs/${orgId}/recordings/${recording.id}/download`),
+        {
+          headers: {
+            'Authorization': `Bearer ${user?.id}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
 
-  const handleDownload = async (r: any) => {
-    try {
-      const blob = await fetchRecordingBlob(r.id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${r.id}.mp3`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-    } catch (e: any) {
-      setMessage('Download failed');
-    }
-  };
-
-  const handleSync = async () => {
-    if (!selectedOrgId || !user) return setMessage('No org selected');
-    setSyncing(true);
-    setMessage('Syncing...');
-    try {
-      const result: any = await triggerMightyCallRecordingsSync(selectedOrgId, startDate, endDate, user.id);
-      setMessage(`Synced ${result.recordings_synced || 0} recordings`);
-      setTimeout(() => fetchRecordings(), 1000);
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `recording-${recording.id}.mp3`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      } else {
+        setError('Failed to download recording');
+      }
     } catch (err: any) {
-      setMessage(err?.message || 'Sync failed');
-    } finally {
-      setSyncing(false);
+      setError(err?.message || 'Error downloading recording');
+      console.error('Error downloading recording:', err);
     }
   };
+
+  if (!orgId) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-slate-400 text-lg">No organization selected</p>
+          <p className="text-slate-500 text-sm mt-2">Please select an organization to view recordings</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <PageLayout title="Recordings" description="Call recordings and audio files">
-      <div className="space-y-6">
-        {!selectedOrgId ? (
-          <div className="bg-slate-900/80 rounded-xl p-8 ring-1 ring-slate-800 text-center">
-            <p className="text-slate-300">No organization selected</p>
-            <p className="text-sm text-slate-500 mt-2">Select an organization from the admin panel to view recordings.</p>
+    <div className="min-h-screen bg-slate-950 p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white">Recordings</h1>
+            <p className="text-slate-400 mt-2">View and download call recordings for {currentOrg?.name}</p>
           </div>
-        ) : (
-          <>
-            {/* Filters Card */}
-            <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-              <h3 className="text-sm font-semibold text-white mb-4">Filter Recordings</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-2">Start Date</label>
-                  <input 
-                    type="date" 
-                    value={startDate} 
-                    onChange={(e) => setStartDate(e.target.value)} 
-                    className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-2">End Date</label>
-                  <input 
-                    type="date" 
-                    value={endDate} 
-                    onChange={(e) => setEndDate(e.target.value)} 
-                    className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
-                  />
-                </div>
-                <div className="flex gap-2 items-end">
-                  <button 
-                    onClick={applyFilters} 
-                    disabled={loading} 
-                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
-                  >
-                    {loading ? 'Filtering...' : 'Filter'}
-                  </button>
-                  <button 
-                    onClick={handleSync} 
-                    disabled={syncing} 
-                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
-                  >
-                    {syncing ? 'Syncing...' : 'Sync'}
-                  </button>
-                  <button
-                    onClick={() => fetchRecordings()}
-                    disabled={loading}
-                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-semibold text-sm transition duration-200"
-                  >
-                    {loading ? 'Refreshing...' : 'Refresh'}
-                  </button>
-                </div>
-              </div>
-              {message && (
-                <div className="mt-3 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
-                  <p className="text-sm text-slate-300">{message}</p>
-                </div>
-              )}
-            </div>
+          <button
+            onClick={fetchRecordings}
+            disabled={loading}
+            className="px-6 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 transition font-medium"
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
 
-            {/* Recordings Grid */}
-            <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-white">Recordings</h2>
-                <span className="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800/60 text-slate-300 ring-1 ring-slate-700">
-                  {recordings.length} total
-                </span>
-              </div>
-              {loading ? (
-                <div className="p-8 text-center">
-                  <p className="text-slate-400">Loading recordings...</p>
-                </div>
-              ) : recordings.length === 0 ? (
-                <div className="p-8 text-center">
-                  <p className="text-slate-400">No recordings found. Try syncing data.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {recordings.slice(0, 50).map((r: any) => (
-                    <div key={r.id} className="bg-gradient-to-br from-slate-800/50 to-slate-900 rounded-lg p-5 ring-1 ring-slate-700 hover:ring-slate-600 transition">
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-white text-sm">
-                            {r.from_number && r.to_number ? `${r.from_number} → ${r.to_number}` : 'Recording'}
-                          </h4>
-                          {r.direction && (
-                            <p className="text-xs text-slate-500 mt-1">Direction: <span className="text-cyan-400 font-medium">{r.direction}</span></p>
-                          )}
-                          <p className="text-xs text-slate-400 mt-1">{r.recording_date ? new Date(r.recording_date).toLocaleDateString() : 'No date'}</p>
-                          {r.org_name && (
-                            <p className="text-xs text-cyan-400 mt-1">Org: <span className="font-medium">{r.org_name}</span></p>
-                          )}
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <div className="inline-block px-2 py-1 rounded-md text-xs font-medium bg-emerald-900/40 text-emerald-300 whitespace-nowrap">Ready</div>
-                          <div className="flex gap-2">
-                            <button onClick={() => handlePlay(r)} className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-white transition">Play</button>
-                            <button onClick={() => handleDownload(r)} className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-white transition">Download</button>
-                          </div>
-                        </div>
-                      </div>
-                      {(r.duration || r.duration_seconds) && (
-                        <div className="pt-3 border-t border-slate-700">
-                          <p className="text-xs text-slate-500">Duration: {Math.floor((r.duration || r.duration_seconds) / 60)}m {(r.duration || r.duration_seconds) % 60}s</p>
-                        </div>
-                      )}
-
-                      {playingUrls[r.id] && (
-                        <div className="pt-3">
-                          <audio id={`audio-${r.id}`} controls src={playingUrls[r.id]} className="w-full mt-2" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-900/30 border border-red-700 rounded-lg p-4">
+            <p className="text-red-300 text-sm">{error}</p>
+          </div>
         )}
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-800">
+            <p className="text-slate-400 text-sm">Total Recordings</p>
+            <p className="text-3xl font-bold text-white mt-2">{recordings.length}</p>
+          </div>
+          <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-800">
+            <p className="text-slate-400 text-sm">Total Duration</p>
+            <p className="text-3xl font-bold text-white mt-2">
+              {Math.floor(recordings.reduce((sum, r) => sum + (r.duration || 0), 0) / 60)}m
+            </p>
+          </div>
+        </div>
+
+        {/* Recordings Grid */}
+        <div className="bg-slate-900/50 rounded-lg border border-slate-800 overflow-hidden">
+          <div className="p-6 border-b border-slate-800">
+            <h2 className="text-xl font-semibold text-white">Recording Library</h2>
+          </div>
+
+          {loading ? (
+            <div className="p-8 text-center">
+              <p className="text-slate-400">Loading recordings...</p>
+            </div>
+          ) : recordings.length === 0 ? (
+            <div className="p-8 text-center">
+              <p className="text-slate-400">No recordings available</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-6">
+              {recordings.slice(0, 50).map((recording) => (
+                <div key={recording.id} className="bg-slate-800/50 rounded-lg p-4 border border-slate-700 hover:border-slate-600 transition">
+                  <div className="space-y-3">
+                    {/* Header */}
+                    <div>
+                      <p className="text-sm font-semibold text-white">
+                        {recording.from_number && recording.to_number
+                          ? `${recording.from_number} → ${recording.to_number}`
+                          : 'Recording'}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {new Date(recording.recording_date || recording.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+
+                    {/* Duration */}
+                    {recording.duration && (
+                      <div className="pt-2 border-t border-slate-700">
+                        <p className="text-xs text-slate-400">
+                          Duration: <span className="text-cyan-400 font-semibold">
+                            {Math.floor(recording.duration / 60)}m {recording.duration % 60}s
+                          </span>
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Player */}
+                    {playingIds.has(recording.id) && recording.url && (
+                      <div className="pt-2">
+                        <audio
+                          src={recording.url}
+                          controls
+                          className="w-full h-8"
+                          autoPlay
+                        />
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        onClick={() => handlePlay(recording.id)}
+                        className="flex-1 px-3 py-2 text-xs font-medium bg-slate-700 text-white rounded hover:bg-slate-600 transition"
+                      >
+                        {playingIds.has(recording.id) ? 'Hide Player' : 'Play'}
+                      </button>
+                      <button
+                        onClick={() => handleDownload(recording)}
+                        className="flex-1 px-3 py-2 text-xs font-medium bg-cyan-600 text-white rounded hover:bg-cyan-700 transition"
+                      >
+                        Download
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </PageLayout>
+    </div>
   );
 }
 

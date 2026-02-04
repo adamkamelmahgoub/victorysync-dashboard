@@ -20,245 +20,286 @@ interface SMSMessage {
 export function SMSPage() {
   const { user } = useAuth();
   const { currentOrg } = useOrg();
-  const [messages, setMessages] = useState<any[]>([]);
+  const orgId = currentOrg?.id;
+
+  const [messages, setMessages] = useState<SMSMessage[]>([]);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [dateRange, setDateRange] = useState('month'); // 'week', 'month', 'all'
+  const [error, setError] = useState<string | null>(null);
+  const [newMessage, setNewMessage] = useState('');
+  const [recipientNumber, setRecipientNumber] = useState('');
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [sending, setSending] = useState(false);
 
-  useEffect(() => {
-    if (selectedOrgId && user) {
-      autoSyncAndFetch();
-    }
-  }, [selectedOrgId, user]);
 
-  // Subscribe to realtime SMS updates
-  useRealtimeSubscription(
-    'mightycall_sms_messages',
-    selectedOrgId,
-    () => {
-      console.log('[Realtime] New SMS message - refreshing list');
-      fetchMessages();
-    },
-    () => {
-      console.log('[Realtime] SMS updated - refreshing list');
-      fetchMessages();
-    }
-  );
-
-  const autoSyncAndFetch = async () => {
-    if (!selectedOrgId || !user) return;
-    setSyncing(true);
-    try {
-      console.log(`[Auto-Sync] Syncing SMS for org ${selectedOrgId}...`);
-      await triggerMightyCallSMSSync(selectedOrgId, user.id);
-      console.log(`[Auto-Sync] SMS sync completed, fetching data...`);
-      // Wait a moment for data to be written to DB
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await fetchMessages();
-    } catch (err: any) {
-      console.warn('[Auto-Sync] Failed to sync SMS:', err?.message);
-      // Still try to fetch even if sync fails
-      await fetchMessages();
-    } finally {
-      setSyncing(false);
-    }
-  };
-
+  // Fetch SMS messages
   const fetchMessages = async () => {
-    if (!selectedOrgId || !user) return;
+    if (!orgId || !user) return;
     setLoading(true);
-    setMessage(null);
+    setError(null);
     try {
-      const response = await fetch(buildApiUrl(`/api/sms/messages?limit=100&org_id=${selectedOrgId}`), {
-        headers: { 'x-user-id': user.id }
-      });
+      const response = await fetch(
+        buildApiUrl(`/api/orgs/${orgId}/sms/messages`),
+        {
+          headers: {
+            'Authorization': `Bearer ${user.id}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
       if (response.ok) {
         const data = await response.json();
-        let filtered = data.messages || [];
-        
-        // Apply date filtering
-        if (dateRange !== 'all') {
-          const start = new Date(startDate);
-          const end = new Date(endDate);
-          end.setHours(23, 59, 59, 999);
-          
-          filtered = filtered.filter((m: any) => {
-            const msgDate = new Date(m.created_at || m.sent_at || m.timestamp);
-            return msgDate >= start && msgDate <= end;
-          });
-        }
-        
-        setMessages(filtered);
+        setMessages(Array.isArray(data) ? data : data.messages || []);
       } else {
-        setMessage('Failed to fetch SMS messages');
+        setError('Failed to fetch SMS messages');
       }
     } catch (err: any) {
-      setMessage(err?.message || 'Error fetching messages');
+      setError(err?.message || 'Error fetching messages');
+      console.error('Error fetching messages:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSyncSMS = async () => {
-    if (!selectedOrgId || !user) return;
-    setSyncing(true);
-    setMessage(null);
-    try {
-      const result = await triggerMightyCallSMSSync(selectedOrgId, user.id);
-      setMessage('SMS sync triggered successfully! Fetching updated messages...');
-      // Refresh messages after sync
-      await new Promise(resolve => setTimeout(resolve, 1000));
+  // Initial load
+  useEffect(() => {
+    if (orgId && user) {
       fetchMessages();
+    }
+  }, [orgId, user]);
+
+  // Subscribe to realtime updates
+  useEffect(() => {
+    if (!orgId) return;
+
+    const channel = supabaseClient
+      .channel(`org-sms-${orgId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sms_messages',
+          filter: `org_id=eq.${orgId}`
+        },
+        () => {
+          console.log('SMS message updated, refreshing...');
+          fetchMessages();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [orgId]);
+
+  // Handle sending SMS
+  const handleSendSMS = async () => {
+    if (!orgId || !user || !newMessage || !recipientNumber) {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    setSending(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/orgs/${orgId}/sms/send`),
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${user.id}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            to: recipientNumber,
+            message: newMessage
+          })
+        }
+      );
+
+      if (response.ok) {
+        setNewMessage('');
+        setRecipientNumber('');
+        setShowSendModal(false);
+        // Refresh messages
+        await fetchMessages();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.message || 'Failed to send SMS');
+      }
     } catch (err: any) {
-      setMessage(`Failed to sync SMS: ${err?.message || 'Unknown error'}`);
+      setError(err?.message || 'Error sending SMS');
+      console.error('Error sending SMS:', err);
     } finally {
-      setSyncing(false);
+      setSending(false);
     }
   };
 
-  const handleDateRangeChange = (range: string) => {
-    setDateRange(range);
-    const now = new Date();
-    const start = new Date();
-    
-    if (range === 'week') {
-      start.setDate(now.getDate() - 7);
-    } else if (range === 'month') {
-      start.setDate(now.getDate() - 30);
-    } else if (range === 'all') {
-      start.setFullYear(2020); // Far back
-    }
-    
-    setStartDate(start.toISOString().split('T')[0]);
-    setEndDate(now.toISOString().split('T')[0]);
-  };
+  if (!orgId) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-slate-400 text-lg">No organization selected</p>
+          <p className="text-slate-500 text-sm mt-2">Please select an organization to view SMS messages</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <PageLayout title="SMS Messages" description="Inbound and outbound SMS communication">
-      <div className="space-y-6">
-        {!selectedOrgId ? (
-          <div className="bg-slate-900/80 rounded-xl p-8 ring-1 ring-slate-800 text-center">
-            <p className="text-slate-300">No organization selected</p>
-            <p className="text-sm text-slate-500 mt-2">Select an organization from the admin panel to view SMS messages.</p>
+    <div className="min-h-screen bg-slate-950 p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white">SMS Messages</h1>
+            <p className="text-slate-400 mt-2">Manage SMS communication for {currentOrg?.name}</p>
           </div>
-        ) : (
-          <>
-            {/* Filters Card */}
-            <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-              <h3 className="text-sm font-semibold text-white mb-4">Filter Messages</h3>
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-2">Quick Range</label>
-                  <select 
-                    value={dateRange}
-                    onChange={(e) => handleDateRangeChange(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
-                  >
-                    <option value="week">Last 7 Days</option>
-                    <option value="month">Last 30 Days</option>
-                    <option value="all">All Time</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-2">Start Date</label>
-                  <input 
-                    type="date" 
-                    value={startDate} 
-                    onChange={(e) => setStartDate(e.target.value)} 
-                    className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-2">End Date</label>
-                  <input 
-                    type="date" 
-                    value={endDate} 
-                    onChange={(e) => setEndDate(e.target.value)} 
-                    className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
-                  />
-                </div>
-                <div className="flex items-end">
-                  <button 
-                    onClick={fetchMessages}
-                    disabled={loading}
-                    className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
-                  >
-                    {loading ? 'Loading...' : 'Apply Filter'}
-                  </button>
-                </div>
-                <div className="flex items-end">
-                  <button 
-                    onClick={handleSyncSMS}
-                    disabled={syncing}
-                    className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
-                  >
-                    {syncing ? 'Syncing...' : 'Sync SMS'}
-                  </button>
-                </div>
-              </div>
-              {message && (
-                <div className="mt-3 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
-                  <p className="text-sm text-slate-300">{message}</p>
-                </div>
-              )}
-            </div>
+          <button
+            onClick={() => setShowSendModal(true)}
+            className="px-6 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition font-medium"
+          >
+            Send SMS
+          </button>
+        </div>
 
-            {/* Messages Count Card */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-gradient-to-br from-slate-900/80 to-slate-800/50 rounded-lg p-6 ring-1 ring-slate-800">
-                <p className="text-slate-400 text-sm">Total Messages</p>
-                <p className="text-3xl font-bold text-white mt-2">{messages.length}</p>
-              </div>
-            </div>
-
-            {/* Messages Container */}
-            <div className="bg-slate-900/80 rounded-xl ring-1 ring-slate-800 overflow-hidden">
-              <div className="p-6 border-b border-slate-700">
-                <h2 className="text-lg font-semibold text-white">Message History</h2>
-              </div>
-              
-              {loading ? (
-                <div className="p-8 text-center">
-                  <p className="text-slate-400">Loading messages...</p>
-                </div>
-              ) : messages.length === 0 ? (
-                <div className="p-8 text-center">
-                  <p className="text-slate-400">No SMS messages found.</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-slate-700">
-                  {messages.slice(0, 50).map((m: any) => (
-                    <div key={m.id} className="p-5 hover:bg-slate-800/30 transition">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-slate-200 text-sm mb-2">
-                            <span className="text-cyan-400">{m.from_number}</span>
-                            <span className="text-slate-500 mx-2">→</span>
-                            <span className="text-emerald-400">{m.to_number}</span>
-                          </div>
-                          <p className="text-slate-400 text-sm break-words">{m.message_text || m.content}</p>
-                        </div>
-                        <div className="text-right whitespace-nowrap ml-4">
-                          <p className="text-xs text-slate-500">
-                            {new Date(m.created_at || m.timestamp).toLocaleDateString()}
-                          </p>
-                          <p className="text-xs text-slate-600 mt-1">
-                            {new Date(m.created_at || m.timestamp).toLocaleTimeString()}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-900/30 border border-red-700 rounded-lg p-4">
+            <p className="text-red-300 text-sm">{error}</p>
+          </div>
         )}
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-800">
+            <p className="text-slate-400 text-sm">Total Messages</p>
+            <p className="text-3xl font-bold text-white mt-2">{messages.length}</p>
+          </div>
+          <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-800">
+            <p className="text-slate-400 text-sm">Status</p>
+            <p className="text-lg font-semibold text-cyan-400 mt-2">
+              {loading ? 'Loading...' : 'Ready'}
+            </p>
+          </div>
+        </div>
+
+        {/* Messages List */}
+        <div className="bg-slate-900/50 rounded-lg border border-slate-800 overflow-hidden">
+          <div className="p-6 border-b border-slate-800">
+            <h2 className="text-xl font-semibold text-white">Message History</h2>
+          </div>
+
+          {loading ? (
+            <div className="p-8 text-center">
+              <p className="text-slate-400">Loading messages...</p>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="p-8 text-center">
+              <p className="text-slate-400">No SMS messages yet</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-800">
+              {messages.slice(0, 50).map((msg) => (
+                <div key={msg.id} className="p-4 hover:bg-slate-800/30 transition">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`inline-block px-2 py-1 rounded text-xs font-semibold ${
+                          msg.direction === 'outbound'
+                            ? 'bg-blue-900/40 text-blue-300'
+                            : 'bg-green-900/40 text-green-300'
+                        }`}>
+                          {msg.direction === 'outbound' ? 'Sent' : 'Received'}
+                        </span>
+                        <span className="text-slate-400 text-sm">
+                          {msg.direction === 'outbound' ? 'To' : 'From'}
+                        </span>
+                        <span className="text-white font-semibold">
+                          {msg.direction === 'outbound' ? msg.recipient : msg.sender}
+                        </span>
+                      </div>
+                      <p className="text-slate-300 break-words">{msg.message}</p>
+                    </div>
+                    <div className="text-right whitespace-nowrap">
+                      <p className="text-xs text-slate-500">
+                        {new Date(msg.created_at).toLocaleDateString()}
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        {new Date(msg.created_at).toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </PageLayout>
+
+      {/* Send SMS Modal */}
+      {showSendModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-900 rounded-lg p-6 max-w-md w-full mx-4 border border-slate-800">
+            <h2 className="text-xl font-bold text-white mb-4">Send SMS</h2>
+
+            {error && (
+              <div className="bg-red-900/30 border border-red-700 rounded p-3 mb-4">
+                <p className="text-red-300 text-sm">{error}</p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Recipient Number
+                </label>
+                <input
+                  type="tel"
+                  value={recipientNumber}
+                  onChange={(e) => setRecipientNumber(e.target.value)}
+                  placeholder="+1 (555) 000-0000"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Message
+                </label>
+                <textarea
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Type your message..."
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 resize-none"
+                  rows={4}
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSendModal(false)}
+                  disabled={sending}
+                  className="flex-1 px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendSMS}
+                  disabled={sending}
+                  className="flex-1 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 transition font-medium"
+                >
+                  {sending ? 'Sending...' : 'Send'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

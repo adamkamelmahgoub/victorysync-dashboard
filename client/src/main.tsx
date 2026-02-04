@@ -34,6 +34,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { NumbersPage } from "./pages/NumbersPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import ReportsPageEnhanced from "./pages/ReportsPageEnhanced";
+import ReportPage from "./pages/ReportPage";
 import { RecordingsPage } from "./pages/RecordingsPage";
 import UserSettingsPage from "./pages/UserSettingsPage";
 import { SMSPage } from "./pages/SMSPage";
@@ -146,7 +147,7 @@ function AppRouter() {
         path="/reports"
         element={
           <ProtectedRoute>
-            <ReportsPageEnhanced />
+            <ReportPage />
           </ProtectedRoute>
         }
       />
@@ -302,7 +303,7 @@ function AppRouter() {
         path="/admin/reports"
         element={
           <AdminRoute>
-            <ReportsPageEnhanced />
+            <AdminReportsPage />
           </AdminRoute>
         }
       />
