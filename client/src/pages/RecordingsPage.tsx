@@ -39,6 +39,37 @@ export function RecordingsPage() {
     }
   };
 
+  const applyFilters = async () => {
+    if (!selectedOrgId || !user) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      // Use /api/recordings/filter endpoint for advanced filtering
+      let url = buildApiUrl(`/api/recordings/filter?org_id=${selectedOrgId}&limit=100`);
+      if (startDate) url += `&start_date=${new Date(startDate).toISOString()}`;
+      if (endDate) url += `&end_date=${new Date(new Date(endDate).getTime() + 24*60*60*1000).toISOString()}`;
+      
+      const response = await fetch(url, {
+        headers: { 'x-user-id': user.id }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setRecordings(data.recordings || []);
+        if ((data.count || 0) > 0) {
+          setMessage(`Found ${data.count} recordings`);
+        } else {
+          setMessage('No recordings found for the selected date range');
+        }
+      } else {
+        setMessage('Failed to apply filters');
+      }
+    } catch (err: any) {
+      setMessage(err?.message || 'Error applying filters');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchRecordingBlob = async (id: string) => {
     if (!user) throw new Error('not_authenticated');
     const resp = await fetch(buildApiUrl(`/api/recordings/${id}/download`), {
@@ -125,13 +156,20 @@ export function RecordingsPage() {
                     className="w-full px-3 py-2.5 bg-slate-800/50 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
                   />
                 </div>
-                <div className="flex items-end">
+                <div className="flex gap-2 items-end">
+                  <button 
+                    onClick={applyFilters} 
+                    disabled={loading} 
+                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
+                  >
+                    {loading ? 'Filtering...' : 'Filter'}
+                  </button>
                   <button 
                     onClick={handleSync} 
                     disabled={syncing} 
-                    className="w-full px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
+                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 disabled:from-slate-600 disabled:to-slate-700 text-white rounded-lg font-semibold text-sm transition duration-200"
                   >
-                    {syncing ? 'Syncing...' : 'Sync Recordings'}
+                    {syncing ? 'Syncing...' : 'Sync'}
                   </button>
                 </div>
               </div>
@@ -167,6 +205,9 @@ export function RecordingsPage() {
                           <h4 className="font-semibold text-white text-sm">
                             {r.from_number && r.to_number ? `${r.from_number} → ${r.to_number}` : 'Recording'}
                           </h4>
+                          {r.direction && (
+                            <p className="text-xs text-slate-500 mt-1">Direction: <span className="text-cyan-400 font-medium">{r.direction}</span></p>
+                          )}
                           <p className="text-xs text-slate-400 mt-1">{r.recording_date ? new Date(r.recording_date).toLocaleDateString() : 'No date'}</p>
                           {r.org_name && (
                             <p className="text-xs text-cyan-400 mt-1">Org: <span className="font-medium">{r.org_name}</span></p>

@@ -6992,6 +6992,158 @@ app.get('/api/recordings', async (req, res) => {
   }
 });
 
+// ENHANCED: GET /api/recordings/filter - Filter recordings by date, phone, duration, direction
+app.get('/api/recordings/filter', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const orgId = req.query.org_id as string;
+    if (!orgId) return res.status(400).json({ error: 'org_id_required' });
+
+    // Get filter parameters
+    const startDate = req.query.start_date as string;
+    const endDate = req.query.end_date as string;
+    const phoneNumber = req.query.phone_number as string;
+    const direction = req.query.direction as string;
+    const minDuration = parseInt(req.query.min_duration as string) || 0;
+    const limit = parseInt(req.query.limit as string) || 100;
+
+    // Check access
+    const isAdmin = await isPlatformAdmin(userId);
+    let allowedPhoneNumbers: string[] | null = null;
+    if (!isAdmin) {
+      const isMember = await isOrgMember(userId, orgId);
+      if (!isMember) return res.status(403).json({ error: 'forbidden' });
+      
+      const { numbers } = await getUserAssignedPhoneNumbers(orgId, userId);
+      if (numbers.length > 0) {
+        allowedPhoneNumbers = numbers;
+      }
+    }
+
+    // Build query
+    let q = supabaseAdmin
+      .from('mightycall_recordings')
+      .select('*')
+      .eq('org_id', orgId);
+
+    // Add date filters
+    if (startDate) q = q.gte('recording_date', startDate);
+    if (endDate) q = q.lte('recording_date', endDate);
+
+    q = q.order('recording_date', { ascending: false }).limit(limit * 2);
+
+    const { data: recordings, error } = await q;
+    if (error) throw error;
+
+    // Filter in memory by phone, direction, duration
+    let filtered = (recordings || []);
+    
+    if (phoneNumber) {
+      filtered = filtered.filter((r: any) => {
+        const metadata = r.metadata || {};
+        const from = r.from_number || metadata.businessNumber;
+        const to = r.to_number || (metadata.called ? metadata.called[0]?.phone : null);
+        return from?.includes(phoneNumber) || to?.includes(phoneNumber);
+      });
+    }
+
+    if (direction && direction !== 'all') {
+      filtered = filtered.filter((r: any) => {
+        const metadata = r.metadata || {};
+        return (metadata.direction || '').toLowerCase() === direction.toLowerCase();
+      });
+    }
+
+    if (minDuration > 0) {
+      filtered = filtered.filter((r: any) => {
+        const duration = r.duration_seconds || r.duration || 0;
+        return duration >= minDuration;
+      });
+    }
+
+    // Apply phone access control
+    if (!isAdmin && allowedPhoneNumbers) {
+      filtered = filtered.filter((rec: any) => {
+        const metadata = rec.metadata || {};
+        const from = rec.from_number || metadata.businessNumber;
+        const to = rec.to_number || (metadata.called ? metadata.called[0]?.phone : null);
+        return (from && allowedPhoneNumbers.includes(from)) || (to && allowedPhoneNumbers.includes(to));
+      });
+    }
+
+    res.json({ recordings: filtered.slice(0, limit), count: filtered.length });
+  } catch (err: any) {
+    console.error('recordings_filter_failed:', fmtErr(err));
+    res.status(500).json({ error: 'recordings_filter_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// FIXED: GET /api/recordings/:id/download - Fixed to use mightycall_recordings instead of calls
+app.get('/api/recordings/:id/download', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+
+    // First try mightycall_recordings table (primary source)
+    let { data: recording, error: recordError } = await supabaseAdmin
+      .from('mightycall_recordings')
+      .select('id, recording_url, phone_number_id, call_id, metadata')
+      .eq('id', id)
+      .maybeSingle();
+
+    // If not found in mightycall_recordings, try calls table as fallback
+    if (!recording && !recordError) {
+      const { data: call, error: callError } = await supabaseAdmin
+        .from('calls')
+        .select('id, recording_url, recording_file_name')
+        .eq('id', id)
+        .maybeSingle();
+      
+      if (callError) {
+        console.error('[recordings/download] db lookup failed:', callError);
+        return res.status(500).json({ error: 'db_lookup_failed' });
+      }
+      recording = call as any;
+    }
+
+    if (!recording || !recording.recording_url) {
+      return res.status(404).json({ error: 'recording_not_found' });
+    }
+
+    const recordingUrl = recording.recording_url;
+    // Fetch remote asset
+    const fetched = await fetch(recordingUrl);
+    if (!fetched.ok) {
+      console.error('[recordings/download] remote fetch failed:', fetched.status);
+      return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
+    }
+
+    // Convert Web stream to Node stream when possible and pipe to response
+    const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
+    const filename = (recording as any).recording_file_name || `${id}.mp3`;
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
+      const nodeStream = Readable.fromWeb((fetched as any).body);
+      nodeStream.pipe(res);
+    } else {
+      // Fallback: buffer into memory and send (may be larger for big files)
+      const arr = await fetched.arrayBuffer();
+      const buf = Buffer.from(arr);
+      res.send(buf);
+    }
+  } catch (e: any) {
+    console.error('[recordings/download] error:', e?.message ?? e);
+    res.status(500).json({ error: 'download_failed', detail: e?.message ?? String(e) });
+  }
+});
+
 // Register the users router for admin endpoints
 app.use('/api/admin', usersRouter);
 
