@@ -6951,14 +6951,20 @@ app.get('/api/recordings', async (req, res) => {
 
     // Apply phone access control for non-admins
     if (!isAdmin && allowedPhoneNumbers && allowedPhoneNumbers.length > 0) {
+      // Non-admin with phone assignments - filter by those phones
       enriched = enriched.filter((rec: any) => {
         const fromMatch = rec.from_number && allowedPhoneNumbers.includes(rec.from_number);
         const toMatch = rec.to_number && allowedPhoneNumbers.includes(rec.to_number);
         return fromMatch || toMatch;
       });
-    } else if (!isAdmin) {
-      // Non-admin with no assigned phones - return empty
-      return res.json({ recordings: [] });
+    } else if (!isAdmin && (!allowedPhoneNumbers || allowedPhoneNumbers.length === 0)) {
+      // Non-admin with no assigned phones - check if they're an org member
+      const isMember = await isOrgMember(userId, orgId);
+      if (!isMember) {
+        // Not an org member and no phone assignments - return empty
+        return res.json({ recordings: [] });
+      }
+      // Org member without phone assignments - show all org recordings
     }
 
     res.json({ recordings: enriched });
