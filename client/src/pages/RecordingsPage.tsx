@@ -18,7 +18,7 @@ interface Recording {
 
 export function RecordingsPage() {
   const { user } = useAuth();
-  const { currentOrg } = useOrg();
+  const { org: currentOrg } = useOrg();
   const orgId = currentOrg?.id;
 
   const [recordings, setRecordings] = useState<Recording[]>([]);

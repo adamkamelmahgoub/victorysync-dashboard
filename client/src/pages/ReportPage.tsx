@@ -33,7 +33,7 @@ function formatDuration(seconds: number): string {
 
 export const ReportPage: React.FC = () => {
   const { user } = useAuth();
-  const { currentOrg } = useOrg();
+  const { org: currentOrg } = useOrg();
   const [calls, setCalls] = useState<Call[]>([]);
   const [kpis, setKpis] = useState<KPI>({
     totalCalls: 0,

@@ -19,7 +19,7 @@ interface SMSMessage {
 
 export function SMSPage() {
   const { user } = useAuth();
-  const { currentOrg } = useOrg();
+  const { org: currentOrg } = useOrg();
   const orgId = currentOrg?.id;
 
   const [messages, setMessages] = useState<SMSMessage[]>([]);
