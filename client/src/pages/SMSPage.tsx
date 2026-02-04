@@ -37,15 +37,13 @@ export function SMSPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        buildApiUrl(`/api/orgs/${orgId}/sms/messages`),
-        {
-          headers: {
-            'Authorization': `Bearer ${user.id}`,
-            'Content-Type': 'application/json'
-          }
+      const url = buildApiUrl(`/api/sms/messages?org_id=${orgId}&limit=100`);
+      const response = await fetch(url, {
+        headers: {
+          'x-user-id': user.id,
+          'Content-Type': 'application/json'
         }
-      );
+      });
 
       if (response.ok) {
         const data = await response.json();

@@ -48,17 +48,18 @@ export const ReportPage: React.FC = () => {
   useEffect(() => {
     const loadCalls = async () => {
       try {
-        const response = await fetch(
-          buildApiUrl(`/api/orgs/${currentOrg?.id}/calls`),
-          {
-            headers: { 'x-user-id': user?.id || '' },
-          }
-        );
+        const url = currentOrg?.id 
+          ? buildApiUrl(`/api/calls/recent?org_id=${currentOrg.id}&limit=100`)
+          : buildApiUrl(`/api/calls/recent?limit=100`);
+
+        const response = await fetch(url, {
+          headers: { 'x-user-id': user?.id || '' },
+        });
 
         if (response.ok) {
           const data = await response.json();
-          setCalls(data.calls || []);
-          calculateKPIs(data.calls || []);
+          setCalls(data.items || []);
+          calculateKPIs(data.items || []);
         }
       } catch (error) {
         console.error('Failed to load calls:', error);
