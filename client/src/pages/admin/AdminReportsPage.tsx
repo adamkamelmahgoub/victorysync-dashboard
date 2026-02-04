@@ -83,6 +83,24 @@ const AdminReportsPage: FC = () => {
     }
   };
 
+  // Subscribe to realtime updates for the selected organization (falls back to polling when no org selected)
+  useRealtimeSubscription(
+    'calls',
+    filterOrgId || null,
+    () => {
+      console.log('[Realtime] New call - refreshing reports');
+      fetchReports();
+    },
+    () => {
+      console.log('[Realtime] Call updated - refreshing reports');
+      fetchReports();
+    },
+    () => {
+      console.log('[Realtime] Call deleted - refreshing reports');
+      fetchReports();
+    }
+  );
+
   const handleSync = async () => {
     if (!filterOrgId) {
       alert('Please select an organization to sync');
@@ -215,10 +233,3 @@ const AdminReportsPage: FC = () => {
 
 export default AdminReportsPage;
 
-  // Auto-refresh every 2 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchReports();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [filterOrgId, filterType, userId]);

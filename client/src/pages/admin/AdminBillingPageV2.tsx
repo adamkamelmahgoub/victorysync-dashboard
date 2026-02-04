@@ -89,7 +89,7 @@ const InvoiceItem: React.FC<{ invoice: Invoice }> = ({ invoice }) => (
 );
 
 // Create Record Modal
-const CreateRecordModal: React.FC<{ onClose: () => void; onSubmit: (data: any) => Promise<void> }> = ({ onClose, onSubmit }) => {
+const CreateRecordModal: React.FC<{ onClose: () => void; onSubmit: (data: any) => Promise<void>; orgOptions?: Array<{id:string;name:string}>; userOptions?: Array<{id:string;email?:string;display_name?:string}> }> = ({ onClose, onSubmit, orgOptions = [], userOptions = [] }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     org_id: '',
@@ -104,9 +104,28 @@ const CreateRecordModal: React.FC<{ onClose: () => void; onSubmit: (data: any) =
     e.preventDefault();
     setLoading(true);
     try {
+      // Validate optional UUID fields
+      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (formData.org_id && !uuidRe.test(formData.org_id)) {
+        alert('Organization ID must be a valid UUID or left blank');
+        setLoading(false);
+        return;
+      }
+      if (formData.user_id && !uuidRe.test(formData.user_id)) {
+        alert('User ID must be a valid UUID or left blank');
+        setLoading(false);
+        return;
+      }
+      const amountNum = parseFloat(formData.amount);
+      if (!isFinite(amountNum) || amountNum < 0) {
+        alert('Amount must be a valid non-negative number');
+        setLoading(false);
+        return;
+      }
+
       await onSubmit({
         ...formData,
-        amount: parseFloat(formData.amount)
+        amount: amountNum
       });
     } finally {
       setLoading(false);
@@ -159,24 +178,30 @@ const CreateRecordModal: React.FC<{ onClose: () => void; onSubmit: (data: any) =
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Organization ID</label>
-              <input
-                type="text"
+              <label className="block text-sm font-medium text-slate-300 mb-2">Organization</label>
+              <select
                 value={formData.org_id}
                 onChange={(e) => setFormData({ ...formData, org_id: e.target.value })}
                 className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-                placeholder="Optional"
-              />
+              >
+                <option value="">(None)</option>
+                {orgOptions.map(o => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">User ID</label>
-              <input
-                type="text"
+              <label className="block text-sm font-medium text-slate-300 mb-2">User</label>
+              <select
                 value={formData.user_id}
                 onChange={(e) => setFormData({ ...formData, user_id: e.target.value })}
                 className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-                placeholder="Optional"
-              />
+              >
+                <option value="">(None)</option>
+                {userOptions.map(u => (
+                  <option key={u.id} value={u.id}>{u.display_name || u.email || u.id}</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -211,9 +236,28 @@ export const AdminBillingPageV2: React.FC = () => {
   const [showCreateRecord, setShowCreateRecord] = useState(false);
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [pendingAmount, setPendingAmount] = useState(0);
+  const [orgOptions, setOrgOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [userOptions, setUserOptions] = useState<Array<{ id: string; email?: string; display_name?: string }>>([]);
 
   useEffect(() => {
     loadData();
+    // load orgs and users for pickers
+    (async () => {
+      try {
+        const resp = await fetch(buildApiUrl('/api/admin/orgs'), { headers: { 'x-user-id': user?.id || '', 'x-dev-bypass': 'true' } });
+        if (resp.ok) {
+          const j = await resp.json();
+          setOrgOptions((j.orgs || []).map((o: any) => ({ id: o.id, name: o.name })));
+        }
+      } catch (e) {}
+      try {
+        const resp2 = await fetch(buildApiUrl('/api/admin/users'), { headers: { 'x-user-id': user?.id || '' } });
+        if (resp2.ok) {
+          const j2 = await resp2.json();
+          setUserOptions((j2.users || []).map((u: any) => ({ id: u.id, email: u.email, display_name: u.display_name })));
+        }
+      } catch (e) {}
+    })();
   }, [activeTab]);
 
   // Subscribe to realtime billing record updates
@@ -239,7 +283,6 @@ export const AdminBillingPageV2: React.FC = () => {
       }
     }
   );
-
   // Subscribe to realtime invoice updates
   useRealtimeSubscription(
     'invoices',
@@ -264,22 +307,12 @@ export const AdminBillingPageV2: React.FC = () => {
     }
   );
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      if (activeTab === 'records') {
-        await loadBillingRecords();
-      } else {
-        await loadInvoices();
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const loadBillingRecords = async () => {
+    const devAsAdmin = (import.meta as any)?.env?.DEV && new URLSearchParams(window.location.search).get('asAdmin') === 'true';
+    const effectiveUserId = devAsAdmin ? ((import.meta as any).env.VITE_DEV_ADMIN_ID || user?.id || '') : (user?.id || '');
+
     const response = await fetch(buildApiUrl('/api/admin/billing/records'), {
-      headers: { 'x-user-id': user?.id || '' }
+      headers: { 'x-user-id': effectiveUserId }
     });
     if (response.ok) {
       const data = await response.json();
@@ -294,8 +327,11 @@ export const AdminBillingPageV2: React.FC = () => {
   };
 
   const loadInvoices = async () => {
+    const devAsAdmin = (import.meta as any)?.env?.DEV && new URLSearchParams(window.location.search).get('asAdmin') === 'true';
+    const effectiveUserId = devAsAdmin ? ((import.meta as any).env.VITE_DEV_ADMIN_ID || user?.id || '') : (user?.id || '');
+
     const response = await fetch(buildApiUrl('/api/admin/billing/invoices'), {
-      headers: { 'x-user-id': user?.id || '' }
+      headers: { 'x-user-id': effectiveUserId }
     });
     if (response.ok) {
       const data = await response.json();
@@ -305,9 +341,12 @@ export const AdminBillingPageV2: React.FC = () => {
 
   const handleCreateRecord = async (recordData: any) => {
     try {
+      const devAsAdmin = (import.meta as any)?.env?.DEV && new URLSearchParams(window.location.search).get('asAdmin') === 'true';
+      const effectiveUserId = devAsAdmin ? ((import.meta as any).env.VITE_DEV_ADMIN_ID || user?.id || '') : (user?.id || '');
+
       const response = await fetch(buildApiUrl('/api/admin/billing/records'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': effectiveUserId },
         body: JSON.stringify(recordData)
       });
 
@@ -378,6 +417,8 @@ export const AdminBillingPageV2: React.FC = () => {
             <CreateRecordModal
               onClose={() => setShowCreateRecord(false)}
               onSubmit={handleCreateRecord}
+              orgOptions={orgOptions}
+              userOptions={userOptions}
             />
           )}
         </div>

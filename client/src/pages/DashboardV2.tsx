@@ -95,6 +95,14 @@ export const DashboardV2: FC = () => {
   const { metrics, loading } = useDashboardMetrics(selectedOrgId ?? null);
   const [currentPath, setCurrentPath] = useState('/');
 
+  const formatSecondsAsMinutes = (s: number | undefined | null) => {
+    if (!s && s !== 0) return '0m 0s';
+    const secs = Math.round(s || 0);
+    const m = Math.floor(secs / 60);
+    const sec = secs % 60;
+    return `${m}m ${sec}s`;
+  };
+
   // Mock data for charts
   const callsTrendData = [
     { name: 'Mon', calls: 240, answered: 200 },
@@ -176,7 +184,7 @@ export const DashboardV2: FC = () => {
                   />
                   <KPICard
                     title="Avg Wait"
-                    value={metrics?.avg_wait_seconds_today ? Math.round(metrics.avg_wait_seconds_today) + 's' : '0s'}
+                    value={formatSecondsAsMinutes(metrics?.avg_wait_seconds_today)}
                     change="5.4%"
                     trend="up"
                     icon="💬"

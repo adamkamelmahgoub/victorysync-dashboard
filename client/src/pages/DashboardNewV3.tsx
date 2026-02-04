@@ -11,6 +11,14 @@ const DashboardNewV3: FC = () => {
   const { metrics, loading } = useDashboardMetrics(selectedOrgId ?? null);
   const [currentPath, setCurrentPath] = useState('/');
 
+  const formatSecondsAsMinutes = (s: number | undefined | null) => {
+    if (!s && s !== 0) return '0m 0s';
+    const secs = Math.round(s || 0);
+    const m = Math.floor(secs / 60);
+    const sec = secs % 60;
+    return `${m}m ${sec}s`;
+  };
+
   useEffect(() => {
     setCurrentPath(window.location.pathname);
   }, []);
@@ -69,7 +77,7 @@ const DashboardNewV3: FC = () => {
                   />
                   <MetricCard
                     label="Avg Wait Time"
-                    value={`${Math.round(metrics?.avg_wait_seconds_today || 0)}s`}
+                    value={formatSecondsAsMinutes(metrics?.avg_wait_seconds_today)}
                     color="purple"
                   />
                 </div>

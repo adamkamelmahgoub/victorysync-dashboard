@@ -1,0 +1,251 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: victorysync
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: victorysync-config
+  namespace: victorysync
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  APP_PORT: "4000"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: victorysync-secrets
+  namespace: victorysync
+type: Opaque
+stringData:
+  VITE_SUPABASE_URL: "https://your-project.supabase.co"
+  VITE_SUPABASE_ANON_KEY: "your-anon-key"
+  SUPABASE_SERVICE_KEY: "your-service-key"
+  MIGHTYCALL_API_KEY: "your-mightycall-key"
+  VITE_API_BASE_URL: "https://your-domain.com"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: victorysync-dashboard
+  namespace: victorysync
+  labels:
+    app: victorysync-dashboard
+    version: v1
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: victorysync-dashboard
+  template:
+    metadata:
+      labels:
+        app: victorysync-dashboard
+        version: v1
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      
+      containers:
+      - name: victorysync
+        image: your-registry/victorysync-dashboard:latest
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - name: http
+          containerPort: 4000
+          protocol: TCP
+        
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: victorysync-config
+              key: NODE_ENV
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: victorysync-config
+              key: LOG_LEVEL
+        - name: APP_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: victorysync-config
+              key: APP_PORT
+        - name: VITE_SUPABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: victorysync-secrets
+              key: VITE_SUPABASE_URL
+        - name: VITE_SUPABASE_ANON_KEY
+          valueFrom:
+            secretKeyRef:
+              name: victorysync-secrets
+              key: VITE_SUPABASE_ANON_KEY
+        - name: SUPABASE_SERVICE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: victorysync-secrets
+              key: SUPABASE_SERVICE_KEY
+        - name: MIGHTYCALL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: victorysync-secrets
+              key: MIGHTYCALL_API_KEY
+        - name: VITE_API_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: victorysync-secrets
+              key: VITE_API_BASE_URL
+        
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 2
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: victorysync-dashboard
+  namespace: victorysync
+  labels:
+    app: victorysync-dashboard
+spec:
+  type: LoadBalancer
+  selector:
+    app: victorysync-dashboard
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: victorysync-dashboard-hpa
+  namespace: victorysync
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: victorysync-dashboard
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: victorysync-dashboard-pdb
+  namespace: victorysync
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: victorysync-dashboard
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: victorysync-dashboard-netpol
+  namespace: victorysync
+spec:
+  podSelector:
+    matchLabels:
+      app: victorysync-dashboard
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 4000
+  egress:
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 5432
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: victorysync-dashboard
+  namespace: victorysync
+spec:
+  selector:
+    matchLabels:
+      app: victorysync-dashboard
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics

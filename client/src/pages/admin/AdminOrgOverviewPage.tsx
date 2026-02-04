@@ -21,6 +21,14 @@ export const AdminOrgOverviewPage: FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const formatSecondsAsMinutes = (s: number | undefined | null) => {
+    if (!s && s !== 0) return '0m 0s';
+    const secs = Math.round(s || 0);
+    const m = Math.floor(secs / 60);
+    const sec = secs % 60;
+    return `${m}m ${sec}s`;
+  };
+
   useEffect(() => {
     const fetchOrgMetrics = async () => {
       try {
@@ -83,7 +91,7 @@ export const AdminOrgOverviewPage: FC = () => {
                       Answered
                     </th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-300">
-                      Avg Wait (s)
+                      Avg Wait
                     </th>
                     <th className="px-4 py-3 text-right font-semibold text-slate-300">
                       Action
@@ -119,7 +127,7 @@ export const AdminOrgOverviewPage: FC = () => {
                         {org.answered_calls.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-center text-slate-300">
-                        {org.avg_wait_seconds.toFixed(1)}
+                        {formatSecondsAsMinutes(org.avg_wait_seconds)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button

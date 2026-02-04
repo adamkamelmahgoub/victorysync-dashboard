@@ -399,6 +399,27 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// RBAC helper middleware: normalize actor id and cache platform admin check
+app.use('/api', async (req, res, next) => {
+  try {
+    const actor = req.header('x-user-id') || null;
+    (req as any).actorId = actor;
+    if (actor) {
+      try {
+        (req as any).isPlatformAdmin = await isPlatformAdmin(actor);
+      } catch (e) {
+        (req as any).isPlatformAdmin = false;
+      }
+    } else {
+      (req as any).isPlatformAdmin = false;
+    }
+  } catch (e) {
+    (req as any).actorId = null;
+    (req as any).isPlatformAdmin = false;
+  }
+  next();
+});
+
 // GET /api/client-metrics?org_id=...
 // If org_id is present: returns metrics for that org
 // If org_id is missing: infers from x-user-id (for org clients) or returns global metrics (for admin)
@@ -4684,6 +4705,42 @@ app.get("/s/series", async (req, res) => {
             query = query.eq('org_id', queryOrgIds[0]);
           } else {
             query = query.in('org_id', queryOrgIds);
+          }
+        }
+        
+        // If this is a non-admin user and we have org(s), also restrict by assigned phone numbers
+        // (some reports may be linked by phone rather than org_id)
+        if (!isAdmin && queryOrgIds.length > 0) {
+          try {
+            // collect assigned numbers/ids/digits across all orgs
+            let allAssignedNumbers: string[] = [];
+            let allAssignedDigits: string[] = [];
+            let allAssignedIds: string[] = [];
+            for (const o of queryOrgIds) {
+              const { phones, numbers, digits } = await getAssignedPhoneNumbersForOrg(o);
+              if (numbers && numbers.length) allAssignedNumbers = allAssignedNumbers.concat(numbers);
+              if (digits && digits.length) allAssignedDigits = allAssignedDigits.concat(digits as string[]);
+              if (phones && phones.length) allAssignedIds = allAssignedIds.concat(phones.map((p: any) => p.id));
+            }
+
+            // Build an OR filter to include reports that reference those phone IDs or numbers
+            const orClauses: string[] = [];
+            if (allAssignedIds.length > 0) {
+              orClauses.push(`phone_number_id.in.(${allAssignedIds.join(',')})`);
+            }
+            if (allAssignedNumbers.length > 0) {
+              // escape commas in phone numbers if any
+              const nums = allAssignedNumbers.map(n => n.replace(/,/g, '\\,'));
+              orClauses.push(`phone_number.in.(${nums.join(',')})`);
+            }
+
+            if (orClauses.length > 0) {
+              // apply OR filter in addition to org_id filter so user sees reports linked to their numbers
+              const orFilter = orClauses.join(',');
+              query = query.or(orFilter);
+            }
+          } catch (e) {
+            console.warn('[mightycall/reports] failed to apply assigned phone filters:', fmtErr(e));
           }
         }
         // If isAdmin and queryOrgIds is empty, no org filter is applied (shows all)
