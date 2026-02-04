@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import AdminLayout from '../../components/AdminLayout';
 import { buildApiUrl } from '../../config';
+import { useRealtimeSubscription } from '../../lib/realtimeSubscriptions';
 
 interface BillingRecord {
   id: string;
@@ -214,6 +215,54 @@ export const AdminBillingPageV2: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [activeTab]);
+
+  // Subscribe to realtime billing record updates
+  useRealtimeSubscription(
+    'billing_records',
+    null,
+    () => {
+      console.log('[Realtime] Billing record created - refreshing...');
+      if (activeTab === 'records') {
+        setTimeout(() => loadBillingRecords(), 500);
+      }
+    },
+    () => {
+      console.log('[Realtime] Billing record updated - refreshing...');
+      if (activeTab === 'records') {
+        setTimeout(() => loadBillingRecords(), 500);
+      }
+    },
+    () => {
+      console.log('[Realtime] Billing record deleted - refreshing...');
+      if (activeTab === 'records') {
+        setTimeout(() => loadBillingRecords(), 500);
+      }
+    }
+  );
+
+  // Subscribe to realtime invoice updates
+  useRealtimeSubscription(
+    'invoices',
+    null,
+    () => {
+      console.log('[Realtime] Invoice created - refreshing...');
+      if (activeTab === 'invoices') {
+        setTimeout(() => loadInvoices(), 500);
+      }
+    },
+    () => {
+      console.log('[Realtime] Invoice updated - refreshing...');
+      if (activeTab === 'invoices') {
+        setTimeout(() => loadInvoices(), 500);
+      }
+    },
+    () => {
+      console.log('[Realtime] Invoice deleted - refreshing...');
+      if (activeTab === 'invoices') {
+        setTimeout(() => loadInvoices(), 500);
+      }
+    }
+  );
 
   const loadData = async () => {
     setLoading(true);
