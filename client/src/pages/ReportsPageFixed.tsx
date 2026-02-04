@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { triggerMightyCallReportsSync } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
+import { buildApiUrl } from '../config';
 
 interface Recording {
   id: string;
@@ -31,12 +32,21 @@ export function ReportsPage() {
     if (selectedOrgId) fetchRecordings();
   }, [selectedOrgId]);
 
+  // Auto-refresh every 2 seconds
+  useEffect(() => {
+    if (!selectedOrgId) return;
+    const interval = setInterval(() => {
+      fetchRecordings();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [selectedOrgId, user]);
+
   const fetchRecordings = async () => {
     if (!selectedOrgId || !user) return;
     setLoading(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/recordings?org_id=${selectedOrgId}&limit=200`, {
+      const response = await fetch(buildApiUrl(`/api/recordings?org_id=${selectedOrgId}&limit=200`), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
@@ -314,12 +324,3 @@ export function ReportsPage() {
 }
 
 export default ReportsPage;
-
-  // Auto-refresh every 2 seconds
-  useEffect(() => {
-    if (!selectedOrgId) return;
-    const interval = setInterval(() => {
-      fetchRecordings();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [selectedOrgId, user]);

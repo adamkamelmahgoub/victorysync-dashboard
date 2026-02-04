@@ -228,15 +228,44 @@ export async function syncMightyCallReports(
     let recordingsSynced = 0;
     const recordings = await fetchMightyCallRecordings(token, phoneNumberIds, start, end).catch(() => []);
     if (Array.isArray(recordings) && recordings.length > 0) {
-      const recRows = recordings.map((r: any) => ({
-        org_id: orgId,
-        phone_number_id: null,
-        call_id: r.callId || r.id,
-        recording_url: r.recordingUrl,
-        duration_seconds: r.duration,
-        recording_date: r.date,
-        metadata: r.metadata || r
-      }));
+      const recRows = recordings.map((r: any) => {
+        // Extract phone numbers from metadata
+        const metadata = r.metadata || r;
+        let fromNumber = null;
+        let toNumber = null;
+
+        if (metadata) {
+          // Try various metadata field names for from_number
+          fromNumber = metadata.businessNumber || 
+                      metadata.from_number || 
+                      metadata.caller_number || 
+                      metadata.phone_number ||
+                      (metadata.from && typeof metadata.from === 'string' ? metadata.from : null);
+
+          // Try various metadata field names for to_number
+          if (metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
+            toNumber = metadata.called[0].phone || metadata.called[0].number;
+          }
+          if (!toNumber) {
+            toNumber = metadata.to_number ||
+                      metadata.recipient ||
+                      metadata.destination_number ||
+                      metadata.to;
+          }
+        }
+
+        return {
+          org_id: orgId,
+          phone_number_id: null,
+          call_id: r.callId || r.id,
+          recording_url: r.recordingUrl,
+          duration_seconds: r.duration,
+          recording_date: r.date,
+          from_number: fromNumber,
+          to_number: toNumber,
+          metadata: metadata || r
+        };
+      });
 
       const { error } = await supabaseAdminClient
         .from('mightycall_recordings')
@@ -275,15 +304,44 @@ export async function syncMightyCallRecordings(
 
     let recordingsSynced = 0;
     if (Array.isArray(recordings) && recordings.length > 0) {
-      const recRows = recordings.map((r: any) => ({
-        org_id: orgId,
-        phone_number_id: null,
-        call_id: r.callId || r.id,
-        recording_url: r.recordingUrl,
-        duration_seconds: r.duration,
-        recording_date: r.date,
-        metadata: r.metadata || r
-      }));
+      const recRows = recordings.map((r: any) => {
+        // Extract phone numbers from metadata
+        const metadata = r.metadata || r;
+        let fromNumber = null;
+        let toNumber = null;
+
+        if (metadata) {
+          // Try various metadata field names for from_number
+          fromNumber = metadata.businessNumber || 
+                      metadata.from_number || 
+                      metadata.caller_number || 
+                      metadata.phone_number ||
+                      (metadata.from && typeof metadata.from === 'string' ? metadata.from : null);
+
+          // Try various metadata field names for to_number
+          if (metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
+            toNumber = metadata.called[0].phone || metadata.called[0].number;
+          }
+          if (!toNumber) {
+            toNumber = metadata.to_number ||
+                      metadata.recipient ||
+                      metadata.destination_number ||
+                      metadata.to;
+          }
+        }
+
+        return {
+          org_id: orgId,
+          phone_number_id: null,
+          call_id: r.callId || r.id,
+          recording_url: r.recordingUrl,
+          duration_seconds: r.duration,
+          recording_date: r.date,
+          from_number: fromNumber,
+          to_number: toNumber,
+          metadata: metadata || r
+        };
+      });
 
       const { error } = await supabaseAdminClient
         .from('mightycall_recordings')

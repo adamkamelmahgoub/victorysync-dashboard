@@ -186,3 +186,12 @@ export function SMSPage() {
 }
 
 export default SMSPage;
+
+  // Auto-refresh every 2 seconds
+  useEffect(() => {
+    if (!selectedOrgId) return;
+    const interval = setInterval(() => {
+      fetchMessages();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [selectedOrgId, user]);

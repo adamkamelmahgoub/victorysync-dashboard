@@ -214,3 +214,11 @@ const AdminReportsPage: FC = () => {
 };
 
 export default AdminReportsPage;
+
+  // Auto-refresh every 2 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchReports();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [filterOrgId, filterType, userId]);

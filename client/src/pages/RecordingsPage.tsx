@@ -17,6 +17,14 @@ export function RecordingsPage() {
   useEffect(() => {
     if (selectedOrgId) fetchRecordings();
   }, [selectedOrgId]);
+  // Auto-refresh every 2 seconds
+  useEffect(() => {
+    if (!selectedOrgId) return;
+    const interval = setInterval(() => {
+      fetchRecordings();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [selectedOrgId, user]);
 
   const fetchRecordings = async () => {
     if (!selectedOrgId || !user) return;

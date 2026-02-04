@@ -29,6 +29,7 @@ const AdminRecordingsPage: FC = () => {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterOrgId, setFilterOrgId] = useState('');
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
 
   useEffect(() => {
     fetchOrgs();
@@ -37,6 +38,15 @@ const AdminRecordingsPage: FC = () => {
   useEffect(() => {
     fetchRecordings();
   }, [filterOrgId]);
+
+  // Auto-refresh every 2 seconds
+  useEffect(() => {
+    if (!autoRefreshEnabled || !filterOrgId) return;
+    const interval = setInterval(() => {
+      fetchRecordings();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [autoRefreshEnabled, filterOrgId]);
 
   const fetchOrgs = async () => {
     try {
@@ -102,6 +112,18 @@ const AdminRecordingsPage: FC = () => {
         {/* Filters Card */}
         <div className="bg-slate-900/80 ring-1 ring-slate-800 p-6 rounded-lg">
           <h2 className="text-sm font-semibold text-slate-200 mb-4">Filters</h2>
+           <div className="flex justify-between items-center mb-4">
+             <h2 className="text-sm font-semibold text-slate-200">Filters</h2>
+             <label className="flex items-center gap-2 cursor-pointer">
+               <input
+                 type="checkbox"
+                 checked={autoRefreshEnabled}
+                 onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+                 className="w-4 h-4 rounded border-slate-600 text-cyan-500"
+               />
+               <span className="text-xs text-slate-300">Auto-refresh (every 2s)</span>
+             </label>
+           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-2">Organization</label>
