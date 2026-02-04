@@ -6463,7 +6463,8 @@ app.get('/api/admin/reports', async (req, res) => {
     if (startDate) q = q.gte('report_date', startDate);
     if (endDate) q = q.lte('report_date', endDate);
 
-    const { data, error } = await q.order('report_date', { ascending: false }).limit(1000);
+    const limit = Math.min(parseInt(req.query.limit as string) || 10000, 50000);
+    const { data, error } = await q.order('report_date', { ascending: false }).limit(limit);
     if (error && error.code !== 'PGRST116') throw error;
 
     // Build summary stats
@@ -6504,7 +6505,8 @@ app.get('/api/admin/call-reports', async (req, res) => {
     if (startDate) q = q.gte('call_date', startDate);
     if (endDate) q = q.lte('call_date', endDate);
 
-    const { data, error } = await q.order('call_date', { ascending: false }).limit(1000);
+    const limit = Math.min(parseInt(req.query.limit as string) || 10000, 50000);
+    const { data, error } = await q.order('call_date', { ascending: false }).limit(limit);
     if (error && error.code !== 'PGRST116') throw error;
 
     // Build summary stats
@@ -6947,29 +6949,49 @@ app.get('/api/recordings', async (req, res) => {
     let enriched = (recordings || []).map((rec: any) => {
       const callData = callsMap[rec.call_id] || {};
       
-      // Extract phone numbers from metadata if not in call record
+      // Extract phone numbers - try multiple sources
       let fromNumber = callData.from_number || rec.from_number || null;
       let toNumber = callData.to_number || rec.to_number || null;
       
-      // Try to extract from metadata if still missing
+      // Try metadata sources if primary sources are missing
       const metadata = rec.metadata || {};
-      if (!fromNumber && metadata.businessNumber) {
-        fromNumber = metadata.businessNumber;
+      
+      // From number sources: businessNumber, caller_number, phone_number
+      if (!fromNumber) {
+        fromNumber = metadata.businessNumber || metadata.caller_number || metadata.phone_number || null;
       }
-      if (!toNumber && metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
-        toNumber = metadata.called[0].phone || metadata.called[0].name || null;
+      
+      // To number sources: called[0].phone, recipient, destination_number
+      if (!toNumber) {
+        if (metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
+          toNumber = metadata.called[0].phone || metadata.called[0].name || null;
+        }
+        if (!toNumber) {
+          toNumber = metadata.recipient || metadata.destination_number || null;
+        }
       }
+      
+      // Calculate duration in seconds
+      const durationSeconds = callData.duration_seconds || rec.duration_seconds || 0;
+      
+      // Create a unique identifier for this recording
+      const recordingDate = new Date(callData.started_at || rec.recording_date || '').toISOString().split('T')[0];
+      const identifier = `${fromNumber || 'Unknown'} → ${toNumber || 'Unknown'} (${durationSeconds}s, ${recordingDate})`;
       
       return {
         ...rec,
         org_name: org?.name || 'Unknown Org',
-        // Include call details (from_number, to_number, etc)
+        // Include call details
         from_number: fromNumber,
         to_number: toNumber,
-        duration: callData.duration_seconds || rec.duration_seconds || 0,
+        duration: durationSeconds,
+        duration_formatted: `${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`,
         call_started_at: callData.started_at || rec.recording_date,
         call_ended_at: callData.ended_at || rec.recording_date,
-        direction: metadata.direction || 'Unknown'
+        direction: metadata.direction || 'Unknown',
+        // Add readable identifier for admins
+        identifier: identifier,
+        display_name: `${fromNumber || 'Unknown'} → ${toNumber || 'Unknown'}` 
       };
     });
 
