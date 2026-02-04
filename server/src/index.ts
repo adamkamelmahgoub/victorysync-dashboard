@@ -6937,15 +6937,30 @@ app.get('/api/recordings', async (req, res) => {
     // Enrich recordings with call data and filter by phone access
     let enriched = (recordings || []).map((rec: any) => {
       const callData = callsMap[rec.call_id] || {};
+      
+      // Extract phone numbers from metadata if not in call record
+      let fromNumber = callData.from_number || rec.from_number || null;
+      let toNumber = callData.to_number || rec.to_number || null;
+      
+      // Try to extract from metadata if still missing
+      const metadata = rec.metadata || {};
+      if (!fromNumber && metadata.businessNumber) {
+        fromNumber = metadata.businessNumber;
+      }
+      if (!toNumber && metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
+        toNumber = metadata.called[0].phone || metadata.called[0].name || null;
+      }
+      
       return {
         ...rec,
         org_name: org?.name || 'Unknown Org',
         // Include call details (from_number, to_number, etc)
-        from_number: callData.from_number || rec.from_number || null,
-        to_number: callData.to_number || rec.to_number || null,
+        from_number: fromNumber,
+        to_number: toNumber,
         duration: callData.duration_seconds || rec.duration_seconds || 0,
         call_started_at: callData.started_at || rec.recording_date,
-        call_ended_at: callData.ended_at || rec.recording_date
+        call_ended_at: callData.ended_at || rec.recording_date,
+        direction: metadata.direction || 'Unknown'
       };
     });
 
