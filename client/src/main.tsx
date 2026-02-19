@@ -88,7 +88,7 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
 function AdminRoute({ children }: { children: JSX.Element }) {
   const { user, loading, globalRole } = useAuth();
   const location = useLocation();
-  const role = globalRole || (user?.user_metadata as any)?.global_role || (user?.user_metadata as any)?.role;
+  const role = globalRole;
 
   // Developer preview: allow admin access when running locally with ?asAdmin=true
   const isDevPreviewAdmin = (import.meta as any)?.env?.DEV && new URLSearchParams(window.location.search).get('asAdmin') === 'true';
@@ -102,7 +102,7 @@ function AdminRoute({ children }: { children: JSX.Element }) {
     );
   }
   // In dev preview mode, allow access regardless of the authenticated user's role
-  if (!user || (previewRole !== "admin" && previewRole !== "platform_admin")) {
+  if (!user || previewRole !== "platform_admin") {
     const adminToClient: Record<string, string> = {
       '/admin/reports': '/reports',
       '/admin/recordings': '/recordings',

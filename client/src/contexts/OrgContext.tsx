@@ -85,7 +85,7 @@ export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
       setError(null);
 
       // Check if user is platform admin
-      const isPlatformAdmin = globalRole === 'admin' || globalRole === 'platform_admin';
+      const isPlatformAdmin = globalRole === 'platform_admin';
 
       // For platform admins, don't require org membership
       if (isPlatformAdmin) {
@@ -295,7 +295,7 @@ export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
     await fetchOrgData();
   };
 
-  const isPlatformAdmin = globalRole === 'admin' || globalRole === 'platform_admin';
+  const isPlatformAdmin = globalRole === 'platform_admin';
   // Normalized roles: member?.role is now 'owner', 'admin', or 'member'
   const isAdmin = member?.role === 'admin' || member?.role === 'owner' || isPlatformAdmin;
   const isOwner = member?.role === 'owner' || (member?.role === 'admin' && !isPlatformAdmin);

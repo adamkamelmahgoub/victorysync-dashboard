@@ -1500,34 +1500,29 @@ app.get('/api/user/profile', async (req, res) => {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
-    // Get user from auth.users with metadata
-    const { data: user, error: userErr } = await supabaseAdmin
-      .from('auth.users')
-      .select('id, email, user_metadata')
-      .eq('id', userId)
-      .single();
-
-    if (userErr || !user) {
-      // Fallback to profiles table if auth.users not available
+    // Source of truth: auth user metadata via Admin API.
+    const { data: authUserData, error: authUserErr } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const authUser = authUserData?.user || null;
+    if (authUserErr || !authUser) {
+      // Legacy fallback only if admin API user lookup fails.
       const { data: profile, error } = await supabaseAdmin
         .from('profiles')
         .select('id, global_role')
         .eq('id', userId)
         .maybeSingle();
-
       if (error) throw error;
       return res.json({ profile: profile || { id: userId, global_role: null } });
     }
 
-    // Return enhanced user profile with metadata
-    const globalRole = (user.user_metadata as any)?.global_role || null;
+    const meta: any = authUser.user_metadata || {};
+    const globalRole = meta?.global_role || null;
     res.json({
       user: {
-        id: user.id,
-        email: user.email,
-        full_name: (user.user_metadata as any)?.full_name || '',
-        phone_number: (user.user_metadata as any)?.phone_number || '',
-        profile_pic_url: (user.user_metadata as any)?.profile_pic_url || ''
+        id: authUser.id,
+        email: authUser.email,
+        full_name: meta?.full_name || '',
+        phone_number: meta?.phone_number || '',
+        profile_pic_url: meta?.profile_pic_url || ''
       },
       profile: { id: userId, global_role: globalRole }
     });
@@ -3919,8 +3914,12 @@ app.get("/api/admin/org-metrics", async (_req, res) => {
 
 const handleAdminUserUpdate = async (req: any, res: any) => {
   try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
     const { id } = req.params;
-    const { orgId, role, can_generate_api_keys } = req.body;
+    const { orgId, role, can_generate_api_keys, global_role } = req.body;
 
     // Fetch current user to get existing metadata
     const { data: userData, error: fetchError } =
@@ -3933,12 +3932,16 @@ const handleAdminUserUpdate = async (req: any, res: any) => {
     const currentMetadata = userData.user.user_metadata || {};
 
     // Merge with new values
-    const newMetadata = {
+    const newMetadata: any = {
       ...currentMetadata,
       ...(orgId && { org_id: orgId }),
       ...(role && { role }),
       ...(typeof can_generate_api_keys === 'boolean' ? { can_generate_api_keys } : {}),
     };
+    if (global_role !== undefined) {
+      if (global_role === null || global_role === '') delete newMetadata.global_role;
+      else newMetadata.global_role = global_role;
+    }
 
     const { data, error } = await supabaseAdmin.auth.admin.updateUserById(id, {
       user_metadata: newMetadata,
@@ -3954,6 +3957,7 @@ const handleAdminUserUpdate = async (req: any, res: any) => {
         email: data.user.email,
         org_id: (data.user.user_metadata as any)?.org_id ?? null,
         role: (data.user.user_metadata as any)?.role ?? null,
+        global_role: (data.user.user_metadata as any)?.global_role ?? null,
         can_generate_api_keys: !!(data.user.user_metadata as any)?.can_generate_api_keys,
       },
     });

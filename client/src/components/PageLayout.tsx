@@ -12,7 +12,7 @@ interface PageLayoutProps {
 export const PageLayout: FC<PageLayoutProps> = ({ title, description, children }) => {
   const { globalRole } = useAuth();
   const location = useLocation();
-  const isAdmin = globalRole === 'platform_admin' || globalRole === 'admin';
+  const isAdmin = globalRole === 'platform_admin';
 
   return (
     <div className="flex min-h-screen text-white">

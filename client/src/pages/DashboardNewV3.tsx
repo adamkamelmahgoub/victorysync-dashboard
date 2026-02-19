@@ -8,7 +8,7 @@ const DashboardNewV3: FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { selectedOrgId, globalRole } = useAuth();
-  const isAdmin = globalRole === 'platform_admin' || globalRole === 'admin';
+  const isAdmin = globalRole === 'platform_admin';
   const { metrics, loading } = useDashboardMetrics(selectedOrgId ?? null);
 
   const formatSecondsAsMinutes = (s: number | undefined | null) => {

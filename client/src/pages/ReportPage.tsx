@@ -68,7 +68,7 @@ export default function ReportPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  const isAdmin = globalRole === 'platform_admin' || globalRole === 'admin';
+  const isAdmin = globalRole === 'platform_admin';
 
   const loadReports = async (reset = false) => {
     if (!user) return;
