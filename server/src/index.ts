@@ -5932,8 +5932,15 @@ app.get("/s/series", async (req, res) => {
             return res.json({ reports: [] });
           }
 
+          let visibleCalls = calls || [];
+          if (!isAdmin && queryOrgIds.length > 0) {
+            visibleCalls = visibleCalls.filter((call: any) =>
+              reportVisibleToAssignedPhones(call, assignedIdSet, assignedNumberSet, assignedDigitSet)
+            );
+          }
+
           // Transform calls to report format
-          data = (calls || []).map((call: any) => ({
+          data = (visibleCalls || []).map((call: any) => ({
             id: call.id,
             org_id: call.org_id,
             report_type: reportType,
@@ -5942,6 +5949,12 @@ app.get("/s/series", async (req, res) => {
             to_number: call.to_number,
             status: call.status,
             duration: 0,
+            data: {
+              calls_count: 1,
+              answered_count: ['answered', 'completed', 'connected'].includes(String(call.status || '').toLowerCase()) ? 1 : 0,
+              missed_count: ['answered', 'completed', 'connected'].includes(String(call.status || '').toLowerCase()) ? 0 : 1,
+              sample_numbers: [call.from_number, call.to_number].filter(Boolean),
+            },
             organizations: { name: 'Org', id: call.org_id }
           }));
         }
@@ -5954,7 +5967,14 @@ app.get("/s/series", async (req, res) => {
             rows = rows.filter((r: any) => reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet));
           }
         }
-        res.json({ reports: rows, next_offset: rows.length === limit ? offset + rows.length : null });
+        const enrichedRows = rows.map((r: any) => {
+          const numbersCalled = extractCandidateNumbersFromReport(r);
+          return {
+            ...r,
+            numbers_called: numbersCalled,
+          };
+        });
+        res.json({ reports: enrichedRows, next_offset: rows.length === limit ? offset + rows.length : null });
       } catch (err: any) {
         console.error('[mightycall/reports] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_reports', detail: err?.message });

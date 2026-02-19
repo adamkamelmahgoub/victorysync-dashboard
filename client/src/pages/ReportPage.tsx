@@ -10,6 +10,9 @@ interface ReportRow {
   report_type: string;
   report_date?: string;
   created_at?: string;
+  from_number?: string;
+  to_number?: string;
+  numbers_called?: string[];
   data?: {
     calls_count?: number;
     answered_count?: number;
@@ -62,6 +65,7 @@ export default function ReportPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [filterType, setFilterType] = useState('calls');
   const [nextOffset, setNextOffset] = useState<number | null>(0);
+  const [listError, setListError] = useState<string | null>(null);
 
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ReportDetailResponse | null>(null);
@@ -79,6 +83,7 @@ export default function ReportPage() {
     try {
       if (reset) setLoading(true);
       else setLoadingMore(true);
+      if (reset) setListError(null);
 
       let url = buildApiUrl(`/api/mightycall/reports?type=${encodeURIComponent(filterType)}&limit=${PAGE_SIZE}&offset=${activeOffset}`);
       if (!isAdmin && org?.id) {
@@ -93,6 +98,8 @@ export default function ReportPage() {
       });
 
       if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        setListError(err?.detail || err?.error || 'Failed to fetch reports');
         return;
       }
 
@@ -100,10 +107,22 @@ export default function ReportPage() {
       const rows: ReportRow[] = data.reports || [];
       setReports((prev) => (reset ? rows : [...prev, ...rows]));
       setNextOffset(data.next_offset ?? null);
+    } catch (e: any) {
+      setListError(e?.message || 'Failed to fetch reports');
     } finally {
       if (reset) setLoading(false);
       else setLoadingMore(false);
     }
+  };
+
+  const rowNumbers = (report: ReportRow): string[] => {
+    const values = [
+      ...(report.numbers_called || []),
+      ...(report.data?.sample_numbers || []),
+      report.from_number || '',
+      report.to_number || ''
+    ].map((v) => String(v || '').trim()).filter(Boolean);
+    return Array.from(new Set(values));
   };
 
   const openDetail = async (reportId: string) => {
@@ -177,7 +196,9 @@ export default function ReportPage() {
         <div className="vs-surface p-6">
           <h2 className="text-sm font-semibold text-slate-200 mb-4">Reports ({reports.length})</h2>
 
-          {loading ? (
+          {listError ? (
+            <div className="text-sm text-rose-300 py-8 text-center">{listError}</div>
+          ) : loading ? (
             <div className="text-sm text-slate-400 py-8 text-center">Loading reports...</div>
           ) : reports.length === 0 ? (
             <div className="text-sm text-slate-400 py-8 text-center">No reports found.</div>
@@ -206,7 +227,7 @@ export default function ReportPage() {
                         <td className="py-3 px-4 text-slate-200">{report.data?.calls_count ?? '-'}</td>
                         <td className="py-3 px-4 text-emerald-300">{report.data?.answered_count ?? '-'}</td>
                         <td className="py-3 px-4 text-amber-300">{report.data?.missed_count ?? '-'}</td>
-                        <td className="py-3 px-4 text-slate-300 text-xs font-mono">{(report.data?.sample_numbers || []).join(', ') || '-'}</td>
+                        <td className="py-3 px-4 text-slate-300 text-xs font-mono">{rowNumbers(report).join(', ') || '-'}</td>
                         <td className="py-3 px-4 text-slate-500 text-xs">{formatDate(report.report_date || report.created_at)}</td>
                       </tr>
                     ))}
@@ -283,6 +304,38 @@ export default function ReportPage() {
                       <div className="text-xs text-slate-400 mb-2">Related SMS</div>
                       <div className="text-lg text-white font-semibold">{detail.related?.sms?.length || 0}</div>
                     </div>
+                  </div>
+
+                  <div className="bg-slate-800/50 border border-slate-700 rounded p-4">
+                    <div className="text-xs text-slate-400 mb-3">Related Calls (From / To / Status / Duration)</div>
+                    {detail.related?.calls?.length ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead className="text-slate-400 border-b border-slate-700/50">
+                            <tr>
+                              <th className="text-left py-2 pr-3">From</th>
+                              <th className="text-left py-2 pr-3">To</th>
+                              <th className="text-left py-2 pr-3">Status</th>
+                              <th className="text-left py-2 pr-3">Duration</th>
+                              <th className="text-left py-2">Started</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-700/30">
+                            {detail.related.calls.slice(0, 300).map((c) => (
+                              <tr key={c.id} className="text-slate-200">
+                                <td className="py-2 pr-3 font-mono">{c.from_number || '-'}</td>
+                                <td className="py-2 pr-3 font-mono">{c.to_number || '-'}</td>
+                                <td className="py-2 pr-3">{c.status || '-'}</td>
+                                <td className="py-2 pr-3">{formatSeconds(Number(c.duration_seconds || 0))}</td>
+                                <td className="py-2">{formatDate(c.started_at)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-400">No related calls found for this report.</div>
+                    )}
                   </div>
                 </>
               ) : (
