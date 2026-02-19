@@ -20,13 +20,13 @@ interface SMSMessage {
 const PAGE_SIZE = 500;
 
 export function SMSPage() {
-  const { user, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
+  const { user, orgs, selectedOrgId } = useAuth();
   const { org: currentOrg } = useOrg();
   const orgId =
+    ((user?.user_metadata as any)?.org_id ?? null) ||
     selectedOrgId ||
     currentOrg?.id ||
-    (orgs && orgs.length > 0 ? orgs[0].id : null) ||
-    ((user?.user_metadata as any)?.org_id ?? null);
+    null;
   const orgName =
     (orgs.find((o) => o.id === orgId)?.name) ||
     currentOrg?.name ||
@@ -43,7 +43,7 @@ export function SMSPage() {
   const [nextOffset, setNextOffset] = useState<number | null>(0);
 
   const loadMessages = async (reset = false) => {
-    if (!orgId || !user) return;
+    if (!user) return;
     if (!reset && nextOffset == null) return;
 
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
@@ -56,7 +56,11 @@ export function SMSPage() {
     }
 
     try {
-      const url = buildApiUrl(`/api/sms/messages?org_id=${encodeURIComponent(orgId)}&limit=${PAGE_SIZE}&offset=${activeOffset}`);
+      const q = new URLSearchParams();
+      q.set('limit', String(PAGE_SIZE));
+      q.set('offset', String(activeOffset));
+      if (orgId) q.set('org_id', orgId);
+      const url = buildApiUrl(`/api/sms/messages?${q.toString()}`);
       const response = await fetch(url, {
         headers: {
           'x-user-id': user.id,
@@ -83,16 +87,10 @@ export function SMSPage() {
   };
 
   useEffect(() => {
-    if (orgId && user) {
+    if (user) {
       loadMessages(true);
     }
   }, [orgId, user?.id]);
-
-  useEffect(() => {
-    if (!selectedOrgId && orgs && orgs.length > 0) {
-      setSelectedOrgId(orgs[0].id);
-    }
-  }, [selectedOrgId, orgs, setSelectedOrgId]);
 
   const handleSendSMS = async () => {
     if (!orgId || !user || !newMessage || !recipientNumber) {
@@ -134,7 +132,7 @@ export function SMSPage() {
     return raw ? new Date(raw).toLocaleString() : '-';
   };
 
-  if (!orgId) {
+  if (!orgId && (!orgs || orgs.length === 0)) {
     return (
       <PageLayout title="SMS" description="No organization selected">
         <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-6 text-slate-300">No organization is linked to this account yet. Ask your org admin to assign your account to an organization.</div>

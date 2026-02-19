@@ -55,7 +55,13 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
               const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
               setOrgs(list);
               const isAdmin = (user.user_metadata?.global_role === 'platform_admin');
-              if (isAdmin) setSelectedOrgId(null); else setSelectedOrgId(list.length > 0 ? list[0].id : null);
+              if (isAdmin) {
+                setSelectedOrgId(null);
+              } else {
+                const metadataOrgId = (user.user_metadata as any)?.org_id || null;
+                const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : null;
+                setSelectedOrgId(assignedOrgId);
+              }
             }
           } catch (e) {
             console.warn('[AuthContext] init fetch orgs failed', e);
@@ -90,7 +96,13 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
               const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
               setOrgs(list);
               const isAdmin = (session.user.user_metadata?.global_role === 'platform_admin');
-              if (isAdmin) setSelectedOrgId(null); else setSelectedOrgId(list.length > 0 ? list[0].id : null);
+              if (isAdmin) {
+                setSelectedOrgId(null);
+              } else {
+                const metadataOrgId = (session.user.user_metadata as any)?.org_id || null;
+                const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : null;
+                setSelectedOrgId(assignedOrgId);
+              }
             }
           } catch (e) { /* ignore */ }
         } else {
@@ -164,7 +176,13 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
             const j = await orgsRes.json();
             const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
             setOrgs(list);
-            if (data.user.user_metadata?.global_role === 'platform_admin') setSelectedOrgId(null); else setSelectedOrgId(list.length > 0 ? list[0].id : null);
+            if (data.user.user_metadata?.global_role === 'platform_admin') {
+              setSelectedOrgId(null);
+            } else {
+              const metadataOrgId = (data.user.user_metadata as any)?.org_id || null;
+              const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : null;
+              setSelectedOrgId(assignedOrgId);
+            }
           }
         } catch (e) {
           console.warn('[AuthContext] Failed to fetch orgs:', e);

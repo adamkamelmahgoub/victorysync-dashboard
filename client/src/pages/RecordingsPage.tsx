@@ -34,13 +34,13 @@ function fmtDuration(s: number) {
 }
 
 export function RecordingsPage() {
-  const { user, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
+  const { user, orgs, selectedOrgId } = useAuth();
   const { org: currentOrg } = useOrg();
   const orgId =
+    ((user?.user_metadata as any)?.org_id ?? null) ||
     selectedOrgId ||
     currentOrg?.id ||
-    (orgs && orgs.length > 0 ? orgs[0].id : null) ||
-    ((user?.user_metadata as any)?.org_id ?? null);
+    null;
   const orgName =
     (orgs.find((o) => o.id === orgId)?.name) ||
     currentOrg?.name ||
@@ -67,7 +67,7 @@ export function RecordingsPage() {
   }, [filteredRows]);
 
   const fetchRecordings = async (reset = true) => {
-    if (!orgId || !user) return;
+    if (!user) return;
     if (!reset && nextOffset == null) return;
 
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
@@ -80,7 +80,11 @@ export function RecordingsPage() {
         setLoadingMore(true);
       }
 
-      const response = await fetch(buildApiUrl(`/api/mightycall/recordings?org_id=${encodeURIComponent(orgId)}&limit=500&offset=${activeOffset}`), {
+      const q = new URLSearchParams();
+      q.set('limit', '500');
+      q.set('offset', String(activeOffset));
+      if (orgId) q.set('org_id', orgId);
+      const response = await fetch(buildApiUrl(`/api/mightycall/recordings?${q.toString()}`), {
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' }
       });
 
@@ -103,15 +107,8 @@ export function RecordingsPage() {
   };
 
   useEffect(() => {
-    if (orgId && user) fetchRecordings(true);
+    if (user) fetchRecordings(true);
   }, [orgId, user?.id]);
-
-  useEffect(() => {
-    // If auth already has orgs but selected org is empty, default to first org for client UX.
-    if (!selectedOrgId && orgs && orgs.length > 0) {
-      setSelectedOrgId(orgs[0].id);
-    }
-  }, [selectedOrgId, orgs, setSelectedOrgId]);
 
   const handleDownload = async (recording: Recording) => {
     try {
@@ -136,7 +133,7 @@ export function RecordingsPage() {
     }
   };
 
-  if (!orgId) {
+  if (!orgId && (!orgs || orgs.length === 0)) {
     return (
       <PageLayout title="Recordings" description="No organization selected">
         <div className="vs-surface p-6 text-slate-300">No organization is linked to this account yet. Ask your org admin to assign your account to an organization.</div>
