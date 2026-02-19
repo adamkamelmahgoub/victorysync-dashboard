@@ -13,6 +13,7 @@ export default function AdminTopNav() {
   const items: Array<{ to: string; label: string }> = [
     { to: '/admin/orgs', label: 'Orgs' },
     { to: '/admin/users', label: 'Users' },
+    { to: '/admin/invites', label: 'Invites' },
     { to: '/admin/support', label: 'Support Tickets' },
     { to: '/admin/number-change-requests', label: 'Phone Requests' },
     { to: '/admin/reports', label: 'Reports' },

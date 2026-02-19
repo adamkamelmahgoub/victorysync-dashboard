@@ -25,6 +25,7 @@ import AdminNumberChangeRequestsPage from "./pages/admin/AdminNumberChangeReques
 import AdminReportsPage from "./pages/admin/AdminReportsPage";
 import AdminRecordingsPage from "./pages/admin/AdminRecordingsPage";
 import AdminSMSPage from "./pages/admin/AdminSMSPage";
+import AdminInviteCodesPage from "./pages/admin/AdminInviteCodesPage";
 import { AdminBillingPage } from "./pages/admin/AdminBillingPage";
 import { AdminBillingPageV2 } from "./pages/admin/AdminBillingPageV2";
 import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
@@ -112,6 +113,7 @@ function AdminRoute({ children }: { children: JSX.Element }) {
       '/admin/operations': '/dashboard',
       '/admin/orgs': '/dashboard',
       '/admin/users': '/dashboard',
+      '/admin/invites': '/dashboard',
       '/admin': '/dashboard',
     };
     const fallback = adminToClient[location.pathname] || '/dashboard';
@@ -310,6 +312,14 @@ function AppRouter() {
         element={
           <AdminRoute>
             <AdminNumberChangeRequestsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/invites"
+        element={
+          <AdminRoute>
+            <AdminInviteCodesPage />
           </AdminRoute>
         }
       />

@@ -14,6 +14,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const adminItems = [
     { label: 'Dashboard', path: '/' },
     { label: 'Phone Numbers', path: '/numbers' },
+    { label: 'Invite Codes', path: '/admin/invites' },
     { label: 'Reports', path: '/admin/reports' },
     { label: 'Recordings', path: '/admin/recordings' },
     { label: 'SMS', path: '/admin/sms' },

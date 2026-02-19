@@ -3109,6 +3109,147 @@ app.post('/api/admin/org-owner-invites', async (req, res) => {
   }
 });
 
+// GET /api/admin/invite-codes - platform admin invite-code management listing
+app.get('/api/admin/invite-codes', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const orgId = String(req.query.orgId || '').trim();
+    const email = normalizeEmail(req.query.email);
+    const limitRaw = Number(req.query.limit ?? 1000);
+    const offsetRaw = Number(req.query.offset ?? 0);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(5000, Math.floor(limitRaw))) : 1000;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
+
+    let q = supabaseAdmin
+      .from('org_invites')
+      .select('id, org_id, email, role, invited_by, invited_at')
+      .order('invited_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (orgId) q = q.eq('org_id', orgId);
+    if (email) q = q.ilike('email', `%${email}%`);
+
+    const { data: invites, error } = await q;
+    if (error) throw error;
+
+    const rows = invites || [];
+    const orgIds = Array.from(new Set(rows.map((r: any) => r.org_id).filter(Boolean)));
+    const inviterIds = Array.from(new Set(rows.map((r: any) => r.invited_by).filter(Boolean)));
+
+    const orgNameById: Record<string, string> = {};
+    const inviterEmailById: Record<string, string> = {};
+
+    if (orgIds.length > 0) {
+      const { data: orgRows } = await supabaseAdmin
+        .from('organizations')
+        .select('id, name')
+        .in('id', orgIds);
+      for (const o of (orgRows || [])) orgNameById[(o as any).id] = (o as any).name || '';
+    }
+
+    if (inviterIds.length > 0) {
+      const { data: inviterRows } = await supabaseAdmin
+        .from('users')
+        .select('id, email')
+        .in('id', inviterIds);
+      for (const u of (inviterRows || [])) inviterEmailById[(u as any).id] = (u as any).email || '';
+    }
+
+    const payload = rows.map((inv: any) => ({
+      id: inv.id,
+      org_id: inv.org_id,
+      org_name: orgNameById[inv.org_id] || null,
+      email: inv.email,
+      role: inv.role,
+      invited_at: inv.invited_at,
+      invited_by: inv.invited_by || null,
+      invited_by_email: inv.invited_by ? (inviterEmailById[inv.invited_by] || null) : null,
+      invite_code: computeInviteCode(inv),
+    }));
+
+    return res.json({ invites: payload, count: payload.length, limit, offset });
+  } catch (e: any) {
+    console.error('admin_list_invite_codes_failed:', fmtErr(e));
+    return res.status(500).json({ error: 'admin_list_invite_codes_failed', detail: fmtErr(e) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/admin/invite-codes - platform admin issues invite code for any org/email/role
+app.post('/api/admin/invite-codes', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { orgId, email, role } = req.body || {};
+    const normalizedEmail = normalizeEmail(email);
+    const inviteRole = String(role || 'agent');
+
+    if (!orgId || !looksLikeUuid(orgId)) return res.status(400).json({ error: 'invalid_org_id' });
+    if (!normalizedEmail) return res.status(400).json({ error: 'invalid_email' });
+    if (!['org_admin', 'org_manager', 'agent'].includes(inviteRole)) return res.status(400).json({ error: 'invalid_role' });
+
+    const { data: org, error: orgErr } = await supabaseAdmin
+      .from('organizations')
+      .select('id, name')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (orgErr) throw orgErr;
+    if (!org) return res.status(404).json({ error: 'org_not_found' });
+
+    const { data: invite, error: invErr } = await supabaseAdmin
+      .from('org_invites')
+      .upsert({ org_id: orgId, email: normalizedEmail, role: inviteRole, invited_by: actorId }, { onConflict: 'org_id,email' })
+      .select('id, org_id, email, role, invited_at, invited_by')
+      .maybeSingle();
+    if (invErr) throw invErr;
+    if (!invite) return res.status(500).json({ error: 'invite_issue_failed' });
+
+    return res.status(201).json({
+      invite: {
+        id: invite.id,
+        org_id: invite.org_id,
+        org_name: (org as any).name || null,
+        email: invite.email,
+        role: invite.role,
+        invited_at: invite.invited_at,
+        invited_by: invite.invited_by || actorId,
+        invite_code: computeInviteCode(invite as any),
+      }
+    });
+  } catch (e: any) {
+    console.error('admin_issue_invite_code_failed:', fmtErr(e));
+    return res.status(500).json({ error: 'admin_issue_invite_code_failed', detail: fmtErr(e) ?? 'unknown_error' });
+  }
+});
+
+// DELETE /api/admin/invite-codes/:inviteId - platform admin revoke invite code
+app.delete('/api/admin/invite-codes/:inviteId', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { inviteId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    if (!inviteId) return res.status(400).json({ error: 'invalid_invite_id' });
+
+    const { data: deleted, error } = await supabaseAdmin
+      .from('org_invites')
+      .delete()
+      .eq('id', inviteId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    if (!deleted) return res.status(404).json({ error: 'invite_not_found' });
+
+    return res.status(204).send();
+  } catch (e: any) {
+    console.error('admin_revoke_invite_code_failed:', fmtErr(e));
+    return res.status(500).json({ error: 'admin_revoke_invite_code_failed', detail: fmtErr(e) ?? 'unknown_error' });
+  }
+});
+
 // POST /api/orgs/:orgId/team-invites - org owner/admin issues team invite code
 app.post('/api/orgs/:orgId/team-invites', async (req, res) => {
   try {
