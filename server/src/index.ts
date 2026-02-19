@@ -6187,6 +6187,102 @@ app.get("/s/series", async (req, res) => {
         const rawMissedCalls = Number(raw.missed_count || 0);
         const rawTotalDuration = Number(raw.total_duration || 0);
 
+        // If KPI totals exist but related rows are empty, try a focused backfill from MightyCall
+        // for this report day, then re-query calls/recordings to populate detail tables.
+        if (reportDate && rawTotalCalls > 0 && relatedCalls.length === 0) {
+          try {
+            let overrideCreds: any = undefined;
+            try {
+              const { getOrgIntegration } = await import('./lib/integrationsStore');
+              const integ = await getOrgIntegration(report.org_id, 'mightycall');
+              if (integ && integ.credentials) {
+                overrideCreds = {
+                  clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+                  clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+                };
+              }
+            } catch {}
+
+            // Resolve org phones for recordings sync.
+            const assigned = await getAssignedPhoneNumbersForOrg(report.org_id);
+            const phoneNumberIds = (assigned.phones || []).map((p: any) => p.id || p.number).filter(Boolean);
+            const { syncMightyCallRecordings } = await import('./integrations/mightycall');
+
+            await Promise.all([
+              syncMightyCallCallHistory(
+                supabaseAdmin,
+                report.org_id,
+                { dateStart: reportDate, dateEnd: reportDate },
+                overrideCreds
+              ),
+              syncMightyCallRecordings(
+                supabaseAdmin,
+                report.org_id,
+                phoneNumberIds,
+                reportDate,
+                reportDate,
+                overrideCreds
+              )
+            ]);
+
+            const dayStart = new Date(`${reportDate}T00:00:00Z`);
+            const fromWide = new Date(dayStart.getTime() - (24 * 60 * 60 * 1000)).toISOString();
+            const toWide = new Date(dayStart.getTime() + (48 * 60 * 60 * 1000)).toISOString();
+
+            const { data: refetchedCalls } = await supabaseAdmin
+              .from('calls')
+              .select('id, from_number, to_number, from_number_digits, to_number_digits, status, duration_seconds, started_at, ended_at')
+              .eq('org_id', report.org_id)
+              .gte('started_at', fromWide)
+              .lte('started_at', toWide)
+              .order('started_at', { ascending: false })
+              .limit(Math.min(relatedLimit * 4, 20000));
+
+            let hydratedCalls = (refetchedCalls || []).filter((c: any) => {
+              if (!hasCandidateNumbers) return true;
+              return rowMatchesCandidateNumbers(c);
+            });
+            if (!isAdmin) {
+              hydratedCalls = hydratedCalls.filter((r: any) =>
+                reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet)
+              );
+            }
+            if (hydratedCalls.length > 0) {
+              relatedCalls = hydratedCalls.slice(0, relatedLimit);
+            }
+
+            const { data: refetchedRec } = await supabaseAdmin
+              .from('mightycall_recordings')
+              .select('id, from_number, to_number, duration_seconds, recording_date, recording_url, metadata')
+              .eq('org_id', report.org_id)
+              .gte('recording_date', fromWide)
+              .lte('recording_date', toWide)
+              .order('recording_date', { ascending: false })
+              .limit(Math.min(relatedLimit * 4, 20000));
+            let hydratedRec = (refetchedRec || []).map((r: any) => {
+              const { fromNumber, toNumber } = extractNumbersFromMetadata(r?.metadata);
+              return {
+                ...r,
+                from_number: r?.from_number || fromNumber,
+                to_number: r?.to_number || toNumber,
+              };
+            }).filter((r: any) => {
+              if (!hasCandidateNumbers) return true;
+              return numberMatch(r?.from_number) || numberMatch(r?.to_number);
+            });
+            if (!isAdmin) {
+              hydratedRec = hydratedRec.filter((r: any) =>
+                reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet)
+              );
+            }
+            if (hydratedRec.length > 0) {
+              relatedRecordings = hydratedRec.slice(0, relatedLimit);
+            }
+          } catch (e) {
+            console.warn('[mightycall/report detail] on-demand backfill failed:', fmtErr(e));
+          }
+        }
+
         // KPI source of truth: real call rows within report scope (after visibility filters).
         const normalizedStatus = (s: any) => String(s || '').toLowerCase().trim();
         const isAnswered = (s: string) => ['answered', 'completed', 'connected'].includes(s);

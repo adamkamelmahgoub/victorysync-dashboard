@@ -34,9 +34,17 @@ function fmtDuration(s: number) {
 }
 
 export function RecordingsPage() {
-  const { user } = useAuth();
+  const { user, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const { org: currentOrg } = useOrg();
-  const orgId = currentOrg?.id;
+  const orgId =
+    selectedOrgId ||
+    currentOrg?.id ||
+    (orgs && orgs.length > 0 ? orgs[0].id : null) ||
+    ((user?.user_metadata as any)?.org_id ?? null);
+  const orgName =
+    (orgs.find((o) => o.id === orgId)?.name) ||
+    currentOrg?.name ||
+    'your organization';
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(false);
@@ -98,6 +106,13 @@ export function RecordingsPage() {
     if (orgId && user) fetchRecordings(true);
   }, [orgId, user?.id]);
 
+  useEffect(() => {
+    // If auth already has orgs but selected org is empty, default to first org for client UX.
+    if (!selectedOrgId && orgs && orgs.length > 0) {
+      setSelectedOrgId(orgs[0].id);
+    }
+  }, [selectedOrgId, orgs, setSelectedOrgId]);
+
   const handleDownload = async (recording: Recording) => {
     try {
       const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download`), {
@@ -124,13 +139,13 @@ export function RecordingsPage() {
   if (!orgId) {
     return (
       <PageLayout title="Recordings" description="No organization selected">
-        <div className="vs-surface p-6 text-slate-300">Please select an organization to view recordings.</div>
+        <div className="vs-surface p-6 text-slate-300">No organization is linked to this account yet. Ask your org admin to assign your account to an organization.</div>
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout title="Recordings" description={`Organized recording history for ${currentOrg?.name || 'your organization'}`}>
+    <PageLayout title="Recordings" description={`Organized recording history for ${orgName}`}>
       <div className="space-y-6">
         <section className="vs-surface p-5">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
