@@ -1280,6 +1280,7 @@ app.get('/api/orgs/:orgId/recordings', async (req, res) => {
         return res.status(403).json({ error: 'forbidden' });
       }
     }
+    const isAdmin = !!actorId && (await isPlatformAdmin(actorId));
 
     // Fetch recordings for this org from mightycall_recordings table
     const { data: recordings, error } = await supabaseAdmin
@@ -1290,8 +1291,32 @@ app.get('/api/orgs/:orgId/recordings', async (req, res) => {
       .limit(limit);
 
     if (error) throw error;
+    let rows = recordings || [];
+    if (actorId && !isAdmin) {
+      const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(orgId, actorId);
+      const assignedIds = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
+      const assignedNumbers = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
+      const assignedDigits = new Set((digits || []).map((d: any) => String(d || '')).filter(Boolean));
+      if (assignedIds.size === 0 && assignedNumbers.size === 0 && assignedDigits.size === 0) {
+        rows = [];
+      } else {
+        rows = rows.filter((r: any) => {
+          const pid = String(r?.phone_number_id || '');
+          if (pid && assignedIds.has(pid)) return true;
+          const f = String(r?.from_number || '').trim();
+          const t = String(r?.to_number || '').trim();
+          if (f && assignedNumbers.has(f)) return true;
+          if (t && assignedNumbers.has(t)) return true;
+          const fd = normalizePhoneDigits(f);
+          const td = normalizePhoneDigits(t);
+          if (fd && assignedDigits.has(fd)) return true;
+          if (td && assignedDigits.has(td)) return true;
+          return false;
+        });
+      }
+    }
 
-    res.json({ recordings: recordings || [] });
+    res.json({ recordings: rows });
   } catch (err: any) {
     console.error('[get_org_recordings] error:', fmtErr(err));
     res.status(500).json({ error: 'fetch_failed', detail: fmtErr(err) ?? 'unknown_error' });
@@ -4177,12 +4202,16 @@ app.post('/api/admin/audit-logs', async (req, res) => {
 app.get("/api/calls/recent", async (req, res) => {
   try {
     const orgId = req.query.org_id as string | undefined;
+    const actorId = req.header('x-user-id') || null;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
     console.log('[calls/recent] Request:', { orgId, limit });
     if (orgId) {
       // Resolve assigned numbers and filter recent calls by those numbers
-      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      const isAdminActor = !!actorId && (await isPlatformAdmin(actorId));
+      const { numbers, digits } = (actorId && !isAdminActor)
+        ? await getUserAssignedPhoneNumbers(orgId, actorId)
+        : await getAssignedPhoneNumbersForOrg(orgId);
       if ((numbers.length === 0) && (digits.length === 0)) {
         return res.json({ items: [] });
       }
@@ -4315,12 +4344,16 @@ app.get("/s/recent", async (req, res) => {
   try {
     // Reuse same query semantics as /api/calls/recent
     const orgId = req.query.org_id as string | undefined;
+    const actorId = req.header('x-user-id') || null;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
     console.log('[s/recent] Request:', { orgId, limit });
 
     if (orgId) {
-      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      const isAdminActor = !!actorId && (await isPlatformAdmin(actorId));
+      const { numbers, digits } = (actorId && !isAdminActor)
+        ? await getUserAssignedPhoneNumbers(orgId, actorId)
+        : await getAssignedPhoneNumbersForOrg(orgId);
       if ((numbers.length === 0) && (digits.length === 0)) {
         return res.json({ items: [] });
       }
@@ -4397,6 +4430,7 @@ app.get("/s/recent", async (req, res) => {
 app.get("/api/calls/queue-summary", async (req, res) => {
   try {
     const orgId = req.query.org_id as string | undefined;
+    const actorId = req.header('x-user-id') || null;
     const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
 
     console.log('[queue-summary] Request:', { orgId, todayStart });
@@ -4423,7 +4457,10 @@ app.get("/api/calls/queue-summary", async (req, res) => {
     // If orgId provided, filter calls to only those matching assigned phone numbers
     let callsToAggregate = (data || []);
     if (orgId) {
-      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      const isAdminActor = !!actorId && (await isPlatformAdmin(actorId));
+      const { numbers, digits } = (actorId && !isAdminActor)
+        ? await getUserAssignedPhoneNumbers(orgId, actorId)
+        : await getAssignedPhoneNumbersForOrg(orgId);
       callsToAggregate = (callsToAggregate || []).filter((c: any) => {
         const tn = c.to_number || null;
         const td = c.to_number_digits || null;
@@ -4482,6 +4519,7 @@ app.get("/api/calls/queue-summary", async (req, res) => {
 app.get("/api/calls/series", async (req, res) => {
   try {
     const orgId = req.query.org_id as string | undefined;
+    const actorId = req.header('x-user-id') || null;
     const range = (req.query.range as string) || "day";
 
     console.log('[calls/series] Request:', { orgId, range });
@@ -4528,7 +4566,10 @@ app.get("/api/calls/series", async (req, res) => {
     // If orgId provided, filter calls to only those matching assigned phone numbers
     let callsForBucketing = (data || []);
     if (orgId) {
-      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      const isAdminActor = !!actorId && (await isPlatformAdmin(actorId));
+      const { numbers, digits } = (actorId && !isAdminActor)
+        ? await getUserAssignedPhoneNumbers(orgId, actorId)
+        : await getAssignedPhoneNumbersForOrg(orgId);
       callsForBucketing = (callsForBucketing || []).filter((c: any) => {
         const tn = c.to_number || null;
         const td = c.to_number_digits || null;
@@ -4615,6 +4656,7 @@ app.get("/api/calls/series", async (req, res) => {
 app.get("/s/series", async (req, res) => {
   try {
     const orgId = req.query.org_id as string | undefined;
+    const actorId = req.header('x-user-id') || null;
     const range = (req.query.range as string) || "day";
 
     console.log('[s/series] Request:', { orgId, range });
@@ -4657,7 +4699,10 @@ app.get("/s/series", async (req, res) => {
 
     let callsForBucketing = (data || []);
     if (orgId) {
-      const { numbers, digits } = await getAssignedPhoneNumbersForOrg(orgId);
+      const isAdminActor = !!actorId && (await isPlatformAdmin(actorId));
+      const { numbers, digits } = (actorId && !isAdminActor)
+        ? await getUserAssignedPhoneNumbers(orgId, actorId)
+        : await getAssignedPhoneNumbersForOrg(orgId);
       callsForBucketing = (callsForBucketing || []).filter((c: any) => {
         const tn = c.to_number || null;
         const td = c.to_number_digits || null;
@@ -4672,7 +4717,7 @@ app.get("/s/series", async (req, res) => {
       return st === "answered" || st === "completed";
     };
 
-    for (const row of data || []) {
+    for (const row of callsForBucketing || []) {
       const started = new Date(row.started_at);
       let bucketDate: Date;
       if (step === "hour") {
@@ -5190,7 +5235,7 @@ app.get("/s/series", async (req, res) => {
         }
 
         const reportType = req.query.type as string || 'calls';
-        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 1000));
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
         const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
 
@@ -5279,9 +5324,9 @@ app.get("/s/series", async (req, res) => {
         let assignedDigitSet = new Set<string>();
         if (!isAdmin && queryOrgIds.length > 0) {
           try {
-            // collect assigned numbers/ids/digits across all orgs
+            // collect assigned numbers/ids/digits across all orgs for THIS USER
             for (const o of queryOrgIds) {
-              const { phones, numbers, digits } = await getAssignedPhoneNumbersForOrg(o);
+              const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(o, userId);
               for (const n of numbers || []) assignedNumberSet.add(String(n));
               for (const d of digits || []) assignedDigitSet.add(String(d));
               for (const p of phones || []) if ((p as any)?.id) assignedIdSet.add(String((p as any).id));
@@ -5387,7 +5432,7 @@ app.get("/s/series", async (req, res) => {
           const orgIds = await getUserOrgIds(userId);
           if (!orgIds.includes(report.org_id)) return res.status(403).json({ error: 'forbidden' });
 
-          const { phones, numbers, digits } = await getAssignedPhoneNumbersForOrg(report.org_id);
+          const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(report.org_id, userId);
           const assignedIdSet = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
           const assignedNumberSet = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
           const assignedDigitSet = new Set((digits || []).map((d: any) => String(d || '')).filter(Boolean));
@@ -5417,6 +5462,8 @@ app.get("/s/series", async (req, res) => {
         const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
         const answerRate = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
 
+        const relatedLimit = Math.max(1, Math.min(parseInt(req.query.related_limit as string) || 5000, 20000));
+
         let relatedCalls: any[] = [];
         try {
           let q = supabaseAdmin
@@ -5424,7 +5471,7 @@ app.get("/s/series", async (req, res) => {
             .select('id, from_number, to_number, status, duration_seconds, started_at, ended_at')
             .eq('org_id', report.org_id)
             .order('started_at', { ascending: false })
-            .limit(200);
+            .limit(relatedLimit);
           if (fromTs && toTs) q = q.gte('started_at', fromTs).lte('started_at', toTs);
           const { data: callsData } = await q;
           relatedCalls = (callsData || []).filter((c: any) => {
@@ -5440,7 +5487,7 @@ app.get("/s/series", async (req, res) => {
             .select('id, from_number, to_number, duration_seconds, recording_date, recording_url')
             .eq('org_id', report.org_id)
             .order('recording_date', { ascending: false })
-            .limit(200);
+            .limit(relatedLimit);
           if (fromTs && toTs) q = q.gte('recording_date', fromTs).lte('recording_date', toTs);
           const { data: recData } = await q;
           relatedRecordings = (recData || []).filter((r: any) => {
@@ -5456,7 +5503,7 @@ app.get("/s/series", async (req, res) => {
             .select('id, from_number, to_number, message_text, direction, status, created_at, message_date, sent_at')
             .eq('org_id', report.org_id)
             .order('created_at', { ascending: false })
-            .limit(200);
+            .limit(relatedLimit);
           if (fromTs && toTs) q = q.gte('created_at', fromTs).lte('created_at', toTs);
           const { data: smsData } = await q;
           relatedSms = (smsData || []).filter((m: any) => {
@@ -5464,6 +5511,26 @@ app.get("/s/series", async (req, res) => {
             return numberMatch(m?.from_number) || numberMatch(m?.to_number);
           });
         } catch {}
+
+        const allNumbers = new Set<string>(candidateNumbers);
+        for (const c of relatedCalls) {
+          const f = String((c as any)?.from_number || '').trim();
+          const t = String((c as any)?.to_number || '').trim();
+          if (f) allNumbers.add(f);
+          if (t) allNumbers.add(t);
+        }
+        for (const r of relatedRecordings) {
+          const f = String((r as any)?.from_number || '').trim();
+          const t = String((r as any)?.to_number || '').trim();
+          if (f) allNumbers.add(f);
+          if (t) allNumbers.add(t);
+        }
+        for (const m of relatedSms) {
+          const f = String((m as any)?.from_number || '').trim();
+          const t = String((m as any)?.to_number || '').trim();
+          if (f) allNumbers.add(f);
+          if (t) allNumbers.add(t);
+        }
 
         res.json({
           report,
@@ -5476,6 +5543,7 @@ app.get("/s/series", async (req, res) => {
             avg_call_duration_seconds: avgDuration
           },
           numbers: candidateNumbers,
+          all_numbers_called: Array.from(allNumbers),
           related: {
             calls: relatedCalls,
             recordings: relatedRecordings,
@@ -5496,7 +5564,7 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 1000));
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
         const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
 
@@ -5659,6 +5727,42 @@ app.get("/s/series", async (req, res) => {
           });
         }
 
+        // Final assignment-based enforcement for non-admin users.
+        if (!isAdmin) {
+          try {
+            const orgIds = orgId ? [orgId] : await getUserOrgIds(userId);
+            const assignedIds = new Set<string>();
+            const assignedNumbers = new Set<string>();
+            const assignedDigits = new Set<string>();
+            for (const o of orgIds) {
+              const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(o, userId);
+              for (const p of phones || []) if ((p as any)?.id) assignedIds.add(String((p as any).id));
+              for (const n of numbers || []) assignedNumbers.add(String(n));
+              for (const d of digits || []) assignedDigits.add(String(d));
+            }
+            if (assignedIds.size === 0 && assignedNumbers.size === 0 && assignedDigits.size === 0) {
+              data = [];
+            } else {
+              data = (data || []).filter((r: any) => {
+                const pid = String(r?.phone_number_id || '');
+                if (pid && assignedIds.has(pid)) return true;
+                const f = String(r?.from_number || '').trim();
+                const t = String(r?.to_number || '').trim();
+                if (f && assignedNumbers.has(f)) return true;
+                if (t && assignedNumbers.has(t)) return true;
+                const fd = normalizePhoneDigits(f);
+                const td = normalizePhoneDigits(t);
+                if (fd && assignedDigits.has(fd)) return true;
+                if (td && assignedDigits.has(td)) return true;
+                return false;
+              });
+            }
+          } catch (e) {
+            console.warn('[mightycall/recordings] assignment filter failed:', fmtErr(e));
+            data = [];
+          }
+        }
+
         const rows = data || [];
         res.json({ recordings: rows, next_offset: rows.length === limit ? offset + rows.length : null });
       } catch (err: any) {
@@ -5744,7 +5848,7 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 1000));
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
         const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
 

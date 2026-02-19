@@ -423,7 +423,7 @@ export async function syncMightyCallReports(
       else if (st.includes('miss')) row.data.missed_count += 1;
       const dur = Number(r?.duration || r?.durationSeconds || 0);
       if (Number.isFinite(dur) && dur > 0) row.data.total_duration += dur;
-      if (numForMap && row.data.sample_numbers.length < 3 && !row.data.sample_numbers.includes(numForMap)) row.data.sample_numbers.push(numForMap);
+      if (numForMap && !row.data.sample_numbers.includes(numForMap)) row.data.sample_numbers.push(numForMap);
     }
 
     const reportRows = Array.from(buckets.values());

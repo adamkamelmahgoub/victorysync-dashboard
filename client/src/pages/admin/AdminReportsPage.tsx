@@ -36,6 +36,7 @@ interface ReportDetailResponse {
     avg_call_duration_seconds: number;
   };
   numbers: string[];
+  all_numbers_called?: string[];
   related: {
     calls: any[];
     recordings: any[];
@@ -337,7 +338,7 @@ const AdminReportsPage: FC = () => {
 
                   <div className="bg-slate-800/50 border border-slate-700 rounded p-4">
                     <div className="text-xs text-slate-400 mb-2">Numbers In This Report</div>
-                    <div className="text-sm text-slate-200 font-mono break-words">{(reportDetail.numbers || []).join(', ') || '-'}</div>
+                    <div className="text-sm text-slate-200 font-mono break-words">{(reportDetail.all_numbers_called || reportDetail.numbers || []).join(', ') || '-'}</div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

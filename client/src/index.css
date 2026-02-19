@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --vs-bg: #020617;
+  --vs-surface: #0b1220;
+  --vs-surface-2: #0f172a;
+  --vs-border: #1e293b;
+  --vs-text: #e2e8f0;
+  --vs-muted: #94a3b8;
+  --vs-brand-primary: #06b6d4;
+  --vs-brand-secondary: #10b981;
+  --vs-brand-accent: #14b8a6;
+}
+
 body {
-  @apply bg-slate-950 text-slate-50;
+  @apply text-slate-50 antialiased;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(6,182,212,0.08), transparent 30%),
+    radial-gradient(circle at 85% 0%, rgba(16,185,129,0.08), transparent 35%),
+    linear-gradient(180deg, #020617 0%, #020817 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.vs-surface {
+  background-color: rgba(11, 18, 32, 0.78);
+  border: 1px solid var(--vs-border);
+  backdrop-filter: blur(8px);
 }
