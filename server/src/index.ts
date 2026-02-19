@@ -416,8 +416,9 @@ app.get("/", (_req, res) => {
 app.use('/api', (req, res, next) => {
   // For development testing, allow requests with x-dev-bypass header
   if (req.header('x-dev-bypass') === 'true') {
-    // Set a test user ID for development
-    req.headers['x-user-id'] = 'a5f6f998-1234-5678-9abc-def012345678'; // adam@victorysync.com user ID
+    // Set a valid test user ID for development.
+    // Override via DEV_BYPASS_USER_ID env if needed.
+    req.headers['x-user-id'] = process.env.DEV_BYPASS_USER_ID || 'a5f6f998-5ed5-4c0c-88ac-9f27d677697a';
     console.log('[DEV BYPASS] Allowing request without auth:', req.method, req.path);
   }
   next();
@@ -461,7 +462,8 @@ app.get("/api/client-metrics", async (req, res) => {
 
     // If org_id not provided, try to infer from x-user-id (for org clients accessing their own metrics)
     const userId = req.header('x-user-id') || null;
-    if (!orgId && userId) {
+    const isAdminUser = userId ? await isPlatformAdmin(userId).catch(() => false) : false;
+    if (!orgId && userId && !isAdminUser) {
       console.log('[client-metrics] no explicit org_id; attempting to infer from user:', userId);
       try {
         const { data: userOrgs, error: userOrgsErr } = await supabaseAdmin
@@ -508,6 +510,28 @@ app.get("/api/client-metrics", async (req, res) => {
       // Fallback: compute from `calls` table for today
       console.log('[client-metrics] Falling back to live calls computation for org:', orgId);
       try {
+        const todayDate = new Date().toISOString().slice(0, 10);
+        // Prefer pre-aggregated MightyCall reports when available.
+        try {
+          const { data: reportRows, error: reportErr } = await supabaseAdmin
+            .from('mightycall_reports')
+            .select('data, report_date')
+            .eq('org_id', orgId)
+            .eq('report_type', 'calls')
+            .eq('report_date', todayDate);
+          if (!reportErr && Array.isArray(reportRows) && reportRows.length > 0) {
+            let totalCalls = 0;
+            let answeredCalls = 0;
+            for (const r of reportRows as any[]) {
+              const d = r?.data || {};
+              totalCalls += Number(d.calls_count || 0);
+              answeredCalls += Number(d.answered_count || 0);
+            }
+            const answerRate = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+            return res.json({ metrics: { org_id: orgId, total_calls: totalCalls, answered_calls: answeredCalls, answer_rate_pct: answerRate, avg_wait_seconds: 0 } });
+          }
+        } catch {}
+
         // Find assigned phone numbers for this org (many-to-many)
         const { phones, numbers: assignedNumbers, digits: assignedDigits } = await getAssignedPhoneNumbersForOrg(orgId);
         const callsSet: any[] = [];
@@ -601,6 +625,27 @@ app.get("/api/client-metrics", async (req, res) => {
       // Fallback: compute from calls table
       console.log('[client-metrics] Falling back to live calls computation (global)');
       try {
+        const todayDate = new Date().toISOString().slice(0, 10);
+        // Prefer pre-aggregated MightyCall reports when available.
+        try {
+          const { data: reportRows, error: reportErr } = await supabaseAdmin
+            .from('mightycall_reports')
+            .select('data, report_date')
+            .eq('report_type', 'calls')
+            .eq('report_date', todayDate);
+          if (!reportErr && Array.isArray(reportRows) && reportRows.length > 0) {
+            let totalCalls = 0;
+            let answeredCalls = 0;
+            for (const r of reportRows as any[]) {
+              const d = r?.data || {};
+              totalCalls += Number(d.calls_count || 0);
+              answeredCalls += Number(d.answered_count || 0);
+            }
+            const answerRatePct = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+            return res.json({ metrics: { total_calls: totalCalls, answered_calls: answeredCalls, answer_rate_pct: answerRatePct, avg_wait_seconds: 0 } });
+          }
+        } catch {}
+
         const { data: calls, error: callsErr } = await supabaseAdmin
           .from('calls')
           .select('status, started_at, answered_at')
@@ -2092,7 +2137,21 @@ app.post('/api/admin/mightycall/sync/calls', async (req, res) => {
     if (!orgId) return res.status(400).json({ error: 'missing_org_id' });
 
     try {
-      const result = await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart, dateEnd });
+      let overrideCreds: any = undefined;
+      try {
+        const { getOrgIntegration } = await import('./lib/integrationsStore');
+        const integ = await getOrgIntegration(orgId, 'mightycall');
+        if (integ && integ.credentials) {
+          overrideCreds = {
+            clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+            clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+          };
+        }
+      } catch (ie) {
+        console.warn('[MightyCall Calls Sync] failed to load org integration:', ie);
+      }
+
+      const result = await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart, dateEnd }, overrideCreds);
       res.json({ success: true, calls: result.callsSynced });
     } catch (mcErr: any) {
       console.error('mightycall_call_history_sync_failed:', fmtErr(mcErr));
@@ -4112,6 +4171,30 @@ app.get("/api/calls/recent", async (req, res) => {
       });
 
       const sliced = filtered.slice(0, limit);
+      if (sliced.length === 0) {
+        try {
+          const { data: reports } = await supabaseAdmin
+            .from('mightycall_reports')
+            .select('id, report_date, data')
+            .eq('org_id', orgId)
+            .eq('report_type', 'calls')
+            .order('report_date', { ascending: false })
+            .limit(limit);
+          const items = (reports || []).map((r: any) => ({
+            id: r.id,
+            direction: null,
+            status: 'reported',
+            fromNumber: null,
+            toNumber: (r?.data?.sample_numbers && r.data.sample_numbers[0]) || null,
+            queueName: null,
+            startedAt: `${r.report_date}T00:00:00Z`,
+            answeredAt: null,
+            endedAt: null,
+            agentName: null
+          }));
+          if (items.length > 0) return res.json({ items });
+        } catch {}
+      }
       const items: any[] = [];
       for (const c of sliced) {
         const agentName = await resolveAgentNameForExtension((c as any).mightycall_extension || (c as any).answered_extension || (c as any).answered_by || (c as any).answer_extension || (c as any).agent_extension || (c as any).agent || null);
@@ -4142,6 +4225,29 @@ app.get("/api/calls/recent", async (req, res) => {
     if (error) {
       console.error('[calls/recent] Supabase error:', fmtErr(error));
       throw error;
+    }
+    if (!data || data.length === 0) {
+      try {
+        const { data: reports } = await supabaseAdmin
+          .from('mightycall_reports')
+          .select('id, report_date, data')
+          .eq('report_type', 'calls')
+          .order('report_date', { ascending: false })
+          .limit(limit);
+        const items = (reports || []).map((r: any) => ({
+          id: r.id,
+          direction: null,
+          status: 'reported',
+          fromNumber: null,
+          toNumber: (r?.data?.sample_numbers && r.data.sample_numbers[0]) || null,
+          queueName: null,
+          startedAt: `${r.report_date}T00:00:00Z`,
+          answeredAt: null,
+          endedAt: null,
+          agentName: null
+        }));
+        if (items.length > 0) return res.json({ items });
+      } catch {}
     }
 
     const items = await Promise.all((data || []).map(async (c: any) => ({
@@ -5018,16 +5124,9 @@ app.get("/s/series", async (req, res) => {
         let orgId = paramOrgId;
         
         if (!orgId) {
-          const { data: userOrg, error: orgError } = await supabaseAdmin
-            .from('org_members')
-            .select('org_id')
-            .eq('user_id', userId)
-            .single();
-
-          if (orgError || !userOrg) {
-            return res.status(403).json({ error: 'no_org_membership' });
-          }
-          orgId = userOrg.org_id;
+          const orgIds = await getUserOrgIds(userId);
+          if (orgIds.length === 0) return res.status(403).json({ error: 'no_org_membership' });
+          orgId = orgIds[0];
         }
 
         const limit = parseInt(req.query.limit as string) || 100;
@@ -5490,30 +5589,34 @@ app.get("/s/series", async (req, res) => {
           targetOrgIds = [orgId];
         } else if (!isAdmin) {
           // Non-admin: only show their orgs
-          const { data: userOrgs } = await supabaseAdmin
-            .from('org_members')
-            .select('org_id')
-            .eq('user_id', userId);
-          
-          if (!userOrgs || userOrgs.length === 0) {
+          const orgIds = await getUserOrgIds(userId);
+          if (orgIds.length === 0) {
             return res.json({ messages: [] });
           }
-          targetOrgIds = userOrgs.map(o => o.org_id);
+          targetOrgIds = orgIds;
         }
         // If isAdmin and no orgId filter, we'll get all orgs
 
         // Build phone filter for non-admin users
         let allowedPhoneIds: string[] | null = null;
+        let allowedPhoneNumbers: string[] = [];
+        let allowedPhoneDigits: string[] = [];
         if (!isAdmin && targetOrgIds.length > 0) {
           // Get user's assigned phones for their org(s)
           const phonesByOrg: Record<string, string[]> = {};
           for (const oId of targetOrgIds) {
-            const { phones } = await getUserAssignedPhoneNumbers(oId, userId);
+            const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(oId, userId);
             phonesByOrg[oId] = phones.map(p => p.id).filter(Boolean);
+            if (numbers?.length) allowedPhoneNumbers = allowedPhoneNumbers.concat(numbers);
+            if (digits?.length) allowedPhoneDigits = allowedPhoneDigits.concat(digits);
           }
           const allPhoneIds = Object.values(phonesByOrg).flat();
           if (allPhoneIds.length > 0) {
             allowedPhoneIds = allPhoneIds;
+          }
+          const hasAnyAssignedPhones = allPhoneIds.length > 0 || allowedPhoneNumbers.length > 0 || allowedPhoneDigits.length > 0;
+          if (!hasAnyAssignedPhones) {
+            return res.json({ messages: [] });
           }
         }
 
@@ -5536,7 +5639,7 @@ app.get("/s/series", async (req, res) => {
             // User has no assigned phones in their org(s)
             return res.json({ messages: [] });
           }
-          query = query.in('phone_number_id', allowedPhoneIds);
+          query = query.in('phone_id', allowedPhoneIds);
         }
 
         let { data, error } = await query;
@@ -5557,12 +5660,24 @@ app.get("/s/series", async (req, res) => {
           }
 
           // Also apply phone filter for non-admin in fallback
-          if (!isAdmin && allowedPhoneIds) {
-            if (allowedPhoneIds.length === 0) {
-              // User has no assigned phones in their org(s)
-              return res.json({ messages: [] });
+          if (!isAdmin && (allowedPhoneNumbers.length > 0 || allowedPhoneDigits.length > 0)) {
+            const orParts: string[] = [];
+            for (const num of allowedPhoneNumbers) {
+              const n = String(num || '').replace(/,/g, '\\,');
+              if (n) {
+                orParts.push(`from_number.eq.${n}`);
+                orParts.push(`to_number.eq.${n}`);
+              }
             }
-            query = query.in('phone_number_id', allowedPhoneIds);
+            for (const d of allowedPhoneDigits) {
+              const digits = String(d || '').replace(/,/g, '\\,');
+              if (!digits) continue;
+              orParts.push(`from_number.ilike.*${digits}*`);
+              orParts.push(`to_number.ilike.*${digits}*`);
+            }
+            if (orParts.length > 0) {
+              query = query.or(orParts.join(','));
+            }
           }
 
           ({ data, error } = await query);
