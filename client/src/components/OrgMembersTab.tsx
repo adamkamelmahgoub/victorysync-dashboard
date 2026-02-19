@@ -89,7 +89,10 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
       const json = await createOrgMember(orgId, inviteEmail, inviteRole, user?.id || undefined);
       if (json?.error) setError(json.error);
       else {
-        const msg = `Invited ${inviteEmail} as ${inviteRole}`;
+        const code = json?.invite?.invite_code || null;
+        const msg = code
+          ? `Invite code for ${inviteEmail}: ${code}`
+          : `Invited ${inviteEmail} as ${inviteRole}`;
         setInviteSuccess(msg);
         setLastInviteResult(msg);
       }

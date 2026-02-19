@@ -203,9 +203,16 @@ export async function listMightyCallSyncJobs(params?: { orgId?: string; status?:
 }
 
 export async function createOrgMember(orgId: string, email: string, role: string, userId?: string) {
-  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members`, {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/team-invites`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify({ email, role })
+  });
+}
+
+export async function createOrgOwnerInvite(orgId: string, ownerEmail: string, ownerRole: string, userId?: string) {
+  return await fetchJson(`/api/admin/org-owner-invites`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ orgId, ownerEmail, ownerRole })
   });
 }
 

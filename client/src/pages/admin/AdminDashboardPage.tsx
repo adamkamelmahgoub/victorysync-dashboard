@@ -193,15 +193,16 @@ const AdminDashboardPage: React.FC = () => {
     setSuccess(null);
 
     try {
-      const res = await fetch(buildApiUrl(`/api/orgs/${inviteOrgId}/members`), {
+      const res = await fetch(buildApiUrl(`/api/admin/org-owner-invites`), {
         method: 'POST',
         headers: {
           'x-user-id': user?.id || '',
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          email: inviteEmail,
-          role: inviteRole
+          orgId: inviteOrgId,
+          ownerEmail: inviteEmail,
+          ownerRole: inviteRole
         })
       });
 
@@ -211,7 +212,8 @@ const AdminDashboardPage: React.FC = () => {
         return;
       }
 
-      setSuccess(`Invitation sent to ${inviteEmail}!`);
+      const code = data?.invite?.invite_code;
+      setSuccess(code ? `Owner invite code for ${inviteEmail}: ${code}` : `Invitation sent to ${inviteEmail}!`);
       setInviteEmail('');
       setInviteRole('agent');
       if (selectedOrg === inviteOrgId) {

@@ -73,6 +73,20 @@ function looksLikeUuid(v: string | null | undefined): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
+function normalizeEmail(v: any): string {
+  return String(v || '').trim().toLowerCase();
+}
+
+function inviteCodeSecret(): string {
+  return String(process.env.INVITE_CODE_SECRET || process.env.SUPABASE_SERVICE_KEY || 'victorysync-invite-dev');
+}
+
+function computeInviteCode(inv: { id: string; org_id: string; email: string; role: string }): string {
+  const payload = `${inv.id}|${inv.org_id}|${normalizeEmail(inv.email)}|${inv.role}|${inviteCodeSecret()}`;
+  const raw = crypto.createHash('sha256').update(payload).digest('hex').toUpperCase().slice(0, 10);
+  return `${raw.slice(0, 5)}-${raw.slice(5, 10)}`;
+}
+
 // ---- API Key helpers ----
 function hashApiKey(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -3020,6 +3034,214 @@ app.post('/api/orgs/:orgId/members', async (req, res) => {
   } catch (e: any) {
     console.error('org_add_member_failed:', fmtErr(e));
     res.status(500).json({ error: 'org_add_member_failed', detail: fmtErr(e) });
+  }
+});
+
+// POST /api/admin/org-owner-invites - platform admin issues owner invite code
+app.post('/api/admin/org-owner-invites', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { orgId, ownerEmail, ownerRole } = req.body || {};
+    const normalizedOwnerEmail = normalizeEmail(ownerEmail);
+    const role = String(ownerRole || 'org_admin');
+    if (!orgId || !looksLikeUuid(orgId)) return res.status(400).json({ error: 'invalid_org_id' });
+    if (!normalizedOwnerEmail) return res.status(400).json({ error: 'invalid_owner_email' });
+    if (!['org_admin', 'org_manager', 'agent'].includes(role)) return res.status(400).json({ error: 'invalid_role' });
+
+    const { data: org, error: orgErr } = await supabaseAdmin
+      .from('organizations')
+      .select('id, name')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (orgErr) throw orgErr;
+    if (!org) return res.status(404).json({ error: 'org_not_found' });
+
+    const { data: invite, error: invErr } = await supabaseAdmin
+      .from('org_invites')
+      .upsert({ org_id: orgId, email: normalizedOwnerEmail, role, invited_by: actorId }, { onConflict: 'org_id,email' })
+      .select('id, org_id, email, role, invited_at')
+      .maybeSingle();
+    if (invErr) throw invErr;
+    if (!invite) return res.status(500).json({ error: 'invite_issue_failed' });
+
+    const inviteCode = computeInviteCode(invite as any);
+    res.status(201).json({
+      invite: {
+        id: invite.id,
+        org_id: invite.org_id,
+        org_name: (org as any).name || null,
+        org_email: null,
+        owner_email: invite.email,
+        role: invite.role,
+        invite_code: inviteCode,
+        invited_at: invite.invited_at,
+      }
+    });
+  } catch (e: any) {
+    console.error('create_org_owner_invite_failed:', fmtErr(e));
+    res.status(500).json({ error: 'create_org_owner_invite_failed', detail: fmtErr(e) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/orgs/:orgId/team-invites - org owner/admin issues team invite code
+app.post('/api/orgs/:orgId/team-invites', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const allowed = (await isPlatformAdmin(actorId)) || (await isOrgAdmin(actorId, orgId));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    const { email, role } = req.body || {};
+    const normalized = normalizeEmail(email);
+    const memberRole = String(role || 'agent');
+    if (!normalized) return res.status(400).json({ error: 'invalid_email' });
+    if (!['agent', 'org_manager', 'org_admin'].includes(memberRole)) return res.status(400).json({ error: 'invalid_role' });
+
+    const { data: org, error: orgErr } = await supabaseAdmin
+      .from('organizations')
+      .select('id, name')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (orgErr) throw orgErr;
+    if (!org) return res.status(404).json({ error: 'org_not_found' });
+
+    const { data: invite, error: invErr } = await supabaseAdmin
+      .from('org_invites')
+      .upsert({ org_id: orgId, email: normalized, role: memberRole, invited_by: actorId }, { onConflict: 'org_id,email' })
+      .select('id, org_id, email, role, invited_at')
+      .maybeSingle();
+    if (invErr) throw invErr;
+    if (!invite) return res.status(500).json({ error: 'invite_issue_failed' });
+
+    const inviteCode = computeInviteCode(invite as any);
+    res.status(201).json({
+      invite: {
+        id: invite.id,
+        org_id: invite.org_id,
+        org_name: (org as any).name || null,
+        email: invite.email,
+        role: invite.role,
+        invite_code: inviteCode,
+        invited_at: invite.invited_at,
+      }
+    });
+  } catch (e: any) {
+    console.error('create_team_invite_failed:', fmtErr(e));
+    res.status(500).json({ error: 'create_team_invite_failed', detail: fmtErr(e) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/auth/validate-invite - verify invite code/email/org before signup
+app.post('/api/auth/validate-invite', async (req, res) => {
+  try {
+    const { email, orgId, inviteCode } = req.body || {};
+    const normalized = normalizeEmail(email);
+    const org_id = String(orgId || '').trim();
+    const code = String(inviteCode || '').trim().toUpperCase();
+    if (!normalized || !org_id || !code) {
+      return res.status(400).json({ error: 'missing_required_fields' });
+    }
+
+    const { data: invites, error } = await supabaseAdmin
+      .from('org_invites')
+      .select('id, org_id, email, role, invited_at')
+      .eq('org_id', org_id)
+      .eq('email', normalized)
+      .order('invited_at', { ascending: false });
+    if (error) throw error;
+    const match = (invites || []).find((inv: any) => computeInviteCode(inv) === code);
+    if (!match) return res.status(404).json({ error: 'invite_not_found_or_invalid_code' });
+
+    const { data: org } = await supabaseAdmin
+      .from('organizations')
+      .select('id, name')
+      .eq('id', org_id)
+      .maybeSingle();
+
+    res.json({
+      valid: true,
+      invite: {
+        id: match.id,
+        org_id: match.org_id,
+        org_name: (org as any)?.name || null,
+        email: match.email,
+        role: match.role,
+      }
+    });
+  } catch (e: any) {
+    console.error('validate_invite_failed:', fmtErr(e));
+    res.status(500).json({ error: 'validate_invite_failed', detail: fmtErr(e) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/auth/signup-with-invite - create account only when invite code matches email+org
+app.post('/api/auth/signup-with-invite', async (req, res) => {
+  try {
+    const { email, password, orgId, inviteCode, fullName } = req.body || {};
+    const normalized = normalizeEmail(email);
+    const org_id = String(orgId || '').trim();
+    const code = String(inviteCode || '').trim().toUpperCase();
+    const pwd = String(password || '');
+    const displayName = String(fullName || '').trim();
+
+    if (!normalized || !org_id || !code || !pwd) return res.status(400).json({ error: 'missing_required_fields' });
+    if (pwd.length < 8) return res.status(400).json({ error: 'weak_password', detail: 'Password must be at least 8 characters' });
+
+    const { data: invites, error } = await supabaseAdmin
+      .from('org_invites')
+      .select('id, org_id, email, role, invited_at')
+      .eq('org_id', org_id)
+      .eq('email', normalized)
+      .order('invited_at', { ascending: false });
+    if (error) throw error;
+    const invite = (invites || []).find((inv: any) => computeInviteCode(inv) === code);
+    if (!invite) return res.status(404).json({ error: 'invite_not_found_or_invalid_code' });
+
+    // Create auth account with org-scoped metadata.
+    const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+      email: normalized,
+      password: pwd,
+      email_confirm: true,
+      user_metadata: {
+        full_name: displayName || undefined,
+        org_id,
+        role: invite.role || 'agent',
+      }
+    });
+    if (createErr) {
+      const msg = String(createErr.message || '');
+      if (msg.toLowerCase().includes('already')) return res.status(409).json({ error: 'account_already_exists' });
+      throw createErr;
+    }
+    const userId = created?.user?.id;
+    if (!userId) return res.status(500).json({ error: 'signup_failed_no_user' });
+
+    const membership = { org_id, user_id: userId, role: invite.role || 'agent' };
+    const { error: memberErr } = await supabaseAdmin.from('org_users').upsert(membership, { onConflict: 'org_id,user_id' });
+    if (memberErr) throw memberErr;
+    try { await supabaseAdmin.from('org_members').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
+    try { await supabaseAdmin.from('organization_members').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
+
+    // Consume invite after successful signup.
+    try { await supabaseAdmin.from('org_invites').delete().eq('id', invite.id); } catch {}
+
+    res.status(201).json({
+      success: true,
+      user: {
+        id: userId,
+        email: normalized,
+        org_id,
+        role: invite.role || 'agent',
+      }
+    });
+  } catch (e: any) {
+    console.error('signup_with_invite_failed:', fmtErr(e));
+    res.status(500).json({ error: 'signup_with_invite_failed', detail: fmtErr(e) ?? 'unknown_error' });
   }
 });
 
