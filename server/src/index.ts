@@ -6024,6 +6024,44 @@ app.get("/s/series", async (req, res) => {
           const d = normalizePhoneDigits(s);
           return !!(d && candidateDigits.has(d));
         };
+        const rowMatchesCandidateNumbers = (row: any) => {
+          if (numberMatch(row?.from_number) || numberMatch(row?.to_number)) return true;
+          const fd = String(row?.from_number_digits || '').trim();
+          const td = String(row?.to_number_digits || '').trim();
+          if (fd && candidateDigits.has(fd)) return true;
+          if (td && candidateDigits.has(td)) return true;
+          return false;
+        };
+        const extractNumbersFromMetadata = (metadata: any): { fromNumber: string | null; toNumber: string | null } => {
+          try {
+            const m = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+            if (!m || typeof m !== 'object') return { fromNumber: null, toNumber: null };
+            const fromNumber = String(
+              m.from_number ||
+              m.from ||
+              m.businessNumber ||
+              m.caller_number ||
+              m.phone_number ||
+              ''
+            ).trim() || null;
+            let toNumber: string | null = null;
+            if (Array.isArray(m.called) && m.called[0]) {
+              toNumber = String(m.called[0].phone || m.called[0].number || '').trim() || null;
+            }
+            if (!toNumber) {
+              toNumber = String(
+                m.to_number ||
+                m.to ||
+                m.recipient ||
+                m.destination_number ||
+                ''
+              ).trim() || null;
+            }
+            return { fromNumber, toNumber };
+          } catch {
+            return { fromNumber: null, toNumber: null };
+          }
+        };
 
         let assignedIdSet = new Set<string>();
         let assignedNumberSet = new Set<string>();
@@ -6041,7 +6079,7 @@ app.get("/s/series", async (req, res) => {
         try {
           let q = supabaseAdmin
             .from('calls')
-            .select('id, from_number, to_number, status, duration_seconds, started_at, ended_at')
+            .select('id, from_number, to_number, from_number_digits, to_number_digits, status, duration_seconds, started_at, ended_at')
             .eq('org_id', report.org_id)
             .order('started_at', { ascending: false })
             .limit(relatedLimit);
@@ -6050,17 +6088,17 @@ app.get("/s/series", async (req, res) => {
           relatedCalls = (callsData || []).filter((c: any) => {
             // If report has candidate numbers, keep it scoped to those numbers.
             if (!hasCandidateNumbers) return true;
-            return numberMatch(c?.from_number) || numberMatch(c?.to_number);
+            return rowMatchesCandidateNumbers(c);
           });
           // If strict report-day filter returns empty, relax date filter while keeping number scope.
           if (relatedCalls.length === 0 && hasCandidateNumbers) {
             const { data: relaxedCalls } = await supabaseAdmin
               .from('calls')
-              .select('id, from_number, to_number, status, duration_seconds, started_at, ended_at')
+              .select('id, from_number, to_number, from_number_digits, to_number_digits, status, duration_seconds, started_at, ended_at')
               .eq('org_id', report.org_id)
               .order('started_at', { ascending: false })
               .limit(Math.min(relatedLimit * 4, 20000));
-            relatedCalls = (relaxedCalls || []).filter((c: any) => numberMatch(c?.from_number) || numberMatch(c?.to_number)).slice(0, relatedLimit);
+            relatedCalls = (relaxedCalls || []).filter((c: any) => rowMatchesCandidateNumbers(c)).slice(0, relatedLimit);
           }
         } catch {}
 
@@ -6068,24 +6106,40 @@ app.get("/s/series", async (req, res) => {
         try {
           let q = supabaseAdmin
             .from('mightycall_recordings')
-            .select('id, from_number, to_number, duration_seconds, recording_date, recording_url')
+            .select('id, from_number, to_number, duration_seconds, recording_date, recording_url, metadata')
             .eq('org_id', report.org_id)
             .order('recording_date', { ascending: false })
             .limit(relatedLimit);
           if (fromTs && toTs) q = q.gte('recording_date', fromTs).lte('recording_date', toTs);
           const { data: recData } = await q;
-          relatedRecordings = (recData || []).filter((r: any) => {
+          const normalizedRec = (recData || []).map((r: any) => {
+            const { fromNumber, toNumber } = extractNumbersFromMetadata(r?.metadata);
+            return {
+              ...r,
+              from_number: r?.from_number || fromNumber,
+              to_number: r?.to_number || toNumber,
+            };
+          });
+          relatedRecordings = normalizedRec.filter((r: any) => {
             if (!hasCandidateNumbers) return true;
             return numberMatch(r?.from_number) || numberMatch(r?.to_number);
           });
           if (relatedRecordings.length === 0 && hasCandidateNumbers) {
             const { data: relaxedRec } = await supabaseAdmin
               .from('mightycall_recordings')
-              .select('id, from_number, to_number, duration_seconds, recording_date, recording_url')
+              .select('id, from_number, to_number, duration_seconds, recording_date, recording_url, metadata')
               .eq('org_id', report.org_id)
               .order('recording_date', { ascending: false })
               .limit(Math.min(relatedLimit * 4, 20000));
-            relatedRecordings = (relaxedRec || []).filter((r: any) => numberMatch(r?.from_number) || numberMatch(r?.to_number)).slice(0, relatedLimit);
+            const normalizedRelaxedRec = (relaxedRec || []).map((r: any) => {
+              const { fromNumber, toNumber } = extractNumbersFromMetadata(r?.metadata);
+              return {
+                ...r,
+                from_number: r?.from_number || fromNumber,
+                to_number: r?.to_number || toNumber,
+              };
+            });
+            relatedRecordings = normalizedRelaxedRec.filter((r: any) => numberMatch(r?.from_number) || numberMatch(r?.to_number)).slice(0, relatedLimit);
           }
         } catch {}
 
@@ -7274,6 +7328,13 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
 
       // Perform the sync using per-org creds when available
       const result = await syncMightyCallReports(supabaseAdmin, orgId, phoneNumberIds, actualStartDate, actualEndDate, overrideCreds);
+      const callHistoryResult = await syncMightyCallCallHistory(
+        supabaseAdmin,
+        orgId,
+        { dateStart: actualStartDate, dateEnd: actualEndDate },
+        overrideCreds
+      );
+      const callsSynced = Number(callHistoryResult?.callsSynced || 0);
 
       // Update job record as completed (if job exists)
       if (job) {
@@ -7287,18 +7348,20 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
               start_date: actualStartDate,
               end_date: actualEndDate,
               reports_synced: result.reportsSynced,
-              recordings_synced: result.recordingsSynced
+              recordings_synced: result.recordingsSynced,
+              calls_synced: callsSynced
             }
           })
           .eq('id', job.id);
       }
 
-      console.log(`[MightyCall Sync] Reports sync completed for org ${orgId}: ${result.reportsSynced} reports, ${result.recordingsSynced} recordings`);
+      console.log(`[MightyCall Sync] Reports sync completed for org ${orgId}: ${result.reportsSynced} reports, ${result.recordingsSynced} recordings, ${callsSynced} calls`);
       res.json({
         success: true,
         org_id: orgId,
         reports_synced: result.reportsSynced,
         recordings_synced: result.recordingsSynced,
+        calls_synced: callsSynced,
         job_id: job?.id || null
       });
 

@@ -1,13 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
 
-interface Recording {
+type Recording = {
   id: string;
   org_id: string;
-  call_id?: string;
   from_number?: string | null;
   to_number?: string | null;
   duration_seconds?: number | null;
@@ -15,6 +14,23 @@ interface Recording {
   recording_date?: string | null;
   recording_url?: string | null;
   created_at?: string | null;
+};
+
+function fmtDate(v?: string | null) {
+  if (!v) return '-';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString();
+}
+
+function secondsOf(r: Recording) {
+  return Number(r.duration_seconds ?? r.duration ?? 0) || 0;
+}
+
+function fmtDuration(s: number) {
+  if (!s) return '0s';
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}m ${rem}s`;
 }
 
 export function RecordingsPage() {
@@ -24,68 +40,73 @@ export function RecordingsPage() {
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [nextOffset, setNextOffset] = useState<number | null>(0);
 
-  const fetchRecordings = async () => {
+  const filteredRows = useMemo(() => {
+    const q = search.trim();
+    if (!q) return recordings;
+    return recordings.filter((r) => String(r.from_number || '').includes(q) || String(r.to_number || '').includes(q));
+  }, [recordings, search]);
+
+  const summary = useMemo(() => {
+    const total = filteredRows.length;
+    const totalSeconds = filteredRows.reduce((a, r) => a + secondsOf(r), 0);
+    const avgSeconds = total > 0 ? Math.round(totalSeconds / total) : 0;
+    return { total, totalSeconds, avgSeconds };
+  }, [filteredRows]);
+
+  const fetchRecordings = async (reset = true) => {
     if (!orgId || !user) return;
-    setLoading(true);
-    setError(null);
+    if (!reset && nextOffset == null) return;
+
+    const activeOffset = reset ? 0 : (nextOffset ?? 0);
+
     try {
-      const response = await fetch(buildApiUrl(`/api/orgs/${orgId}/recordings`), {
-        headers: {
-          'x-user-id': user.id,
-          'Content-Type': 'application/json'
-        }
+      if (reset) {
+        setLoading(true);
+        setError(null);
+      } else {
+        setLoadingMore(true);
+      }
+
+      const response = await fetch(buildApiUrl(`/api/mightycall/recordings?org_id=${encodeURIComponent(orgId)}&limit=500&offset=${activeOffset}`), {
+        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' }
       });
 
       if (!response.ok) {
-        setError('Failed to fetch recordings');
+        const body = await response.json().catch(() => ({}));
+        setError(body?.detail || body?.error || 'Failed to fetch recordings');
         return;
       }
 
       const data = await response.json();
-      setRecordings(Array.isArray(data) ? data : data.recordings || []);
+      const rows = data.recordings || [];
+      setRecordings((prev) => (reset ? rows : [...prev, ...rows]));
+      setNextOffset(data.next_offset ?? null);
     } catch (err: any) {
       setError(err?.message || 'Error fetching recordings');
     } finally {
-      setLoading(false);
+      if (reset) setLoading(false);
+      else setLoadingMore(false);
     }
   };
 
   useEffect(() => {
-    if (orgId && user) {
-      fetchRecordings();
-    }
+    if (orgId && user) fetchRecordings(true);
   }, [orgId, user?.id]);
-
-  const durationSeconds = (r: Recording) => Number(r.duration_seconds ?? r.duration ?? 0) || 0;
-
-  const formatDuration = (seconds: number) => {
-    if (!seconds) return '0s';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}m ${secs}s`;
-  };
-
-  const formatDate = (r: Recording) => {
-    const raw = r.recording_date || r.created_at;
-    return raw ? new Date(raw).toLocaleString() : '-';
-  };
 
   const handleDownload = async (recording: Recording) => {
     try {
       const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download`), {
-        headers: {
-          'x-user-id': user?.id || '',
-          'Content-Type': 'application/json'
-        }
+        headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' }
       });
-
       if (!response.ok) {
         setError('Failed to download recording');
         return;
       }
-
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -103,76 +124,79 @@ export function RecordingsPage() {
   if (!orgId) {
     return (
       <PageLayout title="Recordings" description="No organization selected">
-        <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-6 text-slate-300">Please select an organization to view recordings.</div>
+        <div className="vs-surface p-6 text-slate-300">Please select an organization to view recordings.</div>
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout title="Recordings" description={`View recordings for ${currentOrg?.name || 'your organization'}`}>
+    <PageLayout title="Recordings" description={`Organized recording history for ${currentOrg?.name || 'your organization'}`}>
       <div className="space-y-6">
-        {error && (
-          <div className="bg-red-900/30 border border-red-700 rounded-lg p-4">
-            <p className="text-red-300 text-sm">{error}</p>
-          </div>
-        )}
-
-        <div className="flex justify-end">
-          <button
-            onClick={fetchRecordings}
-            disabled={loading}
-            className="px-6 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 transition font-medium"
-          >
-            {loading ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-
-        <div className="bg-slate-900/80 ring-1 ring-slate-800 p-6 rounded-lg">
-          <h2 className="text-sm font-semibold text-slate-200 mb-4">Recordings ({recordings.length})</h2>
-
-          {loading ? (
-            <div className="text-center py-8">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-emerald-500 mb-2"></div>
-              <div className="text-slate-400 text-sm">Loading recordings...</div>
+        <section className="vs-surface p-5">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-slate-300 mb-2">Search Number</label>
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100" />
             </div>
-          ) : recordings.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm">No recordings found</div>
+            <div className="text-xs text-slate-400">Scope: assigned numbers only</div>
+            <button onClick={() => fetchRecordings(true)} disabled={loading} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">{loading ? 'Refreshing...' : 'Refresh'}</button>
+          </div>
+        </section>
+
+        {error && <div className="vs-surface border border-rose-500/40 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</div>}
+
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Recordings</div><div className="text-2xl text-white font-bold">{summary.total}</div></div>
+          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Total Duration</div><div className="text-2xl text-white font-bold">{fmtDuration(summary.totalSeconds)}</div></div>
+          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Average Duration</div><div className="text-2xl text-cyan-300 font-bold">{fmtDuration(summary.avgSeconds)}</div></div>
+        </section>
+
+        <section className="vs-surface p-0 overflow-hidden">
+          <div className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">Recording List</div>
+          {loading ? (
+            <div className="px-4 py-8 text-sm text-slate-400">Loading recordings...</div>
+          ) : filteredRows.length === 0 ? (
+            <div className="px-4 py-8 text-sm text-slate-400">No recordings found.</div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="max-h-[72vh] overflow-auto">
               <table className="w-full text-sm">
-                <thead className="border-b border-slate-700/50">
-                  <tr className="text-slate-400">
-                    <th className="text-left py-3 px-4 font-semibold">From / To</th>
-                    <th className="text-left py-3 px-4 font-semibold">Duration</th>
-                    <th className="text-left py-3 px-4 font-semibold">Date</th>
-                    <th className="text-left py-3 px-4 font-semibold">Action</th>
+                <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400">
+                  <tr>
+                    <th className="text-left py-2 px-3">From</th>
+                    <th className="text-left py-2 px-3">To</th>
+                    <th className="text-left py-2 px-3">Duration</th>
+                    <th className="text-left py-2 px-3">Date</th>
+                    <th className="text-left py-2 px-3">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-700/30">
-                  {recordings.map((recording) => (
-                    <tr key={recording.id} className="hover:bg-slate-800/30 transition">
-                      <td className="py-3 px-4 text-slate-300 font-mono text-xs">{(recording.from_number || '-') + ' -> ' + (recording.to_number || '-')}</td>
-                      <td className="py-3 px-4 text-slate-300">{formatDuration(durationSeconds(recording))}</td>
-                      <td className="py-3 px-4 text-slate-500 text-xs">{formatDate(recording)}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex gap-3">
-                          {recording.recording_url && (
-                            <a href={recording.recording_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 text-xs font-semibold">
-                              Play
-                            </a>
-                          )}
-                          <button onClick={() => handleDownload(recording)} className="text-cyan-400 hover:text-cyan-300 text-xs font-semibold">
-                            Download
-                          </button>
+                <tbody className="divide-y divide-slate-800/60">
+                  {filteredRows.map((recording) => (
+                    <tr key={recording.id} className="hover:bg-slate-800/40">
+                      <td className="px-3 py-2 font-mono text-xs text-slate-200">{recording.from_number || '-'}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-200">{recording.to_number || '-'}</td>
+                      <td className="px-3 py-2 text-slate-300">{fmtDuration(secondsOf(recording))}</td>
+                      <td className="px-3 py-2 text-xs text-slate-400">{fmtDate(recording.recording_date || recording.created_at)}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          {recording.recording_url ? (
+                            <a href={recording.recording_url} target="_blank" rel="noopener noreferrer" className="rounded border border-cyan-500/40 bg-cyan-900/20 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-900/30">Play</a>
+                          ) : <span className="text-xs text-slate-500">N/A</span>}
+                          <button onClick={() => handleDownload(recording)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700">Download</button>
                         </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+
+              {nextOffset !== null && (
+                <div className="p-3 border-t border-slate-800 flex justify-center">
+                  <button onClick={() => fetchRecordings(false)} disabled={loadingMore} className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-60">{loadingMore ? 'Loading...' : 'Load more'}</button>
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </section>
       </div>
     </PageLayout>
   );
