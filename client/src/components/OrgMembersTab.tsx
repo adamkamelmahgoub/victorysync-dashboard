@@ -1,6 +1,13 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { getOrgMembers, createOrgMember, deleteOrgMember } from '../lib/apiClient';
+import {
+  getOrgMembers,
+  createOrgMember,
+  deleteOrgMember,
+  updateOrgMemberRole,
+  getOrgManagerPermissions,
+  saveOrgManagerPermissions
+} from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Member {
@@ -23,6 +30,17 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [lastInviteAttempt, setLastInviteAttempt] = useState<string | null>(null);
   const [lastInviteResult, setLastInviteResult] = useState<string | null>(null);
+  const [roleDrafts, setRoleDrafts] = useState<Record<string, string>>({});
+  const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
+  const [permEditorFor, setPermEditorFor] = useState<string | null>(null);
+  const [permLoading, setPermLoading] = useState(false);
+  const [permSaving, setPermSaving] = useState(false);
+  const [permDraft, setPermDraft] = useState({
+    can_manage_agents: false,
+    can_manage_phone_numbers: false,
+    can_edit_service_targets: false,
+    can_view_billing: false,
+  });
   // Allow sending an invite if admin check hasn't completed yet (server will enforce permissions),
   // but disable when we've completed the check and the actor is confirmed not an admin.
   const inviteDisabled = inviting || apiUnavailable || !inviteEmail.trim() || (adminCheckDone && !isOrgAdmin);
@@ -38,8 +56,11 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
     try {
       const result = await getOrgMembers(orgId, user?.id);
       setApiUnavailable(false);
-      const list = (result.members || []).map((m: any) => ({ id: m.id, userId: m.user_id, email: m.email || '', role: m.role }));
+      const list = (result.members || []).map((m: any) => ({ id: m.id, userId: m.user_id, email: m.email || '', role: m.role, pending_invite: !!m.pending_invite }));
       setMembers(list);
+      const nextDrafts: Record<string, string> = {};
+      for (const m of list) nextDrafts[m.id] = m.role;
+      setRoleDrafts(nextDrafts);
     } catch (e: any) {
       if (e?.status === 404) {
         setApiUnavailable(true);
@@ -95,6 +116,65 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
       setError(e?.message || 'Failed to remove member');
     }
     fetchMembers();
+  }
+
+  async function handleRoleSave(member: Member) {
+    if (!member.userId) return;
+    if (adminCheckDone && !isOrgAdmin) { setError('Only organization admins can edit roles'); return; }
+    const nextRole = roleDrafts[member.id] || member.role;
+    if (!nextRole || nextRole === member.role) return;
+    setSavingRoleId(member.id);
+    setError(null);
+    try {
+      await updateOrgMemberRole(orgId, member.userId, nextRole, user?.id || undefined);
+      setInviteSuccess(`Updated ${member.email} role to ${nextRole}`);
+      await fetchMembers();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to update role');
+    } finally {
+      setSavingRoleId(null);
+    }
+  }
+
+  async function openPermissionEditor(member: Member) {
+    if (adminCheckDone && !isOrgAdmin) { setError('Only organization admins can manage permissions'); return; }
+    setPermEditorFor(member.id);
+    setPermLoading(true);
+    setError(null);
+    try {
+      const json = await getOrgManagerPermissions(orgId, member.id, user?.id || undefined);
+      const p = json?.permissions || {};
+      setPermDraft({
+        can_manage_agents: !!p.can_manage_agents,
+        can_manage_phone_numbers: !!p.can_manage_phone_numbers,
+        can_edit_service_targets: !!p.can_edit_service_targets,
+        can_view_billing: !!p.can_view_billing,
+      });
+    } catch {
+      setPermDraft({
+        can_manage_agents: false,
+        can_manage_phone_numbers: false,
+        can_edit_service_targets: false,
+        can_view_billing: false,
+      });
+    } finally {
+      setPermLoading(false);
+    }
+  }
+
+  async function savePermissionEditor(memberId: string) {
+    if (adminCheckDone && !isOrgAdmin) { setError('Only organization admins can manage permissions'); return; }
+    setPermSaving(true);
+    setError(null);
+    try {
+      await saveOrgManagerPermissions(orgId, memberId, permDraft, user?.id || undefined);
+      setInviteSuccess('Manager permissions updated');
+      setPermEditorFor(null);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to save manager permissions');
+    } finally {
+      setPermSaving(false);
+    }
   }
 
   async function handleAcceptInvite(inviteId: string) {
@@ -206,11 +286,25 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
             </thead>
             <tbody>
               {members.map(member => (
-                <tr key={member.id} className="border-t border-slate-800">
+                <React.Fragment key={member.id}>
+                <tr className="border-t border-slate-800">
                   <td className="p-3 text-slate-200">{member.email}</td>
                   <td className="p-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-slate-200">{member.role}</span>
+                      {member.pending_invite ? (
+                        <span className="text-slate-200">{member.role}</span>
+                      ) : (
+                        <select
+                          className="p-1.5 rounded bg-slate-800 border border-slate-700 text-sm text-slate-200"
+                          value={roleDrafts[member.id] || member.role}
+                          disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
+                          onChange={(e) => setRoleDrafts((prev) => ({ ...prev, [member.id]: e.target.value }))}
+                        >
+                          <option value="org_admin">Org Admin</option>
+                          <option value="org_manager">Org Manager</option>
+                          <option value="agent">Agent</option>
+                        </select>
+                      )}
                       {member.pending_invite && (
                         <span className="text-xs bg-yellow-900/50 text-yellow-300 px-2 py-1 rounded">
                           Pending
@@ -237,17 +331,87 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
                         </button>
                       </>
                     ) : (
-                      <button
-                        className="px-2 py-1 text-sm bg-rose-700 text-white rounded hover:bg-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={() => handleRemove(member.userId || member.id)}
-                        disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
-                        title={apiUnavailable || (adminCheckDone && !isOrgAdmin) ? 'No permission' : 'Remove member'}
-                      >
-                        Remove
-                      </button>
+                      <>
+                        <button
+                          className="px-2 py-1 text-xs bg-blue-700 text-white rounded hover:bg-blue-600 transition-colors disabled:opacity-50"
+                          onClick={() => handleRoleSave(member)}
+                          disabled={
+                            apiUnavailable ||
+                            (adminCheckDone && !isOrgAdmin) ||
+                            savingRoleId === member.id ||
+                            (roleDrafts[member.id] || member.role) === member.role
+                          }
+                        >
+                          {savingRoleId === member.id ? 'Saving...' : 'Save Role'}
+                        </button>
+                        {((roleDrafts[member.id] || member.role) === 'org_manager' || member.role === 'org_manager') && (
+                          <button
+                            className="px-2 py-1 text-xs bg-indigo-700 text-white rounded hover:bg-indigo-600 transition-colors disabled:opacity-50"
+                            onClick={() => openPermissionEditor(member)}
+                            disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
+                          >
+                            Permissions
+                          </button>
+                        )}
+                        <button
+                          className="px-2 py-1 text-sm bg-rose-700 text-white rounded hover:bg-rose-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          onClick={() => handleRemove(member.userId || member.id)}
+                          disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}
+                          title={apiUnavailable || (adminCheckDone && !isOrgAdmin) ? 'No permission' : 'Remove member'}
+                        >
+                          Remove
+                        </button>
+                      </>
                     )}
                   </td>
                 </tr>
+                {permEditorFor === member.id && (
+                <tr className="border-t border-slate-800 bg-slate-900/50">
+                  <td className="p-3 text-slate-300 text-xs" colSpan={3}>
+                    {permLoading ? (
+                      <div>Loading permissions...</div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="font-semibold text-slate-200">Manager Permissions</div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={permDraft.can_manage_agents} onChange={(e) => setPermDraft((p) => ({ ...p, can_manage_agents: e.target.checked }))} />
+                            <span>Manage Agents</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={permDraft.can_manage_phone_numbers} onChange={(e) => setPermDraft((p) => ({ ...p, can_manage_phone_numbers: e.target.checked }))} />
+                            <span>Manage Phone Numbers</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={permDraft.can_edit_service_targets} onChange={(e) => setPermDraft((p) => ({ ...p, can_edit_service_targets: e.target.checked }))} />
+                            <span>Edit Service Targets</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={permDraft.can_view_billing} onChange={(e) => setPermDraft((p) => ({ ...p, can_view_billing: e.target.checked }))} />
+                            <span>View Billing</span>
+                          </label>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            className="px-2 py-1 text-xs bg-emerald-700 text-white rounded hover:bg-emerald-600 disabled:opacity-50"
+                            onClick={() => savePermissionEditor(member.id)}
+                            disabled={permSaving}
+                          >
+                            {permSaving ? 'Saving...' : 'Save Permissions'}
+                          </button>
+                          <button
+                            className="px-2 py-1 text-xs bg-slate-700 text-white rounded hover:bg-slate-600"
+                            onClick={() => setPermEditorFor(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

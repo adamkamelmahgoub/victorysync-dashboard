@@ -212,6 +212,38 @@ export async function createOrgMember(orgId: string, email: string, role: string
 export async function deleteOrgMember(orgId: string, targetUserId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(targetUserId)}`, { method: 'DELETE', headers: { 'x-user-id': userId || '' } });
 }
+
+export async function updateOrgMemberRole(orgId: string, targetUserId: string, role: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(targetUserId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function getOrgManagerPermissions(orgId: string, orgMemberId: string, userId?: string) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/managers/${encodeURIComponent(orgMemberId)}/permissions`, {
+    headers: { 'x-user-id': userId || '' }
+  });
+}
+
+export async function saveOrgManagerPermissions(
+  orgId: string,
+  orgMemberId: string,
+  permissions: {
+    can_manage_agents?: boolean;
+    can_manage_phone_numbers?: boolean;
+    can_edit_service_targets?: boolean;
+    can_view_billing?: boolean;
+  },
+  userId?: string
+) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/managers/${encodeURIComponent(orgMemberId)}/permissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify(permissions),
+  });
+}
 // Organization integrations (MightyCall, etc.)
 export async function getOrgIntegrations(orgId: string, userId?: string) {
   return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/integrations`, { headers: { 'x-user-id': userId || '' } });

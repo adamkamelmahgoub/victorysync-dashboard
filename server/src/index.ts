@@ -68,6 +68,11 @@ function fmtErr(e: any) {
   return (e as any)?.message ?? e;
 }
 
+function looksLikeUuid(v: string | null | undefined): boolean {
+  if (!v) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+}
+
 // ---- API Key helpers ----
 function hashApiKey(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -1339,22 +1344,88 @@ app.post('/api/admin/orgs/:orgId/managers/:orgMemberId/permissions', async (req,
     const allowed = (userId && (await isPlatformAdmin(userId))) || (userId && (await isOrgAdmin(userId, orgId)));
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
-    // Upsert into org_manager_permissions keyed by org_member_id
+    // Resolve a stable permission key that works across schema variants:
+    // - preferred: legacy organization_members.id (uuid)
+    // - fallback: incoming orgMemberId
+    let permissionKey = String(orgMemberId);
+    if (!looksLikeUuid(permissionKey)) {
+      try {
+        // If incoming id is org_users.id (numeric), resolve to user_id first.
+        const maybeNumeric = Number(permissionKey);
+        let resolvedUserId: string | null = null;
+        if (!Number.isNaN(maybeNumeric)) {
+          const { data: ou } = await supabaseAdmin
+            .from('org_users')
+            .select('user_id')
+            .eq('id', maybeNumeric)
+            .eq('org_id', orgId)
+            .maybeSingle();
+          resolvedUserId = (ou as any)?.user_id || null;
+        } else if (looksLikeUuid(permissionKey)) {
+          resolvedUserId = permissionKey;
+        }
+
+        if (resolvedUserId) {
+          const { data: om } = await supabaseAdmin
+            .from('org_members')
+            .select('id')
+            .eq('org_id', orgId)
+            .eq('user_id', resolvedUserId)
+            .maybeSingle();
+          if ((om as any)?.id) permissionKey = String((om as any).id);
+          else {
+            // Create membership row when missing so FK-constrained permissions can be saved.
+            try {
+              const { data: created } = await supabaseAdmin
+                .from('org_members')
+                .upsert({ org_id: orgId, user_id: resolvedUserId, role: 'org_manager' }, { onConflict: 'org_id,user_id' })
+                .select('id')
+                .maybeSingle();
+              if ((created as any)?.id) permissionKey = String((created as any).id);
+              else if (looksLikeUuid(resolvedUserId)) permissionKey = resolvedUserId;
+            } catch {
+              if (looksLikeUuid(resolvedUserId)) permissionKey = resolvedUserId;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Upsert-like behavior without relying on ON CONFLICT constraints that may be missing.
     const payload = {
-      org_member_id: orgMemberId,
+      org_member_id: permissionKey,
       can_manage_agents: !!perms.can_manage_agents,
       can_manage_phone_numbers: !!perms.can_manage_phone_numbers,
       can_edit_service_targets: !!perms.can_edit_service_targets,
       can_view_billing: !!perms.can_view_billing,
     };
 
-    const { data, error } = await supabaseAdmin
+    let data: any = null;
+    const { data: existing } = await supabaseAdmin
       .from('org_manager_permissions')
-      .upsert(payload, { onConflict: 'org_member_id' })
-      .select()
+      .select('id')
+      .eq('org_member_id', permissionKey)
       .maybeSingle();
 
-    if (error) throw error;
+    if (existing?.id) {
+      const { data: upd, error: updErr } = await supabaseAdmin
+        .from('org_manager_permissions')
+        .update(payload)
+        .eq('id', existing.id)
+        .select()
+        .maybeSingle();
+      if (updErr) throw updErr;
+      data = upd;
+    } else {
+      const { data: ins, error: insErr } = await supabaseAdmin
+        .from('org_manager_permissions')
+        .insert(payload)
+        .select()
+        .maybeSingle();
+      if (insErr) throw insErr;
+      data = ins;
+    }
+
     res.json({ permissions: data });
   } catch (err: any) {
     console.error('org_manager_permissions_failed:', fmtErr(err));
@@ -2957,6 +3028,46 @@ app.post('/api/orgs/:orgId/members', async (req, res) => {
   }
 });
 
+// PATCH /api/orgs/:orgId/members/:userId - update org member role (org-admin only)
+app.patch('/api/orgs/:orgId/members/:userId', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId, userId } = req.params;
+    const { role } = req.body || {};
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!((actorId && (await isPlatformAdmin(actorId))) || (await isOrgAdmin(actorId, orgId)))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const validRoles = ['agent', 'org_manager', 'org_admin'];
+    if (!role || !validRoles.includes(String(role))) {
+      return res.status(400).json({ error: 'invalid_role', detail: `role must be one of: ${validRoles.join(', ')}` });
+    }
+
+    const { data: member, error } = await supabaseAdmin
+      .from('org_users')
+      .update({ role: String(role) })
+      .eq('org_id', orgId)
+      .eq('user_id', userId)
+      .select('id, org_id, user_id, role, created_at')
+      .maybeSingle();
+    if (error) throw error;
+    if (!member) return res.status(404).json({ error: 'member_not_found' });
+
+    try {
+      await supabaseAdmin
+        .from('organization_members')
+        .update({ role: String(role) })
+        .eq('org_id', orgId)
+        .eq('user_id', userId);
+    } catch {}
+
+    res.json({ member });
+  } catch (e: any) {
+    console.error('org_update_member_failed:', fmtErr(e));
+    res.status(500).json({ error: 'org_update_member_failed', detail: fmtErr(e) });
+  }
+});
+
 // DELETE /api/orgs/:orgId/members/:userId - remove a member from the org (org-admin only)
 app.delete('/api/orgs/:orgId/members/:userId', async (req, res) => {
   try {
@@ -3595,11 +3706,46 @@ app.get('/api/admin/orgs/:orgId/raw-phone-mappings', async (req, res) => {
 // GET /api/admin/orgs/:orgId/managers/:orgMemberId/permissions - fetch org manager permissions
 app.get('/api/admin/orgs/:orgId/managers/:orgMemberId/permissions', async (req, res) => {
   try {
+    const actorId = req.header('x-user-id') || null;
     const { orgId, orgMemberId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const allowed = (await isPlatformAdmin(actorId)) || (await isOrgAdmin(actorId, orgId));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    let permissionKey = String(orgMemberId);
+    if (!looksLikeUuid(permissionKey)) {
+      try {
+        const maybeNumeric = Number(permissionKey);
+        let resolvedUserId: string | null = null;
+        if (!Number.isNaN(maybeNumeric)) {
+          const { data: ou } = await supabaseAdmin
+            .from('org_users')
+            .select('user_id')
+            .eq('id', maybeNumeric)
+            .eq('org_id', orgId)
+            .maybeSingle();
+          resolvedUserId = (ou as any)?.user_id || null;
+        } else if (looksLikeUuid(permissionKey)) {
+          resolvedUserId = permissionKey;
+        }
+
+        if (resolvedUserId) {
+          const { data: om } = await supabaseAdmin
+            .from('org_members')
+            .select('id')
+            .eq('org_id', orgId)
+            .eq('user_id', resolvedUserId)
+            .maybeSingle();
+          if ((om as any)?.id) permissionKey = String((om as any).id);
+          else if (looksLikeUuid(resolvedUserId)) permissionKey = resolvedUserId;
+        }
+      } catch {}
+    }
+
     const { data, error } = await supabaseAdmin
       .from('org_manager_permissions')
       .select('*')
-      .eq('org_member_id', orgMemberId)
+      .eq('org_member_id', permissionKey)
       .maybeSingle();
     if (error) throw error;
     res.json({ permissions: data || null });
@@ -5446,6 +5592,7 @@ app.get("/s/series", async (req, res) => {
         const toTs = reportDate ? `${reportDate}T23:59:59Z` : null;
         const candidateNumbers = extractCandidateNumbersFromReport(report);
         const candidateDigits = new Set(candidateNumbers.map((n) => normalizePhoneDigits(n)).filter(Boolean) as string[]);
+        const hasCandidateNumbers = candidateNumbers.length > 0;
         const numberMatch = (value: any) => {
           const s = String(value || '').trim();
           if (!s) return false;
@@ -5454,13 +5601,15 @@ app.get("/s/series", async (req, res) => {
           return !!(d && candidateDigits.has(d));
         };
 
-        const raw = (report as any)?.data || {};
-        const totalCalls = Number(raw.calls_count || 0);
-        const answeredCalls = Number(raw.answered_count || 0);
-        const missedCalls = Number(raw.missed_count || 0);
-        const totalDuration = Number(raw.total_duration || 0);
-        const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
-        const answerRate = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+        let assignedIdSet = new Set<string>();
+        let assignedNumberSet = new Set<string>();
+        let assignedDigitSet = new Set<string>();
+        if (!isAdmin) {
+          const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(report.org_id, userId);
+          assignedIdSet = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
+          assignedNumberSet = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
+          assignedDigitSet = new Set((digits || []).map((d: any) => String(d || '')).filter(Boolean));
+        }
 
         const relatedLimit = Math.max(1, Math.min(parseInt(req.query.related_limit as string) || 5000, 20000));
 
@@ -5475,7 +5624,8 @@ app.get("/s/series", async (req, res) => {
           if (fromTs && toTs) q = q.gte('started_at', fromTs).lte('started_at', toTs);
           const { data: callsData } = await q;
           relatedCalls = (callsData || []).filter((c: any) => {
-            if (candidateNumbers.length === 0) return true;
+            // If report has candidate numbers, keep it scoped to those numbers.
+            if (!hasCandidateNumbers) return true;
             return numberMatch(c?.from_number) || numberMatch(c?.to_number);
           });
         } catch {}
@@ -5491,7 +5641,7 @@ app.get("/s/series", async (req, res) => {
           if (fromTs && toTs) q = q.gte('recording_date', fromTs).lte('recording_date', toTs);
           const { data: recData } = await q;
           relatedRecordings = (recData || []).filter((r: any) => {
-            if (candidateNumbers.length === 0) return true;
+            if (!hasCandidateNumbers) return true;
             return numberMatch(r?.from_number) || numberMatch(r?.to_number);
           });
         } catch {}
@@ -5507,10 +5657,47 @@ app.get("/s/series", async (req, res) => {
           if (fromTs && toTs) q = q.gte('created_at', fromTs).lte('created_at', toTs);
           const { data: smsData } = await q;
           relatedSms = (smsData || []).filter((m: any) => {
-            if (candidateNumbers.length === 0) return true;
+            if (!hasCandidateNumbers) return true;
             return numberMatch(m?.from_number) || numberMatch(m?.to_number);
           });
         } catch {}
+
+        // Non-admin users must only see data for numbers assigned directly to them.
+        if (!isAdmin) {
+          relatedCalls = relatedCalls.filter((r: any) =>
+            reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet)
+          );
+          relatedRecordings = relatedRecordings.filter((r: any) =>
+            reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet)
+          );
+          relatedSms = relatedSms.filter((r: any) =>
+            reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet)
+          );
+        }
+
+        const raw = (report as any)?.data || {};
+        const rawTotalCalls = Number(raw.calls_count || 0);
+        const rawAnsweredCalls = Number(raw.answered_count || 0);
+        const rawMissedCalls = Number(raw.missed_count || 0);
+        const rawTotalDuration = Number(raw.total_duration || 0);
+
+        // KPI source of truth: real call rows within report scope (after visibility filters).
+        const normalizedStatus = (s: any) => String(s || '').toLowerCase().trim();
+        const isAnswered = (s: string) => ['answered', 'completed', 'connected'].includes(s);
+        let totalCalls = relatedCalls.length;
+        let answeredCalls = relatedCalls.reduce((acc: number, c: any) => acc + (isAnswered(normalizedStatus(c?.status)) ? 1 : 0), 0);
+        let missedCalls = Math.max(0, totalCalls - answeredCalls);
+        let totalDuration = relatedCalls.reduce((acc: number, c: any) => acc + (Number(c?.duration_seconds || 0) || 0), 0);
+
+        // If related calls are unavailable in `calls`, fall back to raw MightyCall report metrics.
+        if (totalCalls === 0 && rawTotalCalls > 0) {
+          totalCalls = rawTotalCalls;
+          answeredCalls = rawAnsweredCalls;
+          missedCalls = rawMissedCalls > 0 ? rawMissedCalls : Math.max(0, rawTotalCalls - rawAnsweredCalls);
+          totalDuration = rawTotalDuration;
+        }
+        const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
+        const answerRate = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
 
         const allNumbers = new Set<string>(candidateNumbers);
         for (const c of relatedCalls) {
@@ -5542,7 +5729,7 @@ app.get("/s/series", async (req, res) => {
             total_duration_seconds: totalDuration,
             avg_call_duration_seconds: avgDuration
           },
-          numbers: candidateNumbers,
+          numbers: Array.from(allNumbers),
           all_numbers_called: Array.from(allNumbers),
           related: {
             calls: relatedCalls,
