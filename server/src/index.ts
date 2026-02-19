@@ -87,6 +87,17 @@ function computeInviteCode(inv: { id: string; org_id: string; email: string; rol
   return `${raw.slice(0, 5)}-${raw.slice(5, 10)}`;
 }
 
+const IMMUTABLE_SUPER_ADMIN_EMAIL = 'adam@victorysync.com';
+async function isImmutableSuperAdminUser(userId: string | null | undefined): Promise<boolean> {
+  if (!userId) return false;
+  try {
+    const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+    return normalizeEmail(data?.user?.email) === IMMUTABLE_SUPER_ADMIN_EMAIL;
+  } catch {
+    return false;
+  }
+}
+
 // ---- API Key helpers ----
 function hashApiKey(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -1554,10 +1565,15 @@ app.put('/api/user/profile', async (req, res) => {
 
     const { full_name, email, phone_number } = req.body;
 
+    const { data: currentUser, error: currentUserErr } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (currentUserErr || !currentUser?.user) throw (currentUserErr || new Error('user_not_found'));
+    const currentMeta: any = currentUser.user.user_metadata || {};
+
     const updatePayload: any = {
       user_metadata: {
-        full_name: full_name || '',
-        phone_number: phone_number || ''
+        ...currentMeta,
+        full_name: full_name ?? currentMeta.full_name ?? '',
+        phone_number: phone_number ?? currentMeta.phone_number ?? ''
       }
     };
 
@@ -1669,6 +1685,13 @@ app.post('/api/admin/users/:userId/global-role', async (req, res) => {
 
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
     if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    if (!globalRole) return res.status(400).json({ error: 'missing_global_role' });
+
+    if (await isImmutableSuperAdminUser(userId)) {
+      if (globalRole !== 'platform_admin') {
+        return res.status(403).json({ error: 'immutable_super_admin', detail: 'adam@victorysync.com must remain platform_admin' });
+      }
+    }
 
     const { data, error } = await supabaseAdmin
       .from('profiles')
@@ -4143,6 +4166,15 @@ const handleAdminUserUpdate = async (req: any, res: any) => {
     const { id } = req.params;
     const { orgId, role, can_generate_api_keys, global_role } = req.body;
 
+    const targetIsImmutableSuperAdmin = await isImmutableSuperAdminUser(id);
+    if (targetIsImmutableSuperAdmin) {
+      const badGlobalRole = global_role !== undefined && global_role !== 'platform_admin';
+      const badRole = role !== undefined && role !== 'admin';
+      if (badGlobalRole || badRole) {
+        return res.status(403).json({ error: 'immutable_super_admin', detail: 'adam@victorysync.com role is locked to platform_admin/admin' });
+      }
+    }
+
     // Fetch current user to get existing metadata
     const { data: userData, error: fetchError } =
       await supabaseAdmin.auth.admin.getUserById(id);
@@ -4163,6 +4195,11 @@ const handleAdminUserUpdate = async (req: any, res: any) => {
     if (global_role !== undefined) {
       if (global_role === null || global_role === '') delete newMetadata.global_role;
       else newMetadata.global_role = global_role;
+    }
+
+    if (targetIsImmutableSuperAdmin) {
+      newMetadata.global_role = 'platform_admin';
+      newMetadata.role = 'admin';
     }
 
     const { data, error } = await supabaseAdmin.auth.admin.updateUserById(id, {
