@@ -6052,6 +6052,16 @@ app.get("/s/series", async (req, res) => {
             if (!hasCandidateNumbers) return true;
             return numberMatch(c?.from_number) || numberMatch(c?.to_number);
           });
+          // If strict report-day filter returns empty, relax date filter while keeping number scope.
+          if (relatedCalls.length === 0 && hasCandidateNumbers) {
+            const { data: relaxedCalls } = await supabaseAdmin
+              .from('calls')
+              .select('id, from_number, to_number, status, duration_seconds, started_at, ended_at')
+              .eq('org_id', report.org_id)
+              .order('started_at', { ascending: false })
+              .limit(Math.min(relatedLimit * 4, 20000));
+            relatedCalls = (relaxedCalls || []).filter((c: any) => numberMatch(c?.from_number) || numberMatch(c?.to_number)).slice(0, relatedLimit);
+          }
         } catch {}
 
         let relatedRecordings: any[] = [];
@@ -6068,6 +6078,15 @@ app.get("/s/series", async (req, res) => {
             if (!hasCandidateNumbers) return true;
             return numberMatch(r?.from_number) || numberMatch(r?.to_number);
           });
+          if (relatedRecordings.length === 0 && hasCandidateNumbers) {
+            const { data: relaxedRec } = await supabaseAdmin
+              .from('mightycall_recordings')
+              .select('id, from_number, to_number, duration_seconds, recording_date, recording_url')
+              .eq('org_id', report.org_id)
+              .order('recording_date', { ascending: false })
+              .limit(Math.min(relatedLimit * 4, 20000));
+            relatedRecordings = (relaxedRec || []).filter((r: any) => numberMatch(r?.from_number) || numberMatch(r?.to_number)).slice(0, relatedLimit);
+          }
         } catch {}
 
         let relatedSms: any[] = [];
@@ -6084,6 +6103,15 @@ app.get("/s/series", async (req, res) => {
             if (!hasCandidateNumbers) return true;
             return numberMatch(m?.from_number) || numberMatch(m?.to_number);
           });
+          if (relatedSms.length === 0 && hasCandidateNumbers) {
+            const { data: relaxedSms } = await supabaseAdmin
+              .from('mightycall_sms_messages')
+              .select('id, from_number, to_number, message_text, direction, status, created_at, message_date, sent_at')
+              .eq('org_id', report.org_id)
+              .order('created_at', { ascending: false })
+              .limit(Math.min(relatedLimit * 4, 20000));
+            relatedSms = (relaxedSms || []).filter((m: any) => numberMatch(m?.from_number) || numberMatch(m?.to_number)).slice(0, relatedLimit);
+          }
         } catch {}
 
         // Non-admin users must only see data for numbers assigned directly to them.
