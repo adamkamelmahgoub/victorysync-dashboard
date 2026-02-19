@@ -1,7 +1,10 @@
-[MightyCall] extensions request failed {
-  url: 'https://ccapi.mightycall.com/v4/extensions',
-  status: 404,
-  body: '<html><body><h1>404 Not Found</h1>\n' +
-    'The requested URL was not found.\n' +
-    '</body></html>\n'
+[org_detail] get_org_phone_metrics failed: column "number_digits" does not exist
+[org_detail] get_org_phone_metrics failed: column "number_digits" does not exist
+admin_update_user_failed: User not found
+[SMS Log] error {
+  code: '23503',
+  details: 'Key (org_id)=(b0b6ce58-5d52-4b16-b09b-69f67cf2f74e) is not present in table "organizations".',
+  hint: null,
+  message: 'insert or update on table "sms_logs" violates foreign key constraint "sms_logs_org_id_fkey"'
 }
+admin_metrics_volume_failed: column calls.wait_seconds does not exist

@@ -108,7 +108,7 @@ export function SMSPage() {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${user.id}`,
+            'x-user-id': user.id,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({

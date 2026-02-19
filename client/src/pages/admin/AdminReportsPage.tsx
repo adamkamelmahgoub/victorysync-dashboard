@@ -3,6 +3,7 @@ import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
+import { useRealtimeSubscription } from '../../lib/realtimeSubscriptions';
 
 interface Report {
   id: string;

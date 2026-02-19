@@ -19,7 +19,7 @@ interface Recording {
 }
 
 const NumbersPage: FC = () => {
-  const { user, selectedOrgId } = useAuth();
+  const { user, selectedOrgId, globalRole } = useAuth();
   const userId = user?.id;
   const [numbers, setNumbers] = useState<any[]>([]);
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -35,12 +35,7 @@ const NumbersPage: FC = () => {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    // Ensure admin status is evaluated first, then load numbers so auto-assignment
-    // can run when we know the user is an admin.
-    (async () => {
-      await checkAdminStatus();
-      await fetchNumbers();
-    })();
+    fetchNumbers();
   }, [selectedOrgId, userId]);
 
   useEffect(() => {
@@ -56,22 +51,9 @@ const NumbersPage: FC = () => {
     }
   }, [selectedPhoneId, recordings]);
 
-  const checkAdminStatus = async () => {
-    if (!userId) return;
-    try {
-      // Check if user is platform admin by their role
-      const response = await fetch(`/api/users/${userId}`, {
-        headers: { 'x-user-id': userId }
-      }).catch(() => null);
-      
-      if (response?.ok) {
-        const data = await response.json();
-        setIsAdmin(data.global_role === 'platform_admin' || data.is_admin === true);
-      }
-    } catch (error) {
-      console.error('Error checking admin status:', error);
-    }
-  };
+  useEffect(() => {
+    setIsAdmin(globalRole === 'platform_admin' || (user?.user_metadata as any)?.global_role === 'platform_admin');
+  }, [globalRole, user]);
 
   const fetchNumbers = async () => {
     if (!selectedOrgId || !userId) {
@@ -84,10 +66,6 @@ const NumbersPage: FC = () => {
       const data = await getOrgPhoneNumbers(selectedOrgId, userId);
       setNumbers(data || []);
       
-      // NOTE: auto-assignment is handled in a separate effect that runs when
-      // `isAdmin` and `numbers` are both populated to avoid a race condition
-      // where `isAdmin` may not be known yet when numbers are first fetched.
-      
       // Fetch recordings for these numbers
       await fetchRecordings();
     } catch (error) {
@@ -97,38 +75,6 @@ const NumbersPage: FC = () => {
       setLoading(false);
     }
   };
-
-  const autoAssignPhonesToAdmin = async (phoneNumbers: any[]) => {
-    if (!userId || !isAdmin) return;
-    try {
-      for (const phone of phoneNumbers) {
-        await fetch(`/api/admin/assign-phone-to-user`, {
-          method: 'POST',
-          headers: {
-            'x-user-id': userId,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            user_id: userId,
-            phone_number_id: phone.id
-          })
-        }).catch(() => {
-          // Silently fail individual assignments
-        });
-      }
-    } catch (error) {
-      console.error('Error auto-assigning phones:', error);
-    }
-  };
-
-  // When numbers are loaded and the user is an admin, ensure each phone
-  // number is assigned to the admin user. Run once per numbers change.
-  useEffect(() => {
-    if (!isAdmin || !userId || !numbers || numbers.length === 0) return;
-    // Fire-and-forget; individual failures are silenced by the helper
-    autoAssignPhonesToAdmin(numbers);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, userId, numbers]);
 
   const fetchRecordings = async () => {
     if (!selectedOrgId || !userId) return;

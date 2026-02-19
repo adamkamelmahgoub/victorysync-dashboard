@@ -45,6 +45,7 @@ import {
   syncMightyCallContacts,
   syncSMSLog
 } from './integrations/mightycall';
+import { getMightyCallAccessToken } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgManagerWith } from './auth/rbac';
 import usersRouter from './routes/users';
 import { Readable } from 'stream';
@@ -276,6 +277,29 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
   } catch (e) {
     console.warn('[getUserAssignedPhoneNumbers] exception:', fmtErr(e));
     return { phones: [], numbers: [], digits: [] };
+  }
+}
+
+async function getUserOrgIds(userId: string): Promise<string[]> {
+  try {
+    const { data: fromOrgUsers, error: orgUsersErr } = await supabaseAdmin
+      .from('org_users')
+      .select('org_id')
+      .eq('user_id', userId);
+    if (!orgUsersErr && fromOrgUsers && fromOrgUsers.length > 0) {
+      return fromOrgUsers.map((r: any) => r.org_id).filter(Boolean);
+    }
+
+    const { data: fromOrgMembers, error: orgMembersErr } = await supabaseAdmin
+      .from('org_members')
+      .select('org_id')
+      .eq('user_id', userId);
+    if (!orgMembersErr && fromOrgMembers && fromOrgMembers.length > 0) {
+      return fromOrgMembers.map((r: any) => r.org_id).filter(Boolean);
+    }
+    return [];
+  } catch {
+    return [];
   }
 }
 
@@ -731,6 +755,83 @@ app.delete('/api/orgs/:orgId/api-keys/:keyId', async (req, res) => {
   } catch (e: any) {
     console.error('delete_org_key_failed:', fmtErr(e));
     res.status(500).json({ error: 'delete_org_key_failed', detail: fmtErr(e) });
+  }
+});
+
+// User-scoped management view over platform_api_keys (platform admins only)
+app.get('/api/admin/users/:userId/api-keys', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { userId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { data, error } = await supabaseAdmin
+      .from('platform_api_keys')
+      .select('id, label, created_at, last_used_at')
+      .eq('created_by', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    const apiKeys = (data || []).map((k: any) => ({
+      id: k.id,
+      label: k.label || 'Untitled',
+      created_at: k.created_at,
+      last_used_at: k.last_used_at,
+      key_prefix: 'vsy_****'
+    }));
+    res.json({ api_keys: apiKeys });
+  } catch (e: any) {
+    console.error('list_user_api_keys_failed:', fmtErr(e));
+    res.status(500).json({ error: 'list_user_api_keys_failed', detail: fmtErr(e) });
+  }
+});
+
+app.post('/api/admin/users/:userId/api-keys', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { userId } = req.params;
+    const { label } = req.body || {};
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const plain = generateApiKeyPlaintext();
+    const keyHash = hashApiKey(plain);
+    const { data, error } = await supabaseAdmin
+      .from('platform_api_keys')
+      .insert({ key_hash: keyHash, label: label || null, created_by: userId })
+      .select('id, label, created_at, last_used_at')
+      .maybeSingle();
+    if (error) throw error;
+
+    res.json({
+      api_key_plaintext: plain,
+      plaintext: plain,
+      key: data
+    });
+  } catch (e: any) {
+    console.error('create_user_api_key_failed:', fmtErr(e));
+    res.status(500).json({ error: 'create_user_api_key_failed', detail: fmtErr(e) });
+  }
+});
+
+app.delete('/api/admin/users/:userId/api-keys/:keyId', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { userId, keyId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { error } = await supabaseAdmin
+      .from('platform_api_keys')
+      .delete()
+      .eq('id', keyId)
+      .eq('created_by', userId);
+    if (error) throw error;
+    res.status(204).send();
+  } catch (e: any) {
+    console.error('delete_user_api_key_failed:', fmtErr(e));
+    res.status(500).json({ error: 'delete_user_api_key_failed', detail: fmtErr(e) });
   }
 });
 
@@ -2039,6 +2140,38 @@ app.post('/api/admin/mightycall/send-sms', async (req, res) => {
   } catch (err: any) {
     console.error('sms_send_failed:', fmtErr(err));
     res.status(500).json({ error: 'sms_send_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/orgs/:orgId/sms/send - org-scoped send/log SMS
+app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    const { to, message, from } = req.body || {};
+
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!to || !message) return res.status(400).json({ error: 'missing_required_fields' });
+
+    const isAdminUser = await isPlatformAdmin(actorId);
+    const isMember = await isOrgMember(actorId, orgId);
+    if (!isAdminUser && !isMember) return res.status(403).json({ error: 'forbidden' });
+
+    const smsMessage = {
+      from: from || null,
+      to: Array.isArray(to) ? to : [to],
+      text: message,
+      direction: 'outbound',
+      status: 'sent'
+    };
+
+    const logResult = await syncSMSLog(supabaseAdmin, orgId, smsMessage);
+    if (!logResult.smsSynced) return res.status(500).json({ error: 'sms_log_failed' });
+
+    res.json({ success: true, message: 'SMS sent and logged' });
+  } catch (err: any) {
+    console.error('org_sms_send_failed:', fmtErr(err));
+    res.status(500).json({ error: 'org_sms_send_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
@@ -3518,11 +3651,10 @@ app.get("/api/admin/org-metrics", async (_req, res) => {
   }
 });
 
-// PATCH /api/admin/users/:id - Update user org or role
-app.patch("/api/admin/users/:id", async (req, res) => {
+const handleAdminUserUpdate = async (req: any, res: any) => {
   try {
     const { id } = req.params;
-    const { orgId, role } = req.body;
+    const { orgId, role, can_generate_api_keys } = req.body;
 
     // Fetch current user to get existing metadata
     const { data: userData, error: fetchError } =
@@ -3539,6 +3671,7 @@ app.patch("/api/admin/users/:id", async (req, res) => {
       ...currentMetadata,
       ...(orgId && { org_id: orgId }),
       ...(role && { role }),
+      ...(typeof can_generate_api_keys === 'boolean' ? { can_generate_api_keys } : {}),
     };
 
     const { data, error } = await supabaseAdmin.auth.admin.updateUserById(id, {
@@ -3555,6 +3688,7 @@ app.patch("/api/admin/users/:id", async (req, res) => {
         email: data.user.email,
         org_id: (data.user.user_metadata as any)?.org_id ?? null,
         role: (data.user.user_metadata as any)?.role ?? null,
+        can_generate_api_keys: !!(data.user.user_metadata as any)?.can_generate_api_keys,
       },
     });
   } catch (err: any) {
@@ -3564,7 +3698,11 @@ app.patch("/api/admin/users/:id", async (req, res) => {
       detail: err?.message ?? "unknown_error",
     });
   }
-});
+};
+
+// PATCH/PUT /api/admin/users/:id - Update user org, role, and settings
+app.patch("/api/admin/users/:id", handleAdminUserUpdate);
+app.put("/api/admin/users/:id", handleAdminUserUpdate);
 
 // GET /api/admin/agents - List all users with 'agent' role
 app.get("/api/admin/agents", async (req, res) => {
@@ -3643,6 +3781,297 @@ app.get("/api/admin/orgs/:orgId/stats", async (req, res) => {
       error: "admin_org_stats_failed",
       detail: err?.message ?? "unknown_error",
     });
+  }
+});
+
+// Compatibility endpoints used by shared data modules
+app.get('/api/admin/recordings', async (req, res) => {
+  try {
+    const orgId = req.query.org_id as string | undefined;
+    const phoneNumberId = req.query.phone_number_id as string | undefined;
+    const startDate = req.query.start_date as string | undefined;
+    const endDate = req.query.end_date as string | undefined;
+    const limit = Math.min(parseInt((req.query.limit as string) || '100', 10), 1000);
+    const offset = Math.max(parseInt((req.query.offset as string) || '0', 10), 0);
+
+    let q = supabaseAdmin
+      .from('mightycall_recordings')
+      .select('*', { count: 'exact' })
+      .order('recording_date', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (orgId) q = q.eq('org_id', orgId);
+    if (phoneNumberId) q = q.eq('phone_number_id', phoneNumberId);
+    if (startDate) q = q.gte('recording_date', startDate);
+    if (endDate) q = q.lte('recording_date', endDate);
+
+    const { data, error, count } = await q;
+    if (error) throw error;
+    res.json({ recordings: data || [], count: count || 0 });
+  } catch (err: any) {
+    console.error('admin_recordings_list_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_recordings_list_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.post('/api/admin/recordings', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const { data, error } = await supabaseAdmin
+      .from('mightycall_recordings')
+      .insert(payload)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    res.json({ recording: data });
+  } catch (err: any) {
+    console.error('admin_recordings_create_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_recordings_create_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/metrics/summary', async (req, res) => {
+  try {
+    const orgId = req.query.org_id as string | undefined;
+    const startDate = req.query.start_date as string | undefined;
+    const endDate = req.query.end_date as string | undefined;
+    if (!orgId) return res.status(400).json({ error: 'missing_org_id' });
+
+    let q = supabaseAdmin.from('calls').select('*').eq('org_id', orgId);
+    if (startDate) q = q.gte('started_at', startDate);
+    if (endDate) q = q.lte('started_at', endDate);
+    const { data: calls, error } = await q.limit(100000);
+    if (error) throw error;
+
+    const rows = calls || [];
+    const total = rows.length;
+    const answered = rows.filter((c: any) => String(c.status || '').toLowerCase() === 'answered').length;
+    const waitRows = rows.map((c: any) => Number(c.wait_seconds || 0)).filter((n: number) => Number.isFinite(n) && n >= 0);
+    const durRows = rows.map((c: any) => Number(c.duration_seconds ?? c.duration ?? 0)).filter((n: number) => Number.isFinite(n) && n >= 0);
+
+    const summary = {
+      total_calls: total,
+      answered_calls: answered,
+      avg_wait_seconds: waitRows.length ? Math.round(waitRows.reduce((a: number, b: number) => a + b, 0) / waitRows.length) : 0,
+      avg_duration_seconds: durRows.length ? Math.round(durRows.reduce((a: number, b: number) => a + b, 0) / durRows.length) : 0,
+      sla_percentage: total > 0 ? Math.round((answered / total) * 100) : 0
+    };
+    res.json({ summary });
+  } catch (err: any) {
+    console.error('admin_metrics_summary_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_metrics_summary_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/metrics/volume', async (req, res) => {
+  try {
+    const orgId = req.query.org_id as string | undefined;
+    const startDate = req.query.start_date as string | undefined;
+    const endDate = req.query.end_date as string | undefined;
+    const groupBy = (req.query.group_by as string) || 'day';
+    if (!orgId) return res.status(400).json({ error: 'missing_org_id' });
+
+    let q = supabaseAdmin.from('calls').select('*').eq('org_id', orgId);
+    if (startDate) q = q.gte('started_at', startDate);
+    if (endDate) q = q.lte('started_at', endDate);
+    const { data: calls, error } = await q.limit(100000);
+    if (error) throw error;
+
+    const buckets = new Map<string, { period: string; total_calls: number; answered_calls: number; wait_sum: number; wait_count: number }>();
+    for (const c of calls || []) {
+      const d = new Date((c as any).started_at || Date.now());
+      const key =
+        groupBy === 'hour' ? d.toISOString().slice(0, 13) + ':00:00Z' :
+        groupBy === 'week' ? new Date(d.getTime() - d.getDay() * 86400000).toISOString().slice(0, 10) :
+        groupBy === 'month' ? d.toISOString().slice(0, 7) + '-01' :
+        d.toISOString().slice(0, 10);
+      if (!buckets.has(key)) buckets.set(key, { period: key, total_calls: 0, answered_calls: 0, wait_sum: 0, wait_count: 0 });
+      const b = buckets.get(key)!;
+      b.total_calls += 1;
+      if (String((c as any).status || '').toLowerCase() === 'answered') b.answered_calls += 1;
+      const w = Number((c as any).wait_seconds || 0);
+      if (Number.isFinite(w) && w >= 0) { b.wait_sum += w; b.wait_count += 1; }
+    }
+    const data = Array.from(buckets.values())
+      .map((b) => ({ period: b.period, total_calls: b.total_calls, answered_calls: b.answered_calls, avg_wait_seconds: b.wait_count ? Math.round(b.wait_sum / b.wait_count) : 0 }))
+      .sort((a, b) => a.period.localeCompare(b.period));
+    res.json({ data });
+  } catch (err: any) {
+    console.error('admin_metrics_volume_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_metrics_volume_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/metrics/agents', async (req, res) => {
+  try {
+    const orgId = req.query.org_id as string | undefined;
+    const startDate = req.query.start_date as string | undefined;
+    const endDate = req.query.end_date as string | undefined;
+    if (!orgId) return res.status(400).json({ error: 'missing_org_id' });
+
+    let q = supabaseAdmin.from('calls').select('*').eq('org_id', orgId);
+    if (startDate) q = q.gte('started_at', startDate);
+    if (endDate) q = q.lte('started_at', endDate);
+    const { data: calls, error } = await q.limit(100000);
+    if (error) throw error;
+
+    const grouped = new Map<string, any>();
+    for (const c of calls || []) {
+      const ext = String((c as any).agent_extension || '');
+      if (!ext) continue;
+      if (!grouped.has(ext)) grouped.set(ext, { extension: ext, agent_name: ext, total_calls: 0, answered_calls: 0, dur_sum: 0, dur_count: 0, wait_sum: 0, wait_count: 0 });
+      const g = grouped.get(ext);
+      g.total_calls += 1;
+      if (String((c as any).status || '').toLowerCase() === 'answered') g.answered_calls += 1;
+      const dur = Number((c as any).duration_seconds ?? (c as any).duration ?? 0);
+      if (Number.isFinite(dur) && dur >= 0) { g.dur_sum += dur; g.dur_count += 1; }
+      const wait = Number((c as any).wait_seconds || 0);
+      if (Number.isFinite(wait) && wait >= 0) { g.wait_sum += wait; g.wait_count += 1; }
+    }
+    const data = Array.from(grouped.values()).map((g: any) => ({
+      extension: g.extension,
+      agent_name: g.agent_name,
+      total_calls: g.total_calls,
+      answered_calls: g.answered_calls,
+      avg_duration_seconds: g.dur_count ? Math.round(g.dur_sum / g.dur_count) : 0,
+      avg_wait_seconds: g.wait_count ? Math.round(g.wait_sum / g.wait_count) : 0
+    }));
+    res.json({ data });
+  } catch (err: any) {
+    console.error('admin_metrics_agents_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_metrics_agents_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/metrics/agents-today', async (req, res) => {
+  try {
+    const raw = (req.query.extensions as string) || '';
+    const extensions = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (extensions.length === 0) return res.json({ data: [] });
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const { data: calls, error } = await supabaseAdmin
+      .from('calls')
+      .select('*')
+      .in('agent_extension', extensions)
+      .gte('started_at', todayStart.toISOString())
+      .limit(100000);
+    if (error) throw error;
+
+    const grouped = new Map<string, { extension: string; total_calls: number; total_duration_seconds: number }>();
+    for (const ext of extensions) grouped.set(ext, { extension: ext, total_calls: 0, total_duration_seconds: 0 });
+    for (const c of calls || []) {
+      const ext = String((c as any).agent_extension || '');
+      if (!grouped.has(ext)) grouped.set(ext, { extension: ext, total_calls: 0, total_duration_seconds: 0 });
+      const g = grouped.get(ext)!;
+      g.total_calls += 1;
+      g.total_duration_seconds += Number((c as any).duration_seconds ?? (c as any).duration ?? 0) || 0;
+    }
+    res.json({ data: Array.from(grouped.values()) });
+  } catch (err: any) {
+    console.error('admin_metrics_agents_today_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_metrics_agents_today_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/metrics/phones', async (req, res) => {
+  try {
+    const orgId = req.query.org_id as string | undefined;
+    const startDate = req.query.start_date as string | undefined;
+    const endDate = req.query.end_date as string | undefined;
+    if (!orgId) return res.status(400).json({ error: 'missing_org_id' });
+
+    let q = supabaseAdmin.from('calls').select('*').eq('org_id', orgId);
+    if (startDate) q = q.gte('started_at', startDate);
+    if (endDate) q = q.lte('started_at', endDate);
+    const { data: calls, error } = await q.limit(100000);
+    if (error) throw error;
+
+    const grouped = new Map<string, any>();
+    for (const c of calls || []) {
+      const phone = String((c as any).to_number || '');
+      if (!phone) continue;
+      if (!grouped.has(phone)) grouped.set(phone, { phone_number: phone, label: null, total_calls: 0, answered_calls: 0, dur_sum: 0, dur_count: 0, wait_sum: 0, wait_count: 0 });
+      const g = grouped.get(phone);
+      g.total_calls += 1;
+      if (String((c as any).status || '').toLowerCase() === 'answered') g.answered_calls += 1;
+      const dur = Number((c as any).duration_seconds ?? (c as any).duration ?? 0);
+      if (Number.isFinite(dur) && dur >= 0) { g.dur_sum += dur; g.dur_count += 1; }
+      const wait = Number((c as any).wait_seconds || 0);
+      if (Number.isFinite(wait) && wait >= 0) { g.wait_sum += wait; g.wait_count += 1; }
+    }
+    const data = Array.from(grouped.values()).map((g: any) => ({
+      phone_number: g.phone_number,
+      label: g.label,
+      total_calls: g.total_calls,
+      answered_calls: g.answered_calls,
+      avg_wait_seconds: g.wait_count ? Math.round(g.wait_sum / g.wait_count) : 0,
+      avg_duration_seconds: g.dur_count ? Math.round(g.dur_sum / g.dur_count) : 0
+    }));
+    res.json({ data });
+  } catch (err: any) {
+    console.error('admin_metrics_phones_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_metrics_phones_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/stats', async (_req, res) => {
+  try {
+    const [orgsRes, phonesRes, billingRes, ticketsRes, usersRes] = await Promise.all([
+      supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }),
+      supabaseAdmin.from('phone_numbers').select('id', { count: 'exact', head: true }),
+      supabaseAdmin.from('billing_records').select('amount'),
+      supabaseAdmin.from('support_tickets').select('id,status'),
+      supabaseAdmin.auth.admin.listUsers()
+    ]);
+
+    const totalBilling = (billingRes.data || []).reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+    const activeTickets = (ticketsRes.data || []).filter((t: any) => String(t.status || '').toLowerCase() !== 'closed').length;
+
+    res.json({
+      stats: {
+        total_organizations: orgsRes.count || 0,
+        total_users: usersRes.data?.users?.length || 0,
+        total_phone_numbers: phonesRes.count || 0,
+        total_billing_amount: totalBilling,
+        active_support_tickets: activeTickets
+      }
+    });
+  } catch (err: any) {
+    console.error('admin_stats_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_stats_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/audit-logs', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt((req.query.limit as string) || '500', 10), 1000);
+    const offset = Math.max(parseInt((req.query.offset as string) || '0', 10), 0);
+    const orgId = req.query.org_id as string | undefined;
+    const action = req.query.action as string | undefined;
+
+    let q = supabaseAdmin.from('audit_logs').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+    if (orgId) q = q.eq('org_id', orgId);
+    if (action) q = q.eq('action', action);
+    const { data, error, count } = await q;
+    if (error) return res.json({ logs: [], count: 0 });
+    res.json({ logs: data || [], count: count || 0 });
+  } catch (err: any) {
+    console.error('admin_audit_logs_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_audit_logs_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.post('/api/admin/audit-logs', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const row = { ...payload, created_at: new Date().toISOString() };
+    const { data, error } = await supabaseAdmin.from('audit_logs').insert(row).select().maybeSingle();
+    if (error) return res.json({ log: { id: crypto.randomUUID(), ...row } });
+    res.json({ log: data });
+  } catch (err: any) {
+    console.error('admin_audit_log_create_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_audit_log_create_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
@@ -5210,16 +5639,10 @@ app.get("/s/series", async (req, res) => {
 
         // Non-admin: filter to their org(s)
         if (!isAdmin) {
-          const { data: userOrgs, error: orgsError } = await supabaseAdmin
-            .from('org_members')
-            .select('org_id')
-            .eq('user_id', userId);
-
-          if (orgsError || !userOrgs || userOrgs.length === 0) {
+          const orgIds = await getUserOrgIds(userId);
+          if (orgIds.length === 0) {
             return res.json({ tickets: [] });
           }
-
-          const orgIds = userOrgs.map(o => o.org_id);
           query = query.in('org_id', orgIds);
         }
 
@@ -5241,14 +5664,8 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        // Get user's org
-        const { data: userOrg, error: orgError } = await supabaseAdmin
-          .from('org_members')
-          .select('org_id')
-          .eq('user_id', userId)
-          .single();
-
-        if (orgError || !userOrg) {
+        const orgIds = await getUserOrgIds(userId);
+        if (orgIds.length === 0) {
           return res.status(403).json({ error: 'no_org_membership' });
         }
 
@@ -5258,7 +5675,7 @@ app.get("/s/series", async (req, res) => {
         const { data: ticket, error: ticketError } = await supabaseAdmin
           .from('support_tickets')
           .insert([{
-            org_id: userOrg.org_id,
+            org_id: orgIds[0],
             created_by: userId,
             subject,
             priority: priority || 'normal',
@@ -5312,14 +5729,8 @@ app.get("/s/series", async (req, res) => {
         }
 
         // Check if user belongs to the org
-        const { data: membership, error: membershipError } = await supabaseAdmin
-          .from('org_members')
-          .select('id')
-          .eq('org_id', ticket.org_id)
-          .eq('user_id', userId)
-          .single();
-
-        if (membershipError || !membership) {
+        const membership = await isOrgMember(userId, ticket.org_id);
+        if (!membership) {
           return res.status(403).json({ error: 'access_denied' });
         }
 
@@ -5468,13 +5879,7 @@ app.get("/s/series", async (req, res) => {
         // Check if user is admin or belongs to the org
         const isAdmin = await isPlatformAdmin(userId);
         if (!isAdmin) {
-          const { data: membership } = await supabaseAdmin
-            .from('org_members')
-            .select('id')
-            .eq('org_id', ticket.org_id)
-            .eq('user_id', userId)
-            .single();
-
+          const membership = await isOrgMember(userId, ticket.org_id);
           if (!membership) {
             return res.status(403).json({ error: 'access_denied' });
           }
@@ -5497,21 +5902,15 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        // Get user's org
-        const { data: userOrg, error: orgError } = await supabaseAdmin
-          .from('org_members')
-          .select('org_id')
-          .eq('user_id', userId)
-          .single();
-
-        if (orgError || !userOrg) {
+        const orgIds = await getUserOrgIds(userId);
+        if (orgIds.length === 0) {
           return res.status(403).json({ error: 'no_org_membership' });
         }
 
         const { data, error } = await supabaseAdmin
           .from('number_requests')
           .select('*')
-          .eq('org_id', userOrg.org_id)
+          .eq('org_id', orgIds[0])
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -5530,14 +5929,8 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        // Get user's org
-        const { data: userOrg, error: orgError } = await supabaseAdmin
-          .from('org_members')
-          .select('org_id')
-          .eq('user_id', userId)
-          .single();
-
-        if (orgError || !userOrg) {
+        const orgIds = await getUserOrgIds(userId);
+        if (orgIds.length === 0) {
           return res.status(403).json({ error: 'no_org_membership' });
         }
 
@@ -5548,7 +5941,7 @@ app.get("/s/series", async (req, res) => {
         const { data: ticket, error: ticketError } = await supabaseAdmin
           .from('support_tickets')
           .insert([{
-            org_id: userOrg.org_id,
+            org_id: orgIds[0],
             created_by: userId,
             subject: `Phone Number Request: ${requestType.charAt(0).toUpperCase() + requestType.slice(1)}`,
             priority: 'normal',
@@ -6288,6 +6681,40 @@ const server = app.listen(port, '0.0.0.0', () => {
   } else {
     console.log(`Metrics API listening on port ${port}`);
   }
+
+  // Debug endpoint (also available during development) - provides lightweight health info
+  app.get('/debug/status', async (req, res) => {
+    try {
+      const info: any = {
+        uptime: process.uptime(),
+        env: {
+          apiBase: process.env.API_BASE_URL || null,
+          supabase: !!process.env.SUPABASE_URL,
+          mightycall: !!process.env.MIGHTYCALL_API_KEY
+        }
+      };
+
+      // Supabase quick check
+      try {
+        const { data, error } = await supabaseAdmin.from('organizations').select('id').limit(1);
+        info.supabase = { ok: !error, sampleCount: Array.isArray(data) ? data.length : 0, error: error ? fmtErr(error) : null };
+      } catch (e: any) {
+        info.supabase = { ok: false, error: fmtErr(e) };
+      }
+
+      // MightyCall token check (non-fatal)
+      try {
+        const token = await getMightyCallAccessToken().catch(() => null);
+        info.mightycall = { tokenAvailable: !!token };
+      } catch (e: any) {
+        info.mightycall = { tokenAvailable: false, error: fmtErr(e) };
+      }
+
+      res.json(info);
+    } catch (err: any) {
+      res.status(500).json({ error: 'debug_status_failed', detail: fmtErr(err) });
+    }
+  });
 }).on('error', (err: any) => {
   console.error(`[startup] Failed to bind on port ${port}:`, err.message);
   console.error(err.stack);

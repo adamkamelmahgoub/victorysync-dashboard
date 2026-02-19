@@ -36,7 +36,7 @@ export function RecordingsPage() {
         buildApiUrl(`/api/orgs/${orgId}/recordings`),
         {
           headers: {
-            'Authorization': `Bearer ${user.id}`,
+            'x-user-id': user.id,
             'Content-Type': 'application/json'
           }
         }
@@ -74,7 +74,7 @@ export function RecordingsPage() {
         {
           event: '*',
           schema: 'public',
-          table: 'call_recordings',
+          table: 'mightycall_recordings',
           filter: `org_id=eq.${orgId}`
         },
         () => {
@@ -104,10 +104,10 @@ export function RecordingsPage() {
   const handleDownload = async (recording: Recording) => {
     try {
       const response = await fetch(
-        buildApiUrl(`/api/orgs/${orgId}/recordings/${recording.id}/download`),
+        buildApiUrl(`/api/recordings/${recording.id}/download`),
         {
           headers: {
-            'Authorization': `Bearer ${user?.id}`,
+            'x-user-id': user?.id || '',
             'Content-Type': 'application/json'
           }
         }
