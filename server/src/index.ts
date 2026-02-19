@@ -428,22 +428,40 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
 
 async function getUserOrgIds(userId: string): Promise<string[]> {
   try {
-    const { data: fromOrgUsers, error: orgUsersErr } = await supabaseAdmin
+    const ids = new Set<string>();
+    const add = (rows: any[] | null | undefined) => {
+      for (const r of (rows || [])) {
+        const oid = String((r as any)?.org_id || '').trim();
+        if (oid) ids.add(oid);
+      }
+    };
+
+    const { data: fromOrgUsers } = await supabaseAdmin
       .from('org_users')
       .select('org_id')
       .eq('user_id', userId);
-    if (!orgUsersErr && fromOrgUsers && fromOrgUsers.length > 0) {
-      return fromOrgUsers.map((r: any) => r.org_id).filter(Boolean);
-    }
+    add(fromOrgUsers as any[]);
 
-    const { data: fromOrgMembers, error: orgMembersErr } = await supabaseAdmin
+    const { data: fromOrgMembers } = await supabaseAdmin
       .from('org_members')
       .select('org_id')
       .eq('user_id', userId);
-    if (!orgMembersErr && fromOrgMembers && fromOrgMembers.length > 0) {
-      return fromOrgMembers.map((r: any) => r.org_id).filter(Boolean);
+    add(fromOrgMembers as any[]);
+
+    const { data: fromLegacyMembers } = await supabaseAdmin
+      .from('organization_members')
+      .select('org_id')
+      .eq('user_id', userId);
+    add(fromLegacyMembers as any[]);
+
+    if (ids.size === 0) {
+      // Final fallback to auth metadata org_id.
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const metaOrgId = String((authUser?.user?.user_metadata as any)?.org_id || '').trim();
+      if (metaOrgId) ids.add(metaOrgId);
     }
-    return [];
+
+    return Array.from(ids);
   } catch {
     return [];
   }
@@ -1723,16 +1741,10 @@ app.get('/api/user/orgs', async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
     // Check if user is a platform admin first (has elevated org access)
-    const { data: user, error: userErr } = await supabaseAdmin
-      .from('auth.users')
-      .select('id, user_metadata')
-      .eq('id', userId)
-      .single();
-    
-    const isPlatformAdmin = user && (user.user_metadata as any)?.global_role === 'platform_admin';
+    const isPlatformAdminUser = await isPlatformAdmin(userId);
 
     // If platform admin, return all organizations
-    if (isPlatformAdmin) {
+    if (isPlatformAdminUser) {
       const { data: allOrgs, error: allOrgErr } = await supabaseAdmin
         .from('organizations')
         .select('*');
@@ -1740,14 +1752,8 @@ app.get('/api/user/orgs', async (req, res) => {
       return res.json({ orgs: allOrgs || [] });
     }
 
-    // Regular users: get from org_users
-    const { data: rows, error } = await supabaseAdmin
-      .from('org_users')
-      .select('org_id')
-      .eq('user_id', userId);
-    if (error) throw error;
-
-    const orgIds = (rows || []).map((r: any) => r.org_id).filter(Boolean);
+    // Regular users: resolve orgs from all membership sources.
+    const orgIds = await getUserOrgIds(userId);
     if (orgIds.length === 0) return res.json({ orgs: [] });
 
     const { data: orgs, error: orgErr } = await supabaseAdmin
@@ -5918,52 +5924,22 @@ app.get("/s/series", async (req, res) => {
           }
           // If no orgId for admin, we'll query without org filter
         } else {
-          // Non-admin: only show their org
-          // Try org_users table first (MODERN), then org_members as fallback (LEGACY)
-          let userOrgs: any[] = [];
-          
-          try {
-            // Try org_users first (modern table)
-            const { data: data1, error: err1 } = await supabaseAdmin
-              .from('org_users')
-              .select('org_id')
-              .eq('user_id', userId);
-            
-            if (!err1 && data1 && data1.length > 0) {
-              userOrgs = data1;
-              console.log(`[mightycall/reports] Found user ${userId} in org_users: ${data1.map(o => o.org_id).join(',')}`);
-            }
-            
-            // If not found in org_users, try org_members (legacy fallback)
-            if (userOrgs.length === 0) {
-              const { data: data2, error: err2 } = await supabaseAdmin
-                .from('org_members')
-                .select('org_id')
-                .eq('user_id', userId);
-              
-              if (!err2 && data2 && data2.length > 0) {
-                userOrgs = data2;
-                console.log(`[mightycall/reports] Found user ${userId} in org_members: ${data2.map(o => o.org_id).join(',')}`);
-              }
-            }
-          } catch (e) {
-            console.error('[mightycall/reports] error checking user orgs:', fmtErr(e));
-          }
-          
-          if (userOrgs.length === 0) {
-            console.warn(`[mightycall/reports] No org membership found for user ${userId} in org_users or org_members`);
+          // Non-admin: resolve orgs from all membership sources.
+          const userOrgIds = await getUserOrgIds(userId);
+          if (userOrgIds.length === 0) {
+            console.warn(`[mightycall/reports] No org membership found for user ${userId}`);
             return res.json({ reports: [] });
           }
           
           // If user specified an org_id, verify they have access to it
           if (orgId) {
-            if (!userOrgs.some(o => o.org_id === orgId)) {
+            if (!userOrgIds.includes(orgId)) {
               return res.status(403).json({ error: 'forbidden', detail: 'user_not_member_of_org' });
             }
             queryOrgIds = [orgId];
           } else {
-            // No org specified - use user's all org they belong to
-            queryOrgIds = userOrgs.map(o => o.org_id);
+            // No org specified - use all orgs this user belongs to
+            queryOrgIds = userOrgIds;
           }
         }
 
@@ -6486,42 +6462,11 @@ app.get("/s/series", async (req, res) => {
         if (orgId) {
           query = query.eq('org_id', orgId);
         } else if (!isAdmin) {
-          // Non-admin: only show their org
-          // Try org_users table first (MODERN), then org_members as fallback (LEGACY)
-          let userOrgs: any[] = [];
-          
-          try {
-            // Try org_users first
-            const { data: data1, error: err1 } = await supabaseAdmin
-              .from('org_users')
-              .select('org_id')
-              .eq('user_id', userId);
-            
-            if (!err1 && data1 && data1.length > 0) {
-              userOrgs = data1;
-            }
-            
-            // If not found in org_users, try org_members
-            if (userOrgs.length === 0) {
-              const { data: data2 } = await supabaseAdmin
-                .from('org_members')
-                .select('org_id')
-                .eq('user_id', userId);
-              
-              if (data2 && data2.length > 0) {
-                userOrgs = data2;
-              }
-            }
-          } catch (e) {
-            console.error('[mightycall/recordings] error checking user orgs:', fmtErr(e));
-          }
-          
-          if (!userOrgs || userOrgs.length === 0) {
+          const userOrgIds = await getUserOrgIds(userId);
+          if (!userOrgIds || userOrgIds.length === 0) {
             return res.json({ recordings: [] });
           }
-          
-          const orgIds = userOrgs.map(o => o.org_id);
-          query = query.in('org_id', orgIds);
+          query = query.in('org_id', userOrgIds);
         }
         // If isAdmin and no orgId filter, show all
 
@@ -6541,41 +6486,11 @@ app.get("/s/series", async (req, res) => {
           if (orgId) {
             callsQuery = callsQuery.eq('org_id', orgId);
           } else if (!isAdmin) {
-            // Non-admin: apply org filter for fallback query
-            let userOrgs: any[] = [];
-            
-            try {
-              // Try org_users first
-              const { data: data1, error: err1 } = await supabaseAdmin
-                .from('org_users')
-                .select('org_id')
-                .eq('user_id', userId);
-              
-              if (!err1 && data1 && data1.length > 0) {
-                userOrgs = data1;
-              }
-              
-              // If not found in org_users, try org_members
-              if (userOrgs.length === 0) {
-                const { data: data2 } = await supabaseAdmin
-                  .from('org_members')
-                  .select('org_id')
-                  .eq('user_id', userId);
-                
-                if (data2 && data2.length > 0) {
-                  userOrgs = data2;
-                }
-              }
-            } catch (e) {
-              console.error('[mightycall/recordings fallback] error checking user orgs:', fmtErr(e));
-            }
-            
-            if (!userOrgs || userOrgs.length === 0) {
+            const userOrgIds = await getUserOrgIds(userId);
+            if (!userOrgIds || userOrgIds.length === 0) {
               return res.json({ recordings: [] });
             }
-            
-            const orgIds = userOrgs.map(o => o.org_id);
-            callsQuery = callsQuery.in('org_id', orgIds);
+            callsQuery = callsQuery.in('org_id', userOrgIds);
           }
 
           const { data: calls, error: callsError } = await callsQuery;
