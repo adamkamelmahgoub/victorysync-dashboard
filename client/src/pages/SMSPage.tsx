@@ -20,9 +20,17 @@ interface SMSMessage {
 const PAGE_SIZE = 500;
 
 export function SMSPage() {
-  const { user } = useAuth();
+  const { user, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const { org: currentOrg } = useOrg();
-  const orgId = currentOrg?.id;
+  const orgId =
+    selectedOrgId ||
+    currentOrg?.id ||
+    (orgs && orgs.length > 0 ? orgs[0].id : null) ||
+    ((user?.user_metadata as any)?.org_id ?? null);
+  const orgName =
+    (orgs.find((o) => o.id === orgId)?.name) ||
+    currentOrg?.name ||
+    'your organization';
 
   const [messages, setMessages] = useState<SMSMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -80,6 +88,12 @@ export function SMSPage() {
     }
   }, [orgId, user?.id]);
 
+  useEffect(() => {
+    if (!selectedOrgId && orgs && orgs.length > 0) {
+      setSelectedOrgId(orgs[0].id);
+    }
+  }, [selectedOrgId, orgs, setSelectedOrgId]);
+
   const handleSendSMS = async () => {
     if (!orgId || !user || !newMessage || !recipientNumber) {
       setError('Please fill in all fields');
@@ -123,13 +137,13 @@ export function SMSPage() {
   if (!orgId) {
     return (
       <PageLayout title="SMS" description="No organization selected">
-        <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-6 text-slate-300">Please select an organization to view SMS messages.</div>
+        <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-6 text-slate-300">No organization is linked to this account yet. Ask your org admin to assign your account to an organization.</div>
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout title="SMS Messages" description={`Manage SMS communication for ${currentOrg?.name || 'your organization'}`}>
+    <PageLayout title="SMS Messages" description={`Manage SMS communication for ${orgName}`}>
       <div className="space-y-6">
         {error && (
           <div className="bg-red-900/30 border border-red-700 rounded-lg p-4">

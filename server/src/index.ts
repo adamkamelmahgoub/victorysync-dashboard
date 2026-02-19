@@ -272,11 +272,119 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
 // Get phone numbers assigned to a specific user within an org
 async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
   try {
-    const { data, error } = await supabaseAdmin
-      .from('user_phone_assignments')
-      .select('phone_number_id')
-      .eq('org_id', orgId)
-      .eq('user_id', userId);
+    const DEFAULT_FALLBACK_NUMBER = '+12122357403';
+    const DEFAULT_FALLBACK_DIGITS = normalizePhoneDigits(DEFAULT_FALLBACK_NUMBER) || '12122357403';
+
+    const ensureFallbackAssignment = async () => {
+      try {
+        const { phones: orgPhones } = await getAssignedPhoneNumbersForOrg(orgId);
+
+        let targetPhone: any = (orgPhones || []).find((p: any) => String(p?.number || '').trim() === DEFAULT_FALLBACK_NUMBER)
+          || (orgPhones || []).find((p: any) => String(p?.number_digits || '') === DEFAULT_FALLBACK_DIGITS)
+          || (orgPhones || [])[0]
+          || null;
+
+        if (!targetPhone) {
+          let phoneRow: any = null;
+          const { data: byExact } = await supabaseAdmin
+            .from('phone_numbers')
+            .select('id, number, number_digits, label')
+            .eq('org_id', orgId)
+            .eq('number', DEFAULT_FALLBACK_NUMBER)
+            .maybeSingle();
+          if (byExact) phoneRow = byExact;
+
+          if (!phoneRow) {
+            const { data: byDigits } = await supabaseAdmin
+              .from('phone_numbers')
+              .select('id, number, number_digits, label')
+              .eq('org_id', orgId)
+              .eq('number_digits', DEFAULT_FALLBACK_DIGITS)
+              .maybeSingle();
+            if (byDigits) phoneRow = byDigits;
+          }
+
+          if (!phoneRow) {
+            const { data: created, error: createErr } = await supabaseAdmin
+              .from('phone_numbers')
+              .insert({
+                org_id: orgId,
+                external_id: `manual-default-${orgId}-${DEFAULT_FALLBACK_DIGITS}`,
+                number: DEFAULT_FALLBACK_NUMBER,
+                number_digits: DEFAULT_FALLBACK_DIGITS,
+                label: 'Default Assigned Number',
+                is_active: true,
+                metadata: { source: 'auto_fallback_assignment' }
+              })
+              .select('id, number, number_digits, label')
+              .maybeSingle();
+            if (createErr) {
+              console.warn('[getUserAssignedPhoneNumbers] failed creating fallback phone:', fmtErr(createErr));
+            } else {
+              phoneRow = created;
+            }
+          }
+
+          if (phoneRow) targetPhone = phoneRow;
+        }
+
+        if (!targetPhone?.id) return null;
+
+        // Ensure org mapping exists
+        const { data: orgMap } = await supabaseAdmin
+          .from('org_phone_numbers')
+          .select('id')
+          .eq('org_id', orgId)
+          .eq('phone_number_id', targetPhone.id)
+          .maybeSingle();
+        if (!orgMap) {
+          await supabaseAdmin
+            .from('org_phone_numbers')
+            .insert({
+              org_id: orgId,
+              phone_number_id: targetPhone.id,
+              phone_number: targetPhone.number || DEFAULT_FALLBACK_NUMBER,
+              label: targetPhone.label || 'Default Assigned Number',
+              created_at: new Date().toISOString()
+            });
+        }
+
+        // Ensure user assignment exists
+        const { data: userMap } = await supabaseAdmin
+          .from('user_phone_assignments')
+          .select('phone_number_id')
+          .eq('org_id', orgId)
+          .eq('user_id', userId)
+          .eq('phone_number_id', targetPhone.id)
+          .maybeSingle();
+        if (!userMap) {
+          await supabaseAdmin
+            .from('user_phone_assignments')
+            .insert({
+              org_id: orgId,
+              user_id: userId,
+              phone_number_id: targetPhone.id,
+              created_at: new Date().toISOString()
+            });
+        }
+
+        return targetPhone.id as string;
+      } catch (e) {
+        console.warn('[getUserAssignedPhoneNumbers] ensureFallbackAssignment failed:', fmtErr(e));
+        return null;
+      }
+    };
+
+    const queryAssignments = async () => {
+      const { data, error } = await supabaseAdmin
+        .from('user_phone_assignments')
+        .select('phone_number_id')
+        .eq('org_id', orgId)
+        .eq('user_id', userId);
+      return { data, error };
+    };
+
+    let { data, error } = await queryAssignments();
 
     if (error) {
       console.warn('[getUserAssignedPhoneNumbers] query failed:', fmtErr(error));
@@ -284,7 +392,15 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
     }
 
     if (!data || data.length === 0) {
-      return { phones: [], numbers: [], digits: [] };
+      const fallbackPhoneId = await ensureFallbackAssignment();
+      if (fallbackPhoneId) {
+        const refreshed = await queryAssignments();
+        data = refreshed.data;
+        error = refreshed.error;
+      }
+      if (error || !data || data.length === 0) {
+        return { phones: [], numbers: [], digits: [] };
+      }
     }
 
     const phoneIds = (data as any[]).map(r => r.phone_number_id).filter(Boolean);
