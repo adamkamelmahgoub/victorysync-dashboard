@@ -1,4 +1,4 @@
-import React, { FC, useState, useEffect } from 'react';
+import React, { FC, useEffect, useState } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
@@ -11,8 +11,13 @@ interface Report {
   report_type: string;
   report_date: string;
   created_at: string;
+  data?: {
+    calls_count?: number;
+    answered_count?: number;
+    missed_count?: number;
+    sample_numbers?: string[];
+  };
   organizations?: { name: string; id: string };
-  [key: string]: any;
 }
 
 interface Org {
@@ -20,21 +25,36 @@ interface Org {
   name: string;
 }
 
+const PAGE_SIZE = 500;
+
 const AdminReportsPage: FC = () => {
   const { user } = useAuth();
   const userId = user?.id;
-  
+
   const [reports, setReports] = useState<Report[]>([]);
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [filterOrgId, setFilterOrgId] = useState('');
   const [filterType, setFilterType] = useState('calls');
   const [syncing, setSyncing] = useState(false);
+  const [nextOffset, setNextOffset] = useState<number | null>(0);
 
   useEffect(() => {
     fetchOrgs();
-    fetchReports();
-  }, [filterOrgId, filterType]);
+  }, []);
+
+  useEffect(() => {
+    loadReports(true);
+  }, [filterOrgId, filterType, userId]);
+
+  useRealtimeSubscription(
+    'calls',
+    filterOrgId || null,
+    () => loadReports(true),
+    () => loadReports(true),
+    () => loadReports(true)
+  );
 
   const fetchOrgs = async () => {
     try {
@@ -44,7 +64,7 @@ const AdminReportsPage: FC = () => {
           'x-dev-bypass': 'true'
         }
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         setOrgs(data.orgs || []);
@@ -54,18 +74,23 @@ const AdminReportsPage: FC = () => {
     }
   };
 
-  const fetchReports = async () => {
+  const loadReports = async (reset = false) => {
+    const activeOffset = reset ? 0 : (nextOffset ?? 0);
+    if (!userId) return;
+    if (!reset && nextOffset == null) return;
+
     try {
-      setLoading(true);
-      
-      let url = buildApiUrl(`/api/mightycall/reports?type=${filterType}&limit=200`);
+      if (reset) setLoading(true);
+      else setLoadingMore(true);
+
+      let url = buildApiUrl(`/api/mightycall/reports?type=${encodeURIComponent(filterType)}&limit=${PAGE_SIZE}&offset=${activeOffset}`);
       if (filterOrgId) {
-        url += `&org_id=${filterOrgId}`;
+        url += `&org_id=${encodeURIComponent(filterOrgId)}`;
       }
 
       const response = await fetch(url, {
         headers: {
-          'x-user-id': userId || '',
+          'x-user-id': userId,
           'Content-Type': 'application/json'
         }
       });
@@ -76,31 +101,16 @@ const AdminReportsPage: FC = () => {
       }
 
       const data = await response.json();
-      setReports(data.reports || []);
+      const rows: Report[] = data.reports || [];
+      setReports((prev) => (reset ? rows : [...prev, ...rows]));
+      setNextOffset(data.next_offset ?? null);
     } catch (error) {
       console.error('Error fetching reports:', error);
     } finally {
-      setLoading(false);
+      if (reset) setLoading(false);
+      else setLoadingMore(false);
     }
   };
-
-  // Subscribe to realtime updates for the selected organization (falls back to polling when no org selected)
-  useRealtimeSubscription(
-    'calls',
-    filterOrgId || null,
-    () => {
-      console.log('[Realtime] New call - refreshing reports');
-      fetchReports();
-    },
-    () => {
-      console.log('[Realtime] Call updated - refreshing reports');
-      fetchReports();
-    },
-    () => {
-      console.log('[Realtime] Call deleted - refreshing reports');
-      fetchReports();
-    }
-  );
 
   const handleSync = async () => {
     if (!filterOrgId) {
@@ -131,9 +141,7 @@ const AdminReportsPage: FC = () => {
 
       const data = await response.json();
       alert(`Successfully synced ${data.reports_synced || 0} reports`);
-      
-      // Refresh reports list
-      setTimeout(() => fetchReports(), 500);
+      setTimeout(() => loadReports(true), 500);
     } catch (error: any) {
       console.error('Error syncing:', error);
       alert(`Failed to sync: ${error.message}`);
@@ -145,10 +153,8 @@ const AdminReportsPage: FC = () => {
   return (
     <PageLayout title="Reports" description="View and manage MightyCall reports across organizations">
       <div className="space-y-6">
-
         <AdminTopNav />
 
-        {/* Filters Card */}
         <div className="bg-slate-900/80 ring-1 ring-slate-800 p-6 rounded-lg">
           <h2 className="text-sm font-semibold text-slate-200 mb-4">Filters</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -157,10 +163,10 @@ const AdminReportsPage: FC = () => {
               <select
                 value={filterOrgId}
                 onChange={(e) => setFilterOrgId(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-50 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-50 text-sm"
               >
                 <option value="">All Organizations</option>
-                {orgs.map(org => (
+                {orgs.map((org) => (
                   <option key={org.id} value={org.id}>{org.name}</option>
                 ))}
               </select>
@@ -171,7 +177,7 @@ const AdminReportsPage: FC = () => {
               <select
                 value={filterType}
                 onChange={(e) => setFilterType(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-50 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-50 text-sm"
               >
                 <option value="calls">Calls</option>
                 <option value="messages">Messages</option>
@@ -191,10 +197,9 @@ const AdminReportsPage: FC = () => {
           </div>
         </div>
 
-        {/* Reports List */}
         <div className="bg-slate-900/80 ring-1 ring-slate-800 p-6 rounded-lg">
           <h2 className="text-sm font-semibold text-slate-200 mb-4">Reports ({reports.length})</h2>
-          
+
           {loading ? (
             <div className="text-center py-8">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-emerald-500 mb-2"></div>
@@ -203,27 +208,47 @@ const AdminReportsPage: FC = () => {
           ) : reports.length === 0 ? (
             <div className="text-center py-8 text-slate-400 text-sm">No reports found</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-b border-slate-700/50">
-                  <tr className="text-slate-400">
-                    <th className="text-left py-3 px-4 font-semibold">Organization</th>
-                    <th className="text-left py-3 px-4 font-semibold">Type</th>
-                    <th className="text-left py-3 px-4 font-semibold">Date</th>
-                    <th className="text-left py-3 px-4 font-semibold">Created</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700/30">
-                  {reports.slice(0, 100).map((report) => (
-                    <tr key={report.id} className="hover:bg-slate-800/30 transition">
-                      <td className="py-3 px-4 text-slate-200">{report.organizations?.name || report.org_id}</td>
-                      <td className="py-3 px-4 text-slate-300">{report.report_type}</td>
-                      <td className="py-3 px-4 text-slate-400 text-xs">{new Date(report.report_date || report.created_at).toLocaleDateString()}</td>
-                      <td className="py-3 px-4 text-slate-500 text-xs">{new Date(report.created_at).toLocaleString()}</td>
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-b border-slate-700/50">
+                    <tr className="text-slate-400">
+                      <th className="text-left py-3 px-4 font-semibold">Organization</th>
+                      <th className="text-left py-3 px-4 font-semibold">Type</th>
+                      <th className="text-left py-3 px-4 font-semibold">Calls</th>
+                      <th className="text-left py-3 px-4 font-semibold">Answered</th>
+                      <th className="text-left py-3 px-4 font-semibold">Missed</th>
+                      <th className="text-left py-3 px-4 font-semibold">Number(s)</th>
+                      <th className="text-left py-3 px-4 font-semibold">Date</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/30">
+                    {reports.map((report) => (
+                      <tr key={report.id} className="hover:bg-slate-800/30 transition">
+                        <td className="py-3 px-4 text-slate-200">{report.organizations?.name || report.org_id}</td>
+                        <td className="py-3 px-4 text-slate-300">{report.report_type}</td>
+                        <td className="py-3 px-4 text-slate-300">{report.data?.calls_count ?? '-'}</td>
+                        <td className="py-3 px-4 text-emerald-300">{report.data?.answered_count ?? '-'}</td>
+                        <td className="py-3 px-4 text-amber-300">{report.data?.missed_count ?? '-'}</td>
+                        <td className="py-3 px-4 text-slate-400 text-xs font-mono">{(report.data?.sample_numbers || []).join(', ') || '-'}</td>
+                        <td className="py-3 px-4 text-slate-500 text-xs">{new Date(report.report_date || report.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {nextOffset !== null && (
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => loadReports(false)}
+                    disabled={loadingMore}
+                    className="px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-200 text-sm hover:bg-slate-700 disabled:opacity-50"
+                  >
+                    {loadingMore ? 'Loading more...' : 'Load more'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -233,4 +258,3 @@ const AdminReportsPage: FC = () => {
 };
 
 export default AdminReportsPage;
-

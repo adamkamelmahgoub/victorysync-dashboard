@@ -5154,7 +5154,8 @@ app.get("/s/series", async (req, res) => {
         }
 
         const reportType = req.query.type as string || 'calls';
-        const limit = parseInt(req.query.limit as string) || 100;
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 1000));
+        const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
 
         // Check if user is platform admin
@@ -5225,7 +5226,7 @@ app.get("/s/series", async (req, res) => {
           .select('*, organizations(name, id)')
           .eq('report_type', reportType)
           .order('report_date', { ascending: false })
-          .limit(limit);
+          .range(offset, offset + limit - 1);
 
         // Apply org filter if we have specific orgs to query
         if (queryOrgIds.length > 0) {
@@ -5284,7 +5285,7 @@ app.get("/s/series", async (req, res) => {
             .from('calls')
             .select('id, org_id, from_number, to_number, status, started_at, ended_at')
             .order('started_at', { ascending: false })
-            .limit(limit);
+            .range(offset, offset + limit - 1);
 
           // Apply org filter
           if (queryOrgIds.length > 0) {
@@ -5316,7 +5317,8 @@ app.get("/s/series", async (req, res) => {
           }));
         }
 
-        res.json({ reports: data || [] });
+        const rows = data || [];
+        res.json({ reports: rows, next_offset: rows.length === limit ? offset + rows.length : null });
       } catch (err: any) {
         console.error('[mightycall/reports] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_reports', detail: err?.message });
@@ -5331,7 +5333,8 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        const limit = parseInt(req.query.limit as string) || 50;
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 1000));
+        const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
 
         // Check if user is platform admin
@@ -5341,7 +5344,7 @@ app.get("/s/series", async (req, res) => {
           .from('mightycall_recordings')
           .select('*, organizations(name, id)')
           .order('created_at', { ascending: false })
-          .limit(limit);
+          .range(offset, offset + limit - 1);
 
         // If org_id is provided in query, use it (admin filtering)
         if (orgId) {
@@ -5397,7 +5400,7 @@ app.get("/s/series", async (req, res) => {
             .from('calls')
             .select('id, org_id, from_number, to_number, status, started_at, ended_at, recording_url')
             .order('started_at', { ascending: false })
-            .limit(limit);
+            .range(offset, offset + limit - 1);
 
           if (orgId) {
             callsQuery = callsQuery.eq('org_id', orgId);
@@ -5493,7 +5496,8 @@ app.get("/s/series", async (req, res) => {
           });
         }
 
-        res.json({ recordings: data || [] });
+        const rows = data || [];
+        res.json({ recordings: rows, next_offset: rows.length === limit ? offset + rows.length : null });
       } catch (err: any) {
         console.error('[mightycall/recordings] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_recordings', detail: err?.message });
@@ -5577,7 +5581,8 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        const limit = parseInt(req.query.limit as string) || 100;
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 1000));
+        const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
 
         // Check if user is platform admin
@@ -5626,7 +5631,7 @@ app.get("/s/series", async (req, res) => {
           .from(tableName)
           .select('*, organizations(name, id)')
           .order('created_at', { ascending: false })
-          .limit(limit);
+          .range(offset, offset + limit - 1);
 
         // Add org filter
         if (targetOrgIds.length > 0) {
@@ -5653,7 +5658,7 @@ app.get("/s/series", async (req, res) => {
             .from('sms_logs')
             .select('*')
             .order('sent_at', { ascending: false })
-            .limit(limit);
+            .range(offset, offset + limit - 1);
 
           if (targetOrgIds.length > 0) {
             query = query.in('org_id', targetOrgIds);
@@ -5684,7 +5689,8 @@ app.get("/s/series", async (req, res) => {
         }
 
         if (error) throw error;
-        res.json({ messages: data || [] });
+        const rows = data || [];
+        res.json({ messages: rows, next_offset: rows.length === limit ? offset + rows.length : null });
       } catch (err: any) {
         console.error('[sms/messages] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_messages', detail: err?.message });
