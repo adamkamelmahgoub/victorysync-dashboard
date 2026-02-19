@@ -101,25 +101,28 @@ export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
       const metadataOrgId = (user?.user_metadata as any)?.org_id;
       console.info('[ORG] user metadata org_id:', metadataOrgId);
 
-      // Query org_members to get ALL memberships as an ARRAY (not .single())
-      // This returns an empty array if no matches, instead of throwing PGRST116
-      const { data: memberships, error: memberError } = await supabase
-        .from('org_members')
-        .select('org_id, user_id, role')
-        .eq('user_id', user.id);
+      // Query both membership tables, then merge.
+      const [{ data: orgMembers, error: orgMembersError }, { data: orgUsers, error: orgUsersError }] = await Promise.all([
+        supabase.from('org_members').select('org_id, user_id, role').eq('user_id', user.id),
+        supabase.from('org_users').select('org_id, user_id, role').eq('user_id', user.id),
+      ]);
 
-      console.info('[ORG] memberships query result:', { memberships, memberError });
-
-      // Handle query errors
-      if (memberError) {
-        console.error('[OrgContext] Error fetching org_members:', memberError);
-        setError(`Failed to load organization: ${memberError.message}`);
+      if (orgMembersError && orgUsersError) {
+        console.error('[OrgContext] Error fetching memberships:', { orgMembersError, orgUsersError });
+        setError(`Failed to load organization: ${orgMembersError.message || orgUsersError.message}`);
         setOrg(null);
         setMember(null);
         setLoading(false);
         lastUserIdRef.current = user.id;
         return;
       }
+
+      const mergedMemberships = [...(orgMembers || []), ...(orgUsers || [])] as Array<{ org_id: string; user_id: string; role: string }>;
+      const memberships = Array.from(
+        new Map(mergedMemberships.filter((m) => m?.org_id).map((m) => [m.org_id, m])).values()
+      );
+
+      console.info('[ORG] memberships query result:', { memberships, memberError: orgMembersError || orgUsersError });
 
       // Ensure memberships is an array
       if (!Array.isArray(memberships)) {

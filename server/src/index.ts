@@ -280,7 +280,7 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
         const { phones: orgPhones } = await getAssignedPhoneNumbersForOrg(orgId);
 
         let targetPhone: any = (orgPhones || []).find((p: any) => String(p?.number || '').trim() === DEFAULT_FALLBACK_NUMBER)
-          || (orgPhones || []).find((p: any) => String(p?.number_digits || '') === DEFAULT_FALLBACK_DIGITS)
+          || (orgPhones || []).find((p: any) => normalizePhoneDigits(String(p?.number || '')) === DEFAULT_FALLBACK_DIGITS)
           || (orgPhones || [])[0]
           || null;
 
@@ -288,21 +288,11 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
           let phoneRow: any = null;
           const { data: byExact } = await supabaseAdmin
             .from('phone_numbers')
-            .select('id, number, number_digits, label')
+            .select('id, number, label')
             .eq('org_id', orgId)
             .eq('number', DEFAULT_FALLBACK_NUMBER)
             .maybeSingle();
           if (byExact) phoneRow = byExact;
-
-          if (!phoneRow) {
-            const { data: byDigits } = await supabaseAdmin
-              .from('phone_numbers')
-              .select('id, number, number_digits, label')
-              .eq('org_id', orgId)
-              .eq('number_digits', DEFAULT_FALLBACK_DIGITS)
-              .maybeSingle();
-            if (byDigits) phoneRow = byDigits;
-          }
 
           if (!phoneRow) {
             const { data: created, error: createErr } = await supabaseAdmin
@@ -311,12 +301,11 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
                 org_id: orgId,
                 external_id: `manual-default-${orgId}-${DEFAULT_FALLBACK_DIGITS}`,
                 number: DEFAULT_FALLBACK_NUMBER,
-                number_digits: DEFAULT_FALLBACK_DIGITS,
                 label: 'Default Assigned Number',
                 is_active: true,
                 metadata: { source: 'auto_fallback_assignment' }
               })
-              .select('id, number, number_digits, label')
+              .select('id, number, label')
               .maybeSingle();
             if (createErr) {
               console.warn('[getUserAssignedPhoneNumbers] failed creating fallback phone:', fmtErr(createErr));
@@ -412,14 +401,53 @@ async function getUserAssignedPhoneNumbers(orgId: string, userId: string) {
 
     if (phoneErr) {
       console.warn('[getUserAssignedPhoneNumbers] phone lookup failed:', fmtErr(phoneErr));
-      return { phones: [], numbers: [], digits: [] };
+    }
+    const phoneList: Array<{ id: string; number: string; label?: string | null }> = (phones || []) as any[];
+
+    // Fallback resolver for deployments where user_phone_assignments.phone_number_id
+    // maps to org_phone_numbers.phone_number_id (or org_phone_numbers.id), not phone_numbers.id.
+    if (phoneList.length < phoneIds.length) {
+      try {
+        const { data: orgPhoneRows } = await supabaseAdmin
+          .from('org_phone_numbers')
+          .select('id, phone_number_id, phone_number, label')
+          .eq('org_id', orgId);
+
+        const byPhoneId = new Set(phoneList.map((p: any) => String(p.id)));
+        for (const pid of phoneIds) {
+          if (byPhoneId.has(String(pid))) continue;
+          const row = (orgPhoneRows || []).find((r: any) =>
+            String(r?.phone_number_id || '') === String(pid) || String(r?.id || '') === String(pid)
+          );
+          const number = String((row as any)?.phone_number || '').trim();
+          if (row && number) {
+            phoneList.push({
+              id: String((row as any).phone_number_id || (row as any).id),
+              number,
+              label: (row as any).label || null,
+            });
+            byPhoneId.add(String((row as any).phone_number_id || (row as any).id));
+          }
+        }
+      } catch (e) {
+        console.warn('[getUserAssignedPhoneNumbers] org_phone_numbers fallback failed:', fmtErr(e));
+      }
     }
 
-    const phoneList = phones || [];
-    const numbers = phoneList.map(p => p.number).filter(Boolean);
-    const digits = phoneList.map(p => (p.number || '').replace(/\D/g, '')).filter(Boolean);
+    const deduped: Array<{ id: string; number: string; label?: string | null }> = [];
+    const seen = new Set<string>();
+    for (const p of phoneList) {
+      const n = String((p as any)?.number || '').trim();
+      const k = `${String((p as any)?.id || '')}|${n}`;
+      if (!n || seen.has(k)) continue;
+      seen.add(k);
+      deduped.push({ id: String((p as any).id), number: n, label: (p as any).label || null });
+    }
 
-    return { phones: phoneList, numbers, digits };
+    const numbers = deduped.map(p => p.number).filter(Boolean);
+    const digits = deduped.map(p => normalizePhoneDigits(p.number)).filter(Boolean) as string[];
+
+    return { phones: deduped, numbers, digits };
   } catch (e) {
     console.warn('[getUserAssignedPhoneNumbers] exception:', fmtErr(e));
     return { phones: [], numbers: [], digits: [] };
@@ -6375,6 +6403,79 @@ app.get("/s/series", async (req, res) => {
           }
         }
 
+        // Final fallback: fetch call rows directly from MightyCall API for this report day.
+        // This bypasses local calls-table issues while preserving number/assignment filters.
+        if (reportDate && rawTotalCalls > 0 && relatedCalls.length === 0) {
+          try {
+            let overrideCreds: any = undefined;
+            try {
+              const { getOrgIntegration } = await import('./lib/integrationsStore');
+              const integ = await getOrgIntegration(report.org_id, 'mightycall');
+              if (integ && integ.credentials) {
+                overrideCreds = {
+                  clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+                  clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+                };
+              }
+            } catch {}
+
+            const { getMightyCallAccessToken, fetchMightyCallCalls } = await import('./integrations/mightycall');
+            const token = await getMightyCallAccessToken(overrideCreds);
+            const liveCalls = await fetchMightyCallCalls(token, {
+              startUtc: `${reportDate}T00:00:00Z`,
+              endUtc: `${reportDate}T23:59:59Z`,
+              pageSize: '1000',
+              skip: '0'
+            });
+
+            let mapped = (Array.isArray(liveCalls) ? liveCalls : []).map((c: any, idx: number) => {
+              const from = String(
+                c?.from ||
+                c?.from_number ||
+                c?.client?.address ||
+                c?.caller?.number ||
+                c?.source?.number ||
+                c?.businessNumber ||
+                ''
+              ).trim() || null;
+              const to = String(
+                c?.to ||
+                c?.to_number ||
+                c?.businessNumber?.number ||
+                c?.called?.[0]?.phone ||
+                c?.destination?.number ||
+                ''
+              ).trim() || null;
+              return {
+                id: String(c?.id || c?.callId || `${report.id}-live-${idx}`),
+                from_number: from,
+                to_number: to,
+                from_number_digits: normalizePhoneDigits(from || ''),
+                to_number_digits: normalizePhoneDigits(to || ''),
+                status: String(c?.status || c?.callStatus || c?.state || '').toLowerCase() || null,
+                duration_seconds: Number(c?.duration ?? c?.durationSeconds ?? c?.callDuration ?? 0) || 0,
+                started_at: c?.dateTimeUtc || c?.started_at || c?.start_time || c?.created || null,
+                ended_at: c?.endedAt || c?.ended_at || c?.end_time || null
+              };
+            });
+
+            mapped = mapped.filter((c: any) => {
+              if (!hasCandidateNumbers) return true;
+              return rowMatchesCandidateNumbers(c);
+            });
+            if (!isAdmin) {
+              mapped = mapped.filter((r: any) =>
+                reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet)
+              );
+            }
+            if (mapped.length > 0) {
+              relatedCalls = mapped.slice(0, relatedLimit);
+            }
+          } catch (e) {
+            console.warn('[mightycall/report detail] live MightyCall fallback failed:', fmtErr(e));
+          }
+        }
+
         // KPI source of truth: real call rows within report scope (after visibility filters).
         const normalizedStatus = (s: any) => String(s || '').toLowerCase().trim();
         const isAnswered = (s: string) => ['answered', 'completed', 'connected'].includes(s);
@@ -6725,13 +6826,43 @@ app.get("/s/series", async (req, res) => {
           query = query.in('org_id', targetOrgIds);
         }
         
-        // Add phone filter for non-admin
-        if (!isAdmin && allowedPhoneIds) {
-          if (allowedPhoneIds.length === 0) {
-            // User has no assigned phones in their org(s)
-            return res.json({ messages: [] });
+        // Add phone filter for non-admin.
+        // Do not rely only on phone_id because many rows may have phone_id = null
+        // while from/to numbers are present.
+        if (!isAdmin) {
+          if (allowedPhoneIds && allowedPhoneIds.length > 0) {
+            const idClauses = allowedPhoneIds.map((id) => `phone_id.eq.${String(id).replace(/,/g, '\\,')}`);
+            const numberClauses: string[] = [];
+            for (const num of allowedPhoneNumbers) {
+              const n = String(num || '').replace(/,/g, '\\,');
+              if (!n) continue;
+              numberClauses.push(`from_number.eq.${n}`);
+              numberClauses.push(`to_number.eq.${n}`);
+            }
+            for (const d of allowedPhoneDigits) {
+              const digits = String(d || '').replace(/,/g, '\\,');
+              if (!digits) continue;
+              numberClauses.push(`from_number.ilike.*${digits}*`);
+              numberClauses.push(`to_number.ilike.*${digits}*`);
+            }
+            const clauses = idClauses.concat(numberClauses);
+            if (clauses.length > 0) query = query.or(clauses.join(','));
+          } else {
+            const numberClauses: string[] = [];
+            for (const num of allowedPhoneNumbers) {
+              const n = String(num || '').replace(/,/g, '\\,');
+              if (!n) continue;
+              numberClauses.push(`from_number.eq.${n}`);
+              numberClauses.push(`to_number.eq.${n}`);
+            }
+            for (const d of allowedPhoneDigits) {
+              const digits = String(d || '').replace(/,/g, '\\,');
+              if (!digits) continue;
+              numberClauses.push(`from_number.ilike.*${digits}*`);
+              numberClauses.push(`to_number.ilike.*${digits}*`);
+            }
+            if (numberClauses.length > 0) query = query.or(numberClauses.join(','));
           }
-          query = query.in('phone_id', allowedPhoneIds);
         }
 
         let { data, error } = await query;
