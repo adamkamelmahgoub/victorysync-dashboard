@@ -25,6 +25,24 @@ interface Org {
   name: string;
 }
 
+interface ReportDetailResponse {
+  report: Report;
+  kpis: {
+    total_calls: number;
+    answered_calls: number;
+    missed_calls: number;
+    answer_rate_pct: number;
+    total_duration_seconds: number;
+    avg_call_duration_seconds: number;
+  };
+  numbers: string[];
+  related: {
+    calls: any[];
+    recordings: any[];
+    sms: any[];
+  };
+}
+
 const PAGE_SIZE = 500;
 
 const AdminReportsPage: FC = () => {
@@ -39,6 +57,10 @@ const AdminReportsPage: FC = () => {
   const [filterType, setFilterType] = useState('calls');
   const [syncing, setSyncing] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [reportDetail, setReportDetail] = useState<ReportDetailResponse | null>(null);
 
   useEffect(() => {
     fetchOrgs();
@@ -150,6 +172,32 @@ const AdminReportsPage: FC = () => {
     }
   };
 
+  const openReportDetail = async (reportId: string) => {
+    if (!userId) return;
+    setSelectedReportId(reportId);
+    setDetailLoading(true);
+    setDetailError(null);
+    try {
+      const response = await fetch(buildApiUrl(`/api/mightycall/reports/${encodeURIComponent(reportId)}`), {
+        headers: {
+          'x-user-id': userId,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        setDetailError(err?.detail || err?.error || 'Failed to load report detail');
+        return;
+      }
+      const data = await response.json();
+      setReportDetail(data);
+    } catch (e: any) {
+      setDetailError(e?.message || 'Failed to load report detail');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   return (
     <PageLayout title="Reports" description="View and manage MightyCall reports across organizations">
       <div className="space-y-6">
@@ -224,7 +272,11 @@ const AdminReportsPage: FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-700/30">
                     {reports.map((report) => (
-                      <tr key={report.id} className="hover:bg-slate-800/30 transition">
+                      <tr
+                        key={report.id}
+                        className="hover:bg-slate-800/30 transition cursor-pointer"
+                        onClick={() => openReportDetail(report.id)}
+                      >
                         <td className="py-3 px-4 text-slate-200">{report.organizations?.name || report.org_id}</td>
                         <td className="py-3 px-4 text-slate-300">{report.report_type}</td>
                         <td className="py-3 px-4 text-slate-300">{report.data?.calls_count ?? '-'}</td>
@@ -253,6 +305,63 @@ const AdminReportsPage: FC = () => {
           )}
         </div>
       </div>
+
+      {selectedReportId && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl bg-slate-900 ring-1 ring-slate-700 rounded-lg max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white">Report Detail</h3>
+              <button
+                onClick={() => { setSelectedReportId(null); setReportDetail(null); setDetailError(null); }}
+                className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-slate-200 text-sm hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {detailLoading ? (
+                <div className="text-slate-300 text-sm">Loading detail...</div>
+              ) : detailError ? (
+                <div className="text-red-300 text-sm">{detailError}</div>
+              ) : reportDetail ? (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="bg-slate-800/60 border border-slate-700 rounded p-4"><div className="text-xs text-slate-400">Total Calls</div><div className="text-xl text-white font-bold">{reportDetail.kpis.total_calls}</div></div>
+                    <div className="bg-slate-800/60 border border-slate-700 rounded p-4"><div className="text-xs text-slate-400">Answered</div><div className="text-xl text-emerald-300 font-bold">{reportDetail.kpis.answered_calls}</div></div>
+                    <div className="bg-slate-800/60 border border-slate-700 rounded p-4"><div className="text-xs text-slate-400">Missed</div><div className="text-xl text-amber-300 font-bold">{reportDetail.kpis.missed_calls}</div></div>
+                    <div className="bg-slate-800/60 border border-slate-700 rounded p-4"><div className="text-xs text-slate-400">Answer Rate</div><div className="text-xl text-cyan-300 font-bold">{reportDetail.kpis.answer_rate_pct}%</div></div>
+                    <div className="bg-slate-800/60 border border-slate-700 rounded p-4"><div className="text-xs text-slate-400">Total Duration</div><div className="text-xl text-white font-bold">{reportDetail.kpis.total_duration_seconds}s</div></div>
+                    <div className="bg-slate-800/60 border border-slate-700 rounded p-4"><div className="text-xs text-slate-400">Avg Duration</div><div className="text-xl text-white font-bold">{reportDetail.kpis.avg_call_duration_seconds}s</div></div>
+                  </div>
+
+                  <div className="bg-slate-800/50 border border-slate-700 rounded p-4">
+                    <div className="text-xs text-slate-400 mb-2">Numbers In This Report</div>
+                    <div className="text-sm text-slate-200 font-mono break-words">{(reportDetail.numbers || []).join(', ') || '-'}</div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded p-4">
+                      <div className="text-xs text-slate-400 mb-2">Related Calls</div>
+                      <div className="text-lg text-white font-semibold">{reportDetail.related?.calls?.length || 0}</div>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded p-4">
+                      <div className="text-xs text-slate-400 mb-2">Related Recordings</div>
+                      <div className="text-lg text-white font-semibold">{reportDetail.related?.recordings?.length || 0}</div>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded p-4">
+                      <div className="text-xs text-slate-400 mb-2">Related SMS</div>
+                      <div className="text-lg text-white font-semibold">{reportDetail.related?.sms?.length || 0}</div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-slate-300 text-sm">No detail available.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </PageLayout>
   );
 };

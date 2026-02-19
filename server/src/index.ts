@@ -303,6 +303,42 @@ async function getUserOrgIds(userId: string): Promise<string[]> {
   }
 }
 
+function extractCandidateNumbersFromReport(report: any): string[] {
+  const values: string[] = [];
+  const pushIf = (v: any) => {
+    const s = String(v || '').trim();
+    if (s) values.push(s);
+  };
+  pushIf(report?.phone_number);
+  pushIf(report?.from_number);
+  pushIf(report?.to_number);
+  pushIf(report?.data?.phone_number);
+  const sample = report?.data?.sample_numbers;
+  if (Array.isArray(sample)) {
+    for (const n of sample) pushIf(n);
+  }
+  return Array.from(new Set(values));
+}
+
+function reportVisibleToAssignedPhones(
+  report: any,
+  assignedIds: Set<string>,
+  assignedNumbers: Set<string>,
+  assignedDigits: Set<string>
+): boolean {
+  const phoneId = String(report?.phone_number_id || '');
+  if (phoneId && assignedIds.has(phoneId)) return true;
+
+  const candidates = extractCandidateNumbersFromReport(report);
+  if (candidates.length === 0) return false;
+  for (const c of candidates) {
+    if (assignedNumbers.has(c)) return true;
+    const d = normalizePhoneDigits(c);
+    if (d && assignedDigits.has(d)) return true;
+  }
+  return false;
+}
+
 // Helper: fallback calculation for totals using direct DB calls (used when RPC is unavailable)
 async function computeTotalsFromCalls(orgId: string, startTime: Date, endTime: Date, assignedNumbers: string[], assignedDigits: string[]) {
   const totalsObj = { callsToday: 0, answeredCalls: 0, missedCalls: 0, avgHandleTime: 0, avgSpeedOfAnswer: 0, answerRate: 0 } as any;
@@ -5237,34 +5273,32 @@ app.get("/s/series", async (req, res) => {
           }
         }
         
-        // If this is a non-admin user and we have org(s), also restrict by assigned phone numbers
-        // (some reports may be linked by phone rather than org_id)
+        // If this is a non-admin user and we have org(s), restrict by assigned phone numbers.
+        let assignedIdSet = new Set<string>();
+        let assignedNumberSet = new Set<string>();
+        let assignedDigitSet = new Set<string>();
         if (!isAdmin && queryOrgIds.length > 0) {
           try {
             // collect assigned numbers/ids/digits across all orgs
-            let allAssignedNumbers: string[] = [];
-            let allAssignedDigits: string[] = [];
-            let allAssignedIds: string[] = [];
             for (const o of queryOrgIds) {
               const { phones, numbers, digits } = await getAssignedPhoneNumbersForOrg(o);
-              if (numbers && numbers.length) allAssignedNumbers = allAssignedNumbers.concat(numbers);
-              if (digits && digits.length) allAssignedDigits = allAssignedDigits.concat(digits as string[]);
-              if (phones && phones.length) allAssignedIds = allAssignedIds.concat(phones.map((p: any) => p.id));
+              for (const n of numbers || []) assignedNumberSet.add(String(n));
+              for (const d of digits || []) assignedDigitSet.add(String(d));
+              for (const p of phones || []) if ((p as any)?.id) assignedIdSet.add(String((p as any).id));
             }
 
-            // Build an OR filter to include reports that reference those phone IDs or numbers
+            // Build DB-side prefilter; final enforcement runs in-memory below.
             const orClauses: string[] = [];
-            if (allAssignedIds.length > 0) {
-              orClauses.push(`phone_number_id.in.(${allAssignedIds.join(',')})`);
+            if (assignedIdSet.size > 0) {
+              orClauses.push(`phone_number_id.in.(${Array.from(assignedIdSet).join(',')})`);
             }
-            if (allAssignedNumbers.length > 0) {
+            if (assignedNumberSet.size > 0) {
               // escape commas in phone numbers if any
-              const nums = allAssignedNumbers.map(n => n.replace(/,/g, '\\,'));
+              const nums = Array.from(assignedNumberSet).map(n => n.replace(/,/g, '\\,'));
               orClauses.push(`phone_number.in.(${nums.join(',')})`);
             }
 
             if (orClauses.length > 0) {
-              // apply OR filter in addition to org_id filter so user sees reports linked to their numbers
               const orFilter = orClauses.join(',');
               query = query.or(orFilter);
             }
@@ -5317,11 +5351,140 @@ app.get("/s/series", async (req, res) => {
           }));
         }
 
-        const rows = data || [];
+        let rows = data || [];
+        if (!isAdmin && queryOrgIds.length > 0) {
+          if (assignedIdSet.size === 0 && assignedNumberSet.size === 0 && assignedDigitSet.size === 0) {
+            rows = [];
+          } else {
+            rows = rows.filter((r: any) => reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet));
+          }
+        }
         res.json({ reports: rows, next_offset: rows.length === limit ? offset + rows.length : null });
       } catch (err: any) {
         console.error('[mightycall/reports] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_reports', detail: err?.message });
+      }
+    });
+
+    // Get one report with enriched detail (KPIs + related numbers/activity).
+    app.get('/api/mightycall/reports/:id', async (req, res) => {
+      try {
+        const userId = req.header('x-user-id') || null;
+        if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+        const reportId = req.params.id;
+        if (!reportId) return res.status(400).json({ error: 'missing_report_id' });
+
+        const isAdmin = await isPlatformAdmin(userId);
+        const { data: report, error } = await supabaseAdmin
+          .from('mightycall_reports')
+          .select('*, organizations(name, id)')
+          .eq('id', reportId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!report) return res.status(404).json({ error: 'report_not_found' });
+
+        if (!isAdmin) {
+          const orgIds = await getUserOrgIds(userId);
+          if (!orgIds.includes(report.org_id)) return res.status(403).json({ error: 'forbidden' });
+
+          const { phones, numbers, digits } = await getAssignedPhoneNumbersForOrg(report.org_id);
+          const assignedIdSet = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
+          const assignedNumberSet = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
+          const assignedDigitSet = new Set((digits || []).map((d: any) => String(d || '')).filter(Boolean));
+          if (!reportVisibleToAssignedPhones(report, assignedIdSet, assignedNumberSet, assignedDigitSet)) {
+            return res.status(403).json({ error: 'forbidden', detail: 'report_not_assigned_to_user_numbers' });
+          }
+        }
+
+        const reportDate = String(report.report_date || '').slice(0, 10);
+        const fromTs = reportDate ? `${reportDate}T00:00:00Z` : null;
+        const toTs = reportDate ? `${reportDate}T23:59:59Z` : null;
+        const candidateNumbers = extractCandidateNumbersFromReport(report);
+        const candidateDigits = new Set(candidateNumbers.map((n) => normalizePhoneDigits(n)).filter(Boolean) as string[]);
+        const numberMatch = (value: any) => {
+          const s = String(value || '').trim();
+          if (!s) return false;
+          if (candidateNumbers.includes(s)) return true;
+          const d = normalizePhoneDigits(s);
+          return !!(d && candidateDigits.has(d));
+        };
+
+        const raw = (report as any)?.data || {};
+        const totalCalls = Number(raw.calls_count || 0);
+        const answeredCalls = Number(raw.answered_count || 0);
+        const missedCalls = Number(raw.missed_count || 0);
+        const totalDuration = Number(raw.total_duration || 0);
+        const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
+        const answerRate = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+
+        let relatedCalls: any[] = [];
+        try {
+          let q = supabaseAdmin
+            .from('calls')
+            .select('id, from_number, to_number, status, duration_seconds, started_at, ended_at')
+            .eq('org_id', report.org_id)
+            .order('started_at', { ascending: false })
+            .limit(200);
+          if (fromTs && toTs) q = q.gte('started_at', fromTs).lte('started_at', toTs);
+          const { data: callsData } = await q;
+          relatedCalls = (callsData || []).filter((c: any) => {
+            if (candidateNumbers.length === 0) return true;
+            return numberMatch(c?.from_number) || numberMatch(c?.to_number);
+          });
+        } catch {}
+
+        let relatedRecordings: any[] = [];
+        try {
+          let q = supabaseAdmin
+            .from('mightycall_recordings')
+            .select('id, from_number, to_number, duration_seconds, recording_date, recording_url')
+            .eq('org_id', report.org_id)
+            .order('recording_date', { ascending: false })
+            .limit(200);
+          if (fromTs && toTs) q = q.gte('recording_date', fromTs).lte('recording_date', toTs);
+          const { data: recData } = await q;
+          relatedRecordings = (recData || []).filter((r: any) => {
+            if (candidateNumbers.length === 0) return true;
+            return numberMatch(r?.from_number) || numberMatch(r?.to_number);
+          });
+        } catch {}
+
+        let relatedSms: any[] = [];
+        try {
+          let q = supabaseAdmin
+            .from('mightycall_sms_messages')
+            .select('id, from_number, to_number, message_text, direction, status, created_at, message_date, sent_at')
+            .eq('org_id', report.org_id)
+            .order('created_at', { ascending: false })
+            .limit(200);
+          if (fromTs && toTs) q = q.gte('created_at', fromTs).lte('created_at', toTs);
+          const { data: smsData } = await q;
+          relatedSms = (smsData || []).filter((m: any) => {
+            if (candidateNumbers.length === 0) return true;
+            return numberMatch(m?.from_number) || numberMatch(m?.to_number);
+          });
+        } catch {}
+
+        res.json({
+          report,
+          kpis: {
+            total_calls: totalCalls,
+            answered_calls: answeredCalls,
+            missed_calls: missedCalls,
+            answer_rate_pct: answerRate,
+            total_duration_seconds: totalDuration,
+            avg_call_duration_seconds: avgDuration
+          },
+          numbers: candidateNumbers,
+          related: {
+            calls: relatedCalls,
+            recordings: relatedRecordings,
+            sms: relatedSms
+          }
+        });
+      } catch (err: any) {
+        console.error('[mightycall/report detail] error:', err);
+        res.status(500).json({ error: 'failed_to_fetch_report_detail', detail: err?.message });
       }
     });
 
