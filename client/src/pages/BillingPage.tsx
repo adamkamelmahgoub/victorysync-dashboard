@@ -6,6 +6,7 @@ import { buildApiUrl } from '../config';
 type BillingOverview = {
   org_id: string | null;
   next_due_date: string | null;
+  package_source?: 'org_subscription' | 'user_package' | null;
   package: {
     id: string;
     name: string;
@@ -25,11 +26,23 @@ type Invoice = {
   total?: number;
 };
 
+type BillingRecord = {
+  id: string;
+  description?: string;
+  type?: string;
+  status?: string;
+  currency?: string;
+  amount?: number;
+  billing_date?: string;
+  created_at?: string;
+};
+
 export default function BillingPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [overview, setOverview] = useState<BillingOverview | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [records, setRecords] = useState<BillingRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const totalBilled = useMemo(() => invoices.reduce((acc, i) => acc + Number(i.total_amount ?? i.total ?? 0), 0), [invoices]);
@@ -40,18 +53,22 @@ export default function BillingPage() {
     setError(null);
     try {
       const headers = { 'x-user-id': user.id };
-      const [ovRes, invRes] = await Promise.all([
+      const [ovRes, invRes, recRes] = await Promise.all([
         fetch(buildApiUrl('/api/client/billing/overview'), { headers }),
         fetch(buildApiUrl('/api/client/billing/invoices?limit=5000'), { headers }),
+        fetch(buildApiUrl('/api/client/billing/records?limit=5000'), { headers }),
       ]);
 
       if (!ovRes.ok) throw new Error('Failed to load billing overview');
       if (!invRes.ok) throw new Error('Failed to load invoices');
+      if (!recRes.ok) throw new Error('Failed to load billing records');
 
       const ov = await ovRes.json();
       const inv = await invRes.json();
+      const rec = await recRes.json();
       setOverview(ov);
       setInvoices(inv.invoices || []);
+      setRecords(rec.records || []);
     } catch (e: any) {
       setError(e?.message || 'Failed to load billing data');
     } finally {
@@ -93,6 +110,7 @@ export default function BillingPage() {
             <div className="text-xs text-slate-400">Current Package</div>
             <div className="text-xl text-white font-bold mt-1">{overview?.package?.name || 'No package assigned'}</div>
             <div className="text-xs text-slate-400 mt-1">{overview?.package?.description || '-'}</div>
+            {overview?.package_source && <div className="text-[11px] text-slate-500 mt-1">Source: {overview.package_source === 'org_subscription' ? 'Organization package' : 'User package'}</div>}
           </div>
           <div className="vs-surface p-4">
             <div className="text-xs text-slate-400">Next Due Date</div>
@@ -105,6 +123,39 @@ export default function BillingPage() {
         </section>
 
         <section className="vs-surface p-0 overflow-hidden">
+          <div className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">
+            Billing Records
+          </div>
+          <div className="max-h-[38vh] overflow-auto border-b border-slate-800/70">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400">
+                <tr>
+                  <th className="text-left py-2 px-3">Description</th>
+                  <th className="text-left py-2 px-3">Type</th>
+                  <th className="text-left py-2 px-3">Status</th>
+                  <th className="text-left py-2 px-3">Date</th>
+                  <th className="text-left py-2 px-3">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {records.map((r) => (
+                  <tr key={r.id} className="hover:bg-slate-800/40">
+                    <td className="px-3 py-2 text-slate-200">{r.description || '-'}</td>
+                    <td className="px-3 py-2 text-slate-300">{r.type || '-'}</td>
+                    <td className="px-3 py-2 text-slate-300">{r.status || '-'}</td>
+                    <td className="px-3 py-2 text-slate-400">{r.billing_date ? new Date(r.billing_date).toLocaleDateString() : (r.created_at ? new Date(r.created_at).toLocaleDateString() : '-')}</td>
+                    <td className="px-3 py-2 text-cyan-300">{r.currency || 'USD'} {Number(r.amount || 0).toFixed(2)}</td>
+                  </tr>
+                ))}
+                {records.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-6 text-slate-400" colSpan={5}>No billing records found.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
           <div className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200 flex items-center justify-between">
             <span>Invoices</span>
             <button onClick={loadData} disabled={loading} className="rounded bg-cyan-600 px-3 py-1 text-xs text-white disabled:opacity-60">{loading ? 'Refreshing...' : 'Refresh'}</button>

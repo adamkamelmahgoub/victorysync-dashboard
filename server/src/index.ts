@@ -5935,22 +5935,44 @@ app.get("/s/series", async (req, res) => {
         if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
         const orgIds = await getUserOrgIds(userId);
-        if (orgIds.length === 0) return res.json({ package: null, next_due_date: null, org_id: null });
-        const orgId = orgIds[0];
+        const orgId = orgIds[0] || null;
 
-        const { data: sub } = await supabaseAdmin
-          .from('org_subscriptions')
-          .select('*, billing_plans(*)')
-          .eq('org_id', orgId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        let sub: any = null;
+        if (orgId) {
+          const { data } = await supabaseAdmin
+            .from('org_subscriptions')
+            .select('*, billing_plans(*)')
+            .eq('org_id', orgId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          sub = data || null;
+        }
+
+        // Fallback: user package assignment from legacy package model.
+        let userPackage: any = null;
+        if (!sub) {
+          const { data: up } = await supabaseAdmin
+            .from('user_packages')
+            .select('*, packages(*)')
+            .eq('user_id', userId)
+            .order('assigned_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          userPackage = up || null;
+        }
+
+        const packageData = (sub as any)?.billing_plans || (userPackage as any)?.packages || null;
+        const nextDueDate = (sub as any)?.next_billing_date || (userPackage as any)?.expires_at || null;
+        const packageSource = sub ? 'org_subscription' : (userPackage ? 'user_package' : null);
 
         res.json({
           org_id: orgId,
-          package: (sub as any)?.billing_plans || null,
+          package: packageData,
           subscription: sub || null,
-          next_due_date: (sub as any)?.next_billing_date || null
+          user_package: userPackage || null,
+          package_source: packageSource,
+          next_due_date: nextDueDate
         });
       } catch (err: any) {
         console.error('[client/billing/overview] error:', err);
@@ -5978,6 +6000,58 @@ app.get("/s/series", async (req, res) => {
       } catch (err: any) {
         console.error('[client/billing/invoices] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_client_invoices', detail: err?.message });
+      }
+    });
+
+    app.get('/api/client/billing/records', async (req, res) => {
+      try {
+        const userId = req.header('x-user-id') || null;
+        if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
+
+        const orgIds = await getUserOrgIds(userId);
+
+        // User-targeted records
+        const { data: userRows, error: userErr } = await supabaseAdmin
+          .from('billing_records')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+        if (userErr) throw userErr;
+
+        // Org-targeted records
+        let orgRows: any[] = [];
+        if (orgIds.length > 0) {
+          const { data: oRows, error: orgErr } = await supabaseAdmin
+            .from('billing_records')
+            .select('*')
+            .in('org_id', orgIds)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+          if (orgErr) throw orgErr;
+          orgRows = oRows || [];
+        }
+
+        const merged = [...(userRows || []), ...(orgRows || [])];
+        const dedup = new Map<string, any>();
+        for (const row of merged) {
+          const id = String((row as any)?.id || '');
+          if (!id) continue;
+          if (!dedup.has(id)) dedup.set(id, row);
+        }
+        const records = Array.from(dedup.values())
+          .sort((a: any, b: any) => {
+            const ad = new Date(String(a?.created_at || 0)).getTime();
+            const bd = new Date(String(b?.created_at || 0)).getTime();
+            return bd - ad;
+          })
+          .slice(0, limit);
+
+        res.json({ records });
+      } catch (err: any) {
+        console.error('[client/billing/records] error:', err);
+        res.status(500).json({ error: 'failed_to_fetch_client_billing_records', detail: err?.message });
       }
     });
 

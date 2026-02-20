@@ -79,6 +79,7 @@ export const AdminBillingPageV2: React.FC = () => {
   const [showCreateRecord, setShowCreateRecord] = useState(false);
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [showCreatePackage, setShowCreatePackage] = useState(false);
+  const [showAdvancedRecordFields, setShowAdvancedRecordFields] = useState(false);
 
   const [recordForm, setRecordForm] = useState({
     org_id: '',
@@ -89,9 +90,6 @@ export const AdminBillingPageV2: React.FC = () => {
     amount: '',
     currency: 'USD',
     billing_date: '',
-    stripe_customer_id: '',
-    stripe_invoice_id: '',
-    stripe_payment_intent_id: '',
     metadata_json: '{}',
   });
 
@@ -121,9 +119,6 @@ export const AdminBillingPageV2: React.FC = () => {
     features_json: '[]',
     is_active: true,
     autoAssignOrgId: '',
-    autoAssignUserId: '',
-    assignExpiresAt: '',
-    assignMetadataJson: '{}',
   });
 
   const authHeaders = useMemo(() => ({ 'x-user-id': user?.id || '', 'Content-Type': 'application/json' }), [user?.id]);
@@ -218,11 +213,17 @@ export const AdminBillingPageV2: React.FC = () => {
         amount: Number(recordForm.amount || 0),
         currency: recordForm.currency || 'USD',
         billing_date: recordForm.billing_date || undefined,
-        stripe_customer_id: recordForm.stripe_customer_id || undefined,
-        stripe_invoice_id: recordForm.stripe_invoice_id || undefined,
-        stripe_payment_intent_id: recordForm.stripe_payment_intent_id || undefined,
         metadata,
       };
+      if (!payload.org_id && !payload.user_id) {
+        throw new Error('Select at least one target: organization or user');
+      }
+      if (!payload.description.trim()) {
+        throw new Error('Description is required');
+      }
+      if (!(payload.amount > 0)) {
+        throw new Error('Amount must be greater than 0');
+      }
       const resp = await fetch(buildApiUrl('/api/admin/billing/records'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create record');
       setShowCreateRecord(false);
@@ -309,30 +310,22 @@ export const AdminBillingPageV2: React.FC = () => {
 
       const pkgJson = await resp.json().catch(() => ({}));
       const createdPackageId = pkgJson?.package?.id;
+      if (orgs.length > 0 && !packageForm.autoAssignOrgId) {
+        setShowCreatePackage(false);
+        await loadPackages();
+        setError('Package created, but not assigned to an organization yet. Assign to an org so clients can see it.');
+        return;
+      }
       if (createdPackageId && packageForm.autoAssignOrgId) {
-        await fetch(buildApiUrl('/api/admin/org-subscriptions'), {
+        const assignResp = await fetch(buildApiUrl('/api/admin/org-subscriptions'), {
           method: 'POST',
           headers: authHeaders,
           body: JSON.stringify({ orgId: packageForm.autoAssignOrgId, planId: createdPackageId }),
         });
-      }
-      if (createdPackageId && packageForm.autoAssignUserId) {
-        let assignmentMetadata: any = {};
-        try {
-          assignmentMetadata = parseJsonInput(packageForm.assignMetadataJson, {});
-        } catch {
-          assignmentMetadata = {};
+        if (!assignResp.ok) {
+          const assignErr = await assignResp.json().catch(() => ({}));
+          throw new Error(assignErr?.error || 'Package created but failed to assign to organization');
         }
-        await fetch(buildApiUrl('/api/admin/user-packages'), {
-          method: 'POST',
-          headers: authHeaders,
-          body: JSON.stringify({
-            user_id: packageForm.autoAssignUserId,
-            package_id: createdPackageId,
-            expires_at: packageForm.assignExpiresAt || null,
-            metadata: assignmentMetadata,
-          }),
-        });
       }
 
       setShowCreatePackage(false);
@@ -445,7 +438,15 @@ export const AdminBillingPageV2: React.FC = () => {
               <option value="">Select organization (optional)</option>
               {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
-            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.user_id} onChange={(e) => setRecordForm({ ...recordForm, user_id: e.target.value })}>
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.user_id} onChange={(e) => {
+              const nextUserId = e.target.value;
+              const selectedUser = users.find((u) => u.id === nextUserId);
+              setRecordForm((prev) => ({
+                ...prev,
+                user_id: nextUserId,
+                org_id: prev.org_id || selectedUser?.org_id || '',
+              }));
+            }}>
               <option value="">Select user (optional)</option>
               {users.map((u) => <option key={u.id} value={u.id}>{userDisplay(u)}</option>)}
             </select>
@@ -454,11 +455,19 @@ export const AdminBillingPageV2: React.FC = () => {
             <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.status} onChange={(e) => setRecordForm({ ...recordForm, status: e.target.value })}><option value="pending">pending</option><option value="paid">paid</option><option value="failed">failed</option><option value="refunded">refunded</option></select>
             <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Amount" type="number" step="0.01" value={recordForm.amount} onChange={(e) => setRecordForm({ ...recordForm, amount: e.target.value })} />
             <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.currency} onChange={(e) => setRecordForm({ ...recordForm, currency: e.target.value })}><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="CAD">CAD</option></select>
-            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Billing date (YYYY-MM-DD)" value={recordForm.billing_date} onChange={(e) => setRecordForm({ ...recordForm, billing_date: e.target.value })} />
-            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Stripe customer ID" value={recordForm.stripe_customer_id} onChange={(e) => setRecordForm({ ...recordForm, stripe_customer_id: e.target.value })} />
-            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Stripe invoice ID" value={recordForm.stripe_invoice_id} onChange={(e) => setRecordForm({ ...recordForm, stripe_invoice_id: e.target.value })} />
-            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Stripe payment intent ID" value={recordForm.stripe_payment_intent_id} onChange={(e) => setRecordForm({ ...recordForm, stripe_payment_intent_id: e.target.value })} />
-            <textarea className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm min-h-[80px]" placeholder="Metadata JSON" value={recordForm.metadata_json} onChange={(e) => setRecordForm({ ...recordForm, metadata_json: e.target.value })} />
+            <div className="col-span-2 rounded border border-cyan-700/40 bg-cyan-900/10 px-3 py-2 text-xs text-cyan-100">Tip: clients see records assigned to their organization and/or user account.</div>
+            <div className="col-span-2">
+              <button type="button" className="text-xs text-cyan-300 hover:text-cyan-200" onClick={() => setShowAdvancedRecordFields((v) => !v)}>
+                {showAdvancedRecordFields ? 'Hide advanced fields' : 'Show advanced fields'}
+              </button>
+            </div>
+            {showAdvancedRecordFields && (
+              <>
+                <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Billing date (YYYY-MM-DD)" value={recordForm.billing_date} onChange={(e) => setRecordForm({ ...recordForm, billing_date: e.target.value })} />
+                <div />
+                <textarea className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm min-h-[80px]" placeholder="Metadata JSON (optional)" value={recordForm.metadata_json} onChange={(e) => setRecordForm({ ...recordForm, metadata_json: e.target.value })} />
+              </>
+            )}
           </div>
           <div className="flex gap-2 mt-4 justify-end">
             <button onClick={() => setShowCreateRecord(false)} className="px-4 py-2 rounded bg-slate-700 text-slate-200 text-sm">Cancel</button>
@@ -519,20 +528,15 @@ export const AdminBillingPageV2: React.FC = () => {
             <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Overage/min" type="number" step="0.01" value={packageForm.overage_minute_cost} onChange={(e) => setPackageForm({ ...packageForm, overage_minute_cost: e.target.value })} />
             <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Overage/SMS" type="number" step="0.01" value={packageForm.overage_sms_cost} onChange={(e) => setPackageForm({ ...packageForm, overage_sms_cost: e.target.value })} />
             <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={packageForm.autoAssignOrgId} onChange={(e) => setPackageForm({ ...packageForm, autoAssignOrgId: e.target.value })}>
-              <option value="">Assign to org after create (optional)</option>
+              <option value="">Assign to org after create (recommended)</option>
               {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
-            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={packageForm.autoAssignUserId} onChange={(e) => setPackageForm({ ...packageForm, autoAssignUserId: e.target.value })}>
-              <option value="">Assign to user after create (optional)</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{userDisplay(u)}</option>)}
-            </select>
-            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="User package expires at (optional)" value={packageForm.assignExpiresAt} onChange={(e) => setPackageForm({ ...packageForm, assignExpiresAt: e.target.value })} />
+            <div className="px-3 py-2 rounded bg-slate-900/60 border border-slate-700 text-slate-400 text-xs">Client billing page reads organization subscriptions and billing records. Package assignment here is org-based.</div>
             <label className="col-span-2 inline-flex items-center gap-2 text-sm text-slate-300">
               <input type="checkbox" checked={packageForm.is_active} onChange={(e) => setPackageForm({ ...packageForm, is_active: e.target.checked })} />
               Active package
             </label>
             <textarea className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm min-h-[90px]" placeholder="Features JSON (array/object)" value={packageForm.features_json} onChange={(e) => setPackageForm({ ...packageForm, features_json: e.target.value })} />
-            <textarea className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm min-h-[80px]" placeholder="User assignment metadata JSON (optional)" value={packageForm.assignMetadataJson} onChange={(e) => setPackageForm({ ...packageForm, assignMetadataJson: e.target.value })} />
           </div>
           <div className="flex gap-2 mt-4 justify-end">
             <button onClick={() => setShowCreatePackage(false)} className="px-4 py-2 rounded bg-slate-700 text-slate-200 text-sm">Cancel</button>
