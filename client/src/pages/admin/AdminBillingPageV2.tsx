@@ -1,7 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
+ï»¿import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import AdminLayout from '../../components/AdminLayout';
 import { buildApiUrl } from '../../config';
+
+type OrgOption = {
+  id: string;
+  name: string;
+};
+
+type UserOption = {
+  id: string;
+  email: string;
+  org_id?: string | null;
+  role?: string | null;
+};
 
 type BillingRecord = {
   id: string;
@@ -33,6 +45,7 @@ type BillingPackage = {
   id: string;
   name: string;
   description?: string | null;
+  features?: any;
   base_monthly_cost?: number;
   included_minutes?: number;
   included_sms?: number;
@@ -45,7 +58,7 @@ type BillingPackage = {
 function Modal({ children }: { children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl p-6">{children}</div>
+      <div className="w-full max-w-4xl max-h-[90vh] overflow-auto bg-slate-900 border border-slate-700 rounded-xl p-6">{children}</div>
     </div>
   );
 }
@@ -54,20 +67,77 @@ export const AdminBillingPageV2: React.FC = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'records' | 'invoices' | 'packages'>('records');
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [packages, setPackages] = useState<BillingPackage[]>([]);
+  const [orgs, setOrgs] = useState<OrgOption[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
 
   const [showCreateRecord, setShowCreateRecord] = useState(false);
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [showCreatePackage, setShowCreatePackage] = useState(false);
 
-  const [recordForm, setRecordForm] = useState({ org_id: '', user_id: '', type: 'subscription', description: '', amount: '', currency: 'USD' });
-  const [invoiceForm, setInvoiceForm] = useState({ org_id: '', items: [{ description: '', quantity: 1, unit_price: 0 }] as Array<{ description: string; quantity: number; unit_price: number }> });
-  const [packageForm, setPackageForm] = useState({ name: '', description: '', base_monthly_cost: '0', included_minutes: '0', included_sms: '0', overage_minute_cost: '0.01', overage_sms_cost: '0.01', is_active: true });
+  const [recordForm, setRecordForm] = useState({
+    org_id: '',
+    user_id: '',
+    type: 'subscription',
+    status: 'pending',
+    description: '',
+    amount: '',
+    currency: 'USD',
+    billing_date: '',
+    stripe_customer_id: '',
+    stripe_invoice_id: '',
+    stripe_payment_intent_id: '',
+    metadata_json: '{}',
+  });
+
+  const [invoiceForm, setInvoiceForm] = useState({
+    org_id: '',
+    status: 'draft',
+    currency: 'USD',
+    due_date: '',
+    billing_period_start: '',
+    billing_period_end: '',
+    tax_amount: '0',
+    subtotal: '',
+    total_amount: '',
+    notes: '',
+    metadata_json: '{}',
+    items: [{ description: '', quantity: 1, unit_price: 0 }] as Array<{ description: string; quantity: number; unit_price: number }>,
+  });
+
+  const [packageForm, setPackageForm] = useState({
+    name: '',
+    description: '',
+    base_monthly_cost: '0',
+    included_minutes: '0',
+    included_sms: '0',
+    overage_minute_cost: '0.01',
+    overage_sms_cost: '0.01',
+    features_json: '[]',
+    is_active: true,
+    autoAssignOrgId: '',
+    autoAssignUserId: '',
+    assignExpiresAt: '',
+    assignMetadataJson: '{}',
+  });
 
   const authHeaders = useMemo(() => ({ 'x-user-id': user?.id || '', 'Content-Type': 'application/json' }), [user?.id]);
+
+  const parseJsonInput = (raw: string, fallback: any) => {
+    if (!raw || !raw.trim()) return fallback;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error('Invalid JSON field');
+    }
+  };
+
+  const userDisplay = (u: UserOption) => `${u.email}${u.role ? ` (${u.role})` : ''}`;
 
   const loadRecords = async () => {
     const resp = await fetch(buildApiUrl('/api/admin/billing/records'), { headers: { 'x-user-id': user?.id || '' } });
@@ -90,43 +160,111 @@ export const AdminBillingPageV2: React.FC = () => {
     setPackages(j.packages || []);
   };
 
+  const loadOptions = async () => {
+    const [orgResp, userResp] = await Promise.all([
+      fetch(buildApiUrl('/api/admin/orgs'), { headers: { 'x-user-id': user?.id || '' } }),
+      fetch(buildApiUrl('/api/admin/users'), { headers: { 'x-user-id': user?.id || '' } }),
+    ]);
+    if (!orgResp.ok) throw new Error('Failed to load organizations');
+    if (!userResp.ok) throw new Error('Failed to load users');
+    const orgJson = await orgResp.json();
+    const userJson = await userResp.json();
+    setOrgs((orgJson.orgs || []).map((o: any) => ({ id: String(o.id), name: String(o.name || o.id) })));
+    setUsers((userJson.users || []).map((u: any) => ({
+      id: String(u.id),
+      email: String(u.email || u.id),
+      org_id: u.org_id || null,
+      role: u.role || null,
+    })));
+  };
+
   const loadActiveTab = async () => {
     setLoading(true);
+    setError(null);
     try {
       if (activeTab === 'records') await loadRecords();
       if (activeTab === 'invoices') await loadInvoices();
       if (activeTab === 'packages') await loadPackages();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load billing data');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (user?.id) loadActiveTab();
+    if (!user?.id) return;
+    loadActiveTab();
   }, [activeTab, user?.id]);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    loadOptions().catch(() => {
+      // Non-blocking for billing actions.
+    });
+  }, [user?.id]);
+
   const createRecord = async () => {
-    const payload = {
-      ...recordForm,
-      amount: Number(recordForm.amount || 0),
-      org_id: recordForm.org_id || null,
-      user_id: recordForm.user_id || null,
-    };
-    const resp = await fetch(buildApiUrl('/api/admin/billing/records'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
-    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create record');
-    setShowCreateRecord(false);
+    setSubmitting(true);
+    setError(null);
+    try {
+      const metadata = parseJsonInput(recordForm.metadata_json, {});
+      const payload = {
+        org_id: recordForm.org_id || null,
+        user_id: recordForm.user_id || null,
+        type: recordForm.type,
+        status: recordForm.status,
+        description: recordForm.description,
+        amount: Number(recordForm.amount || 0),
+        currency: recordForm.currency || 'USD',
+        billing_date: recordForm.billing_date || undefined,
+        stripe_customer_id: recordForm.stripe_customer_id || undefined,
+        stripe_invoice_id: recordForm.stripe_invoice_id || undefined,
+        stripe_payment_intent_id: recordForm.stripe_payment_intent_id || undefined,
+        metadata,
+      };
+      const resp = await fetch(buildApiUrl('/api/admin/billing/records'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create record');
+      setShowCreateRecord(false);
+      await loadRecords();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const deleteRecord = async (id: string) => {
+    if (!confirm('Delete this billing record?')) return;
+    const resp = await fetch(buildApiUrl(`/api/admin/billing/records/${encodeURIComponent(id)}`), { method: 'DELETE', headers: { 'x-user-id': user?.id || '' } });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to delete billing record');
     await loadRecords();
   };
 
   const createInvoice = async () => {
-    const payload = {
-      org_id: invoiceForm.org_id,
-      items: invoiceForm.items.map((it) => ({ description: it.description, quantity: Number(it.quantity || 0), unit_price: Number(it.unit_price || 0) })),
-    };
-    const resp = await fetch(buildApiUrl('/api/admin/billing/invoices'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
-    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create invoice');
-    setShowCreateInvoice(false);
-    await loadInvoices();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const metadata = parseJsonInput(invoiceForm.metadata_json, {});
+      const payload = {
+        org_id: invoiceForm.org_id,
+        status: invoiceForm.status,
+        currency: invoiceForm.currency || 'USD',
+        due_date: invoiceForm.due_date || undefined,
+        billing_period_start: invoiceForm.billing_period_start || undefined,
+        billing_period_end: invoiceForm.billing_period_end || undefined,
+        tax_amount: Number(invoiceForm.tax_amount || 0),
+        subtotal: invoiceForm.subtotal ? Number(invoiceForm.subtotal) : undefined,
+        total_amount: invoiceForm.total_amount ? Number(invoiceForm.total_amount) : undefined,
+        notes: invoiceForm.notes || undefined,
+        metadata,
+        items: invoiceForm.items.map((it) => ({ description: it.description, quantity: Number(it.quantity || 0), unit_price: Number(it.unit_price || 0) })),
+      };
+      const resp = await fetch(buildApiUrl('/api/admin/billing/invoices'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create invoice');
+      setShowCreateInvoice(false);
+      await loadInvoices();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const deleteInvoice = async (id: string) => {
@@ -151,18 +289,57 @@ export const AdminBillingPageV2: React.FC = () => {
   };
 
   const createPackage = async () => {
-    const payload = {
-      ...packageForm,
-      base_monthly_cost: Number(packageForm.base_monthly_cost || 0),
-      included_minutes: Number(packageForm.included_minutes || 0),
-      included_sms: Number(packageForm.included_sms || 0),
-      overage_minute_cost: Number(packageForm.overage_minute_cost || 0),
-      overage_sms_cost: Number(packageForm.overage_sms_cost || 0),
-    };
-    const resp = await fetch(buildApiUrl('/api/admin/billing-packages'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
-    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create package');
-    setShowCreatePackage(false);
-    await loadPackages();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const features = parseJsonInput(packageForm.features_json, []);
+      const payload = {
+        name: packageForm.name,
+        description: packageForm.description,
+        base_monthly_cost: Number(packageForm.base_monthly_cost || 0),
+        included_minutes: Number(packageForm.included_minutes || 0),
+        included_sms: Number(packageForm.included_sms || 0),
+        overage_minute_cost: Number(packageForm.overage_minute_cost || 0),
+        overage_sms_cost: Number(packageForm.overage_sms_cost || 0),
+        features,
+        is_active: packageForm.is_active,
+      };
+      const resp = await fetch(buildApiUrl('/api/admin/billing-packages'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create package');
+
+      const pkgJson = await resp.json().catch(() => ({}));
+      const createdPackageId = pkgJson?.package?.id;
+      if (createdPackageId && packageForm.autoAssignOrgId) {
+        await fetch(buildApiUrl('/api/admin/org-subscriptions'), {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({ orgId: packageForm.autoAssignOrgId, planId: createdPackageId }),
+        });
+      }
+      if (createdPackageId && packageForm.autoAssignUserId) {
+        let assignmentMetadata: any = {};
+        try {
+          assignmentMetadata = parseJsonInput(packageForm.assignMetadataJson, {});
+        } catch {
+          assignmentMetadata = {};
+        }
+        await fetch(buildApiUrl('/api/admin/user-packages'), {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({
+            user_id: packageForm.autoAssignUserId,
+            package_id: createdPackageId,
+            expires_at: packageForm.assignExpiresAt || null,
+            metadata: assignmentMetadata,
+          }),
+        });
+      }
+
+      setShowCreatePackage(false);
+      await loadPackages();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const deletePackage = async (id: string) => {
@@ -184,6 +361,8 @@ export const AdminBillingPageV2: React.FC = () => {
       activeTab={activeTab}
       onTabChange={(id) => setActiveTab(id as any)}
     >
+      {error && <div className="mb-4 rounded border border-rose-500/40 bg-rose-900/20 px-3 py-2 text-sm text-rose-200">{error}</div>}
+
       {activeTab === 'records' && (
         <div className="space-y-4">
           <div className="flex justify-end">
@@ -192,12 +371,15 @@ export const AdminBillingPageV2: React.FC = () => {
           {loading ? <div className="text-slate-400 text-sm">Loading...</div> : (
             <div className="space-y-2">
               {records.map((r) => (
-                <div key={r.id} className="bg-slate-800 border border-slate-700 rounded p-3 flex items-center justify-between">
+                <div key={r.id} className="bg-slate-800 border border-slate-700 rounded p-3 flex items-center justify-between gap-3">
                   <div>
                     <div className="text-white text-sm font-semibold">{r.description}</div>
-                    <div className="text-slate-400 text-xs">{r.type} · {r.status} · {new Date(r.created_at).toLocaleDateString()}</div>
+                    <div className="text-slate-400 text-xs">{r.type} | {r.status} | {new Date(r.created_at).toLocaleDateString()} | org: {r.org_id || '-'} | user: {r.user_id || '-'}</div>
                   </div>
-                  <div className="text-cyan-300 text-sm font-semibold">{r.currency} {Number(r.amount || 0).toFixed(2)}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-cyan-300 text-sm font-semibold">{r.currency} {Number(r.amount || 0).toFixed(2)}</div>
+                    <button onClick={() => deleteRecord(r.id)} className="px-3 py-1 rounded border border-rose-600 text-rose-300 text-xs">Delete</button>
+                  </div>
                 </div>
               ))}
               {records.length === 0 && <div className="text-slate-400 text-sm">No records found.</div>}
@@ -217,7 +399,7 @@ export const AdminBillingPageV2: React.FC = () => {
                 <div key={inv.id} className="bg-slate-800 border border-slate-700 rounded p-3 flex items-center justify-between gap-3">
                   <div>
                     <div className="text-white text-sm font-semibold">{inv.invoice_number || inv.id}</div>
-                    <div className="text-slate-400 text-xs">{inv.status} · {new Date(inv.created_at).toLocaleDateString()}</div>
+                    <div className="text-slate-400 text-xs">{inv.status} | {new Date(inv.created_at).toLocaleDateString()} | org: {inv.org_id || '-'}</div>
                   </div>
                   <div className="text-cyan-300 text-sm font-semibold">${Number(inv.total_amount ?? inv.total ?? 0).toFixed(2)}</div>
                   <div className="flex gap-2">
@@ -243,7 +425,7 @@ export const AdminBillingPageV2: React.FC = () => {
                 <div key={p.id} className="bg-slate-800 border border-slate-700 rounded p-3 flex items-center justify-between gap-3">
                   <div>
                     <div className="text-white text-sm font-semibold">{p.name}</div>
-                    <div className="text-slate-400 text-xs">{p.description || '-'} · {p.is_active === false ? 'inactive' : 'active'}</div>
+                    <div className="text-slate-400 text-xs">{p.description || '-'} | {p.is_active === false ? 'inactive' : 'active'}</div>
                   </div>
                   <div className="text-cyan-300 text-sm font-semibold">${Number(p.base_monthly_cost || 0).toFixed(2)}/mo</div>
                   <button onClick={() => deletePackage(p.id)} className="px-3 py-1 rounded border border-rose-600 text-rose-300 text-xs">Delete</button>
@@ -259,15 +441,28 @@ export const AdminBillingPageV2: React.FC = () => {
         <Modal>
           <h3 className="text-white text-lg font-semibold mb-4">Create Billing Record</h3>
           <div className="grid grid-cols-2 gap-3">
-            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Org ID (optional)" value={recordForm.org_id} onChange={(e) => setRecordForm({ ...recordForm, org_id: e.target.value })} />
-            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="User ID (optional)" value={recordForm.user_id} onChange={(e) => setRecordForm({ ...recordForm, user_id: e.target.value })} />
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.org_id} onChange={(e) => setRecordForm({ ...recordForm, org_id: e.target.value })}>
+              <option value="">Select organization (optional)</option>
+              {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.user_id} onChange={(e) => setRecordForm({ ...recordForm, user_id: e.target.value })}>
+              <option value="">Select user (optional)</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{userDisplay(u)}</option>)}
+            </select>
             <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm col-span-2" placeholder="Description" value={recordForm.description} onChange={(e) => setRecordForm({ ...recordForm, description: e.target.value })} />
-            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.type} onChange={(e) => setRecordForm({ ...recordForm, type: e.target.value })}><option value="subscription">subscription</option><option value="one_time">one_time</option><option value="usage">usage</option><option value="refund">refund</option></select>
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.type} onChange={(e) => setRecordForm({ ...recordForm, type: e.target.value })}><option value="subscription">subscription</option><option value="one_time">one_time</option><option value="usage">usage</option><option value="refund">refund</option><option value="payment">payment</option></select>
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.status} onChange={(e) => setRecordForm({ ...recordForm, status: e.target.value })}><option value="pending">pending</option><option value="paid">paid</option><option value="failed">failed</option><option value="refunded">refunded</option></select>
             <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Amount" type="number" step="0.01" value={recordForm.amount} onChange={(e) => setRecordForm({ ...recordForm, amount: e.target.value })} />
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.currency} onChange={(e) => setRecordForm({ ...recordForm, currency: e.target.value })}><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="CAD">CAD</option></select>
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Billing date (YYYY-MM-DD)" value={recordForm.billing_date} onChange={(e) => setRecordForm({ ...recordForm, billing_date: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Stripe customer ID" value={recordForm.stripe_customer_id} onChange={(e) => setRecordForm({ ...recordForm, stripe_customer_id: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Stripe invoice ID" value={recordForm.stripe_invoice_id} onChange={(e) => setRecordForm({ ...recordForm, stripe_invoice_id: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Stripe payment intent ID" value={recordForm.stripe_payment_intent_id} onChange={(e) => setRecordForm({ ...recordForm, stripe_payment_intent_id: e.target.value })} />
+            <textarea className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm min-h-[80px]" placeholder="Metadata JSON" value={recordForm.metadata_json} onChange={(e) => setRecordForm({ ...recordForm, metadata_json: e.target.value })} />
           </div>
           <div className="flex gap-2 mt-4 justify-end">
             <button onClick={() => setShowCreateRecord(false)} className="px-4 py-2 rounded bg-slate-700 text-slate-200 text-sm">Cancel</button>
-            <button onClick={async () => { try { await createRecord(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create</button>
+            <button disabled={submitting} onClick={async () => { try { await createRecord(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm disabled:opacity-50">{submitting ? 'Creating...' : 'Create'}</button>
           </div>
         </Modal>
       )}
@@ -276,7 +471,26 @@ export const AdminBillingPageV2: React.FC = () => {
         <Modal>
           <h3 className="text-white text-lg font-semibold mb-4">Create Invoice</h3>
           <div className="space-y-3">
-            <input className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Org ID" value={invoiceForm.org_id} onChange={(e) => setInvoiceForm({ ...invoiceForm, org_id: e.target.value })} />
+            <div className="grid grid-cols-2 gap-3">
+              <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={invoiceForm.org_id} onChange={(e) => setInvoiceForm({ ...invoiceForm, org_id: e.target.value })}>
+                <option value="">Select organization</option>
+                {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+              <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={invoiceForm.status} onChange={(e) => setInvoiceForm({ ...invoiceForm, status: e.target.value })}>
+                <option value="draft">draft</option><option value="sent">sent</option><option value="paid">paid</option><option value="overdue">overdue</option><option value="cancelled">cancelled</option>
+              </select>
+              <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={invoiceForm.currency} onChange={(e) => setInvoiceForm({ ...invoiceForm, currency: e.target.value })}>
+                <option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="CAD">CAD</option>
+              </select>
+              <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Due date (YYYY-MM-DD)" value={invoiceForm.due_date} onChange={(e) => setInvoiceForm({ ...invoiceForm, due_date: e.target.value })} />
+              <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Period start (YYYY-MM-DD)" value={invoiceForm.billing_period_start} onChange={(e) => setInvoiceForm({ ...invoiceForm, billing_period_start: e.target.value })} />
+              <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Period end (YYYY-MM-DD)" value={invoiceForm.billing_period_end} onChange={(e) => setInvoiceForm({ ...invoiceForm, billing_period_end: e.target.value })} />
+              <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" type="number" step="0.01" placeholder="Tax amount" value={invoiceForm.tax_amount} onChange={(e) => setInvoiceForm({ ...invoiceForm, tax_amount: e.target.value })} />
+              <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" type="number" step="0.01" placeholder="Subtotal (optional override)" value={invoiceForm.subtotal} onChange={(e) => setInvoiceForm({ ...invoiceForm, subtotal: e.target.value })} />
+              <input className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" type="number" step="0.01" placeholder="Total amount (optional override)" value={invoiceForm.total_amount} onChange={(e) => setInvoiceForm({ ...invoiceForm, total_amount: e.target.value })} />
+              <input className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Notes" value={invoiceForm.notes} onChange={(e) => setInvoiceForm({ ...invoiceForm, notes: e.target.value })} />
+              <textarea className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm min-h-[80px]" placeholder="Metadata JSON" value={invoiceForm.metadata_json} onChange={(e) => setInvoiceForm({ ...invoiceForm, metadata_json: e.target.value })} />
+            </div>
             {invoiceForm.items.map((it, idx) => (
               <div className="grid grid-cols-12 gap-2" key={idx}>
                 <input className="col-span-6 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Description" value={it.description} onChange={(e) => { const items = [...invoiceForm.items]; items[idx] = { ...items[idx], description: e.target.value }; setInvoiceForm({ ...invoiceForm, items }); }} />
@@ -288,7 +502,7 @@ export const AdminBillingPageV2: React.FC = () => {
           </div>
           <div className="flex gap-2 mt-4 justify-end">
             <button onClick={() => setShowCreateInvoice(false)} className="px-4 py-2 rounded bg-slate-700 text-slate-200 text-sm">Cancel</button>
-            <button onClick={async () => { try { await createInvoice(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create</button>
+            <button disabled={submitting} onClick={async () => { try { await createInvoice(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm disabled:opacity-50">{submitting ? 'Creating...' : 'Create'}</button>
           </div>
         </Modal>
       )}
@@ -303,10 +517,26 @@ export const AdminBillingPageV2: React.FC = () => {
             <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Included mins" type="number" value={packageForm.included_minutes} onChange={(e) => setPackageForm({ ...packageForm, included_minutes: e.target.value })} />
             <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Included SMS" type="number" value={packageForm.included_sms} onChange={(e) => setPackageForm({ ...packageForm, included_sms: e.target.value })} />
             <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Overage/min" type="number" step="0.01" value={packageForm.overage_minute_cost} onChange={(e) => setPackageForm({ ...packageForm, overage_minute_cost: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Overage/SMS" type="number" step="0.01" value={packageForm.overage_sms_cost} onChange={(e) => setPackageForm({ ...packageForm, overage_sms_cost: e.target.value })} />
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={packageForm.autoAssignOrgId} onChange={(e) => setPackageForm({ ...packageForm, autoAssignOrgId: e.target.value })}>
+              <option value="">Assign to org after create (optional)</option>
+              {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={packageForm.autoAssignUserId} onChange={(e) => setPackageForm({ ...packageForm, autoAssignUserId: e.target.value })}>
+              <option value="">Assign to user after create (optional)</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{userDisplay(u)}</option>)}
+            </select>
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="User package expires at (optional)" value={packageForm.assignExpiresAt} onChange={(e) => setPackageForm({ ...packageForm, assignExpiresAt: e.target.value })} />
+            <label className="col-span-2 inline-flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" checked={packageForm.is_active} onChange={(e) => setPackageForm({ ...packageForm, is_active: e.target.checked })} />
+              Active package
+            </label>
+            <textarea className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm min-h-[90px]" placeholder="Features JSON (array/object)" value={packageForm.features_json} onChange={(e) => setPackageForm({ ...packageForm, features_json: e.target.value })} />
+            <textarea className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm min-h-[80px]" placeholder="User assignment metadata JSON (optional)" value={packageForm.assignMetadataJson} onChange={(e) => setPackageForm({ ...packageForm, assignMetadataJson: e.target.value })} />
           </div>
           <div className="flex gap-2 mt-4 justify-end">
             <button onClick={() => setShowCreatePackage(false)} className="px-4 py-2 rounded bg-slate-700 text-slate-200 text-sm">Cancel</button>
-            <button onClick={async () => { try { await createPackage(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create</button>
+            <button disabled={submitting} onClick={async () => { try { await createPackage(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm disabled:opacity-50">{submitting ? 'Creating...' : 'Create'}</button>
           </div>
         </Modal>
       )}
@@ -315,3 +545,4 @@ export const AdminBillingPageV2: React.FC = () => {
 };
 
 export default AdminBillingPageV2;
+

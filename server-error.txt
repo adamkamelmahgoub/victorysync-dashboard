@@ -1,10 +1,6 @@
-[org_detail] get_org_phone_metrics failed: column "number_digits" does not exist
-[org_detail] get_org_phone_metrics failed: column "number_digits" does not exist
-admin_update_user_failed: User not found
-[SMS Log] error {
-  code: '23503',
-  details: 'Key (org_id)=(b0b6ce58-5d52-4b16-b09b-69f67cf2f74e) is not present in table "organizations".',
-  hint: null,
-  message: 'insert or update on table "sms_logs" violates foreign key constraint "sms_logs_org_id_fkey"'
-}
-admin_metrics_volume_failed: column calls.wait_seconds does not exist
+[startup] Failed to bind on port 4000: listen EADDRINUSE: address already in use 0.0.0.0:4000
+Error: listen EADDRINUSE: address already in use 0.0.0.0:4000
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at node:net:2206:7
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)

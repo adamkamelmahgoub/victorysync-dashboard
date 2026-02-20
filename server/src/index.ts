@@ -5515,27 +5515,94 @@ app.get("/s/series", async (req, res) => {
           return res.status(403).json({ error: 'unauthorized' });
         }
 
-        const { org_id, user_id, type, description, amount, currency, metadata } = req.body;
+        const {
+          org_id,
+          user_id,
+          type,
+          description,
+          amount,
+          currency,
+          status,
+          billing_date,
+          stripe_customer_id,
+          stripe_invoice_id,
+          stripe_payment_intent_id,
+          metadata
+        } = req.body || {};
 
-        const { data, error } = await supabaseAdmin
-          .from('billing_records')
-          .insert([{
-            org_id,
-            user_id,
+        const advancedInsert: any = {
+          org_id: org_id || null,
+          user_id: user_id || null,
+          type,
+          description,
+          amount,
+          currency: currency || 'USD',
+          metadata: metadata || {}
+        };
+        if (status !== undefined) advancedInsert.status = status;
+        if (billing_date !== undefined) advancedInsert.billing_date = billing_date;
+        if (stripe_customer_id !== undefined) advancedInsert.stripe_customer_id = stripe_customer_id;
+        if (stripe_invoice_id !== undefined) advancedInsert.stripe_invoice_id = stripe_invoice_id;
+        if (stripe_payment_intent_id !== undefined) advancedInsert.stripe_payment_intent_id = stripe_payment_intent_id;
+
+        let data: any = null;
+        let error: any = null;
+        {
+          const r = await supabaseAdmin
+            .from('billing_records')
+            .insert([advancedInsert])
+            .select()
+            .single();
+          data = r.data;
+          error = r.error;
+        }
+        // Older schemas may not have all advanced columns.
+        if (error && String(error.message || '').toLowerCase().includes('column')) {
+          const minimalInsert = {
+            org_id: org_id || null,
+            user_id: user_id || null,
             type,
             description,
             amount,
             currency: currency || 'USD',
             metadata: metadata || {}
-          }])
-          .select()
-          .single();
-
+          };
+          const retry = await supabaseAdmin
+            .from('billing_records')
+            .insert([minimalInsert])
+            .select()
+            .single();
+          data = retry.data;
+          error = retry.error;
+        }
         if (error) throw error;
         res.json({ record: data });
       } catch (err: any) {
         console.error('[billing/records POST] error:', err);
         res.status(500).json({ error: 'failed_to_create_billing_record', detail: err?.message });
+      }
+    });
+
+    // Delete a billing record
+    app.delete('/api/admin/billing/records/:id', async (req, res) => {
+      try {
+        const actorId = req.header('x-user-id') || null;
+        if (!actorId || !(await isPlatformAdmin(actorId))) {
+          return res.status(403).json({ error: 'unauthorized' });
+        }
+        const recordId = String(req.params.id || '').trim();
+        if (!recordId) return res.status(400).json({ error: 'missing_record_id' });
+
+        const { error } = await supabaseAdmin
+          .from('billing_records')
+          .delete()
+          .eq('id', recordId);
+        if (error) throw error;
+
+        res.json({ success: true, deleted_record_id: recordId });
+      } catch (err: any) {
+        console.error('[billing/records DELETE] error:', err);
+        res.status(500).json({ error: 'failed_to_delete_billing_record', detail: err?.message });
       }
     });
 
@@ -5581,7 +5648,21 @@ app.get("/s/series", async (req, res) => {
           return res.status(403).json({ error: 'unauthorized' });
         }
 
-        const { org_id, items = [] } = req.body;
+        const {
+          org_id,
+          status,
+          billing_period_start,
+          billing_period_end,
+          due_date,
+          currency,
+          tax_amount,
+          subtotal,
+          total_amount,
+          grand_total,
+          notes,
+          metadata,
+          items = []
+        } = req.body || {};
 
         if (!org_id) {
           return res.status(400).json({ error: 'org_id_required' });
@@ -5590,18 +5671,53 @@ app.get("/s/series", async (req, res) => {
         // Generate invoice number
         const invoiceNumber = `INV-${Date.now()}`;
 
-        // Build minimal invoice object - only basic required fields
+        const computedSubtotal = Number(
+          subtotal ?? items.reduce((acc: number, item: any) => acc + ((Number(item?.quantity || 0) || 0) * (Number(item?.unit_price || 0) || 0)), 0)
+        ) || 0;
+        const computedTax = Number(tax_amount ?? 0) || 0;
+        const computedTotal = Number(total_amount ?? grand_total ?? (computedSubtotal + computedTax)) || 0;
+
+        // Build invoice object with advanced optional fields.
         const invoiceData: any = {
           org_id,
           invoice_number: invoiceNumber,
-          status: 'draft'
+          status: status || 'draft'
         };
+        if (billing_period_start !== undefined) invoiceData.billing_period_start = billing_period_start;
+        if (billing_period_end !== undefined) invoiceData.billing_period_end = billing_period_end;
+        if (due_date !== undefined) invoiceData.due_date = due_date;
+        if (currency !== undefined) invoiceData.currency = currency;
+        if (notes !== undefined) invoiceData.notes = notes;
+        if (metadata !== undefined) invoiceData.metadata = metadata;
+        if (computedSubtotal > 0) invoiceData.subtotal = computedSubtotal;
+        if (computedTax > 0) invoiceData.tax_amount = computedTax;
+        if (computedTotal > 0) invoiceData.total_amount = computedTotal;
 
-        const { data: invoice, error: invoiceError } = await supabaseAdmin
-          .from('invoices')
-          .insert([invoiceData])
-          .select()
-          .single();
+        let invoice: any = null;
+        let invoiceError: any = null;
+        {
+          const insertRes = await supabaseAdmin
+            .from('invoices')
+            .insert([invoiceData])
+            .select()
+            .single();
+          invoice = insertRes.data;
+          invoiceError = insertRes.error;
+        }
+        if (invoiceError && String(invoiceError.message || '').toLowerCase().includes('column')) {
+          const minimalInvoiceData: any = {
+            org_id,
+            invoice_number: invoiceNumber,
+            status: status || 'draft'
+          };
+          const retry = await supabaseAdmin
+            .from('invoices')
+            .insert([minimalInvoiceData])
+            .select()
+            .single();
+          invoice = retry.data;
+          invoiceError = retry.error;
+        }
 
         if (invoiceError) throw invoiceError;
 
