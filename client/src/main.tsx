@@ -44,6 +44,7 @@ import { SupportPage } from "./pages/SupportPage";
 import { TeamPage } from "./pages/TeamPage";
 import { DebugAuthPage } from "./pages/DebugAuthPage";
 import { APIKeysPage } from "./pages/APIKeysPage";
+import BillingPage from "./pages/BillingPage";
 
 declare global {
   interface Window {
@@ -209,7 +210,11 @@ function AppRouter() {
       />
       <Route
         path="/billing"
-        element={<Navigate to="/dashboard" replace />}
+        element={
+          <ProtectedRoute>
+            <BillingPage />
+          </ProtectedRoute>
+        }
       />
       <Route
         path="/team"

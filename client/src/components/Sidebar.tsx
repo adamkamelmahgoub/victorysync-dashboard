@@ -30,6 +30,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
     { label: 'Recordings', path: '/recordings' },
     { label: 'SMS', path: '/sms' },
     { label: 'Support', path: '/support' },
+    { label: 'Billing', path: '/billing' },
   ];
 
   const menuItems = isAdmin ? adminItems : clientItems;

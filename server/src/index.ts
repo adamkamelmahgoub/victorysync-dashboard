@@ -5631,6 +5631,297 @@ app.get("/s/series", async (req, res) => {
       }
     });
 
+    // Delete an invoice (and dependent items) by id
+    app.delete('/api/admin/billing/invoices/:id', async (req, res) => {
+      try {
+        const actorId = req.header('x-user-id') || null;
+        if (!actorId || !(await isPlatformAdmin(actorId))) {
+          return res.status(403).json({ error: 'unauthorized' });
+        }
+
+        const invoiceId = String(req.params.id || '').trim();
+        if (!invoiceId) return res.status(400).json({ error: 'missing_invoice_id' });
+
+        // Best-effort cleanup across both schemas used in this codebase
+        await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', invoiceId);
+        await supabaseAdmin.from('invoice_line_items').delete().eq('invoice_id', invoiceId);
+
+        const { error } = await supabaseAdmin.from('invoices').delete().eq('id', invoiceId);
+        if (error) throw error;
+
+        res.json({ success: true, deleted_invoice_id: invoiceId });
+      } catch (err: any) {
+        console.error('[billing/invoices DELETE] error:', err);
+        res.status(500).json({ error: 'failed_to_delete_invoice', detail: err?.message });
+      }
+    });
+
+    // Export invoice as CSV/JSON (admin)
+    app.get('/api/admin/billing/invoices/:id/export', async (req, res) => {
+      try {
+        const actorId = req.header('x-user-id') || null;
+        if (!actorId || !(await isPlatformAdmin(actorId))) {
+          return res.status(403).json({ error: 'unauthorized' });
+        }
+        const invoiceId = String(req.params.id || '').trim();
+        const format = String(req.query.format || 'csv').toLowerCase();
+        if (!invoiceId) return res.status(400).json({ error: 'missing_invoice_id' });
+
+        const { data: invoice, error } = await supabaseAdmin
+          .from('invoices')
+          .select('*')
+          .eq('id', invoiceId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!invoice) return res.status(404).json({ error: 'invoice_not_found' });
+
+        const { data: itemsA } = await supabaseAdmin
+          .from('invoice_items')
+          .select('*')
+          .eq('invoice_id', invoiceId);
+        const { data: itemsB } = await supabaseAdmin
+          .from('invoice_line_items')
+          .select('*')
+          .eq('invoice_id', invoiceId);
+        const items = (itemsA && itemsA.length > 0) ? itemsA : (itemsB || []);
+
+        if (format === 'json') {
+          return res.json({ invoice, items });
+        }
+
+        const header = [
+          'invoice_id',
+          'invoice_number',
+          'org_id',
+          'status',
+          'created_at',
+          'item_description',
+          'quantity',
+          'unit_price',
+          'line_total'
+        ];
+        const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const rows = (items.length > 0 ? items : [null]).map((it: any) => ([
+          invoice.id,
+          invoice.invoice_number || '',
+          invoice.org_id || '',
+          invoice.status || '',
+          invoice.created_at || '',
+          it?.description || '',
+          it?.quantity ?? '',
+          it?.unit_price ?? '',
+          it?.line_total ?? ((Number(it?.quantity || 0) * Number(it?.unit_price || 0)) || '')
+        ].map(esc).join(',')));
+        const csv = [header.join(','), ...rows].join('\n');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="invoice-${invoice.invoice_number || invoice.id}.csv"`);
+        res.send(csv);
+      } catch (err: any) {
+        console.error('[billing/invoices export] error:', err);
+        res.status(500).json({ error: 'failed_to_export_invoice', detail: err?.message });
+      }
+    });
+
+    // Dedicated billing-package endpoints backed by billing_plans
+    app.get('/api/admin/billing-packages', async (req, res) => {
+      try {
+        const actorId = req.header('x-user-id') || null;
+        if (!actorId || !(await isPlatformAdmin(actorId))) {
+          return res.status(403).json({ error: 'unauthorized' });
+        }
+        const { data, error } = await supabaseAdmin
+          .from('billing_plans')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json({ packages: data || [] });
+      } catch (err: any) {
+        console.error('[billing-packages GET] error:', err);
+        res.status(500).json({ error: 'failed_to_fetch_billing_packages', detail: err?.message });
+      }
+    });
+
+    app.post('/api/admin/billing-packages', async (req, res) => {
+      try {
+        const actorId = req.header('x-user-id') || null;
+        if (!actorId || !(await isPlatformAdmin(actorId))) {
+          return res.status(403).json({ error: 'unauthorized' });
+        }
+        const {
+          name,
+          description,
+          base_monthly_cost,
+          included_minutes,
+          included_sms,
+          overage_minute_cost,
+          overage_sms_cost,
+          features,
+          is_active
+        } = req.body || {};
+        if (!name) return res.status(400).json({ error: 'missing_name' });
+
+        const { data, error } = await supabaseAdmin
+          .from('billing_plans')
+          .insert({
+            name,
+            description: description || null,
+            base_monthly_cost: Number(base_monthly_cost || 0) || 0,
+            included_minutes: Number(included_minutes || 0) || 0,
+            included_sms: Number(included_sms || 0) || 0,
+            overage_minute_cost: Number(overage_minute_cost || 0.01) || 0.01,
+            overage_sms_cost: Number(overage_sms_cost || 0.01) || 0.01,
+            features: features || [],
+            is_active: is_active !== false
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        res.json({ package: data });
+      } catch (err: any) {
+        console.error('[billing-packages POST] error:', err);
+        res.status(500).json({ error: 'failed_to_create_billing_package', detail: err?.message });
+      }
+    });
+
+    app.delete('/api/admin/billing-packages/:id', async (req, res) => {
+      try {
+        const actorId = req.header('x-user-id') || null;
+        if (!actorId || !(await isPlatformAdmin(actorId))) {
+          return res.status(403).json({ error: 'unauthorized' });
+        }
+        const id = String(req.params.id || '').trim();
+        if (!id) return res.status(400).json({ error: 'missing_package_id' });
+
+        // Remove plan subscriptions first to avoid FK failures where applicable.
+        await supabaseAdmin.from('org_subscriptions').delete().eq('plan_id', id);
+
+        const { error: delErr } = await supabaseAdmin.from('billing_plans').delete().eq('id', id);
+        if (delErr) {
+          // Fallback to soft-disable if hard delete fails.
+          const { error: softErr } = await supabaseAdmin
+            .from('billing_plans')
+            .update({ is_active: false })
+            .eq('id', id);
+          if (softErr) throw delErr;
+          return res.json({ success: true, package_id: id, mode: 'soft_disabled' });
+        }
+        res.json({ success: true, package_id: id, mode: 'deleted' });
+      } catch (err: any) {
+        console.error('[billing-packages DELETE] error:', err);
+        res.status(500).json({ error: 'failed_to_delete_billing_package', detail: err?.message });
+      }
+    });
+
+    // Client billing: overview + invoices + invoice export (org-scoped)
+    app.get('/api/client/billing/overview', async (req, res) => {
+      try {
+        const userId = req.header('x-user-id') || null;
+        if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+        const orgIds = await getUserOrgIds(userId);
+        if (orgIds.length === 0) return res.json({ package: null, next_due_date: null, org_id: null });
+        const orgId = orgIds[0];
+
+        const { data: sub } = await supabaseAdmin
+          .from('org_subscriptions')
+          .select('*, billing_plans(*)')
+          .eq('org_id', orgId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        res.json({
+          org_id: orgId,
+          package: (sub as any)?.billing_plans || null,
+          subscription: sub || null,
+          next_due_date: (sub as any)?.next_billing_date || null
+        });
+      } catch (err: any) {
+        console.error('[client/billing/overview] error:', err);
+        res.status(500).json({ error: 'failed_to_fetch_client_billing_overview', detail: err?.message });
+      }
+    });
+
+    app.get('/api/client/billing/invoices', async (req, res) => {
+      try {
+        const userId = req.header('x-user-id') || null;
+        if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 200, 5000));
+
+        const orgIds = await getUserOrgIds(userId);
+        if (orgIds.length === 0) return res.json({ invoices: [] });
+
+        const { data, error } = await supabaseAdmin
+          .from('invoices')
+          .select('*, invoice_items(*)')
+          .in('org_id', orgIds)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+        if (error) throw error;
+        res.json({ invoices: data || [] });
+      } catch (err: any) {
+        console.error('[client/billing/invoices] error:', err);
+        res.status(500).json({ error: 'failed_to_fetch_client_invoices', detail: err?.message });
+      }
+    });
+
+    app.get('/api/client/billing/invoices/:id/export', async (req, res) => {
+      try {
+        const userId = req.header('x-user-id') || null;
+        if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+        const invoiceId = String(req.params.id || '').trim();
+        const format = String(req.query.format || 'csv').toLowerCase();
+        if (!invoiceId) return res.status(400).json({ error: 'missing_invoice_id' });
+
+        const orgIds = await getUserOrgIds(userId);
+        if (orgIds.length === 0) return res.status(403).json({ error: 'forbidden' });
+
+        const { data: invoice, error } = await supabaseAdmin
+          .from('invoices')
+          .select('*')
+          .eq('id', invoiceId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!invoice || !orgIds.includes(String((invoice as any).org_id || ''))) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const { data: itemsA } = await supabaseAdmin
+          .from('invoice_items')
+          .select('*')
+          .eq('invoice_id', invoiceId);
+        const { data: itemsB } = await supabaseAdmin
+          .from('invoice_line_items')
+          .select('*')
+          .eq('invoice_id', invoiceId);
+        const items = (itemsA && itemsA.length > 0) ? itemsA : (itemsB || []);
+
+        if (format === 'json') {
+          return res.json({ invoice, items });
+        }
+
+        const header = ['invoice_id', 'invoice_number', 'status', 'created_at', 'item_description', 'quantity', 'unit_price', 'line_total'];
+        const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const rows = (items.length > 0 ? items : [null]).map((it: any) => ([
+          invoice.id,
+          (invoice as any).invoice_number || '',
+          (invoice as any).status || '',
+          (invoice as any).created_at || '',
+          it?.description || '',
+          it?.quantity ?? '',
+          it?.unit_price ?? '',
+          it?.line_total ?? ((Number(it?.quantity || 0) * Number(it?.unit_price || 0)) || '')
+        ].map(esc).join(',')));
+        const csv = [header.join(','), ...rows].join('\n');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="invoice-${(invoice as any).invoice_number || invoice.id}.csv"`);
+        res.send(csv);
+      } catch (err: any) {
+        console.error('[client/billing/invoice export] error:', err);
+        res.status(500).json({ error: 'failed_to_export_client_invoice', detail: err?.message });
+      }
+    });
+
     // ===== PACKAGE MANAGEMENT ENDPOINTS =====
 
     // Get all packages

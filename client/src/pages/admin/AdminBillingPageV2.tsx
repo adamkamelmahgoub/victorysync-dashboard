@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import AdminLayout from '../../components/AdminLayout';
 import { buildApiUrl } from '../../config';
-import { useRealtimeSubscription } from '../../lib/realtimeSubscriptions';
 
-interface BillingRecord {
+type BillingRecord = {
   id: string;
   org_id: string | null;
   user_id: string | null;
@@ -15,451 +14,301 @@ interface BillingRecord {
   status: string;
   billing_date: string;
   created_at: string;
-}
+};
 
-interface Invoice {
+type Invoice = {
   id: string;
   org_id: string;
   invoice_number: string;
-  subtotal: number;
-  tax: number;
-  total: number;
+  subtotal?: number;
+  tax_amount?: number;
+  total_amount?: number;
+  total?: number;
   status: string;
   created_at: string;
-  invoice_items?: any[];
-}
-
-// KPI Card Component
-const KPICard: React.FC<{ label: string; value: string | number; color?: string }> = ({ label, value, color = 'cyan' }) => {
-  const colorStyles: Record<string, { border: string; text: string }> = {
-    cyan: { border: 'hover:border-cyan-500', text: 'text-cyan-400' },
-    yellow: { border: 'hover:border-yellow-500', text: 'text-yellow-400' },
-    blue: { border: 'hover:border-blue-500', text: 'text-blue-400' },
-    green: { border: 'hover:border-green-500', text: 'text-green-400' },
-  };
-  const style = colorStyles[color] || colorStyles.cyan;
-  return (
-    <div className={`bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 ${style.border} transition-all`}>
-      <p className="text-slate-400 text-sm font-medium">{label}</p>
-      <p className={`text-3xl font-bold mt-2 ${style.text}`}>{value}</p>
-    </div>
-  );
+  invoice_items?: Array<{ description?: string; quantity?: number; unit_price?: number; line_total?: number }>;
 };
 
-// Record Item Component
-const RecordItem: React.FC<{ record: BillingRecord; onDelete?: (id: string) => void }> = ({ record, onDelete }) => (
-  <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 hover:border-slate-600 transition-all">
-    <div className="flex justify-between items-start">
-      <div className="flex-1">
-        <p className="font-semibold text-white">{record.description}</p>
-        <p className="text-sm text-slate-400 mt-1">
-          Type: <span className="text-slate-300">{record.type}</span>
-        </p>
-        <p className="text-sm text-slate-400">
-          Status: <span className={`font-medium ${record.status === 'paid' ? 'text-green-400' : 'text-yellow-400'}`}>{record.status}</span>
-        </p>
-      </div>
-      <div className="text-right">
-        <p className="text-2xl font-bold text-cyan-400">{record.currency} {record.amount.toFixed(2)}</p>
-        <p className="text-xs text-slate-500 mt-2">{new Date(record.created_at).toLocaleDateString()}</p>
-      </div>
-    </div>
-  </div>
-);
+type BillingPackage = {
+  id: string;
+  name: string;
+  description?: string | null;
+  base_monthly_cost?: number;
+  included_minutes?: number;
+  included_sms?: number;
+  overage_minute_cost?: number;
+  overage_sms_cost?: number;
+  is_active?: boolean;
+  created_at?: string;
+};
 
-// Invoice Item Component
-const InvoiceItem: React.FC<{ invoice: Invoice }> = ({ invoice }) => (
-  <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 hover:border-slate-600 transition-all">
-    <div className="flex justify-between items-start">
-      <div className="flex-1">
-        <p className="font-semibold text-white">{invoice.invoice_number}</p>
-        <p className="text-sm text-slate-400 mt-1">
-          Items: <span className="text-slate-300">{invoice.invoice_items?.length || 0}</span>
-        </p>
-        <p className="text-sm text-slate-400">
-          Status: <span className={`font-medium ${invoice.status === 'paid' ? 'text-green-400' : invoice.status === 'draft' ? 'text-blue-400' : 'text-yellow-400'}`}>{invoice.status}</span>
-        </p>
-      </div>
-      <div className="text-right">
-        <p className="text-2xl font-bold text-cyan-400">${invoice.total.toFixed(2)}</p>
-        <p className="text-xs text-slate-500 mt-2">{new Date(invoice.created_at).toLocaleDateString()}</p>
-      </div>
+function Modal({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl p-6">{children}</div>
     </div>
-  </div>
-);
+  );
+}
 
-// Create Record Modal
-const CreateRecordModal: React.FC<{ onClose: () => void; onSubmit: (data: any) => Promise<void>; orgOptions?: Array<{id:string;name:string}>; userOptions?: Array<{id:string;email?:string;display_name?:string}> }> = ({ onClose, onSubmit, orgOptions = [], userOptions = [] }) => {
+export const AdminBillingPageV2: React.FC = () => {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<'records' | 'invoices' | 'packages'>('records');
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    org_id: '',
-    user_id: '',
-    type: 'subscription',
-    description: '',
-    amount: '',
-    currency: 'USD'
-  });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const [records, setRecords] = useState<BillingRecord[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [packages, setPackages] = useState<BillingPackage[]>([]);
+
+  const [showCreateRecord, setShowCreateRecord] = useState(false);
+  const [showCreateInvoice, setShowCreateInvoice] = useState(false);
+  const [showCreatePackage, setShowCreatePackage] = useState(false);
+
+  const [recordForm, setRecordForm] = useState({ org_id: '', user_id: '', type: 'subscription', description: '', amount: '', currency: 'USD' });
+  const [invoiceForm, setInvoiceForm] = useState({ org_id: '', items: [{ description: '', quantity: 1, unit_price: 0 }] as Array<{ description: string; quantity: number; unit_price: number }> });
+  const [packageForm, setPackageForm] = useState({ name: '', description: '', base_monthly_cost: '0', included_minutes: '0', included_sms: '0', overage_minute_cost: '0.01', overage_sms_cost: '0.01', is_active: true });
+
+  const authHeaders = useMemo(() => ({ 'x-user-id': user?.id || '', 'Content-Type': 'application/json' }), [user?.id]);
+
+  const loadRecords = async () => {
+    const resp = await fetch(buildApiUrl('/api/admin/billing/records'), { headers: { 'x-user-id': user?.id || '' } });
+    if (!resp.ok) throw new Error('Failed to load billing records');
+    const j = await resp.json();
+    setRecords(j.records || []);
+  };
+
+  const loadInvoices = async () => {
+    const resp = await fetch(buildApiUrl('/api/admin/billing/invoices'), { headers: { 'x-user-id': user?.id || '' } });
+    if (!resp.ok) throw new Error('Failed to load invoices');
+    const j = await resp.json();
+    setInvoices(j.invoices || []);
+  };
+
+  const loadPackages = async () => {
+    const resp = await fetch(buildApiUrl('/api/admin/billing-packages'), { headers: { 'x-user-id': user?.id || '' } });
+    if (!resp.ok) throw new Error('Failed to load packages');
+    const j = await resp.json();
+    setPackages(j.packages || []);
+  };
+
+  const loadActiveTab = async () => {
     setLoading(true);
     try {
-      // Validate optional UUID fields
-      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (formData.org_id && !uuidRe.test(formData.org_id)) {
-        alert('Organization ID must be a valid UUID or left blank');
-        setLoading(false);
-        return;
-      }
-      if (formData.user_id && !uuidRe.test(formData.user_id)) {
-        alert('User ID must be a valid UUID or left blank');
-        setLoading(false);
-        return;
-      }
-      const amountNum = parseFloat(formData.amount);
-      if (!isFinite(amountNum) || amountNum < 0) {
-        alert('Amount must be a valid non-negative number');
-        setLoading(false);
-        return;
-      }
-
-      await onSubmit({
-        ...formData,
-        amount: amountNum
-      });
+      if (activeTab === 'records') await loadRecords();
+      if (activeTab === 'invoices') await loadInvoices();
+      if (activeTab === 'packages') await loadPackages();
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-slate-900 rounded-xl border border-slate-700 p-8 max-w-md w-full mx-4">
-        <h3 className="text-xl font-bold text-white mb-6">Create Billing Record</h3>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Description *</label>
-            <input
-              type="text"
-              required
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-              placeholder="e.g., Monthly subscription"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Type *</label>
-            <select
-              value={formData.type}
-              onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:border-cyan-500 focus:outline-none"
-            >
-              <option value="subscription">Subscription</option>
-              <option value="one_time">One-time</option>
-              <option value="usage">Usage</option>
-              <option value="refund">Refund</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Amount *</label>
-            <input
-              type="number"
-              step="0.01"
-              required
-              value={formData.amount}
-              onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-              placeholder="0.00"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Organization</label>
-              <select
-                value={formData.org_id}
-                onChange={(e) => setFormData({ ...formData, org_id: e.target.value })}
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-              >
-                <option value="">(None)</option>
-                {orgOptions.map(o => (
-                  <option key={o.id} value={o.id}>{o.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">User</label>
-              <select
-                value={formData.user_id}
-                onChange={(e) => setFormData({ ...formData, user_id: e.target.value })}
-                className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-              >
-                <option value="">(None)</option>
-                {userOptions.map(u => (
-                  <option key={u.id} value={u.id}>{u.display_name || u.email || u.id}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-lg font-medium hover:from-cyan-700 hover:to-blue-700 disabled:opacity-50 transition-all"
-            >
-              {loading ? 'Creating...' : 'Create Record'}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-slate-800 text-slate-300 rounded-lg font-medium hover:bg-slate-700 transition-all"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-export const AdminBillingPageV2: React.FC = () => {
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'records' | 'invoices'>('records');
-  const [billingRecords, setBillingRecords] = useState<BillingRecord[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [showCreateRecord, setShowCreateRecord] = useState(false);
-  const [totalRevenue, setTotalRevenue] = useState(0);
-  const [pendingAmount, setPendingAmount] = useState(0);
-  const [orgOptions, setOrgOptions] = useState<Array<{ id: string; name: string }>>([]);
-  const [userOptions, setUserOptions] = useState<Array<{ id: string; email?: string; display_name?: string }>>([]);
-
-  const loadData = async () => {
-    if (activeTab === 'records') {
-      await loadBillingRecords();
-    } else {
-      await loadInvoices();
-    }
-  };
-
   useEffect(() => {
-    loadData();
-    // load orgs and users for pickers
-    (async () => {
-      try {
-        const resp = await fetch(buildApiUrl('/api/admin/orgs'), { headers: { 'x-user-id': user?.id || '', 'x-dev-bypass': 'true' } });
-        if (resp.ok) {
-          const j = await resp.json();
-          setOrgOptions((j.orgs || []).map((o: any) => ({ id: o.id, name: o.name })));
-        }
-      } catch (e) {}
-      try {
-        const resp2 = await fetch(buildApiUrl('/api/admin/users'), { headers: { 'x-user-id': user?.id || '' } });
-        if (resp2.ok) {
-          const j2 = await resp2.json();
-          setUserOptions((j2.users || []).map((u: any) => ({ id: u.id, email: u.email, display_name: u.display_name })));
-        }
-      } catch (e) {}
-    })();
-  }, [activeTab]);
+    if (user?.id) loadActiveTab();
+  }, [activeTab, user?.id]);
 
-  // Subscribe to realtime billing record updates
-  useRealtimeSubscription(
-    'billing_records',
-    null,
-    () => {
-      console.log('[Realtime] Billing record created - refreshing...');
-      if (activeTab === 'records') {
-        setTimeout(() => loadBillingRecords(), 500);
-      }
-    },
-    () => {
-      console.log('[Realtime] Billing record updated - refreshing...');
-      if (activeTab === 'records') {
-        setTimeout(() => loadBillingRecords(), 500);
-      }
-    },
-    () => {
-      console.log('[Realtime] Billing record deleted - refreshing...');
-      if (activeTab === 'records') {
-        setTimeout(() => loadBillingRecords(), 500);
-      }
-    }
-  );
-  // Subscribe to realtime invoice updates
-  useRealtimeSubscription(
-    'invoices',
-    null,
-    () => {
-      console.log('[Realtime] Invoice created - refreshing...');
-      if (activeTab === 'invoices') {
-        setTimeout(() => loadInvoices(), 500);
-      }
-    },
-    () => {
-      console.log('[Realtime] Invoice updated - refreshing...');
-      if (activeTab === 'invoices') {
-        setTimeout(() => loadInvoices(), 500);
-      }
-    },
-    () => {
-      console.log('[Realtime] Invoice deleted - refreshing...');
-      if (activeTab === 'invoices') {
-        setTimeout(() => loadInvoices(), 500);
-      }
-    }
-  );
-
-  const loadBillingRecords = async () => {
-    const devAsAdmin = (import.meta as any)?.env?.DEV && new URLSearchParams(window.location.search).get('asAdmin') === 'true';
-    const effectiveUserId = devAsAdmin ? ((import.meta as any).env.VITE_DEV_ADMIN_ID || user?.id || '') : (user?.id || '');
-
-    const response = await fetch(buildApiUrl('/api/admin/billing/records'), {
-      headers: { 'x-user-id': effectiveUserId }
-    });
-    if (response.ok) {
-      const data = await response.json();
-      setBillingRecords(data.records || []);
-      
-      // Calculate totals
-      const revenue = (data.records || []).reduce((sum: number, r: BillingRecord) => sum + r.amount, 0);
-      const pending = (data.records || []).reduce((sum: number, r: BillingRecord) => r.status !== 'paid' ? sum + r.amount : sum, 0);
-      setTotalRevenue(revenue);
-      setPendingAmount(pending);
-    }
+  const createRecord = async () => {
+    const payload = {
+      ...recordForm,
+      amount: Number(recordForm.amount || 0),
+      org_id: recordForm.org_id || null,
+      user_id: recordForm.user_id || null,
+    };
+    const resp = await fetch(buildApiUrl('/api/admin/billing/records'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create record');
+    setShowCreateRecord(false);
+    await loadRecords();
   };
 
-  const loadInvoices = async () => {
-    const devAsAdmin = (import.meta as any)?.env?.DEV && new URLSearchParams(window.location.search).get('asAdmin') === 'true';
-    const effectiveUserId = devAsAdmin ? ((import.meta as any).env.VITE_DEV_ADMIN_ID || user?.id || '') : (user?.id || '');
-
-    const response = await fetch(buildApiUrl('/api/admin/billing/invoices'), {
-      headers: { 'x-user-id': effectiveUserId }
-    });
-    if (response.ok) {
-      const data = await response.json();
-      setInvoices(data.invoices || []);
-    }
+  const createInvoice = async () => {
+    const payload = {
+      org_id: invoiceForm.org_id,
+      items: invoiceForm.items.map((it) => ({ description: it.description, quantity: Number(it.quantity || 0), unit_price: Number(it.unit_price || 0) })),
+    };
+    const resp = await fetch(buildApiUrl('/api/admin/billing/invoices'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create invoice');
+    setShowCreateInvoice(false);
+    await loadInvoices();
   };
 
-  const handleCreateRecord = async (recordData: any) => {
-    try {
-      const devAsAdmin = (import.meta as any)?.env?.DEV && new URLSearchParams(window.location.search).get('asAdmin') === 'true';
-      const effectiveUserId = devAsAdmin ? ((import.meta as any).env.VITE_DEV_ADMIN_ID || user?.id || '') : (user?.id || '');
+  const deleteInvoice = async (id: string) => {
+    if (!confirm('Delete this invoice?')) return;
+    const resp = await fetch(buildApiUrl(`/api/admin/billing/invoices/${encodeURIComponent(id)}`), { method: 'DELETE', headers: { 'x-user-id': user?.id || '' } });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to delete invoice');
+    await loadInvoices();
+  };
 
-      const response = await fetch(buildApiUrl('/api/admin/billing/records'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': effectiveUserId },
-        body: JSON.stringify(recordData)
-      });
+  const exportInvoice = async (id: string) => {
+    const resp = await fetch(buildApiUrl(`/api/admin/billing/invoices/${encodeURIComponent(id)}/export?format=csv`), { headers: { 'x-user-id': user?.id || '' } });
+    if (!resp.ok) throw new Error('Failed to export invoice');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoice-${id}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
 
-      const data = await response.json();
-      if (!response.ok) {
-        alert(`Error: ${data.error || 'Failed to create billing record'}`);
-        return;
-      }
+  const createPackage = async () => {
+    const payload = {
+      ...packageForm,
+      base_monthly_cost: Number(packageForm.base_monthly_cost || 0),
+      included_minutes: Number(packageForm.included_minutes || 0),
+      included_sms: Number(packageForm.included_sms || 0),
+      overage_minute_cost: Number(packageForm.overage_minute_cost || 0),
+      overage_sms_cost: Number(packageForm.overage_sms_cost || 0),
+    };
+    const resp = await fetch(buildApiUrl('/api/admin/billing-packages'), { method: 'POST', headers: authHeaders, body: JSON.stringify(payload) });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to create package');
+    setShowCreatePackage(false);
+    await loadPackages();
+  };
 
-      setShowCreateRecord(false);
-      await loadBillingRecords();
-      alert('Billing record created successfully!');
-    } catch (error) {
-      alert(`Error: ${error instanceof Error ? error.message : 'Failed to create billing record'}`);
-    }
+  const deletePackage = async (id: string) => {
+    if (!confirm('Delete this billing package?')) return;
+    const resp = await fetch(buildApiUrl(`/api/admin/billing-packages/${encodeURIComponent(id)}`), { method: 'DELETE', headers: { 'x-user-id': user?.id || '' } });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || 'Failed to delete package');
+    await loadPackages();
   };
 
   return (
     <AdminLayout
       title="Billing Management"
-      subtitle="Manage billing records and invoices"
+      subtitle="Manage records, invoices, and billing packages"
       tabs={[
         { id: 'records', label: 'Billing Records' },
-        { id: 'invoices', label: 'Invoices' }
+        { id: 'invoices', label: 'Invoices' },
+        { id: 'packages', label: 'Packages' },
       ]}
       activeTab={activeTab}
-      onTabChange={(tabId: string) => setActiveTab(tabId as 'records' | 'invoices')}
+      onTabChange={(id) => setActiveTab(id as any)}
     >
       {activeTab === 'records' && (
-        <div className="space-y-6">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <KPICard label="Total Revenue" value={`$${totalRevenue.toFixed(2)}`} color="cyan" />
-            <KPICard label="Pending Amount" value={`$${pendingAmount.toFixed(2)}`} color="yellow" />
-            <KPICard label="Total Records" value={billingRecords.length} color="blue" />
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button onClick={() => setShowCreateRecord(true)} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create Record</button>
           </div>
-
-          {/* Create Button */}
-          <div className="flex justify-between items-center">
-            <h2 className="text-sm font-semibold text-white">All Billing Records</h2>
-            <button
-              onClick={() => setShowCreateRecord(true)}
-              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 text-white rounded-lg font-semibold text-xs hover:from-emerald-500 hover:to-cyan-500 transition"
-            >
-              Create Record
-            </button>
-          </div>
-
-          {/* Records List */}
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-emerald-500 mx-auto mb-4"></div>
-              <p className="text-slate-400 text-xs">Loading records...</p>
-            </div>
-          ) : billingRecords.length > 0 ? (
-            <div className="space-y-3">
-              {billingRecords.map((record) => (
-                <RecordItem key={record.id} record={record} />
+          {loading ? <div className="text-slate-400 text-sm">Loading...</div> : (
+            <div className="space-y-2">
+              {records.map((r) => (
+                <div key={r.id} className="bg-slate-800 border border-slate-700 rounded p-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-white text-sm font-semibold">{r.description}</div>
+                    <div className="text-slate-400 text-xs">{r.type} � {r.status} � {new Date(r.created_at).toLocaleDateString()}</div>
+                  </div>
+                  <div className="text-cyan-300 text-sm font-semibold">{r.currency} {Number(r.amount || 0).toFixed(2)}</div>
+                </div>
               ))}
+              {records.length === 0 && <div className="text-slate-400 text-sm">No records found.</div>}
             </div>
-          ) : (
-            <div className="text-center py-12 bg-slate-800/30 rounded-lg border border-slate-700/50">
-              <p className="text-slate-400 text-xs">No billing records yet</p>
-            </div>
-          )}
-
-          {showCreateRecord && (
-            <CreateRecordModal
-              onClose={() => setShowCreateRecord(false)}
-              onSubmit={handleCreateRecord}
-              orgOptions={orgOptions}
-              userOptions={userOptions}
-            />
           )}
         </div>
       )}
 
       {activeTab === 'invoices' && (
-        <div className="space-y-6">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <KPICard label="Total Invoices" value={invoices.length} color="cyan" />
-            <KPICard label="Total Amount" value={`$${invoices.reduce((sum, inv) => sum + inv.total, 0).toFixed(2)}`} color="green" />
-            <KPICard label="Draft Invoices" value={invoices.filter(i => i.status === 'draft').length} color="blue" />
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button onClick={() => setShowCreateInvoice(true)} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create Invoice</button>
           </div>
-
-          {/* Invoices List */}
-          <h2 className="text-sm font-semibold text-white">All Invoices</h2>
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-emerald-500 mx-auto mb-4"></div>
-              <p className="text-slate-400 text-xs">Loading invoices...</p>
-            </div>
-          ) : invoices.length > 0 ? (
-            <div className="space-y-3">
-              {invoices.map((invoice) => (
-                <InvoiceItem key={invoice.id} invoice={invoice} />
+          {loading ? <div className="text-slate-400 text-sm">Loading...</div> : (
+            <div className="space-y-2">
+              {invoices.map((inv) => (
+                <div key={inv.id} className="bg-slate-800 border border-slate-700 rounded p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-white text-sm font-semibold">{inv.invoice_number || inv.id}</div>
+                    <div className="text-slate-400 text-xs">{inv.status} � {new Date(inv.created_at).toLocaleDateString()}</div>
+                  </div>
+                  <div className="text-cyan-300 text-sm font-semibold">${Number(inv.total_amount ?? inv.total ?? 0).toFixed(2)}</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => exportInvoice(inv.id)} className="px-3 py-1 rounded border border-cyan-600 text-cyan-300 text-xs">Export</button>
+                    <button onClick={() => deleteInvoice(inv.id)} className="px-3 py-1 rounded border border-rose-600 text-rose-300 text-xs">Delete</button>
+                  </div>
+                </div>
               ))}
-            </div>
-          ) : (
-            <div className="text-center py-12 bg-slate-800/30 rounded-lg border border-slate-700/50">
-              <p className="text-slate-400 text-xs">No invoices yet</p>
+              {invoices.length === 0 && <div className="text-slate-400 text-sm">No invoices found.</div>}
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === 'packages' && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button onClick={() => setShowCreatePackage(true)} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create Package</button>
+          </div>
+          {loading ? <div className="text-slate-400 text-sm">Loading...</div> : (
+            <div className="space-y-2">
+              {packages.map((p) => (
+                <div key={p.id} className="bg-slate-800 border border-slate-700 rounded p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-white text-sm font-semibold">{p.name}</div>
+                    <div className="text-slate-400 text-xs">{p.description || '-'} � {p.is_active === false ? 'inactive' : 'active'}</div>
+                  </div>
+                  <div className="text-cyan-300 text-sm font-semibold">${Number(p.base_monthly_cost || 0).toFixed(2)}/mo</div>
+                  <button onClick={() => deletePackage(p.id)} className="px-3 py-1 rounded border border-rose-600 text-rose-300 text-xs">Delete</button>
+                </div>
+              ))}
+              {packages.length === 0 && <div className="text-slate-400 text-sm">No packages found.</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showCreateRecord && (
+        <Modal>
+          <h3 className="text-white text-lg font-semibold mb-4">Create Billing Record</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Org ID (optional)" value={recordForm.org_id} onChange={(e) => setRecordForm({ ...recordForm, org_id: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="User ID (optional)" value={recordForm.user_id} onChange={(e) => setRecordForm({ ...recordForm, user_id: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm col-span-2" placeholder="Description" value={recordForm.description} onChange={(e) => setRecordForm({ ...recordForm, description: e.target.value })} />
+            <select className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" value={recordForm.type} onChange={(e) => setRecordForm({ ...recordForm, type: e.target.value })}><option value="subscription">subscription</option><option value="one_time">one_time</option><option value="usage">usage</option><option value="refund">refund</option></select>
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Amount" type="number" step="0.01" value={recordForm.amount} onChange={(e) => setRecordForm({ ...recordForm, amount: e.target.value })} />
+          </div>
+          <div className="flex gap-2 mt-4 justify-end">
+            <button onClick={() => setShowCreateRecord(false)} className="px-4 py-2 rounded bg-slate-700 text-slate-200 text-sm">Cancel</button>
+            <button onClick={async () => { try { await createRecord(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create</button>
+          </div>
+        </Modal>
+      )}
+
+      {showCreateInvoice && (
+        <Modal>
+          <h3 className="text-white text-lg font-semibold mb-4">Create Invoice</h3>
+          <div className="space-y-3">
+            <input className="w-full px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Org ID" value={invoiceForm.org_id} onChange={(e) => setInvoiceForm({ ...invoiceForm, org_id: e.target.value })} />
+            {invoiceForm.items.map((it, idx) => (
+              <div className="grid grid-cols-12 gap-2" key={idx}>
+                <input className="col-span-6 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Description" value={it.description} onChange={(e) => { const items = [...invoiceForm.items]; items[idx] = { ...items[idx], description: e.target.value }; setInvoiceForm({ ...invoiceForm, items }); }} />
+                <input className="col-span-3 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" type="number" placeholder="Qty" value={it.quantity} onChange={(e) => { const items = [...invoiceForm.items]; items[idx] = { ...items[idx], quantity: Number(e.target.value || 0) }; setInvoiceForm({ ...invoiceForm, items }); }} />
+                <input className="col-span-3 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" type="number" step="0.01" placeholder="Unit price" value={it.unit_price} onChange={(e) => { const items = [...invoiceForm.items]; items[idx] = { ...items[idx], unit_price: Number(e.target.value || 0) }; setInvoiceForm({ ...invoiceForm, items }); }} />
+              </div>
+            ))}
+            <button onClick={() => setInvoiceForm({ ...invoiceForm, items: [...invoiceForm.items, { description: '', quantity: 1, unit_price: 0 }] })} className="px-3 py-1 rounded border border-slate-600 text-slate-300 text-xs">Add Item</button>
+          </div>
+          <div className="flex gap-2 mt-4 justify-end">
+            <button onClick={() => setShowCreateInvoice(false)} className="px-4 py-2 rounded bg-slate-700 text-slate-200 text-sm">Cancel</button>
+            <button onClick={async () => { try { await createInvoice(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create</button>
+          </div>
+        </Modal>
+      )}
+
+      {showCreatePackage && (
+        <Modal>
+          <h3 className="text-white text-lg font-semibold mb-4">Create Billing Package</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <input className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Name" value={packageForm.name} onChange={(e) => setPackageForm({ ...packageForm, name: e.target.value })} />
+            <input className="col-span-2 px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Description" value={packageForm.description} onChange={(e) => setPackageForm({ ...packageForm, description: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Monthly" type="number" step="0.01" value={packageForm.base_monthly_cost} onChange={(e) => setPackageForm({ ...packageForm, base_monthly_cost: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Included mins" type="number" value={packageForm.included_minutes} onChange={(e) => setPackageForm({ ...packageForm, included_minutes: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Included SMS" type="number" value={packageForm.included_sms} onChange={(e) => setPackageForm({ ...packageForm, included_sms: e.target.value })} />
+            <input className="px-3 py-2 rounded bg-slate-800 border border-slate-700 text-white text-sm" placeholder="Overage/min" type="number" step="0.01" value={packageForm.overage_minute_cost} onChange={(e) => setPackageForm({ ...packageForm, overage_minute_cost: e.target.value })} />
+          </div>
+          <div className="flex gap-2 mt-4 justify-end">
+            <button onClick={() => setShowCreatePackage(false)} className="px-4 py-2 rounded bg-slate-700 text-slate-200 text-sm">Cancel</button>
+            <button onClick={async () => { try { await createPackage(); } catch (e: any) { alert(e?.message || 'Failed'); } }} className="px-4 py-2 rounded bg-cyan-600 text-white text-sm">Create</button>
+          </div>
+        </Modal>
       )}
     </AdminLayout>
   );
