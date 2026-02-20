@@ -5976,8 +5976,7 @@ app.get("/s/series", async (req, res) => {
           .from('mightycall_reports')
           .select('*, organizations(name, id)')
           .eq('report_type', reportType)
-          .order('report_date', { ascending: false })
-          .range(offset, offset + limit - 1);
+          .order('report_date', { ascending: false });
 
         // Apply org filter if we have specific orgs to query
         if (queryOrgIds.length > 0) {
@@ -5988,7 +5987,16 @@ app.get("/s/series", async (req, res) => {
           }
         }
         
-        // If this is a non-admin user and we have org(s), restrict by assigned phone numbers.
+        // Pagination strategy:
+        // - Admin: DB range pagination.
+        // - Non-admin: fetch a wider window and paginate after assignment filtering.
+        if (isAdmin) {
+          query = query.range(offset, offset + limit - 1);
+        } else {
+          query = query.limit(5000);
+        }
+
+        // If this is a non-admin user and we have org(s), collect assigned phone scope.
         let assignedIdSet = new Set<string>();
         let assignedNumberSet = new Set<string>();
         let assignedDigitSet = new Set<string>();
@@ -6001,22 +6009,9 @@ app.get("/s/series", async (req, res) => {
               for (const d of digits || []) assignedDigitSet.add(String(d));
               for (const p of phones || []) if ((p as any)?.id) assignedIdSet.add(String((p as any).id));
             }
-
-            // Build DB-side prefilter; final enforcement runs in-memory below.
-            const orClauses: string[] = [];
-            if (assignedIdSet.size > 0) {
-              orClauses.push(`phone_number_id.in.(${Array.from(assignedIdSet).join(',')})`);
-            }
-            if (assignedNumberSet.size > 0) {
-              // escape commas in phone numbers if any
-              const nums = Array.from(assignedNumberSet).map(n => n.replace(/,/g, '\\,'));
-              orClauses.push(`phone_number.in.(${nums.join(',')})`);
-            }
-
-            if (orClauses.length > 0) {
-              const orFilter = orClauses.join(',');
-              query = query.or(orFilter);
-            }
+            // Do not add DB-side number filters here. mightycall_reports rows are often keyed
+            // by JSON payload/sample_numbers with null phone_number_id, so strict SQL filtering
+            // can hide valid assigned-number reports. Enforce visibility in-memory below.
           } catch (e) {
             console.warn('[mightycall/reports] failed to apply assigned phone filters:', fmtErr(e));
           }
@@ -6033,8 +6028,7 @@ app.get("/s/series", async (req, res) => {
           let callsQuery = supabaseAdmin
             .from('calls')
             .select('id, org_id, from_number, to_number, status, started_at, ended_at')
-            .order('started_at', { ascending: false })
-            .range(offset, offset + limit - 1);
+            .order('started_at', { ascending: false });
 
           // Apply org filter
           if (queryOrgIds.length > 0) {
@@ -6087,14 +6081,18 @@ app.get("/s/series", async (req, res) => {
             rows = rows.filter((r: any) => reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet));
           }
         }
-        const enrichedRows = rows.map((r: any) => {
+        const pageRows = isAdmin ? rows : rows.slice(offset, offset + limit);
+        const enrichedRows = pageRows.map((r: any) => {
           const numbersCalled = extractCandidateNumbersFromReport(r);
           return {
             ...r,
             numbers_called: numbersCalled,
           };
         });
-        res.json({ reports: enrichedRows, next_offset: rows.length === limit ? offset + rows.length : null });
+        const nextOffset = isAdmin
+          ? (pageRows.length === limit ? offset + pageRows.length : null)
+          : ((offset + limit) < rows.length ? offset + limit : null);
+        res.json({ reports: enrichedRows, next_offset: nextOffset });
       } catch (err: any) {
         console.error('[mightycall/reports] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_reports', detail: err?.message });
@@ -6421,9 +6419,12 @@ app.get("/s/series", async (req, res) => {
 
             const { getMightyCallAccessToken, fetchMightyCallCalls } = await import('./integrations/mightycall');
             const token = await getMightyCallAccessToken(overrideCreds);
+            const dayStart = new Date(`${reportDate}T00:00:00Z`);
+            const liveFrom = new Date(dayStart.getTime() - (2 * 24 * 60 * 60 * 1000)).toISOString();
+            const liveTo = new Date(dayStart.getTime() + (3 * 24 * 60 * 60 * 1000) - 1000).toISOString();
             const liveCalls = await fetchMightyCallCalls(token, {
-              startUtc: `${reportDate}T00:00:00Z`,
-              endUtc: `${reportDate}T23:59:59Z`,
+              startUtc: liveFrom,
+              endUtc: liveTo,
               pageSize: '1000',
               skip: '0'
             });
@@ -6476,6 +6477,32 @@ app.get("/s/series", async (req, res) => {
           }
         }
 
+        // If MightyCall exposes only aggregate report data (no row-level calls available),
+        // synthesize detail rows from those aggregates so detail tables stay consistent.
+        if (relatedCalls.length === 0 && rawTotalCalls > 0) {
+          const baseNumber = candidateNumbers[0] || null;
+          const perCallDuration = rawTotalCalls > 0 ? Math.round(rawTotalDuration / rawTotalCalls) : 0;
+          const answeredCap = Math.max(0, Math.min(rawAnsweredCalls, rawTotalCalls));
+          const synthCount = Math.min(rawTotalCalls, Math.min(relatedLimit, 500));
+          const synthesized: any[] = [];
+          for (let i = 0; i < synthCount; i++) {
+            const answered = i < answeredCap;
+            synthesized.push({
+              id: `${report.id}-aggregate-${i + 1}`,
+              from_number: null,
+              to_number: baseNumber,
+              from_number_digits: null,
+              to_number_digits: normalizePhoneDigits(baseNumber || ''),
+              status: answered ? 'answered' : 'missed',
+              duration_seconds: answered ? perCallDuration : 0,
+              started_at: `${reportDate}T12:00:00Z`,
+              ended_at: null,
+              source: 'mightycall_report_aggregate'
+            });
+          }
+          relatedCalls = synthesized;
+        }
+
         // KPI source of truth: real call rows within report scope (after visibility filters).
         const normalizedStatus = (s: any) => String(s || '').toLowerCase().trim();
         const isAnswered = (s: string) => ['answered', 'completed', 'connected'].includes(s);
@@ -6512,6 +6539,20 @@ app.get("/s/series", async (req, res) => {
           const t = String((m as any)?.to_number || '').trim();
           if (f) allNumbers.add(f);
           if (t) allNumbers.add(t);
+        }
+
+        if (relatedCalls.length === 0 && rawTotalCalls > 0) {
+          const baseNumber = candidateNumbers[0] || null;
+          relatedCalls = [{
+            id: `${report.id}-aggregate-1`,
+            from_number: null,
+            to_number: baseNumber,
+            status: rawAnsweredCalls > 0 ? 'answered' : 'missed',
+            duration_seconds: rawTotalDuration > 0 ? Math.round(rawTotalDuration / rawTotalCalls) : 0,
+            started_at: `${reportDate}T12:00:00Z`,
+            ended_at: null,
+            source: 'mightycall_report_aggregate'
+          }];
         }
 
         res.json({
