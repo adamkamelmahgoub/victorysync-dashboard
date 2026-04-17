@@ -3210,20 +3210,44 @@ app.get('/api/admin/mightycall/extensions', async (req, res) => {
     const liveOnly = String(req.query.live_only || '').toLowerCase() === 'true';
     if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
 
-    const { data: orgRows, error: orgError } = await supabaseAdmin
-      .from('organizations')
-      .select('id, name')
-      .order('created_at', { ascending: true });
+    const [{ data: orgRows, error: orgError }, { data: orgUserRows, error: orgUserError }] = await Promise.all([
+      supabaseAdmin
+        .from('organizations')
+        .select('id, name')
+        .order('created_at', { ascending: true }),
+      supabaseAdmin
+        .from('org_users')
+        .select('org_id')
+    ]);
     if (orgError) throw orgError;
+    if (orgUserError) throw orgUserError;
+
+    const orgMap = new Map<string, { id: string; name: string | null }>();
+    for (const org of orgRows || []) {
+      const orgId = String((org as any).id || '');
+      if (!orgId) continue;
+      orgMap.set(orgId, {
+        id: orgId,
+        name: String((org as any).name || '').trim() || null
+      });
+    }
+    for (const row of orgUserRows || []) {
+      const orgId = String((row as any).org_id || '');
+      if (!orgId || orgMap.has(orgId)) continue;
+      orgMap.set(orgId, {
+        id: orgId,
+        name: `Organization ${orgId.slice(0, 8)}`
+      });
+    }
 
     const liveRows: any[] = [];
     const hiddenRows: any[] = [];
     const fallbackRows: any[] = [];
     const orgsProcessed: any[] = [];
 
-    for (const org of orgRows || []) {
-      const orgId = String((org as any).id || '');
-      const orgName = String((org as any).name || '').trim() || null;
+    for (const org of Array.from(orgMap.values())) {
+      const orgId = String(org.id || '');
+      const orgName = org.name || null;
       if (!orgId) continue;
       try {
         const inventory = await getMightyCallExtensionInventoryForOrg(orgId, liveOnly);
