@@ -49,6 +49,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
   const [extensionOptions, setExtensionOptions] = useState<ExtensionOption[]>([]);
   const [extensionsLoading, setExtensionsLoading] = useState(false);
   const [extensionsError, setExtensionsError] = useState<string | null>(null);
+  const [extensionsInfo, setExtensionsInfo] = useState<string | null>(null);
   const [extensionsAudit, setExtensionsAudit] = useState<ExtensionOption[]>([]);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
 
@@ -115,13 +116,19 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
   async function fetchAvailableExtensions() {
     setExtensionsLoading(true);
     setExtensionsError(null);
+    setExtensionsInfo(null);
     try {
       const json = await getOrgMightyCallExtensions(orgId, user?.id, { liveOnly: true });
-      setExtensionOptions((json.extensions || []) as ExtensionOption[]);
+      const liveOptions = (json.extensions || []) as ExtensionOption[];
+      const fallbackOptions = (json.fallback_extensions || []) as ExtensionOption[];
+      const nextOptions = liveOptions.length > 0 ? liveOptions : fallbackOptions;
+      setExtensionOptions(nextOptions);
       setExtensionsAudit((json.hidden_extensions || []) as ExtensionOption[]);
       if (!json.live_fetch_ok) {
         setExtensionsError(json.live_fetch_error || 'MightyCall live extensions could not be loaded');
-      } else if (!(json.extensions || []).length) {
+      } else if (!liveOptions.length && fallbackOptions.length) {
+        setExtensionsInfo('MightyCall returned no live extensions for this org, so saved org extensions are shown instead.');
+      } else if (!liveOptions.length) {
         setExtensionsError('MightyCall returned no live extensions for this org.');
       }
     } catch (e: any) {
@@ -196,6 +203,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       {error && <div className="text-rose-400 mb-2">{error}</div>}
       {liveError && <div className="text-amber-300 mb-2">{liveError}</div>}
       {extensionsError && <div className="text-amber-300 mb-2">{extensionsError}</div>}
+      {extensionsInfo && <div className="text-cyan-300 mb-2">{extensionsInfo}</div>}
       {!extensionsError && extensionsAudit.length > 0 && (
         <div className="text-xs text-slate-400 mb-2">
           Hidden {extensionsAudit.length} stale saved extension{extensionsAudit.length === 1 ? '' : 's'} that are not currently live in MightyCall.

@@ -70,6 +70,7 @@ const AdminAgentsManagementPage: FC = () => {
   const [hiddenExtensionOptionsByOrg, setHiddenExtensionOptionsByOrg] = useState<Record<string, ExtensionOption[]>>({});
   const [extensionsLoadingByOrg, setExtensionsLoadingByOrg] = useState<Record<string, boolean>>({});
   const [extensionsErrorByOrg, setExtensionsErrorByOrg] = useState<Record<string, string | null>>({});
+  const [extensionsInfoByOrg, setExtensionsInfoByOrg] = useState<Record<string, string | null>>({});
   const [cleanupLoadingByOrg, setCleanupLoadingByOrg] = useState<Record<string, boolean>>({});
   const [cleanupSummary, setCleanupSummary] = useState<string | null>(null);
 
@@ -113,13 +114,18 @@ const AdminAgentsManagementPage: FC = () => {
     if (extensionOptionsByOrg[orgId]?.length) return;
     setExtensionsLoadingByOrg((prev) => ({ ...prev, [orgId]: true }));
     setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: null }));
+    setExtensionsInfoByOrg((prev) => ({ ...prev, [orgId]: null }));
     try {
       const json = await getOrgMightyCallExtensions(orgId, userId, { liveOnly: true });
-      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.extensions || [] }));
+      const liveOptions = json.extensions || [];
+      const fallbackOptions = json.fallback_extensions || [];
+      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: liveOptions.length > 0 ? liveOptions : fallbackOptions }));
       setHiddenExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.hidden_extensions || [] }));
       if (!json.live_fetch_ok) {
         setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: json.live_fetch_error || 'MightyCall live extensions could not be loaded' }));
-      } else if (!(json.extensions || []).length) {
+      } else if (!liveOptions.length && fallbackOptions.length) {
+        setExtensionsInfoByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org, so saved org extensions are shown instead.' }));
+      } else if (!liveOptions.length) {
         setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org.' }));
       }
     } finally {
@@ -131,13 +137,18 @@ const AdminAgentsManagementPage: FC = () => {
     if (!orgId) return;
     setExtensionsLoadingByOrg((prev) => ({ ...prev, [orgId]: true }));
     setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: null }));
+    setExtensionsInfoByOrg((prev) => ({ ...prev, [orgId]: null }));
     try {
       const json = await getOrgMightyCallExtensions(orgId, userId, { liveOnly: true });
-      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.extensions || [] }));
+      const liveOptions = json.extensions || [];
+      const fallbackOptions = json.fallback_extensions || [];
+      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: liveOptions.length > 0 ? liveOptions : fallbackOptions }));
       setHiddenExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.hidden_extensions || [] }));
       if (!json.live_fetch_ok) {
         setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: json.live_fetch_error || 'MightyCall live extensions could not be loaded' }));
-      } else if (!(json.extensions || []).length) {
+      } else if (!liveOptions.length && fallbackOptions.length) {
+        setExtensionsInfoByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org, so saved org extensions are shown instead.' }));
+      } else if (!liveOptions.length) {
         setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org.' }));
       }
     } catch (e: any) {
@@ -245,8 +256,10 @@ const AdminAgentsManagementPage: FC = () => {
   }, [activeOrgId]);
 
   const createExtensionOptions = extensionOptionsByOrg[createOrgId] || [];
-  const activeOrgHiddenExtensions = hiddenExtensionOptionsByOrg[activeOrgId] || [];
-  const activeOrgExtensionsError = extensionsErrorByOrg[activeOrgId] || null;
+  const detailOrgId = activeOrgId || createOrgId;
+  const activeOrgHiddenExtensions = hiddenExtensionOptionsByOrg[detailOrgId] || [];
+  const activeOrgExtensionsError = extensionsErrorByOrg[detailOrgId] || null;
+  const activeOrgExtensionsInfo = extensionsInfoByOrg[detailOrgId] || null;
 
   const handleCreateAssignment = async () => {
     if (!createUserId || !createOrgId || !createRole) {
@@ -402,10 +415,13 @@ const AdminAgentsManagementPage: FC = () => {
             </button>
           </div>
 
-          {(cleanupSummary || activeOrgExtensionsError || activeOrgHiddenExtensions.length > 0) && (
+          {(cleanupSummary || activeOrgExtensionsError || activeOrgExtensionsInfo || activeOrgHiddenExtensions.length > 0) && (
             <div className="mt-4 space-y-2">
               {cleanupSummary && (
                 <div className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-300">{cleanupSummary}</div>
+              )}
+              {activeOrgExtensionsInfo && (
+                <div className="rounded-lg border border-cyan-700/60 bg-cyan-950/30 px-4 py-3 text-sm text-cyan-300">{activeOrgExtensionsInfo}</div>
               )}
               {activeOrgExtensionsError && (
                 <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">{activeOrgExtensionsError}</div>

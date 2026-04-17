@@ -3167,16 +3167,21 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
     const allExtensions = Array.from(rows.values()).sort((a, b) => a.extension.localeCompare(b.extension));
     const visibleExtensions = liveOnly ? allExtensions.filter((row) => row.is_live) : allExtensions;
     const hiddenExtensions = liveOnly ? allExtensions.filter((row) => !row.is_live) : [];
+    const fallbackExtensions = liveOnly
+      ? hiddenExtensions.filter((row) => row.sources.some((source) => source === 'agent_extensions' || source === 'org_users'))
+      : [];
 
     res.json({
       extensions: visibleExtensions,
       hidden_extensions: hiddenExtensions,
+      fallback_extensions: fallbackExtensions,
       mode: liveOnly ? 'live_only' : 'merged',
       live_fetch_ok: liveFetchOk,
       live_fetch_error: liveFetchError,
       source_summary: {
         live_count: allExtensions.filter((row) => row.is_live).length,
-        cached_only_count: allExtensions.filter((row) => !row.is_live).length
+        cached_only_count: allExtensions.filter((row) => !row.is_live).length,
+        fallback_count: fallbackExtensions.length
       }
     });
   } catch (err: any) {
