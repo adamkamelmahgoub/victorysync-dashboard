@@ -3067,8 +3067,14 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
 
     const isPlaceholderExtensionRow = (row: ExtensionRow) => {
       if (row.is_live) return false;
-      const haystack = `${row.extension || ''} ${row.display_name || ''}`.toLowerCase();
-      return ['dummy', 'placeholder', 'sample', 'example', 'test extension', 'demo extension'].some((token) => haystack.includes(token));
+      const hasOrgAssignmentSource = row.sources.some((source) => source === 'agent_extensions' || source === 'org_users');
+      const extensionValue = String(row.extension || '').toLowerCase();
+      const displayValue = String(row.display_name || '').toLowerCase();
+      const placeholderTokens = ['dummy', 'placeholder', 'sample', 'example', 'test extension', 'demo extension'];
+
+      if (placeholderTokens.some((token) => extensionValue.includes(token))) return true;
+      if (hasOrgAssignmentSource) return false;
+      return placeholderTokens.some((token) => displayValue.includes(token));
     };
 
     const rows = new Map<string, ExtensionRow>();
