@@ -3314,6 +3314,30 @@ app.get('/api/admin/mightycall/extensions', async (req, res) => {
       }
     }
 
+    try {
+      const { data: verifiedRows, error: verifiedError } = await supabaseAdmin
+        .from('mightycall_extensions')
+        .select('extension, display_name, external_id')
+        .like('external_id', 'verified:%')
+        .order('extension', { ascending: true });
+      if (verifiedError) throw verifiedError;
+      for (const row of verifiedRows || []) {
+        const extension = String((row as any).extension || '').trim();
+        if (!extension) continue;
+        if (liveRows.some((item) => String(item?.extension || '').trim() === extension)) continue;
+        liveRows.push({
+          extension,
+          display_name: ((row as any).display_name ? String((row as any).display_name) : null),
+          sources: ['mightycall_verified_cache'],
+          is_live: true,
+          source_org_id: null,
+          source_org_name: 'Imported'
+        });
+      }
+    } catch (e) {
+      console.warn('[admin_mightycall_extensions] verified cache lookup failed:', fmtErr(e));
+    }
+
     const sortRows = (rows: any[]) => rows.sort((a, b) => {
       const orgCmp = String(a.source_org_name || '').localeCompare(String(b.source_org_name || ''));
       return orgCmp !== 0 ? orgCmp : String(a.extension || '').localeCompare(String(b.extension || ''));
