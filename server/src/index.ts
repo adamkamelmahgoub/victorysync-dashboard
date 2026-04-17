@@ -3077,6 +3077,16 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
       return placeholderTokens.some((token) => displayValue.includes(token));
     };
 
+    const sanitizeExtensionRow = (row: ExtensionRow): ExtensionRow => {
+      const hasOrgAssignmentSource = row.sources.some((source) => source === 'agent_extensions' || source === 'org_users');
+      const displayValue = String(row.display_name || '').toLowerCase();
+      const placeholderTokens = ['dummy', 'placeholder', 'sample', 'example', 'test extension', 'demo extension'];
+      if (hasOrgAssignmentSource && placeholderTokens.some((token) => displayValue.includes(token))) {
+        return { ...row, display_name: null };
+      }
+      return row;
+    };
+
     const rows = new Map<string, ExtensionRow>();
     const pushRow = (source: string, extension: any, displayName?: any) => {
       const normalized = String(extension || '').trim();
@@ -3181,6 +3191,7 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
     }
 
     const allExtensions = Array.from(rows.values())
+      .map((row) => sanitizeExtensionRow(row))
       .filter((row) => !isPlaceholderExtensionRow(row))
       .sort((a, b) => a.extension.localeCompare(b.extension));
     const visibleExtensions = liveOnly ? allExtensions.filter((row) => row.is_live) : allExtensions;
