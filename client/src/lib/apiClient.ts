@@ -311,3 +311,31 @@ export async function saveOrgIntegration(orgId: string, data: { integration_type
 export async function deleteOrgIntegration(orgId: string, integrationId: string, userId?: string) {
   return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/integrations/${encodeURIComponent(integrationId)}`, { method: 'DELETE', headers: { 'x-user-id': userId || '' } });
 }
+
+export async function getOrgIntegrationHealth(orgId: string, userId?: string) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/integrations/health`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function getProductionHealth(userId?: string) {
+  return await fetchJson(`/api/admin/production-health`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function getSchemaHealth(userId?: string) {
+  return await fetchJson(`/api/admin/schema-health`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function getMembershipDrift(userId?: string, limit = 100) {
+  return await fetchJson(`/api/admin/membership-drift?limit=${encodeURIComponent(String(limit))}`, {
+    headers: { 'x-user-id': userId || '' }
+  });
+}
+
+export async function getAdminAuditLogs(userId?: string, options?: { limit?: number; offset?: number; orgId?: string; action?: string }) {
+  const q = new URLSearchParams();
+  if (options?.limit) q.set('limit', String(options.limit));
+  if (options?.offset) q.set('offset', String(options.offset));
+  if (options?.orgId) q.set('org_id', options.orgId);
+  if (options?.action) q.set('action', options.action);
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/admin/audit-logs${suffix}`, { headers: { 'x-user-id': userId || '' } });
+}

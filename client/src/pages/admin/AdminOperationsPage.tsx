@@ -3,6 +3,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { PageLayout } from '../../components/PageLayout';
 import { useToast } from '../../contexts/ToastContext';
 import { buildApiUrl } from '../../config';
+import { getAdminAuditLogs, getMembershipDrift, getProductionHealth } from '../../lib/apiClient';
+import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 
 interface Organization {
   id: string;
@@ -43,6 +45,27 @@ interface ApiKey {
   key_prefix: string; // First 8 chars of key for display
 }
 
+interface AuditLogRow {
+  id?: string;
+  action: string;
+  actor_id?: string | null;
+  org_id?: string | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  created_at?: string | null;
+}
+
+interface MembershipDriftDetails {
+  org_users_count: number;
+  org_members_count: number;
+  mismatched_records: number;
+  org_members_only: number;
+  org_users_only: number;
+  mismatched_rows: Array<{ org_id: string; user_id: string; org_users_role: string | null; org_members_role: string | null }>;
+  org_users_only_rows: Array<{ org_id: string; user_id: string; role: string | null }>;
+  org_members_only_rows: Array<{ org_id: string; user_id: string; role: string | null }>;
+}
+
 export function AdminOperationsPage() {
   const { user } = useAuth();
   const toast = (() => {
@@ -76,6 +99,11 @@ export function AdminOperationsPage() {
   const [toAdd, setToAdd] = useState<string[]>([]);
   const [toRemove, setToRemove] = useState<string[]>([]);
   const [savingPhones, setSavingPhones] = useState(false);
+  const [productionHealth, setProductionHealth] = useState<any | null>(null);
+  const [membershipDrift, setMembershipDrift] = useState<MembershipDriftDetails | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
+  const [opsLoading, setOpsLoading] = useState(false);
+  const [exportingBackup, setExportingBackup] = useState(false);
 
   // All Users
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -93,6 +121,11 @@ export function AdminOperationsPage() {
   useEffect(() => {
     loadOrgs();
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void Promise.all([loadProductionHealth(), loadOperationalDiagnostics()]);
+  }, [user?.id]);
 
   // Load org details when selected org changes
   useEffect(() => {
@@ -149,6 +182,60 @@ export function AdminOperationsPage() {
       console.error('Load org details error:', err);
     } finally {
       setOrgLoading(false);
+    }
+  };
+
+  const loadProductionHealth = async () => {
+    if (!user?.id) return;
+    try {
+      const data = await getProductionHealth(user.id);
+      setProductionHealth(data);
+    } catch (err) {
+      console.error('Load production health error:', err);
+    }
+  };
+
+  const loadOperationalDiagnostics = async () => {
+    if (!user?.id) return;
+    try {
+      setOpsLoading(true);
+      const [drift, logs] = await Promise.all([
+        getMembershipDrift(user.id, 25),
+        getAdminAuditLogs(user.id, { limit: 12 }),
+      ]);
+      setMembershipDrift(drift);
+      setAuditLogs(logs.logs || []);
+    } catch (err) {
+      console.error('Load operational diagnostics error:', err);
+    } finally {
+      setOpsLoading(false);
+    }
+  };
+
+  const handleExportBackup = async (orgId?: string | null) => {
+    if (!user?.id) return;
+    try {
+      setExportingBackup(true);
+      const q = orgId ? `?org_id=${encodeURIComponent(orgId)}` : '';
+      const response = await fetch(buildApiUrl(`/api/admin/backups/export${q}`), {
+        headers: { 'x-user-id': user.id }
+      });
+      if (!response.ok) throw new Error('Failed to export backup');
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = orgId ? `victorysync-org-${orgId}-backup.json` : 'victorysync-platform-backup.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      if (toast?.push) toast.push('Backup export downloaded', 'success');
+    } catch (err: any) {
+      console.error('Export backup error:', err);
+      if (toast?.push) toast.push(err?.message || 'Failed to export backup', 'error');
+    } finally {
+      setExportingBackup(false);
     }
   };
 
@@ -341,6 +428,142 @@ export function AdminOperationsPage() {
   return (
     <PageLayout title="Operations" description="Manage organizations, members, and phone numbers">
       <div className="space-y-6">
+        {productionHealth && (
+          <SectionCard
+            title="Production readiness"
+            description="High-priority operational checks that should stay healthy before calling the dashboard production-ready."
+            actions={
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="vs-button-secondary" onClick={() => void Promise.all([loadProductionHealth(), loadOperationalDiagnostics()])}>
+                  Refresh Checks
+                </button>
+                <button className="vs-button-secondary" onClick={() => void handleExportBackup(null)} disabled={exportingBackup}>
+                  {exportingBackup ? 'Exporting…' : 'Export Platform Backup'}
+                </button>
+                <StatusBadge tone={productionHealth.ok ? 'success' : 'warning'}>{productionHealth.ok ? 'Healthy' : 'Needs Work'}</StatusBadge>
+              </div>
+            }
+          >
+            <div className="grid gap-4 lg:grid-cols-4">
+              <MetricStatCard label="Schema" value={productionHealth.schema?.ok ? 'Healthy' : 'Drift'} accent={productionHealth.schema?.ok ? 'emerald' : 'amber'} hint={`${productionHealth.schema?.missing_tables?.length || 0} missing tables`} />
+              <MetricStatCard label="Memberships" value={productionHealth.membership?.mismatched_records ? 'Drift' : 'Aligned'} accent={productionHealth.membership?.mismatched_records ? 'amber' : 'emerald'} hint={`${productionHealth.membership?.mismatched_records || 0} mismatches`} />
+              <MetricStatCard label="Auth Users" value={String(productionHealth.auth_users_count || 0)} accent="neutral" hint="Current auth footprint" />
+              <MetricStatCard label="Env" value={productionHealth.env?.ok ? 'Configured' : 'Missing'} accent={productionHealth.env?.ok ? 'emerald' : 'amber'} hint="Core environment status" />
+            </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+              <div className="vs-surface-muted p-4 text-sm text-slate-300">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Schema blockers</div>
+                <div className="mt-3 space-y-2">
+                  {productionHealth.schema?.missing_tables?.length ? (
+                    <div>Missing tables: {productionHealth.schema.missing_tables.join(', ')}</div>
+                  ) : (
+                    <div>No missing critical tables detected.</div>
+                  )}
+                  {productionHealth.schema?.missing_columns?.length ? (
+                    <div>Missing columns: {productionHealth.schema.missing_columns.join(', ')}</div>
+                  ) : (
+                    <div>No missing critical columns detected.</div>
+                  )}
+                  <div>Profile trigger: {productionHealth.schema?.profile_trigger_healthy ? 'healthy' : productionHealth.schema?.profile_trigger_message || 'needs migration'}</div>
+                </div>
+              </div>
+              <div className="vs-surface-muted p-4 text-sm text-slate-300">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Environment</div>
+                <div className="mt-3 space-y-2">
+                  <div>Supabase: {String(!!productionHealth.env?.required?.SUPABASE_URL && !!productionHealth.env?.required?.SUPABASE_SERVICE_KEY)}</div>
+                  <div>MightyCall: {String(!!productionHealth.env?.required?.MIGHTYCALL_API_KEY && !!productionHealth.env?.required?.MIGHTYCALL_USER_KEY)}</div>
+                  <div>Integrations key: {String(!!productionHealth.env?.optional?.INTEGRATIONS_KEY)}</div>
+                  <div>Restricted CORS origin set: {String(!!productionHealth.env?.optional?.FRONTEND_ORIGIN)}</div>
+                </div>
+              </div>
+              <div className="vs-surface-muted p-4 text-sm text-slate-300">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Recovery</div>
+                <div className="mt-3 space-y-2">
+                  <div>Export full platform state before destructive admin work.</div>
+                  <div>Use org-scoped export from the selected organization panel when isolating client issues.</div>
+                  <div>Audit logs now capture org membership, role, integration, and backup actions when the table exists.</div>
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+        )}
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+          <SectionCard
+            title="Membership drift"
+            description="These checks expose duplicate-role models and tell you exactly which records still need migration cleanup."
+            actions={<StatusBadge tone={membershipDrift && (membershipDrift.mismatched_records || membershipDrift.org_members_only || membershipDrift.org_users_only) ? 'warning' : 'success'}>{membershipDrift && (membershipDrift.mismatched_records || membershipDrift.org_members_only || membershipDrift.org_users_only) ? 'Drift Detected' : 'Aligned'}</StatusBadge>}
+          >
+            {opsLoading && !membershipDrift ? (
+              <div className="text-sm text-slate-400">Loading membership diagnostics...</div>
+            ) : !membershipDrift ? (
+              <EmptyStatePanel title="No diagnostics loaded" description="Refresh the readiness checks to load membership drift details." />
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <MetricStatCard label="Org Users Only" value={membershipDrift.org_users_only} accent={membershipDrift.org_users_only ? 'amber' : 'emerald'} hint="Present in org_users only" />
+                  <MetricStatCard label="Org Members Only" value={membershipDrift.org_members_only} accent={membershipDrift.org_members_only ? 'amber' : 'emerald'} hint="Present in org_members only" />
+                  <MetricStatCard label="Role Mismatches" value={membershipDrift.mismatched_records} accent={membershipDrift.mismatched_records ? 'amber' : 'emerald'} hint="Conflicting roles across both models" />
+                </div>
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <div className="vs-surface-muted p-4 text-xs text-slate-300">
+                    <div className="mb-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Org Users Only</div>
+                    <div className="space-y-2">
+                      {membershipDrift.org_users_only_rows.length === 0 ? <div className="text-slate-500">None</div> : membershipDrift.org_users_only_rows.slice(0, 5).map((row) => (
+                        <div key={`${row.org_id}:${row.user_id}`}>{row.org_id} · {row.user_id} · {row.role || 'no role'}</div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="vs-surface-muted p-4 text-xs text-slate-300">
+                    <div className="mb-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Org Members Only</div>
+                    <div className="space-y-2">
+                      {membershipDrift.org_members_only_rows.length === 0 ? <div className="text-slate-500">None</div> : membershipDrift.org_members_only_rows.slice(0, 5).map((row) => (
+                        <div key={`${row.org_id}:${row.user_id}`}>{row.org_id} · {row.user_id} · {row.role || 'no role'}</div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="vs-surface-muted p-4 text-xs text-slate-300">
+                    <div className="mb-3 text-[11px] uppercase tracking-[0.22em] text-slate-500">Role Mismatches</div>
+                    <div className="space-y-2">
+                      {membershipDrift.mismatched_rows.length === 0 ? <div className="text-slate-500">None</div> : membershipDrift.mismatched_rows.slice(0, 5).map((row) => (
+                        <div key={`${row.org_id}:${row.user_id}`}>{row.user_id} · org_users={row.org_users_role || 'none'} · org_members={row.org_members_role || 'none'}</div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Audit trail"
+            description="Recent privileged actions are surfaced here so destructive changes are visible without leaving the dashboard."
+            actions={<StatusBadge tone="info">{auditLogs.length} recent entries</StatusBadge>}
+          >
+            {opsLoading && auditLogs.length === 0 ? (
+              <div className="text-sm text-slate-400">Loading audit events...</div>
+            ) : auditLogs.length === 0 ? (
+              <EmptyStatePanel title="No audit events yet" description="Audit events will appear here once the audit_logs table is present and admin actions flow through the new logging path." />
+            ) : (
+              <div className="space-y-3">
+                {auditLogs.map((log, index) => (
+                  <div key={log.id || `${log.action}-${index}`} className="vs-surface-muted flex items-start justify-between gap-4 p-4">
+                    <div className="min-w-0">
+                      <div className="font-medium text-slate-100">{log.action}</div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        Actor: {log.actor_id || 'system'} · Org: {log.org_id || 'platform'} · Entity: {log.entity_type || 'n/a'} {log.entity_id ? `(${log.entity_id})` : ''}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-xs text-slate-500">
+                      {log.created_at ? new Date(log.created_at).toLocaleString() : '-'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+        </div>
+
         {/* Header */}
         <header className="flex items-center justify-between">
           <div>
@@ -429,12 +652,23 @@ export function AdminOperationsPage() {
               <>
                 {/* Org Header */}
                 <div className="border-b border-slate-700 bg-slate-900/95 p-5">
-                  <p className="text-xs font-semibold text-emerald-400 uppercase tracking-[0.18em]">
-                    {selectedOrg.name}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-2">
-                    Created {new Date(selectedOrg.created_at).toLocaleDateString()}
-                  </p>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-400 uppercase tracking-[0.18em]">
+                        {selectedOrg.name}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-2">
+                        Created {new Date(selectedOrg.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => void handleExportBackup(selectedOrg.id)}
+                      disabled={exportingBackup}
+                      className="vs-button-secondary"
+                    >
+                      {exportingBackup ? 'Exporting…' : 'Export Org Backup'}
+                    </button>
+                  </div>
                   {orgStats && (
                     <div className="grid grid-cols-3 gap-3 mt-4">
                       <div>

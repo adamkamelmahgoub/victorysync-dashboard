@@ -65,6 +65,8 @@ export const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 export const MIGHTYCALL_API_KEY = process.env.MIGHTYCALL_API_KEY;
 export const MIGHTYCALL_USER_KEY = process.env.MIGHTYCALL_USER_KEY;
 export const MIGHTYCALL_BASE_URL = process.env.MIGHTYCALL_BASE_URL || 'https://ccapi.mightycall.com/v4';
+export const INTEGRATIONS_KEY = process.env.INTEGRATIONS_KEY || process.env.SERVICE_KEY || process.env.SERVER_SERVICE_KEY || null;
+export const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || process.env.APP_URL || process.env.DASHBOARD_URL || null;
 
 // Simple validation – if anything critical is missing, log and throw
 const missing: string[] = [];
@@ -85,4 +87,30 @@ console.log('[env] Loaded MightyCall envs:', {
   MIGHTYCALL_USER_KEY: !!MIGHTYCALL_USER_KEY,
   MIGHTYCALL_BASE_URL: MIGHTYCALL_BASE_URL,
 });
+
+export function getEnvironmentHealth() {
+  const required = {
+    SUPABASE_URL: !!SUPABASE_URL,
+    SUPABASE_SERVICE_KEY: !!SUPABASE_SERVICE_KEY,
+    MIGHTYCALL_API_KEY: !!MIGHTYCALL_API_KEY,
+    MIGHTYCALL_USER_KEY: !!MIGHTYCALL_USER_KEY,
+  };
+
+  const optional = {
+    INTEGRATIONS_KEY: !!INTEGRATIONS_KEY,
+    FRONTEND_ORIGIN: !!FRONTEND_ORIGIN,
+    MIGHTYCALL_BASE_URL: !!MIGHTYCALL_BASE_URL,
+  };
+
+  return {
+    ok: Object.values(required).every(Boolean),
+    required,
+    optional,
+    recommendations: {
+      restrict_cors_origin: !FRONTEND_ORIGIN,
+      encrypted_integrations_ready: !!INTEGRATIONS_KEY,
+    },
+    checked_at: new Date().toISOString(),
+  };
+}
 

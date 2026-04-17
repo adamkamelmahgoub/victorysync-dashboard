@@ -2,6 +2,7 @@
 // Role-based access control helpers
 
 import { supabaseAdmin } from "../lib/supabaseClient";
+import { getCanonicalMembership } from "../lib/memberships";
 
 interface UserContext {
   userId: string;
@@ -78,14 +79,8 @@ export async function isOrgAdmin(
   orgId: string
 ): Promise<boolean> {
   try {
-    const { data, error } = await supabaseAdmin
-      .from("org_users")
-      .select("role")
-      .eq("user_id", userId)
-      .eq("org_id", orgId)
-      .maybeSingle();
-    if (error || !data) return false;
-    return data.role === "org_admin";
+    const membership = await getCanonicalMembership(orgId, userId);
+    return membership?.role === "org_admin";
   } catch (err) {
     console.error("isOrgAdmin check failed:", err);
     return false;
@@ -98,27 +93,8 @@ export async function isOrgMember(
   orgId: string
 ): Promise<boolean> {
   try {
-    const { data, error } = await supabaseAdmin
-      .from("org_users")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("org_id", orgId)
-      .maybeSingle();
-    if (error || !data) {
-      // Try legacy org_members table as fallback
-      try {
-        const { data: data2, error: error2 } = await supabaseAdmin
-          .from("org_members")
-          .select("id")
-          .eq("user_id", userId)
-          .eq("org_id", orgId)
-          .maybeSingle();
-        return !error2 && !!data2;
-      } catch (e) {
-        return false;
-      }
-    }
-    return true;
+    const membership = await getCanonicalMembership(orgId, userId);
+    return !!membership;
   } catch (err) {
     console.error("isOrgMember check failed:", err);
     return false;
@@ -132,34 +108,9 @@ export async function isOrgManagerWith(
   permission: keyof typeof permissionColumns
 ): Promise<boolean> {
   try {
-    // Look up member record (legacy `org_users` / modern `org_members` may vary)
-    // Try legacy `org_users` table first, then modern `org_members` as a fallback
-    let member: any = null;
-    try {
-      const { data: m1, error: memberErr } = await supabaseAdmin
-        .from("org_users")
-        .select("id, org_id, user_id, role")
-        .eq("user_id", userId)
-        .eq("org_id", orgId)
-        .maybeSingle();
-      if (m1 && m1.role === 'org_manager') member = m1;
-    } catch (e) {
-      // ignore
-    }
-    if (!member) {
-      try {
-        const { data: m2, error: memberErr2 } = await supabaseAdmin
-          .from("org_members")
-          .select("id, org_id, user_id, role")
-          .eq("user_id", userId)
-          .eq("org_id", orgId)
-          .maybeSingle();
-        if (m2 && m2.role === 'org_manager') member = m2;
-      } catch (e) {
-        // ignore
-      }
-    }
+    const member = await getCanonicalMembership(orgId, userId);
     if (!member) return false;
+    if (member.role !== 'org_manager') return false;
 
     // Try to consult explicit manager permissions table (modern schema)
     try {

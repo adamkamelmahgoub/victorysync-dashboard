@@ -26,7 +26,7 @@
  */
 
 // server/src/index.ts
-import './config/env';
+import { getEnvironmentHealth } from './config/env';
 import express from "express";
 import cors from "cors";
 import crypto from 'crypto';
@@ -52,11 +52,18 @@ import { getMightyCallAccessToken } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgManagerWith } from './auth/rbac';
 import usersRouter from './routes/users';
 import { Readable } from 'stream';
+import { writeAuditLog } from './lib/audit';
+import { getMembershipDriftDetails, getMembershipDriftSummary } from './lib/memberships';
+import { getSchemaHealth } from './lib/schemaHealth';
+import { normalizeMightyCallJournalActivity, normalizeMightyCallStatusActivity } from './lib/mightycallNormalizer';
 
 // Extend Express Request interface to include apiKeyScope
 declare global {
   namespace Express {
     interface Request {
+      requestId?: string;
+      actorId?: string | null;
+      isPlatformAdmin?: boolean;
       apiKeyScope?: {
         scope: 'platform' | 'org';
         keyId: string;
@@ -69,6 +76,100 @@ declare global {
 // Helper to safely format errors for logging (avoids TS property errors)
 function fmtErr(e: any) {
   return (e as any)?.message ?? e;
+}
+
+function logStructured(level: 'info' | 'warn' | 'error', event: string, meta: Record<string, any> = {}) {
+  const payload = {
+    level,
+    event,
+    ts: new Date().toISOString(),
+    ...meta,
+  };
+  const line = JSON.stringify(payload);
+  if (level === 'error') console.error(line);
+  else if (level === 'warn') console.warn(line);
+  else console.log(line);
+}
+
+async function getProductionReadinessSnapshot() {
+  const schema = await getSchemaHealth();
+  const membership = await getMembershipDriftSummary();
+  const env = getEnvironmentHealth();
+  let authUsersCount = 0;
+  try {
+    const { data } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
+    authUsersCount = data?.users?.length || 0;
+  } catch {}
+
+  return {
+    ok: env.ok && schema.ok && membership.mismatched_records === 0 && membership.org_members_only === 0,
+    checked_at: new Date().toISOString(),
+    env,
+    auth_users_count: authUsersCount,
+    schema,
+    membership,
+  };
+}
+
+async function getOrgIntegrationHealth(orgId: string) {
+  let integrationConfigured = false;
+  let integrationReadable = false;
+  let tokenHealthy = false;
+  let profileHealthy = false;
+  let liveCallsHealthy = false;
+  let journalHealthy = false;
+  let syncJob: any = null;
+  let error: string | null = null;
+
+  try {
+    const { getOrgIntegration } = await import('./lib/integrationsStore');
+    const integ = await getOrgIntegration(orgId, 'mightycall');
+    integrationConfigured = !!integ;
+    integrationReadable = !!integ?.credentials;
+    const overrideCreds = integ?.credentials ? {
+      clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+      clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+    } : undefined;
+    const token = await getMightyCallAccessToken(overrideCreds);
+    tokenHealthy = !!token;
+    if (token) {
+      const apiKeyOverride = overrideCreds?.clientId || undefined;
+      const [profile, calls, journal] = await Promise.all([
+        fetchMightyCallProfileByExtension('100', token, apiKeyOverride).catch(() => null),
+        fetchMightyCallCalls(token, { pageSize: '5', skip: '0' }, apiKeyOverride).catch(() => []),
+        fetchMightyCallJournalRequests(token, { pageSize: '5', page: '1', type: 'Call' }, apiKeyOverride).catch(() => []),
+      ]);
+      profileHealthy = !!profile;
+      liveCallsHealthy = Array.isArray(calls);
+      journalHealthy = Array.isArray(journal);
+    }
+  } catch (err: any) {
+    error = err?.message || String(err);
+  }
+
+  try {
+    const { data } = await supabaseAdmin
+      .from('integration_sync_jobs')
+      .select('*')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    syncJob = data || null;
+  } catch {}
+
+  return {
+    org_id: orgId,
+    integration_configured: integrationConfigured,
+    integration_readable: integrationReadable,
+    token_healthy: tokenHealthy,
+    profile_healthy: profileHealthy,
+    live_calls_healthy: liveCallsHealthy,
+    journal_healthy: journalHealthy,
+    latest_sync_job: syncJob,
+    error,
+    checked_at: new Date().toISOString(),
+  };
 }
 
 function looksLikeUuid(v: string | null | undefined): boolean {
@@ -931,6 +1032,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const matchedJournalCall = !matchedLiveCall && !matchedDbCall && normalizedExt
       ? activeJournalCalls.find((call: any) => collectExtensionCandidates(call).includes(normalizedExt)) || null
       : null;
+    const normalizedJournal = matchedJournalCall ? normalizeMightyCallJournalActivity(matchedJournalCall) : null;
 
     const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
     const callStatus = matchedLiveCall
@@ -938,10 +1040,11 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       : matchedDbCall
         ? String(matchedDbCall?.status || '').trim() || extStatus
         : matchedJournalCall
-          ? String(matchedJournalCall?.state || matchedJournalCall?.wfstate?.state || matchedJournalCall?.availability || '').trim() || extStatus
+          ? String(normalizedJournal?.status || matchedJournalCall?.state || matchedJournalCall?.wfstate?.state || matchedJournalCall?.availability || '').trim() || extStatus
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
     const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
+    const normalizedStatus = normalizeMightyCallStatusActivity(statusPayload, normalizedExt);
     const onCall = !!(
       matchedLiveCall ||
       matchedDbCall ||
@@ -962,15 +1065,15 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       : matchedDbCall
         ? extractCounterpartyLabel(matchedDbCall, orgPhoneDigits, normalizedExt)
         : matchedJournalCall
-          ? extractCounterpartyLabel(matchedJournalCall, orgPhoneDigits, normalizedExt)
-        : extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
+          ? normalizedJournal?.counterpart || extractCounterpartyLabel(matchedJournalCall, orgPhoneDigits, normalizedExt)
+        : normalizedStatus?.counterpart || extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
     const startedAt = matchedLiveCall
       ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
       : matchedDbCall
         ? matchedDbCall?.started_at || null
         : matchedJournalCall
-          ? matchedJournalCall?.created || matchedJournalCall?.createdAt || null
-        : statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
+          ? normalizedJournal?.started_at || matchedJournalCall?.created || matchedJournalCall?.createdAt || null
+        : normalizedStatus?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
     const source = matchedLiveCall ? 'mightycall_calls' : matchedDbCall ? 'db_calls' : matchedJournalCall ? 'mightycall_journal' : statusPayload?.status || statusPayload?.state || statusPayload?.presenceStatus || statusPayload?.availability ? 'mightycall_status' : (extMeta ? 'mightycall_extensions' : 'unmatched');
 
     if (normalizedExt) {
@@ -1114,6 +1217,29 @@ app.use(express.json());
 // Disable ETag generation for API responses to avoid conditional GET returning 304
 app.disable('etag');
 
+app.use('/api', (req, res, next) => {
+  const startedAt = Date.now();
+  const requestId = String(req.header('x-request-id') || crypto.randomUUID());
+  req.requestId = requestId;
+  res.setHeader('x-request-id', requestId);
+
+  res.on('finish', () => {
+    logStructured('info', 'api.request.completed', {
+      request_id: requestId,
+      method: req.method,
+      path: req.path,
+      query: req.query,
+      status_code: res.statusCode,
+      duration_ms: Date.now() - startedAt,
+      actor_id: req.actorId || req.header('x-user-id') || null,
+      api_scope: req.apiKeyScope?.scope || null,
+      org_scope: req.apiKeyScope?.orgId || null,
+    });
+  });
+
+  next();
+});
+
 // Ensure API responses are not cached by intermediaries or clients
 app.use('/api', (_req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -1129,6 +1255,157 @@ app.use('/api', (_req, res, next) => {
 // Simple health check
 app.get("/", (_req, res) => {
   res.send("VictorySync metrics API is running");
+});
+
+app.get('/api/admin/production-health', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    const snapshot = await getProductionReadinessSnapshot();
+    res.json(snapshot);
+  } catch (err: any) {
+    console.error('production_health_failed:', fmtErr(err));
+    res.status(500).json({ error: 'production_health_failed', detail: fmtErr(err) });
+  }
+});
+
+app.get('/api/admin/schema-health', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    res.json(await getSchemaHealth());
+  } catch (err: any) {
+    console.error('schema_health_failed:', fmtErr(err));
+    res.status(500).json({ error: 'schema_health_failed', detail: fmtErr(err) });
+  }
+});
+
+app.get('/api/admin/membership-drift', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    const limit = Math.min(parseInt((req.query.limit as string) || '100', 10), 500);
+    res.json(await getMembershipDriftDetails(limit));
+  } catch (err: any) {
+    console.error('membership_drift_failed:', fmtErr(err));
+    res.status(500).json({ error: 'membership_drift_failed', detail: fmtErr(err) });
+  }
+});
+
+app.get('/api/admin/backups/export', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const orgId = (req.query.org_id as string | undefined) || null;
+    const scope = orgId ? 'organization' : 'platform';
+
+    const [
+      organizationsRes,
+      profilesRes,
+      orgUsersRes,
+      orgMembersRes,
+      phoneNumbersRes,
+      orgPhoneNumbersRes,
+      supportTicketsRes,
+      integrationsRes,
+    ] = await Promise.all([
+      orgId
+        ? supabaseAdmin.from('organizations').select('id, name, created_at').eq('id', orgId)
+        : supabaseAdmin.from('organizations').select('id, name, created_at'),
+      supabaseAdmin.from('profiles').select('id, email, global_role').order('email'),
+      orgId
+        ? supabaseAdmin.from('org_users').select('id, org_id, user_id, role, mightycall_extension').eq('org_id', orgId)
+        : supabaseAdmin.from('org_users').select('id, org_id, user_id, role, mightycall_extension'),
+      orgId
+        ? supabaseAdmin.from('org_members').select('id, org_id, user_id, role, mightycall_extension').eq('org_id', orgId)
+        : supabaseAdmin.from('org_members').select('id, org_id, user_id, role, mightycall_extension'),
+      supabaseAdmin.from('phone_numbers').select('id, number, label, created_at'),
+      orgId
+        ? supabaseAdmin.from('org_phone_numbers').select('id, org_id, phone_number_id, phone_number, label, created_at').eq('org_id', orgId)
+        : supabaseAdmin.from('org_phone_numbers').select('id, org_id, phone_number_id, phone_number, label, created_at'),
+      orgId
+        ? supabaseAdmin.from('support_tickets').select('id, org_id, title, status, created_at').eq('org_id', orgId)
+        : supabaseAdmin.from('support_tickets').select('id, org_id, title, status, created_at').limit(500),
+      orgId
+        ? supabaseAdmin.from('org_integrations').select('id, org_id, provider, metadata, created_at, updated_at').eq('org_id', orgId)
+        : supabaseAdmin.from('org_integrations').select('id, org_id, provider, metadata, created_at, updated_at'),
+    ]);
+
+    const payload = {
+      exported_at: new Date().toISOString(),
+      exported_by: actorId,
+      request_id: req.requestId || null,
+      scope,
+      org_id: orgId,
+      tables: {
+        organizations: organizationsRes.data || [],
+        profiles: profilesRes.data || [],
+        org_users: orgUsersRes.data || [],
+        org_members: orgMembersRes.data || [],
+        phone_numbers: phoneNumbersRes.data || [],
+        org_phone_numbers: orgPhoneNumbersRes.data || [],
+        support_tickets: supportTicketsRes.data || [],
+        org_integrations: integrationsRes.data || [],
+      },
+      counts: {
+        organizations: (organizationsRes.data || []).length,
+        profiles: (profilesRes.data || []).length,
+        org_users: (orgUsersRes.data || []).length,
+        org_members: (orgMembersRes.data || []).length,
+        phone_numbers: (phoneNumbersRes.data || []).length,
+        org_phone_numbers: (orgPhoneNumbersRes.data || []).length,
+        support_tickets: (supportTicketsRes.data || []).length,
+        org_integrations: (integrationsRes.data || []).length,
+      },
+    };
+
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'admin.backup.exported',
+      org_id: orgId,
+      entity_type: 'backup_export',
+      entity_id: scope,
+      metadata: { scope, request_id: req.requestId || null, counts: payload.counts },
+    });
+
+    const filename = orgId ? `victorysync-org-${orgId}-backup.json` : 'victorysync-platform-backup.json';
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.json(payload);
+  } catch (err: any) {
+    console.error('backup_export_failed:', fmtErr(err));
+    res.status(500).json({ error: 'backup_export_failed', detail: fmtErr(err) });
+  }
+});
+
+app.post('/api/webhooks/mightycall', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    await writeAuditLog({
+      actor_id: 'mightycall:webhook',
+      action: 'mightycall.webhook.received',
+      org_id: payload?.org_id || payload?.orgId || null,
+      entity_type: 'webhook',
+      entity_id: payload?.id || payload?.requestGuid || null,
+      metadata: payload,
+    });
+    try {
+      await supabaseAdmin.from('integration_sync_jobs').insert({
+        org_id: payload?.org_id || payload?.orgId || null,
+        integration_type: 'mightycall_webhook',
+        status: 'received',
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        records_processed: 1,
+        metadata: payload,
+      });
+    } catch {}
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('mightycall_webhook_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mightycall_webhook_failed', detail: fmtErr(err) });
+  }
 });
 
 // TEMPORARY DEV BYPASS: Allow testing without auth
@@ -1698,6 +1975,7 @@ app.get("/api/admin/org_users", async (_req, res) => {
 // POST /api/admin/org_users - upsert an org_user assignment
 app.post("/api/admin/org_users", async (req, res) => {
   try {
+    const actorId = req.header('x-user-id') || null;
     const { user_id, org_id, role, mightycall_extension } = req.body;
     if (!user_id || !org_id || !role) {
       return res.status(400).json({ error: "missing_required_fields", detail: "user_id, org_id and role are required" });
@@ -1723,6 +2001,14 @@ app.post("/api/admin/org_users", async (req, res) => {
       .maybeSingle();
 
     if (error) throw error;
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'org_user.upserted',
+      org_id,
+      entity_type: 'org_user',
+      entity_id: `${org_id}:${user_id}`,
+      metadata: { role, mightycall_extension: mightycall_extension ?? null },
+    });
     res.json({ org_user: data });
   } catch (err: any) {
     console.error("admin_upsert_org_user_failed:", fmtErr(err));
@@ -1733,6 +2019,7 @@ app.post("/api/admin/org_users", async (req, res) => {
 // DELETE /api/admin/org_users - remove an assignment (body: { user_id, org_id })
 app.delete("/api/admin/org_users", async (req, res) => {
   try {
+    const actorId = req.header('x-user-id') || null;
     const { user_id, org_id } = req.body || {};
     if (!user_id || !org_id) {
       return res.status(400).json({ error: "missing_required_fields", detail: "user_id and org_id required" });
@@ -1745,6 +2032,14 @@ app.delete("/api/admin/org_users", async (req, res) => {
       .eq("org_id", org_id);
 
     if (error) throw error;
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'org_user.deleted',
+      org_id,
+      entity_type: 'org_user',
+      entity_id: `${org_id}:${user_id}`,
+      metadata: {},
+    });
     res.json({ success: true });
   } catch (err: any) {
     console.error("admin_delete_org_user_failed:", fmtErr(err));
@@ -2334,13 +2629,23 @@ app.post('/api/admin/users/:userId/global-role', async (req, res) => {
       }
     }
 
-    const { data, error } = await supabaseAdmin
+    let data: any = null;
+    const { error } = await supabaseAdmin
       .from('profiles')
-      .upsert({ id: userId, global_role: globalRole }, { onConflict: 'id' })
+      .update({ global_role: globalRole })
+      .eq('id', userId)
       .select()
       .maybeSingle();
 
     if (error) throw error;
+    data = { id: userId, global_role: globalRole };
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'user.global_role.updated',
+      entity_type: 'profile',
+      entity_id: userId,
+      metadata: { global_role: globalRole },
+    });
     res.json({ profile: data });
   } catch (err: any) {
     console.error('set_global_role_failed:', fmtErr(err));
@@ -2714,14 +3019,34 @@ app.get('/api/admin/orgs/:orgId/integrations', async (req, res) => {
       }
     }
 
-    // Fetch integrations (but don't return secrets)
-    const { data, error } = await supabaseAdmin
-      .from('org_integrations')
-      .select('id, org_id, integration_type, label, created_at, updated_at')
-      .eq('org_id', orgId);
-    if (error) throw error;
-
-    res.json({ integrations: data || [] });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('org_integrations')
+        .select('id, org_id, provider, metadata, created_at, updated_at')
+        .eq('org_id', orgId);
+      if (error) throw error;
+      const integrations = (data || []).map((row: any) => ({
+        id: row.id,
+        org_id: row.org_id,
+        integration_type: row.provider,
+        label: row.metadata?.label || row.provider,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      }));
+      return res.json({ integrations });
+    } catch (tableErr) {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const mightycall = await getOrgIntegration(orgId, 'mightycall').catch(() => null);
+      const integrations = mightycall ? [{
+        id: mightycall.id,
+        org_id: mightycall.org_id,
+        integration_type: mightycall.provider,
+        label: mightycall.metadata?.label || mightycall.provider,
+        created_at: mightycall.created_at,
+        updated_at: mightycall.updated_at,
+      }] : [];
+      res.json({ integrations });
+    }
   } catch (err: any) {
     console.error('integrations_list_failed:', fmtErr(err));
     res.status(500).json({ error: 'integrations_list_failed', detail: fmtErr(err) ?? 'unknown_error' });
@@ -2754,23 +3079,26 @@ app.post('/api/admin/orgs/:orgId/integrations', async (req, res) => {
       return res.status(400).json({ error: 'missing_required_fields' });
     }
 
-    // Upsert the integration (store credentials encrypted in DB)
-    const { data, error } = await supabaseAdmin
-      .from('org_integrations')
-      .upsert(
-        {
-          org_id: orgId,
-          integration_type,
-          label: label || integration_type,
-          credentials,
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: 'org_id,integration_type' }
-      )
-      .select('id, org_id, integration_type, label, created_at, updated_at')
-      .single();
+    const { saveOrgIntegration, getOrgIntegration } = await import('./lib/integrationsStore');
+    await saveOrgIntegration(orgId, integration_type, credentials, { label: label || integration_type });
+    const saved = await getOrgIntegration(orgId, integration_type);
+    const data = saved ? {
+      id: saved.id,
+      org_id: saved.org_id,
+      integration_type: saved.provider,
+      label: saved.metadata?.label || saved.provider,
+      created_at: saved.created_at,
+      updated_at: saved.updated_at,
+    } : null;
 
-    if (error) throw error;
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'integration.saved',
+      org_id: orgId,
+      entity_type: 'org_integration',
+      entity_id: data?.id || null,
+      metadata: { integration_type, label: label || integration_type },
+    });
 
     res.json({ integration: data });
   } catch (err: any) {
@@ -2800,12 +3128,30 @@ app.delete('/api/admin/orgs/:orgId/integrations/:integrationId', async (req, res
       }
     }
 
-    const { error } = await supabaseAdmin
-      .from('org_integrations')
-      .delete()
-      .eq('id', req.params.integrationId)
-      .eq('org_id', orgId);
-    if (error) throw error;
+    try {
+      const { data: found } = await supabaseAdmin
+        .from('org_integrations')
+        .select('provider')
+        .eq('id', req.params.integrationId)
+        .eq('org_id', orgId)
+        .maybeSingle();
+      if (found?.provider) {
+        const { deleteOrgIntegration } = await import('./lib/integrationsStore');
+        await deleteOrgIntegration(orgId, found.provider);
+      }
+    } catch {
+      const { deleteOrgIntegration } = await import('./lib/integrationsStore');
+      await deleteOrgIntegration(orgId, req.params.integrationId);
+    }
+
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'integration.deleted',
+      org_id: orgId,
+      entity_type: 'org_integration',
+      entity_id: req.params.integrationId,
+      metadata: {},
+    });
 
     res.json({ success: true });
   } catch (err: any) {
@@ -3004,6 +3350,20 @@ app.post('/api/admin/mightycall/send-sms', async (req, res) => {
   } catch (err: any) {
     console.error('sms_send_failed:', fmtErr(err));
     res.status(500).json({ error: 'sms_send_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/orgs/:orgId/integrations/health', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const orgId = req.params.orgId;
+    if (!actorId) return res.status(401).json({ error: 'unauthorized' });
+    const allowed = (await isPlatformAdmin(actorId)) || (await isOrgAdmin(actorId, orgId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+    res.json(await getOrgIntegrationHealth(orgId));
+  } catch (err: any) {
+    console.error('integration_health_failed:', fmtErr(err));
+    res.status(500).json({ error: 'integration_health_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
@@ -5615,6 +5975,19 @@ const handleAdminUserUpdate = async (req: any, res: any) => {
       throw error;
     }
 
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'user.admin_updated',
+      entity_type: 'auth_user',
+      entity_id: id,
+      metadata: {
+        org_id: orgId || null,
+        role: role || null,
+        global_role: global_role ?? null,
+        can_generate_api_keys: typeof can_generate_api_keys === 'boolean' ? can_generate_api_keys : null,
+      },
+    });
+
     res.json({
       user: {
         id: data.user.id,
@@ -5979,6 +6352,8 @@ app.get('/api/admin/stats', async (_req, res) => {
 
 app.get('/api/admin/audit-logs', async (req, res) => {
   try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
     const limit = Math.min(parseInt((req.query.limit as string) || '500', 10), 1000);
     const offset = Math.max(parseInt((req.query.offset as string) || '0', 10), 0);
     const orgId = req.query.org_id as string | undefined;
@@ -5998,6 +6373,8 @@ app.get('/api/admin/audit-logs', async (req, res) => {
 
 app.post('/api/admin/audit-logs', async (req, res) => {
   try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
     const payload = req.body || {};
     const row = { ...payload, created_at: new Date().toISOString() };
     const { data, error } = await supabaseAdmin.from('audit_logs').insert(row).select().maybeSingle();
@@ -9558,8 +9935,9 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
 // Get sync job history
 app.get('/api/mightycall/sync/jobs', apiKeyAuthMiddleware, async (req, res) => {
   try {
-    if (!req.apiKeyScope) {
-      return res.status(401).json({ error: 'API key required' });
+    const actorId = req.header('x-user-id') || null;
+    if (!req.apiKeyScope && !actorId) {
+      return res.status(401).json({ error: 'API key or user authentication required' });
     }
 
     const { orgId, status, limit = 50 } = req.query;
@@ -9571,13 +9949,20 @@ app.get('/api/mightycall/sync/jobs', apiKeyAuthMiddleware, async (req, res) => {
 
     // Filter by org if specified and user has permission
     if (orgId) {
-      if (req.apiKeyScope.scope === 'org' && req.apiKeyScope.orgId !== orgId) {
+      if (req.apiKeyScope?.scope === 'org' && req.apiKeyScope.orgId !== orgId) {
         return res.status(403).json({ error: 'Cannot access sync jobs for other organizations' });
       }
+      if (actorId) {
+        const allowed = (await isPlatformAdmin(actorId)) || (await isOrgMember(actorId, String(orgId)));
+        if (!allowed) return res.status(403).json({ error: 'Cannot access sync jobs for other organizations' });
+      }
       query = query.eq('org_id', orgId);
-    } else if (req.apiKeyScope.scope === 'org') {
+    } else if (req.apiKeyScope?.scope === 'org') {
       // Org API keys can only see their own org's jobs
       query = query.eq('org_id', req.apiKeyScope.orgId);
+    } else if (actorId && !(await isPlatformAdmin(actorId))) {
+      const orgIds = await getUserOrgIds(actorId);
+      query = query.in('org_id', orgIds.length > 0 ? orgIds : ['__none__']);
     }
 
     // Filter by status if specified
@@ -9779,6 +10164,15 @@ const server = app.listen(port, '0.0.0.0', () => {
 
 console.log('[startup] app.listen() returned, server object created');
 console.log('[startup] *** Server is ready and listening for connections ***');
+console.log('[startup] environment health:', JSON.stringify(getEnvironmentHealth()));
+
+void getProductionReadinessSnapshot()
+  .then((snapshot) => {
+    console.log('[startup] production readiness snapshot:', JSON.stringify(snapshot));
+  })
+  .catch((err) => {
+    console.warn('[startup] production readiness snapshot failed:', fmtErr(err));
+  });
 
 // Keep the process alive - prevent immediate exit
 setImmediate(() => {
