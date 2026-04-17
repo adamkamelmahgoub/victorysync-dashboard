@@ -287,25 +287,131 @@ export async function fetchMightyCallContacts(accessToken?: string) {
   return [];
 }
 
+function normalizeExtensionValue(value: any): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (digits && digits.length <= 6) return digits;
+  if (/^\d{1,6}$/.test(raw)) return raw;
+  return '';
+}
+
+function pickDisplayName(value: any): string | null {
+  const candidates = [
+    value?.displayName,
+    value?.name,
+    value?.fullName,
+    value?.full_name,
+    value?.user?.displayName,
+    value?.user?.name,
+    value?.member?.displayName,
+    value?.member?.name,
+    value?.contact?.name
+  ];
+  for (const candidate of candidates) {
+    const next = String(candidate || '').trim();
+    if (next) return next;
+  }
+  return null;
+}
+
+function collectExtensionCandidatesFromPayload(input: any, depth = 0): string[] {
+  if (depth > 4 || input == null) return [];
+  const found = new Set<string>();
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      for (const ext of collectExtensionCandidatesFromPayload(item, depth + 1)) found.add(ext);
+    }
+    return Array.from(found);
+  }
+
+  if (typeof input !== 'object') {
+    const ext = normalizeExtensionValue(input);
+    return ext ? [ext] : [];
+  }
+
+  const keys = Object.keys(input as Record<string, any>);
+  for (const key of keys) {
+    const lower = key.toLowerCase();
+    const value = (input as any)[key];
+
+    if (
+      lower === 'extension' ||
+      lower === 'ext' ||
+      lower === 'extensionid' ||
+      lower === 'extensionnumber' ||
+      lower === 'internalnumber' ||
+      lower === 'shortnumber' ||
+      lower === 'number'
+    ) {
+      const ext = normalizeExtensionValue(value);
+      if (ext) found.add(ext);
+    }
+
+    if (
+      lower.includes('extension') ||
+      lower.includes('internal') ||
+      lower.includes('short') ||
+      lower === 'user' ||
+      lower === 'member' ||
+      lower === 'agent'
+    ) {
+      for (const ext of collectExtensionCandidatesFromPayload(value, depth + 1)) found.add(ext);
+    }
+  }
+
+  return Array.from(found);
+}
+
+function collectExtensionRows(list: any[]): Array<{ id: string | null; extension: string; display_name: string | null; metadata: any }> {
+  const rows = new Map<string, { id: string | null; extension: string; display_name: string | null; metadata: any }>();
+  for (const item of Array.isArray(list) ? list : []) {
+    const candidates = collectExtensionCandidatesFromPayload(item);
+    const displayName = pickDisplayName(item);
+    for (const extension of candidates) {
+      if (!extension) continue;
+      const existing = rows.get(extension);
+      if (!existing) {
+        rows.set(extension, {
+          id: item?.id || item?.externalId || item?.extensionId || item?.userId || item?.memberId || null,
+          extension,
+          display_name: displayName,
+          metadata: item
+        });
+        continue;
+      }
+      if (!existing.display_name && displayName) {
+        rows.set(extension, { ...existing, display_name: displayName });
+      }
+    }
+  }
+  return Array.from(rows.values());
+}
+
 // Lightweight placeholders for extensions/voicemails
 export async function fetchMightyCallExtensions(accessToken?: string) {
   const token = accessToken || await getMightyCallAccessToken();
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
-  const endpoints = ['/extensions', '/users/extensions', '/v4/extensions'];
+  const endpoints = ['/extensions', '/users/extensions', '/v4/extensions', '/users', '/members', '/agents'];
   for (const ep of endpoints) {
     for (const url of buildUrlVariants(base, ep)) {
       const r = await tryFetchJson(url, token);
       if (!r.ok || !r.body) continue;
-      const list = (r.body as any)?.data?.extensions ?? (r.body as any)?.extensions ?? (r.body as any)?.data ?? [];
+      const list =
+        (r.body as any)?.data?.extensions ??
+        (r.body as any)?.extensions ??
+        (r.body as any)?.data?.users ??
+        (r.body as any)?.users ??
+        (r.body as any)?.data?.members ??
+        (r.body as any)?.members ??
+        (r.body as any)?.data?.agents ??
+        (r.body as any)?.agents ??
+        (r.body as any)?.data ??
+        [];
       if (Array.isArray(list)) {
-        return list
-          .map((x: any) => ({
-            id: x.id || x.externalId || x.extensionId || null,
-            extension: String(x.extension || x.ext || x.number || '').trim(),
-            display_name: x.displayName || x.name || x.fullName || null,
-            metadata: x
-          }))
-          .filter((x: any) => x.extension);
+        const rows = collectExtensionRows(list);
+        if (rows.length > 0) return rows;
       }
     }
   }
