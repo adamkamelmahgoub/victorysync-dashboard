@@ -1,6 +1,7 @@
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
+import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
 
@@ -98,7 +99,7 @@ const AdminReportsPage: FC = () => {
       ...(r.numbers_called || []),
       ...(r.data?.sample_numbers || []),
       r.from_number || '',
-      r.to_number || ''
+      r.to_number || '',
     ].map((v) => String(v || '').trim()).filter(Boolean);
     return Array.from(new Set(values));
   };
@@ -167,7 +168,7 @@ const AdminReportsPage: FC = () => {
 
     try {
       const response = await fetch(buildApiUrl(`/api/mightycall/reports/${encodeURIComponent(reportId)}?related_limit=5000`), {
-        headers: { 'x-user-id': userId, 'Content-Type': 'application/json' }
+        headers: { 'x-user-id': userId, 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
@@ -190,144 +191,148 @@ const AdminReportsPage: FC = () => {
   }, [selectedReportId]);
 
   return (
-    <PageLayout title="Reports" description="Organized report analytics with called numbers and drill-down activity">
+    <PageLayout
+      eyebrow="Admin reporting"
+      title="Reports"
+      description="Cross-organization reporting, called-number visibility, and report drill-down activity for platform operations."
+      actions={<button onClick={() => loadReports(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing reports...' : 'Refresh'}</button>}
+    >
       <div className="space-y-6">
         <AdminTopNav />
 
-        <section className="vs-surface p-5">
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Organization</label>
-              <select value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100">
+        <SectionCard title="Report filters" description="Compare reporting activity across organizations without leaving the admin workspace.">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,240px),minmax(0,240px),1fr] md:items-end">
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Organization</label>
+              <select value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="vs-input w-full">
                 <option value="">All Organizations</option>
                 {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
             </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Report Type</label>
-              <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100">
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Report Type</label>
+              <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="vs-input w-full">
                 <option value="calls">Calls</option>
                 <option value="messages">Messages</option>
                 <option value="analytics">Analytics</option>
               </select>
             </div>
-            <button onClick={() => loadReports(true)} disabled={loading} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">{loading ? 'Refreshing...' : 'Refresh'}</button>
-            <div className="text-xs text-slate-400 text-right">Rows: {reports.length}</div>
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">Loaded {reports.length} rows for admin review</div>
           </div>
-        </section>
+        </SectionCard>
 
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Reports</div><div className="text-2xl text-white font-bold">{summary.totalReports}</div></div>
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Total Calls</div><div className="text-2xl text-white font-bold">{summary.totalCalls}</div></div>
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Answered</div><div className="text-2xl text-emerald-300 font-bold">{summary.answered}</div></div>
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Missed</div><div className="text-2xl text-amber-300 font-bold">{summary.missed}</div></div>
-        </section>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricStatCard label="Reports" value={summary.totalReports} />
+          <MetricStatCard label="Total Calls" value={summary.totalCalls} />
+          <MetricStatCard label="Answered" value={summary.answered} accent="emerald" />
+          <MetricStatCard label="Missed" value={summary.missed} accent="amber" />
+        </div>
 
-        <section className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-          <div className="xl:col-span-7 vs-surface p-0 overflow-hidden">
-            <div className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">Report List</div>
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <SectionCard title="Report inventory" description="A platform-wide list of report rows, scoped by organization and type." className="xl:col-span-7" contentClassName="p-0">
             {listError ? (
-              <div className="px-4 py-8 text-sm text-rose-300">{listError}</div>
+              <div className="px-5 py-10 text-sm text-rose-300">{listError}</div>
             ) : loading ? (
-              <div className="px-4 py-8 text-sm text-slate-400">Loading reports...</div>
+              <div className="px-5 py-10 text-sm text-slate-400">Loading reports...</div>
             ) : reports.length === 0 ? (
-              <div className="px-4 py-8 text-sm text-slate-400">No reports found.</div>
+              <div className="p-5"><EmptyStatePanel title="No reports found" description="No reporting rows matched the current admin filters." /></div>
             ) : (
-              <div className="max-h-[70vh] overflow-auto">
+              <div className="max-h-[72vh] overflow-auto">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400">
+                  <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
                     <tr>
-                      <th className="text-left py-2 px-3">Org</th>
-                      <th className="text-left py-2 px-3">Calls</th>
-                      <th className="text-left py-2 px-3">Answered</th>
-                      <th className="text-left py-2 px-3">Missed</th>
-                      <th className="text-left py-2 px-3">Numbers Called</th>
-                      <th className="text-left py-2 px-3">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Org</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Calls</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Answered</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Missed</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Numbers</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Date</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60">
+                  <tbody className="divide-y divide-white/6">
                     {reports.map((r) => (
-                      <tr key={r.id} onClick={() => setSelectedReportId(r.id)} className={`cursor-pointer ${selectedReportId === r.id ? 'bg-cyan-500/10' : 'hover:bg-slate-800/40'}`}>
-                        <td className="py-2 px-3 text-slate-200">{r.organizations?.name || r.org_id}</td>
-                        <td className="py-2 px-3 text-slate-200">{r.data?.calls_count ?? '-'}</td>
-                        <td className="py-2 px-3 text-emerald-300">{r.data?.answered_count ?? '-'}</td>
-                        <td className="py-2 px-3 text-amber-300">{r.data?.missed_count ?? '-'}</td>
-                        <td className="py-2 px-3 text-xs font-mono text-slate-300 max-w-[260px] truncate">{rowNumbers(r).join(', ') || '-'}</td>
-                        <td className="py-2 px-3 text-xs text-slate-500">{fmtDate(r.report_date || r.created_at)}</td>
+                      <tr key={r.id} onClick={() => setSelectedReportId(r.id)} className={`cursor-pointer transition ${selectedReportId === r.id ? 'bg-cyan-400/[0.08]' : 'hover:bg-white/[0.03]'}`}>
+                        <td className="px-4 py-3 text-slate-200">{r.organizations?.name || r.org_id}</td>
+                        <td className="px-4 py-3 text-slate-100">{r.data?.calls_count ?? '-'}</td>
+                        <td className="px-4 py-3 text-emerald-200">{r.data?.answered_count ?? '-'}</td>
+                        <td className="px-4 py-3 text-amber-200">{r.data?.missed_count ?? '-'}</td>
+                        <td className="max-w-[260px] truncate px-4 py-3 font-mono text-xs text-slate-400">{rowNumbers(r).join(', ') || '-'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(r.report_date || r.created_at)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
                 {nextOffset !== null && (
-                  <div className="p-3 border-t border-slate-800 flex justify-center">
-                    <button onClick={() => loadReports(false)} disabled={loadingMore} className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-60">{loadingMore ? 'Loading...' : 'Load more'}</button>
+                  <div className="flex justify-center border-t border-white/8 p-4">
+                    <button onClick={() => loadReports(false)} disabled={loadingMore} className="vs-button-secondary">
+                      {loadingMore ? 'Loading more...' : 'Load more'}
+                    </button>
                   </div>
                 )}
               </div>
             )}
-          </div>
+          </SectionCard>
 
-          <div className="xl:col-span-5 vs-surface p-4">
-            <div className="mb-3 text-sm font-semibold text-slate-200">Report Detail</div>
+          <SectionCard title="Report detail" description="Selected report KPI context and related calls, recordings, and SMS." className="xl:col-span-5">
             {detailLoading ? (
               <div className="text-sm text-slate-400">Loading detail...</div>
             ) : detailError ? (
               <div className="text-sm text-rose-300">{detailError}</div>
             ) : !detail ? (
-              <div className="text-sm text-slate-400">Select a report to view details.</div>
+              <EmptyStatePanel title="No report selected" description="Choose a report row to review its KPI breakdown and related interactions." />
             ) : (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded border border-slate-700 bg-slate-800/50 p-3"><div className="text-xs text-slate-400">Total Calls</div><div className="text-xl text-white font-bold">{detail.kpis.total_calls}</div></div>
-                  <div className="rounded border border-slate-700 bg-slate-800/50 p-3"><div className="text-xs text-slate-400">Answer Rate</div><div className="text-xl text-cyan-300 font-bold">{detail.kpis.answer_rate_pct}%</div></div>
-                  <div className="rounded border border-slate-700 bg-slate-800/50 p-3"><div className="text-xs text-slate-400">Answered</div><div className="text-xl text-emerald-300 font-bold">{detail.kpis.answered_calls}</div></div>
-                  <div className="rounded border border-slate-700 bg-slate-800/50 p-3"><div className="text-xs text-slate-400">Missed</div><div className="text-xl text-amber-300 font-bold">{detail.kpis.missed_calls}</div></div>
+                  <div className="vs-surface-muted p-4"><div className="text-xs text-slate-500">Total Calls</div><div className="mt-2 text-2xl font-semibold text-white">{detail.kpis.total_calls}</div></div>
+                  <div className="vs-surface-muted p-4"><div className="text-xs text-slate-500">Answer Rate</div><div className="mt-2 text-2xl font-semibold text-cyan-200">{detail.kpis.answer_rate_pct}%</div></div>
+                  <div className="vs-surface-muted p-4"><div className="text-xs text-slate-500">Answered</div><div className="mt-2 text-2xl font-semibold text-emerald-200">{detail.kpis.answered_calls}</div></div>
+                  <div className="vs-surface-muted p-4"><div className="text-xs text-slate-500">Missed</div><div className="mt-2 text-2xl font-semibold text-amber-200">{detail.kpis.missed_calls}</div></div>
                 </div>
 
-                <div className="rounded border border-slate-700 bg-slate-800/40 p-3">
-                  <div className="text-xs text-slate-400 mb-2">Numbers Called</div>
-                  <div className="text-xs font-mono text-slate-200 break-words">{(detail.all_numbers_called || detail.numbers || []).join(', ') || '-'}</div>
+                <div className="vs-surface-muted p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Numbers called</div>
+                  <div className="mt-3 break-words font-mono text-xs text-slate-200">{(detail.all_numbers_called || detail.numbers || []).join(', ') || '-'}</div>
                 </div>
 
-                <div className="flex gap-2">
-                  <button onClick={() => setDetailTab('calls')} className={`rounded px-2.5 py-1 text-xs ${detailTab === 'calls' ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-300'}`}>Calls ({detail.related.calls.length})</button>
-                  <button onClick={() => setDetailTab('recordings')} className={`rounded px-2.5 py-1 text-xs ${detailTab === 'recordings' ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-300'}`}>Recordings ({detail.related.recordings.length})</button>
-                  <button onClick={() => setDetailTab('sms')} className={`rounded px-2.5 py-1 text-xs ${detailTab === 'sms' ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-300'}`}>SMS ({detail.related.sms.length})</button>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => setDetailTab('calls')} className={detailTab === 'calls' ? 'vs-button-primary' : 'vs-button-secondary'}>Calls ({detail.related.calls.length})</button>
+                  <button onClick={() => setDetailTab('recordings')} className={detailTab === 'recordings' ? 'vs-button-primary' : 'vs-button-secondary'}>Recordings ({detail.related.recordings.length})</button>
+                  <button onClick={() => setDetailTab('sms')} className={detailTab === 'sms' ? 'vs-button-primary' : 'vs-button-secondary'}>SMS ({detail.related.sms.length})</button>
                 </div>
 
-                <div className="max-h-[38vh] overflow-auto rounded border border-slate-700">
+                <div className="overflow-auto rounded-3xl border border-white/8">
                   {detailTab === 'calls' && (
                     <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-700/60"><tr><th className="text-left py-2 px-2">From</th><th className="text-left py-2 px-2">To</th><th className="text-left py-2 px-2">Status</th><th className="text-left py-2 px-2">Duration</th><th className="text-left py-2 px-2">Started</th></tr></thead>
-                      <tbody className="divide-y divide-slate-800/60">
+                      <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500"><tr><th className="px-3 py-3 text-left">From</th><th className="px-3 py-3 text-left">To</th><th className="px-3 py-3 text-left">Status</th><th className="px-3 py-3 text-left">Duration</th><th className="px-3 py-3 text-left">Started</th></tr></thead>
+                      <tbody className="divide-y divide-white/6">
                         {detail.related.calls.length === 0 ? (
-                          <tr><td className="px-2 py-3 text-slate-400" colSpan={5}>No related calls found for this report.</td></tr>
+                          <tr><td className="px-3 py-4 text-slate-400" colSpan={5}>No related calls found for this report.</td></tr>
                         ) : detail.related.calls.map((c) => (
-                          <tr key={c.id}><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(c.from_number, detail.report.from_number)}</td><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(c.to_number, detail.report.to_number)}</td><td className="px-2 py-2 text-slate-300">{c.status || '-'}</td><td className="px-2 py-2 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td><td className="px-2 py-2 text-slate-400">{fmtDate(c.started_at)}</td></tr>
+                          <tr key={c.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.to_number, detail.report.to_number)}</td><td className="px-3 py-3"><StatusBadge tone={String(c.status || '').toLowerCase().includes('miss') ? 'warning' : 'neutral'}>{c.status || '-'}</StatusBadge></td><td className="px-3 py-3 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td><td className="px-3 py-3 text-slate-500">{fmtDate(c.started_at)}</td></tr>
                         ))}
                       </tbody>
                     </table>
                   )}
                   {detailTab === 'recordings' && (
                     <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-700/60"><tr><th className="text-left py-2 px-2">From</th><th className="text-left py-2 px-2">To</th><th className="text-left py-2 px-2">Duration</th><th className="text-left py-2 px-2">Date</th></tr></thead>
-                      <tbody className="divide-y divide-slate-800/60">
+                      <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500"><tr><th className="px-3 py-3 text-left">From</th><th className="px-3 py-3 text-left">To</th><th className="px-3 py-3 text-left">Duration</th><th className="px-3 py-3 text-left">Date</th></tr></thead>
+                      <tbody className="divide-y divide-white/6">
                         {detail.related.recordings.length === 0 ? (
-                          <tr><td className="px-2 py-3 text-slate-400" colSpan={4}>No related recordings found for this report.</td></tr>
+                          <tr><td className="px-3 py-4 text-slate-400" colSpan={4}>No related recordings found for this report.</td></tr>
                         ) : detail.related.recordings.map((r) => (
-                          <tr key={r.id}><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(r.from_number, detail.report.from_number)}</td><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(r.to_number, detail.report.to_number)}</td><td className="px-2 py-2 text-slate-300">{fmtSeconds(Number(r.duration_seconds || 0))}</td><td className="px-2 py-2 text-slate-400">{fmtDate(r.recording_date)}</td></tr>
+                          <tr key={r.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(r.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(r.to_number, detail.report.to_number)}</td><td className="px-3 py-3 text-slate-300">{fmtSeconds(Number(r.duration_seconds || 0))}</td><td className="px-3 py-3 text-slate-500">{fmtDate(r.recording_date)}</td></tr>
                         ))}
                       </tbody>
                     </table>
                   )}
                   {detailTab === 'sms' && (
                     <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-700/60"><tr><th className="text-left py-2 px-2">From</th><th className="text-left py-2 px-2">To</th><th className="text-left py-2 px-2">Direction</th><th className="text-left py-2 px-2">Date</th></tr></thead>
-                      <tbody className="divide-y divide-slate-800/60">
+                      <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500"><tr><th className="px-3 py-3 text-left">From</th><th className="px-3 py-3 text-left">To</th><th className="px-3 py-3 text-left">Direction</th><th className="px-3 py-3 text-left">Date</th></tr></thead>
+                      <tbody className="divide-y divide-white/6">
                         {detail.related.sms.length === 0 ? (
-                          <tr><td className="px-2 py-3 text-slate-400" colSpan={4}>No related SMS found for this report.</td></tr>
+                          <tr><td className="px-3 py-4 text-slate-400" colSpan={4}>No related SMS found for this report.</td></tr>
                         ) : detail.related.sms.map((s) => (
-                          <tr key={s.id}><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(s.from_number, detail.report.from_number)}</td><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(s.to_number, detail.report.to_number)}</td><td className="px-2 py-2 text-slate-300">{s.direction || '-'}</td><td className="px-2 py-2 text-slate-400">{fmtDate(s.created_at)}</td></tr>
+                          <tr key={s.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(s.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(s.to_number, detail.report.to_number)}</td><td className="px-3 py-3 text-slate-300">{s.direction || '-'}</td><td className="px-3 py-3 text-slate-500">{fmtDate(s.created_at)}</td></tr>
                         ))}
                       </tbody>
                     </table>
@@ -335,8 +340,8 @@ const AdminReportsPage: FC = () => {
                 </div>
               </div>
             )}
-          </div>
-        </section>
+          </SectionCard>
+        </div>
       </div>
     </PageLayout>
   );

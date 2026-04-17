@@ -1,9 +1,10 @@
-import React, { FC, useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { useDashboardMetrics } from "../hooks/useDashboardMetrics";
-import { Sidebar } from "../components/Sidebar";
-import { getOrgAgentLiveStatus } from "../lib/apiClient";
+import React, { FC, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
+import { getOrgAgentLiveStatus } from '../lib/apiClient';
+import { PageLayout } from '../components/PageLayout';
+import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
 type LiveAgentStatus = {
   user_id: string;
@@ -16,12 +17,46 @@ type LiveAgentStatus = {
   started_at?: string | null;
 };
 
+type WorkflowCardProps = {
+  title: string;
+  description: string;
+  actionLabel: string;
+  onClick: () => void;
+};
+
+function formatSecondsAsMinutes(s: number | undefined | null) {
+  if (!s && s !== 0) return '0m 0s';
+  const secs = Math.round(s || 0);
+  const m = Math.floor(secs / 60);
+  const sec = secs % 60;
+  return `${m}m ${sec}s`;
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString();
+}
+
+const WorkflowCard: FC<WorkflowCardProps> = ({ title, description, actionLabel, onClick }) => (
+  <button
+    onClick={onClick}
+    className="flex h-full flex-col justify-between rounded-3xl border border-white/8 bg-white/[0.025] p-5 text-left transition hover:border-cyan-400/20 hover:bg-white/[0.045]"
+  >
+    <div>
+      <div className="text-sm font-semibold text-white">{title}</div>
+      <p className="mt-2 text-sm leading-6 text-slate-400">{description}</p>
+    </div>
+    <div className="mt-6 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-200/85">{actionLabel}</div>
+  </button>
+);
+
 const DashboardNewV3: FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { selectedOrgId, globalRole, user } = useAuth();
+  const { selectedOrgId, globalRole, user, orgs } = useAuth();
   const isAdmin = globalRole === 'platform_admin';
-  const { metrics, loading } = useDashboardMetrics(selectedOrgId ?? null);
+  const { metrics, loading, error } = useDashboardMetrics(selectedOrgId ?? null);
   const [liveAgents, setLiveAgents] = useState<LiveAgentStatus[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
@@ -51,7 +86,7 @@ const DashboardNewV3: FC = () => {
         setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
       } catch (e: any) {
         if (cancelled) return;
-        setLiveError(e?.message || "Failed to load live agent status");
+        setLiveError(e?.message || 'Failed to load live agent status');
       } finally {
         if (!cancelled) setLiveLoading(false);
       }
@@ -65,253 +100,286 @@ const DashboardNewV3: FC = () => {
     };
   }, [selectedOrgId, user?.id]);
 
-  const formatSecondsAsMinutes = (s: number | undefined | null) => {
-    if (!s && s !== 0) return '0m 0s';
-    const secs = Math.round(s || 0);
-    const m = Math.floor(secs / 60);
-    const sec = secs % 60;
-    return `${m}m ${sec}s`;
-  };
+  const orgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
+  const answered = metrics?.answered_calls_today || 0;
+  const total = metrics?.total_calls_today || 0;
+  const missed = Math.max(total - answered, 0);
+  const onCallCount = liveAgents.filter((agent) => agent.on_call).length;
+  const availableCount = Math.max(liveAgents.length - onCallCount, 0);
 
-  const formatDateTime = (value?: string | null) => {
-    if (!value) return '-';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '-';
-    return date.toLocaleString();
-  };
+  const workflowCards = useMemo(() => ([
+    {
+      title: 'Investigate queue activity',
+      description: 'Review live roster movement, answer coverage, and who is currently handling calls.',
+      actionLabel: 'Open live status',
+      onClick: () => navigate('/live-status'),
+    },
+    {
+      title: 'Review reports and recordings',
+      description: 'Jump into report drilldowns and recordings to trace dropped calls, missed opportunities, and QA issues.',
+      actionLabel: 'Open reporting',
+      onClick: () => navigate(isAdmin ? '/admin/reports' : '/reports'),
+    },
+    {
+      title: 'Manage numbers and routing',
+      description: 'Keep client phone inventory aligned with teams, assignments, and operational ownership.',
+      actionLabel: 'Open numbers',
+      onClick: () => navigate('/numbers'),
+    },
+  ]), [isAdmin, navigate]);
+
+  const headerActions = (
+    <>
+      <button onClick={() => navigate('/live-status')} className="vs-button-secondary">
+        Open Live Status
+      </button>
+      <button onClick={() => navigate(isAdmin ? '/admin/reports' : '/reports')} className="vs-button-primary">
+        View Reports
+      </button>
+    </>
+  );
+
+  const headerMeta = (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Workspace</div>
+        <div className="mt-2 text-sm font-medium text-slate-200">{orgName}</div>
+      </div>
+      <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Last live sync</div>
+        <div className="mt-2 text-sm font-medium text-slate-200">{liveRefreshedAt ? formatDateTime(liveRefreshedAt) : 'Waiting for first refresh'}</div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="flex min-h-screen text-white">
-      <Sidebar isAdmin={isAdmin} currentPath={location.pathname} />
-
-      {/* Main Content */}
-      <main className="ml-64 flex-1 overflow-auto">
-        {/* Header */}
-        <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/75 backdrop-blur">
-          <div className="px-8 py-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-                <p className="text-slate-400 text-sm mt-1">Welcome back to VictorySync</p>
-              </div>
-              <div className="text-right">
-                <p className="text-slate-400 text-sm">Today</p>
-                <p className="text-lg font-semibold text-cyan-300">{new Date().toLocaleDateString()}</p>
-              </div>
-            </div>
+    <PageLayout
+      eyebrow="Operations overview"
+      title="Executive dashboard"
+      description="A high-trust view of live call performance, agent coverage, and the operational workflows your team needs most."
+      actions={headerActions}
+      meta={headerMeta}
+    >
+      <div className="space-y-6">
+        {error && (
+          <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {error}
           </div>
-        </header>
+        )}
 
-        {/* Content */}
-        <div className="p-8">
-          {loading ? (
-            <div className="flex items-center justify-center h-96">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                <p className="text-slate-400">Loading dashboard...</p>
-              </div>
+        {loading ? (
+          <>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <LoadingSkeleton key={idx} className="h-36" />
+              ))}
             </div>
-          ) : (
-            <div className="space-y-8">
-              {/* KPI Grid */}
-              <div>
-                <h2 className="text-xl font-bold text-white mb-6">Key Metrics</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  <MetricCard
-                    label="Total Calls"
-                    value={metrics?.total_calls_today || 0}
-                    color="blue"
-                  />
-                  <MetricCard
-                    label="Answered Calls"
-                    value={metrics?.answered_calls_today || 0}
-                    color="green"
-                  />
-                  <MetricCard
-                    label="Answer Rate"
-                    value={`${Math.round(metrics?.answer_rate_today || 0)}%`}
-                    color="cyan"
-                  />
-                  <MetricCard
-                    label="Avg Wait Time"
-                    value={formatSecondsAsMinutes(metrics?.avg_wait_seconds_today)}
-                    color="cyan"
-                  />
-                </div>
-              </div>
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.5fr,1fr]">
+              <LoadingSkeleton className="h-[360px]" />
+              <LoadingSkeleton className="h-[360px]" />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <MetricStatCard
+                label="Total Calls"
+                value={total}
+                hint={<span>{answered} answered today</span>}
+              />
+              <MetricStatCard
+                label="Answer Rate"
+                value={`${Math.round(metrics?.answer_rate_today || 0)}%`}
+                hint={<span>{metrics?.delta_pp ? `${metrics.delta_pp >= 0 ? '+' : ''}${metrics.delta_pp.toFixed(1)} pp vs baseline` : 'Monitoring against yesterday trend'}</span>}
+                accent="cyan"
+              />
+              <MetricStatCard
+                label="Avg Wait Time"
+                value={formatSecondsAsMinutes(metrics?.avg_wait_seconds_today)}
+                hint="Keep queue delay contained during peak hours"
+                accent="amber"
+              />
+              <MetricStatCard
+                label="Coverage"
+                value={`${onCallCount}/${liveAgents.length || 0}`}
+                hint={<span>{availableCount} currently available</span>}
+                accent="emerald"
+              />
+            </div>
 
-              {/* Quick Actions */}
-              <div>
-                <h2 className="text-xl font-bold text-white mb-6">Quick Actions</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <ActionCard
-                    title="Phone Numbers"
-                    description="Manage your phone numbers"
-                    onClick={() => navigate('/numbers')}
-                  />
-                  <ActionCard
-                    title="Reports"
-                    description="View call reports and analytics"
-                    onClick={() => navigate(isAdmin ? '/admin/reports' : '/reports')}
-                  />
-                  <ActionCard
-                    title="Support"
-                    description="Contact support or submit tickets"
-                    onClick={() => navigate(isAdmin ? '/admin/support' : '/support')}
-                  />
-                </div>
-              </div>
-
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-                  <div>
-                    <h2 className="text-lg font-bold text-white">Live Agent Status</h2>
-                    <p className="text-sm text-slate-400 mt-1">
-                      {selectedOrgId
-                        ? (liveRefreshedAt ? `Updated ${formatDateTime(liveRefreshedAt)}` : 'Status from MightyCall')
-                        : 'Select an organization to view live agent call status'}
-                    </p>
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.45fr,1fr]">
+              <SectionCard
+                title="Operational snapshot"
+                description="Today’s performance in the context of client coverage and service pressure."
+                className="h-full"
+              >
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Call handling</div>
+                    <div className="mt-4 flex items-end justify-between gap-4">
+                      <div>
+                        <div className="text-3xl font-semibold tracking-[-0.03em] text-white">{answered}</div>
+                        <div className="mt-1 text-sm text-slate-400">Calls answered today</div>
+                      </div>
+                      <StatusBadge tone={missed > 0 ? 'warning' : 'success'}>
+                        {missed > 0 ? `${missed} missed` : 'No misses'}
+                      </StatusBadge>
+                    </div>
                   </div>
-                  <button
-                    onClick={async () => {
-                      if (!selectedOrgId || !user?.id) return;
-                      try {
-                        setLiveLoading(true);
-                        setLiveError(null);
-                        const json = await getOrgAgentLiveStatus(selectedOrgId, user.id);
-                        setLiveAgents((json.items || []) as LiveAgentStatus[]);
-                        setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
-                      } catch (e: any) {
-                        setLiveError(e?.message || "Failed to load live agent status");
-                      } finally {
-                        setLiveLoading(false);
-                      }
-                    }}
-                    disabled={!selectedOrgId || liveLoading}
-                    className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50"
-                  >
-                    {liveLoading ? 'Refreshing...' : 'Refresh Live'}
-                  </button>
+
+                  <div className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Assigned coverage</div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-white">{metrics?.assignedPhones?.length || 0}</div>
+                    <div className="mt-1 text-sm text-slate-400">Tracked phone numbers attached to this workspace</div>
+                  </div>
+
+                  <div className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Live floor status</div>
+                    <div className="mt-4 flex items-center gap-2">
+                      <StatusBadge tone={onCallCount > 0 ? 'info' : 'neutral'}>
+                        {onCallCount > 0 ? `${onCallCount} on call` : 'No active calls'}
+                      </StatusBadge>
+                      <StatusBadge tone="success">{availableCount} available</StatusBadge>
+                    </div>
+                    <div className="mt-3 text-sm text-slate-400">Active agent presence pulled from MightyCall.</div>
+                  </div>
+
+                  <div className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Service posture</div>
+                    <div className="mt-4 text-lg font-semibold text-white">
+                      {Math.round(metrics?.answer_rate_today || 0) >= 80 ? 'Healthy coverage' : 'Attention required'}
+                    </div>
+                    <div className="mt-2 text-sm text-slate-400">
+                      {Math.round(metrics?.answer_rate_today || 0) >= 80
+                        ? 'Answer performance is staying within a strong operating range.'
+                        : 'Answer performance is below target and worth reviewing with the team.'}
+                    </div>
+                  </div>
                 </div>
+              </SectionCard>
 
-                {liveError && (
-                  <div className="mb-4 rounded-lg border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-300">
-                    {liveError}
-                  </div>
-                )}
+              <SectionCard
+                title="Priority workflows"
+                description="The next places operators usually need to go from the executive view."
+                className="h-full"
+              >
+                <div className="grid gap-4">
+                  {workflowCards.map((card) => (
+                    <WorkflowCard key={card.title} {...card} />
+                  ))}
+                </div>
+              </SectionCard>
+            </div>
 
-                {!selectedOrgId ? (
-                  <div className="text-sm text-slate-400">No organization selected.</div>
-                ) : liveAgents.length === 0 ? (
-                  <div className="text-sm text-slate-400">
-                    {liveLoading ? 'Loading live agent activity...' : 'No agents or live call activity found for this organization.'}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    {liveAgents.map((agent) => (
-                      <div key={agent.user_id} className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-white font-semibold">
-                              {agent.display_name || agent.email || 'Agent'}
-                            </div>
-                            <div className="text-xs text-slate-400 mt-1">
-                              {agent.email || 'No email'}{agent.extension ? ` • Ext ${agent.extension}` : ''}
-                            </div>
+            <SectionCard
+              title="Live agent roster"
+              description={selectedOrgId
+                ? 'Real-time roster presence from MightyCall for the selected organization.'
+                : 'Select an organization to review real-time agent activity.'}
+              actions={(
+                <button
+                  onClick={async () => {
+                    if (!selectedOrgId || !user?.id) return;
+                    try {
+                      setLiveLoading(true);
+                      setLiveError(null);
+                      const json = await getOrgAgentLiveStatus(selectedOrgId, user.id);
+                      setLiveAgents((json.items || []) as LiveAgentStatus[]);
+                      setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
+                    } catch (e: any) {
+                      setLiveError(e?.message || 'Failed to load live agent status');
+                    } finally {
+                      setLiveLoading(false);
+                    }
+                  }}
+                  disabled={!selectedOrgId || liveLoading}
+                  className="vs-button-secondary"
+                >
+                  {liveLoading ? 'Refreshing live...' : 'Refresh Live'}
+                </button>
+              )}
+            >
+              {liveError && (
+                <div className="mb-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                  {liveError}
+                </div>
+              )}
+
+              {!selectedOrgId ? (
+                <EmptyStatePanel
+                  title="No organization selected"
+                  description="Choose an organization from the workspace selector to load live agent activity and call coverage."
+                />
+              ) : liveAgents.length === 0 ? (
+                <EmptyStatePanel
+                  title={liveLoading ? 'Loading live activity' : 'No live roster activity yet'}
+                  description={liveLoading
+                    ? 'VictorySync is polling MightyCall for current call presence and agent availability.'
+                    : 'No agents or live call activity were returned for this organization yet.'}
+                />
+              ) : (
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  {liveAgents.map((agent) => (
+                    <div key={agent.user_id} className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
+                          <div className="mt-1 text-sm text-slate-400">
+                            {agent.email || 'No email'}
+                            {agent.extension ? ` · Ext ${agent.extension}` : ''}
                           </div>
-                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                            agent.on_call ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-700 text-slate-300'
-                          }`}>
-                            {agent.on_call ? 'On Call' : (agent.status || 'Idle')}
-                          </span>
                         </div>
+                        <StatusBadge tone={agent.on_call ? 'success' : 'neutral'}>
+                          {agent.on_call ? 'On Call' : (agent.status || 'Idle')}
+                        </StatusBadge>
+                      </div>
 
-                        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                          <div className="rounded-md bg-slate-800/80 p-3">
-                            <div className="text-xs uppercase tracking-wide text-slate-500">With</div>
-                            <div className="mt-1 text-slate-200 break-words">{agent.counterpart || '-'}</div>
-                          </div>
-                          <div className="rounded-md bg-slate-800/80 p-3">
-                            <div className="text-xs uppercase tracking-wide text-slate-500">Status</div>
-                            <div className="mt-1 text-slate-200">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-                            <div className="mt-1 text-xs text-slate-500">Started {formatDateTime(agent.started_at)}</div>
-                          </div>
+                      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="vs-surface-muted p-4">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Counterpart</div>
+                          <div className="mt-3 text-sm text-slate-200 break-words">{agent.counterpart || '-'}</div>
+                        </div>
+                        <div className="vs-surface-muted p-4">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Call state</div>
+                          <div className="mt-3 text-sm text-slate-200">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+                          <div className="mt-2 text-xs text-slate-500">Started {formatDateTime(agent.started_at)}</div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
 
-              {/* Recent Activity */}
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-                <h2 className="text-lg font-bold text-white mb-4">System Status</h2>
-                <div className="space-y-3">
-                  <StatusItem label="API Server" status="operational" />
-                  <StatusItem label="Database" status="operational" />
-                  <StatusItem label="Phone Service" status={metrics ? "operational" : "checking"} />
+            <SectionCard title="Service health" description="High-level platform posture for day-to-day operating confidence.">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="vs-surface-muted p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-200">API Server</span>
+                    <StatusBadge tone="success">Operational</StatusBadge>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-400">Dashboard APIs are responding and current metrics were retrieved successfully.</p>
+                </div>
+                <div className="vs-surface-muted p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-200">MightyCall sync</span>
+                    <StatusBadge tone={liveError ? 'warning' : 'info'}>{liveError ? 'Review' : 'Connected'}</StatusBadge>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-400">Live roster and imported extensions depend on MightyCall presence data.</p>
+                </div>
+                <div className="vs-surface-muted p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-200">Coverage watch</span>
+                    <StatusBadge tone={missed > 0 ? 'warning' : 'success'}>{missed > 0 ? 'Needs review' : 'Stable'}</StatusBadge>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-400">Use live roster and reports together to investigate missed-call windows quickly.</p>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
-  );
-};
-
-interface MetricCardProps {
-  label: string;
-  value: string | number;
-  color: 'blue' | 'green' | 'cyan' | 'purple';
-}
-
-const MetricCard: FC<MetricCardProps> = ({ label, value, color }) => {
-  const colorMap = {
-    blue: 'from-blue-600 to-blue-700',
-    green: 'from-green-600 to-green-700',
-    cyan: 'from-cyan-600 to-cyan-700',
-    purple: 'from-purple-600 to-purple-700',
-  };
-
-  return (
-    <div className={`bg-gradient-to-br ${colorMap[color]} rounded-lg p-6 border border-slate-600`}>
-      <p className="text-slate-200 text-sm font-medium">{label}</p>
-      <p className="text-4xl font-bold text-white mt-3">{value}</p>
-    </div>
-  );
-};
-
-interface ActionCardProps {
-  title: string;
-  description: string;
-  onClick: () => void;
-}
-
-const ActionCard: FC<ActionCardProps> = ({ title, description, onClick }) => (
-  <button
-    onClick={onClick}
-    className="bg-slate-800 border border-slate-700 rounded-lg p-6 hover:border-blue-500 hover:bg-slate-700 transition-all text-left"
-  >
-    <h3 className="text-lg font-bold text-white">{title}</h3>
-    <p className="text-slate-400 text-sm mt-2">{description}</p>
-  </button>
-);
-
-interface StatusItemProps {
-  label: string;
-  status: 'operational' | 'checking' | 'error';
-}
-
-const StatusItem: FC<StatusItemProps> = ({ label, status }) => {
-  const statusColor = status === 'operational' ? 'text-green-400' : status === 'checking' ? 'text-yellow-400' : 'text-red-400';
-  const statusText = status === 'operational' ? 'Operational' : status === 'checking' ? 'Checking...' : 'Error';
-  
-  return (
-    <div className="flex items-center justify-between p-3 bg-slate-700 rounded">
-      <p className="text-white font-medium">{label}</p>
-      <p className={`text-sm font-semibold ${statusColor}`}>{statusText}</p>
-    </div>
+            </SectionCard>
+          </>
+        )}
+      </div>
+    </PageLayout>
   );
 };
 

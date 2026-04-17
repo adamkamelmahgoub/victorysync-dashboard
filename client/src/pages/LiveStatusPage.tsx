@@ -1,8 +1,8 @@
-import React, { FC, useEffect, useState } from 'react';
-import { Sidebar } from '../components/Sidebar';
+import React, { FC, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useLocation } from 'react-router-dom';
 import { getLiveAgentStatus } from '../lib/apiClient';
+import { PageLayout } from '../components/PageLayout';
+import { EmptyStatePanel, LoadingSkeleton, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
 type LiveAgentStatus = {
   user_id: string;
@@ -24,7 +24,6 @@ function fmtDateTime(value?: string | null) {
 }
 
 const LiveStatusPage: FC = () => {
-  const location = useLocation();
   const { user, globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const isAdmin = globalRole === 'platform_admin';
   const [items, setItems] = useState<LiveAgentStatus[]>([]);
@@ -56,96 +55,105 @@ const LiveStatusPage: FC = () => {
   }, [user?.id, activeOrgId]);
 
   const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));
+  const onCall = items.filter((agent) => agent.on_call).length;
+  const idle = Math.max(items.length - onCall, 0);
+
+  const actions = useMemo(() => (
+    <div className="flex flex-wrap items-center gap-2">
+      {isAdmin && (
+        <select
+          value={selectedOrgId ?? ''}
+          onChange={(e) => setSelectedOrgId(e.target.value || null)}
+          className="vs-input min-w-[220px]"
+        >
+          <option value="">All organizations</option>
+          {orgs.map((org) => (
+            <option key={org.id} value={org.id}>{org.name}</option>
+          ))}
+        </select>
+      )}
+      <button onClick={load} disabled={loading} className="vs-button-secondary">
+        {loading ? 'Refreshing live...' : 'Refresh Live'}
+      </button>
+    </div>
+  ), [isAdmin, loading, orgs, selectedOrgId, setSelectedOrgId]);
+
+  const meta = (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Live roster</div>
+        <div className="mt-2 text-sm font-medium text-slate-200">{onCall} on call · {idle} available</div>
+      </div>
+      <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Updated</div>
+        <div className="mt-2 text-sm font-medium text-slate-200">{refreshedAt ? fmtDateTime(refreshedAt) : 'Waiting for first sync'}</div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="flex min-h-screen text-white">
-      <Sidebar isAdmin={isAdmin} currentPath={location.pathname} />
-
-      <main className="ml-64 flex-1 overflow-auto">
-        <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/75 backdrop-blur">
-          <div className="px-8 py-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-white">Live Status</h1>
-              <p className="text-slate-400 text-sm mt-1">
-                {refreshedAt ? `Updated ${fmtDateTime(refreshedAt)}` : 'Live agent status from MightyCall'}
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3 md:flex-row md:items-center">
-              {isAdmin && (
-                <select
-                  value={selectedOrgId ?? ''}
-                  onChange={(e) => setSelectedOrgId(e.target.value || null)}
-                  className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-                >
-                  <option value="">All organizations</option>
-                  {orgs.map((org) => (
-                    <option key={org.id} value={org.id}>{org.name}</option>
-                  ))}
-                </select>
-              )}
-              <button
-                onClick={load}
-                disabled={loading}
-                className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50"
-              >
-                {loading ? 'Refreshing...' : 'Refresh Live'}
-              </button>
-            </div>
+    <PageLayout
+      eyebrow="Live monitoring"
+      title="Live status"
+      description="Monitor current call activity, agent availability, and active counterparts across the operation."
+      actions={actions}
+      meta={meta}
+    >
+      <div className="space-y-6">
+        {error && (
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            {error}
           </div>
-        </header>
+        )}
 
-        <div className="p-8">
-          {error && (
-            <div className="mb-6 rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">
-              {error}
-            </div>
-          )}
-
+        <SectionCard title="Real-time roster" description="Live agent presence from MightyCall, grouped for quick operational scanning.">
           {loading && items.length === 0 ? (
-            <div className="text-sm text-slate-400">Loading live agent activity...</div>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <LoadingSkeleton key={idx} className="h-48" />
+              ))}
+            </div>
           ) : items.length === 0 ? (
-            <div className="text-sm text-slate-400">No agents or live call activity found.</div>
+            <EmptyStatePanel
+              title="No live roster activity found"
+              description="VictorySync did not receive any current agent call presence for the selected scope. Try refreshing or narrowing to one organization."
+            />
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               {items.map((agent) => (
-                <div key={`${agent.org_id || 'global'}:${agent.user_id}`} className="rounded-lg border border-slate-700 bg-slate-900/50 p-5">
-                  <div className="flex items-start justify-between gap-3">
+                <div key={`${agent.org_id || 'global'}:${agent.user_id}`} className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <div className="text-white font-semibold">
-                        {agent.display_name || agent.email || 'Agent'}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-400">
+                      <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
+                      <div className="mt-1 text-sm text-slate-400">
                         {agent.email || 'No email'}
-                        {agent.extension ? ` • Ext ${agent.extension}` : ''}
-                        {isAdmin && agent.org_id ? ` • ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
+                        {agent.extension ? ` · Ext ${agent.extension}` : ''}
+                        {isAdmin && agent.org_id ? ` · ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
                       </div>
                     </div>
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                      agent.on_call ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-700 text-slate-300'
-                    }`}>
+                    <StatusBadge tone={agent.on_call ? 'success' : 'neutral'}>
                       {agent.on_call ? 'On Call' : (agent.status || 'Idle')}
-                    </span>
+                    </StatusBadge>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-md bg-slate-800/80 p-3">
-                      <div className="text-xs uppercase tracking-wide text-slate-500">With</div>
-                      <div className="mt-1 text-slate-200 break-words">{agent.counterpart || '-'}</div>
+                  <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="vs-surface-muted p-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
+                      <div className="mt-3 break-words text-sm text-slate-200">{agent.counterpart || '-'}</div>
                     </div>
-                    <div className="rounded-md bg-slate-800/80 p-3">
-                      <div className="text-xs uppercase tracking-wide text-slate-500">Status</div>
-                      <div className="mt-1 text-slate-200">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-                      <div className="mt-1 text-xs text-slate-500">Started {fmtDateTime(agent.started_at)}</div>
+                    <div className="vs-surface-muted p-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
+                      <div className="mt-3 text-sm text-slate-200">{fmtDateTime(agent.started_at)}</div>
+                      <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
-      </main>
-    </div>
+        </SectionCard>
+      </div>
+    </PageLayout>
   );
 };
 

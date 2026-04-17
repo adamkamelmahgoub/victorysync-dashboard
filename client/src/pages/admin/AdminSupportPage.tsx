@@ -1,6 +1,7 @@
-import React, { FC, useState, useEffect } from 'react';
+import React, { FC, useEffect, useMemo, useState } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
+import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
 
@@ -26,13 +27,14 @@ interface Ticket {
 const AdminSupportPage: FC = () => {
   const { user } = useAuth();
   const userId = user?.id;
-  
+
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTickets();
@@ -41,22 +43,26 @@ const AdminSupportPage: FC = () => {
   const fetchTickets = async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await fetch(buildApiUrl('/api/admin/support/tickets'), {
         headers: {
           'x-user-id': userId || '',
-          'Content-Type': 'application/json'
-        }
+          'Content-Type': 'application/json',
+        },
       });
 
       if (!response.ok) {
-        console.error('Failed to fetch tickets');
+        setError('Failed to fetch tickets');
         return;
       }
 
       const data = await response.json();
-      setTickets(data.tickets || []);
+      const nextTickets = data.tickets || [];
+      setTickets(nextTickets);
+      setSelectedTicket((prev) => nextTickets.find((t: Ticket) => t.id === prev?.id) || prev || nextTickets[0] || null);
     } catch (error) {
       console.error('Error fetching tickets:', error);
+      setError('Failed to fetch tickets');
     } finally {
       setLoading(false);
     }
@@ -67,28 +73,26 @@ const AdminSupportPage: FC = () => {
 
     try {
       setSending(true);
+      setError(null);
       const response = await fetch(buildApiUrl(`/api/admin/support/tickets/${selectedTicket.id}/messages`), {
         method: 'POST',
         headers: {
           'x-user-id': userId || '',
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: messageText })
+        body: JSON.stringify({ message: messageText }),
       });
 
       if (!response.ok) {
-        alert('Failed to send message');
+        setError('Failed to send message');
         return;
       }
 
       setMessageText('');
-      fetchTickets();
-      // Re-select to show updated messages
-      const updatedTicket = tickets.find(t => t.id === selectedTicket.id);
-      if (updatedTicket) setSelectedTicket(updatedTicket);
+      await fetchTickets();
     } catch (error) {
       console.error('Error sending message:', error);
-      alert('Failed to send message');
+      setError('Failed to send message');
     } finally {
       setSending(false);
     }
@@ -102,172 +106,155 @@ const AdminSupportPage: FC = () => {
         method: 'PATCH',
         headers: {
           'x-user-id': userId || '',
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status: newStatus })
+        body: JSON.stringify({ status: newStatus }),
       });
 
       if (!response.ok) {
-        alert('Failed to update ticket status');
+        setError('Failed to update ticket status');
         return;
       }
 
-      fetchTickets();
+      await fetchTickets();
     } catch (error) {
       console.error('Error updating status:', error);
+      setError('Failed to update ticket status');
     }
   };
 
-  const filteredTickets = filterStatus === 'all' 
-    ? tickets 
-    : tickets.filter(t => t.status === filterStatus);
+  const filteredTickets = filterStatus === 'all'
+    ? tickets
+    : tickets.filter((t) => t.status === filterStatus);
+
+  const summary = useMemo(() => {
+    const open = tickets.filter((ticket) => ticket.status === 'open').length;
+    const inProgress = tickets.filter((ticket) => ticket.status === 'in-progress').length;
+    const highPriority = tickets.filter((ticket) => ticket.priority === 'high').length;
+    return { total: tickets.length, open, inProgress, highPriority };
+  }, [tickets]);
 
   return (
-    <PageLayout title="Support Tickets" description="View and manage all support tickets from clients">
+    <PageLayout
+      eyebrow="Admin support"
+      title="Support Tickets"
+      description="View, triage, and respond to support issues across all client organizations."
+      actions={<button onClick={fetchTickets} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>}
+    >
       <div className="space-y-6">
-
         <AdminTopNav />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Tickets List */}
-          <div className="lg:col-span-1 bg-slate-900/80 ring-1 ring-slate-800 rounded-lg overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-700/50">
-              <div className="flex items-center gap-2 mb-3">
-                <label className="text-xs font-semibold text-slate-300">Filter by Status:</label>
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="text-xs bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                >
-                  <option value="all">All</option>
-                  <option value="open">Open</option>
-                  <option value="in-progress">In Progress</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="closed">Closed</option>
-                </select>
-              </div>
-              <div className="text-xs text-slate-400">
-                {filteredTickets.length} ticket{filteredTickets.length !== 1 ? 's' : ''}
-              </div>
+        {error && <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricStatCard label="Tickets" value={summary.total} />
+          <MetricStatCard label="Open" value={summary.open} accent="cyan" />
+          <MetricStatCard label="In Progress" value={summary.inProgress} accent="emerald" />
+          <MetricStatCard label="High Priority" value={summary.highPriority} accent="amber" />
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.9fr,1.3fr]">
+          <SectionCard title="Ticket queue" description="Filter the queue and choose a ticket for triage.">
+            <div className="mb-4">
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status Filter</label>
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="vs-input w-full">
+                <option value="all">All</option>
+                <option value="open">Open</option>
+                <option value="in-progress">In Progress</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              </select>
             </div>
 
-            <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                <div className="p-4 text-slate-400 text-xs">Loading tickets...</div>
-              ) : filteredTickets.length === 0 ? (
-                <div className="p-4 text-slate-400 text-xs">No tickets found</div>
-              ) : (
-                filteredTickets.map(ticket => (
+            {loading ? (
+              <div className="text-sm text-slate-400">Loading tickets...</div>
+            ) : filteredTickets.length === 0 ? (
+              <EmptyStatePanel title="No tickets found" description="No support tickets matched the current filter." />
+            ) : (
+              <div className="space-y-3">
+                {filteredTickets.map((ticket) => (
                   <button
                     key={ticket.id}
                     onClick={() => setSelectedTicket(ticket)}
-                    className={`w-full text-left p-4 border-b border-slate-700/50 hover:bg-slate-800/50 transition ${
-                      selectedTicket?.id === ticket.id ? 'bg-slate-800/50' : ''
+                    className={`w-full rounded-3xl border p-4 text-left transition ${
+                      selectedTicket?.id === ticket.id
+                        ? 'border-cyan-400/20 bg-cyan-400/[0.07]'
+                        : 'border-white/8 bg-white/[0.025] hover:bg-white/[0.04]'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-xs text-white truncate">{ticket.subject}</div>
-                        <div className="text-xs text-slate-400 mt-1">{ticket.org_id}</div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-white">{ticket.subject}</div>
+                        <div className="mt-2 text-xs text-slate-500">{ticket.org_id}</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <StatusBadge tone={ticket.status === 'open' ? 'info' : ticket.status === 'resolved' ? 'success' : 'neutral'}>{ticket.status}</StatusBadge>
+                          <StatusBadge tone={ticket.priority === 'high' ? 'warning' : 'neutral'}>{ticket.priority}</StatusBadge>
+                        </div>
                       </div>
-                      <div className={`px-2 py-1 rounded text-xs font-semibold whitespace-nowrap ${
-                        ticket.status === 'open' ? 'bg-amber-900/50 text-amber-200 ring-1 ring-amber-800/50' :
-                        ticket.status === 'in-progress' ? 'bg-blue-900/50 text-blue-200 ring-1 ring-blue-800/50' :
-                        ticket.status === 'resolved' ? 'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-800/50' :
-                        'bg-slate-700/50 text-slate-300'
-                      }`}>
-                        {ticket.status}
-                      </div>
-                    </div>
-                    <div className="text-xs text-slate-500 mt-2">
-                      {new Date(ticket.created_at).toLocaleDateString()}
+                      <div className="text-xs text-slate-500">{new Date(ticket.created_at).toLocaleDateString()}</div>
                     </div>
                   </button>
-                ))
-              )}
-            </div>
-          </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
 
-          {/* Ticket Details */}
-          <div className="lg:col-span-2">
-            {selectedTicket ? (
-              <div className="bg-slate-900/80 ring-1 ring-slate-800 rounded-lg p-6 flex flex-col h-full">
-                <div className="space-y-4 pb-4">
+          <SectionCard title={selectedTicket?.subject || 'Ticket detail'} description="Update status, review the thread, and reply to the client.">
+            {!selectedTicket ? (
+              <EmptyStatePanel title="No ticket selected" description="Choose a ticket from the queue to start triage." />
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
-                    <h2 className="text-lg font-semibold text-white">{selectedTicket.subject}</h2>
-                    <p className="text-xs text-slate-400 mt-1">Organization: {selectedTicket.org_id}</p>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status</label>
+                    <select
+                      value={selectedTicket.status}
+                      onChange={(e) => {
+                        handleStatusChange(e.target.value);
+                        setSelectedTicket({ ...selectedTicket, status: e.target.value });
+                      }}
+                      className="vs-input w-full"
+                    >
+                      <option value="open">Open</option>
+                      <option value="in-progress">In Progress</option>
+                      <option value="resolved">Resolved</option>
+                      <option value="closed">Closed</option>
+                    </select>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs text-slate-400 font-semibold">Status</label>
-                      <select
-                        value={selectedTicket.status}
-                        onChange={(e) => {
-                          handleStatusChange(e.target.value);
-                          setSelectedTicket({ ...selectedTicket, status: e.target.value });
-                        }}
-                        className="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-100 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                      >
-                        <option value="open">Open</option>
-                        <option value="in-progress">In Progress</option>
-                        <option value="resolved">Resolved</option>
-                        <option value="closed">Closed</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-400 font-semibold">Priority</label>
-                      <div className={`mt-1 px-3 py-2 rounded text-xs font-semibold ${
-                        selectedTicket.priority === 'high' ? 'bg-red-900/50 text-red-200 ring-1 ring-red-800/50' :
-                        selectedTicket.priority === 'normal' ? 'bg-blue-900/50 text-blue-200 ring-1 ring-blue-800/50' :
-                        'bg-slate-700/50 text-slate-300'
-                      }`}>
-                        {selectedTicket.priority}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-slate-400">
-                    Created: {new Date(selectedTicket.created_at).toLocaleString()}
+                  <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Priority</div>
+                    <div className="mt-2"><StatusBadge tone={selectedTicket.priority === 'high' ? 'warning' : 'neutral'}>{selectedTicket.priority}</StatusBadge></div>
                   </div>
                 </div>
 
-                <div className="border-t border-slate-700/50 pt-4 flex-1 overflow-y-auto">
-                  <div className="space-y-4 mb-4">
-                    {selectedTicket.support_ticket_messages?.map(msg => (
-                      <div key={msg.id} className="bg-slate-800/30 rounded-lg p-3">
-                        <div className="text-xs text-slate-400 mb-2">
-                          {msg.sender_user_id === selectedTicket.created_by ? 'Client' : 'You'} • {new Date(msg.created_at).toLocaleString()}
-                        </div>
-                        <p className="text-xs text-slate-100">{msg.message}</p>
+                <div className="text-xs text-slate-500">Created {new Date(selectedTicket.created_at).toLocaleString()}</div>
+
+                <div className="max-h-[360px] space-y-3 overflow-y-auto rounded-3xl border border-white/8 bg-white/[0.02] p-4">
+                  {selectedTicket.support_ticket_messages?.map((msg) => (
+                    <div key={msg.id} className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                      <div className="mb-2 text-xs text-slate-500">
+                        {msg.sender_user_id === selectedTicket.created_by ? 'Client' : 'You'} · {new Date(msg.created_at).toLocaleString()}
                       </div>
-                    ))}
-                  </div>
+                      <p className="text-sm text-slate-100">{msg.message}</p>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="border-t border-slate-700/50 pt-4">
+                <div className="space-y-3">
                   <textarea
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
                     placeholder="Type your response..."
-                    className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-100 text-xs mb-3 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                    className="vs-input min-h-[120px] w-full resize-none"
                     rows={3}
                   />
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={sending || !messageText.trim()}
-                    className="w-full bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-lg text-xs transition"
-                  >
+                  <button onClick={handleSendMessage} disabled={sending || !messageText.trim()} className="vs-button-primary w-full">
                     {sending ? 'Sending...' : 'Send Response'}
                   </button>
                 </div>
               </div>
-            ) : (
-              <div className="bg-slate-900/80 ring-1 ring-slate-800 rounded-lg p-6 text-center text-slate-400">
-                <p className="text-xs">Select a ticket to view details</p>
-              </div>
             )}
-          </div>
+          </SectionCard>
         </div>
       </div>
     </PageLayout>

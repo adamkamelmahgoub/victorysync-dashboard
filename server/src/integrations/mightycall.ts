@@ -116,7 +116,7 @@ export async function fetchMightyCallPhoneNumbers(accessToken: string) {
   return [];
 }
 
-export async function fetchMightyCallCalls(accessToken: string, filters?: any) {
+export async function fetchMightyCallCalls(accessToken: string, filters?: any, apiKeyOverride?: string) {
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const endpoints = ['/calls', '/api/calls', '/v4/calls', '/api/calls/list', '/journal/calls', '/call-history', '/callhistory'];
   const pageSize = Math.min(Math.max(parseInt(String(filters?.pageSize || '200'), 10) || 200, 1), 1000);
@@ -154,7 +154,7 @@ export async function fetchMightyCallCalls(accessToken: string, filters?: any) {
           params.append('page', String(page));
 
           const full = `${url}?${params.toString()}`;
-          const r = await tryFetchJson(full, accessToken);
+          const r = await tryFetchJson(full, accessToken, apiKeyOverride);
           if (!r.ok || !r.body) break;
 
           const body: any = r.body;

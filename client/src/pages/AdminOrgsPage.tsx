@@ -1,5 +1,6 @@
 import React, { FC, useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { buildApiUrl } from '../config';
 
 interface Organization {
   id: string;

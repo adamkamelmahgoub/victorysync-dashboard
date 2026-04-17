@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
+import { EmptyStatePanel, MetricStatCard, SectionCard } from '../components/DashboardPrimitives';
 
 type Recording = {
   id: string;
@@ -85,7 +86,7 @@ export function RecordingsPage() {
       q.set('offset', String(activeOffset));
       if (orgId) q.set('org_id', orgId);
       const response = await fetch(buildApiUrl(`/api/mightycall/recordings?${q.toString()}`), {
-        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' }
+        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
       });
 
       if (!response.ok) {
@@ -113,7 +114,7 @@ export function RecordingsPage() {
   const handleDownload = async (recording: Recording) => {
     try {
       const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download`), {
-        headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' }
+        headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
         setError('Failed to download recording');
@@ -135,65 +136,68 @@ export function RecordingsPage() {
 
   if (!orgId && (!orgs || orgs.length === 0)) {
     return (
-      <PageLayout title="Recordings" description="No organization selected">
-        <div className="vs-surface p-6 text-slate-300">No organization is linked to this account yet. Ask your org admin to assign your account to an organization.</div>
+      <PageLayout eyebrow="Recordings" title="Recordings" description="No organization selected">
+        <EmptyStatePanel title="No organization linked" description="Ask your org admin to assign your account to an organization before reviewing recordings." />
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout title="Recordings" description={`Organized recording history for ${orgName}`}>
+    <PageLayout
+      eyebrow="Quality review"
+      title="Recordings"
+      description={`Organized recording history, playback, and download actions for ${orgName}.`}
+      actions={<button onClick={() => fetchRecordings(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>}
+    >
       <div className="space-y-6">
-        <section className="vs-surface p-5">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Search Number</label>
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100" />
+        <SectionCard title="Recording filters" description="Search recording activity by the numbers involved.">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,320px),1fr] md:items-end">
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Search Number</label>
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="vs-input w-full" />
             </div>
-            <div className="text-xs text-slate-400">Scope: assigned numbers only</div>
-            <button onClick={() => fetchRecordings(true)} disabled={loading} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">{loading ? 'Refreshing...' : 'Refresh'}</button>
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">Scope: assigned numbers only</div>
           </div>
-        </section>
+        </SectionCard>
 
-        {error && <div className="vs-surface border border-rose-500/40 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</div>}
+        {error && <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
 
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Recordings</div><div className="text-2xl text-white font-bold">{summary.total}</div></div>
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Total Duration</div><div className="text-2xl text-white font-bold">{fmtDuration(summary.totalSeconds)}</div></div>
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Average Duration</div><div className="text-2xl text-cyan-300 font-bold">{fmtDuration(summary.avgSeconds)}</div></div>
-        </section>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <MetricStatCard label="Recordings" value={summary.total} />
+          <MetricStatCard label="Total Duration" value={fmtDuration(summary.totalSeconds)} />
+          <MetricStatCard label="Average Duration" value={fmtDuration(summary.avgSeconds)} accent="cyan" />
+        </div>
 
-        <section className="vs-surface p-0 overflow-hidden">
-          <div className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">Recording List</div>
+        <SectionCard title="Recording list" description="Review call recordings with direct playback and download actions." contentClassName="p-0">
           {loading ? (
-            <div className="px-4 py-8 text-sm text-slate-400">Loading recordings...</div>
+            <div className="px-5 py-10 text-sm text-slate-400">Loading recordings...</div>
           ) : filteredRows.length === 0 ? (
-            <div className="px-4 py-8 text-sm text-slate-400">No recordings found.</div>
+            <div className="p-5"><EmptyStatePanel title="No recordings found" description="No recording rows matched the current organization and search criteria." /></div>
           ) : (
             <div className="max-h-[72vh] overflow-auto">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400">
+                <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
                   <tr>
-                    <th className="text-left py-2 px-3">From</th>
-                    <th className="text-left py-2 px-3">To</th>
-                    <th className="text-left py-2 px-3">Duration</th>
-                    <th className="text-left py-2 px-3">Date</th>
-                    <th className="text-left py-2 px-3">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">From</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">To</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Duration</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-white/6">
                   {filteredRows.map((recording) => (
-                    <tr key={recording.id} className="hover:bg-slate-800/40">
-                      <td className="px-3 py-2 font-mono text-xs text-slate-200">{recording.from_number || '-'}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-slate-200">{recording.to_number || '-'}</td>
-                      <td className="px-3 py-2 text-slate-300">{fmtDuration(secondsOf(recording))}</td>
-                      <td className="px-3 py-2 text-xs text-slate-400">{fmtDate(recording.recording_date || recording.created_at)}</td>
-                      <td className="px-3 py-2">
+                    <tr key={recording.id} className="transition hover:bg-white/[0.03]">
+                      <td className="px-4 py-3 font-mono text-xs text-slate-200">{recording.from_number || '-'}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-200">{recording.to_number || '-'}</td>
+                      <td className="px-4 py-3 text-slate-300">{fmtDuration(secondsOf(recording))}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(recording.recording_date || recording.created_at)}</td>
+                      <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {recording.recording_url ? (
-                            <a href={recording.recording_url} target="_blank" rel="noopener noreferrer" className="rounded border border-cyan-500/40 bg-cyan-900/20 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-900/30">Play</a>
+                            <a href={recording.recording_url} target="_blank" rel="noopener noreferrer" className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</a>
                           ) : <span className="text-xs text-slate-500">N/A</span>}
-                          <button onClick={() => handleDownload(recording)} className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700">Download</button>
+                          <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>
                         </div>
                       </td>
                     </tr>
@@ -202,13 +206,15 @@ export function RecordingsPage() {
               </table>
 
               {nextOffset !== null && (
-                <div className="p-3 border-t border-slate-800 flex justify-center">
-                  <button onClick={() => fetchRecordings(false)} disabled={loadingMore} className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-60">{loadingMore ? 'Loading...' : 'Load more'}</button>
+                <div className="flex justify-center border-t border-white/8 p-4">
+                  <button onClick={() => fetchRecordings(false)} disabled={loadingMore} className="vs-button-secondary">
+                    {loadingMore ? 'Loading more...' : 'Load more'}
+                  </button>
                 </div>
               )}
             </div>
           )}
-        </section>
+        </SectionCard>
       </div>
     </PageLayout>
   );

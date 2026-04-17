@@ -53,7 +53,7 @@ export default function PhoneNumbersTab({ orgId }: { orgId: string }) {
     setError(null);
     const { data, error } = await supabase
       .from('phone_numbers')
-      .select('id, number, label, created_at, status')
+      .select('id, number, label, created_at, is_active')
       .eq('org_id', orgId)
       .order('created_at', { ascending: false });
     if (error) setError(error.message);

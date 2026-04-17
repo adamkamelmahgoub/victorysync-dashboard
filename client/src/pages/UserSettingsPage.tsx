@@ -462,12 +462,12 @@ export default function UserSettingsPage() {
               <div className="flex gap-2">
                 <input
                   type="text"
-                  value={showNewKeyPlaintext}
+                  value={showNewKeyPlaintext || ''}
                   readOnly
                   className="flex-1 px-4 py-2 bg-slate-900 border border-amber-700 rounded-lg text-amber-300 font-mono text-sm"
                 />
                 <button
-                  onClick={() => copyToClipboard(showNewKeyPlaintext)}
+                  onClick={() => copyToClipboard(showNewKeyPlaintext || '')}
                   className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold transition"
                 >
                   Copy

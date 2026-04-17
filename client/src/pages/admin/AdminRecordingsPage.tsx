@@ -1,6 +1,7 @@
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
+import { EmptyStatePanel, MetricStatCard, SectionCard } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
 
@@ -124,70 +125,72 @@ const AdminRecordingsPage: FC = () => {
   }, [autoRefreshEnabled, filterOrgId, userId]);
 
   return (
-    <PageLayout title="Recordings" description="Organized recordings view with numbers, durations, and direct actions">
+    <PageLayout
+      eyebrow="Admin recordings"
+      title="Recordings"
+      description="Cross-organization recording review with playback access and queue-quality visibility."
+      actions={<button onClick={() => loadRecordings(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>}
+    >
       <div className="space-y-6">
         <AdminTopNav />
 
-        <section className="vs-surface p-5">
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Organization</label>
-              <select value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100">
+        <SectionCard title="Recording filters" description="Search by number, narrow by organization, and optionally watch for new rows.">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,240px),minmax(0,240px),1fr] md:items-end">
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Organization</label>
+              <select value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="vs-input w-full">
                 <option value="">All Organizations</option>
                 {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
               </select>
             </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Search Number</label>
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100" />
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Search Number</label>
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="vs-input w-full" />
             </div>
-            <button onClick={() => loadRecordings(true)} disabled={loading} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-60">{loading ? 'Refreshing...' : 'Refresh'}</button>
-            <label className="flex items-center justify-end gap-2 text-xs text-slate-300">
+            <label className="flex items-center justify-start gap-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
               <input type="checkbox" checked={autoRefreshEnabled} onChange={(e) => setAutoRefreshEnabled(e.target.checked)} />
-              Auto-refresh 10s
+              Auto-refresh every 10 seconds
             </label>
           </div>
-        </section>
+        </SectionCard>
 
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Recordings</div><div className="text-2xl text-white font-bold">{summary.total}</div></div>
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Total Duration</div><div className="text-2xl text-white font-bold">{fmtDuration(summary.totalSeconds)}</div></div>
-          <div className="vs-surface p-4"><div className="text-xs text-slate-400">Average Duration</div><div className="text-2xl text-cyan-300 font-bold">{fmtDuration(summary.avgSeconds)}</div></div>
-        </section>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <MetricStatCard label="Recordings" value={summary.total} />
+          <MetricStatCard label="Total Duration" value={fmtDuration(summary.totalSeconds)} />
+          <MetricStatCard label="Average Duration" value={fmtDuration(summary.avgSeconds)} accent="cyan" />
+        </div>
 
-        <section className="vs-surface p-0 overflow-hidden">
-          <div className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">Recording List</div>
-
+        <SectionCard title="Recording inventory" description="A cross-client list of recording rows available for review." contentClassName="p-0">
           {listError ? (
-            <div className="px-4 py-8 text-sm text-rose-300">{listError}</div>
+            <div className="px-5 py-10 text-sm text-rose-300">{listError}</div>
           ) : loading ? (
-            <div className="px-4 py-8 text-sm text-slate-400">Loading recordings...</div>
+            <div className="px-5 py-10 text-sm text-slate-400">Loading recordings...</div>
           ) : filteredRows.length === 0 ? (
-            <div className="px-4 py-8 text-sm text-slate-400">No recordings found.</div>
+            <div className="p-5"><EmptyStatePanel title="No recordings found" description="No recording rows matched the current admin filters." /></div>
           ) : (
             <div className="max-h-[72vh] overflow-auto">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400">
+                <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
                   <tr>
-                    <th className="text-left py-2 px-3">Organization</th>
-                    <th className="text-left py-2 px-3">From</th>
-                    <th className="text-left py-2 px-3">To</th>
-                    <th className="text-left py-2 px-3">Duration</th>
-                    <th className="text-left py-2 px-3">Date</th>
-                    <th className="text-left py-2 px-3">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Organization</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">From</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">To</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Duration</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-white/6">
                   {filteredRows.map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-800/40">
-                      <td className="px-3 py-2 text-slate-200">{r.organizations?.name || r.org_id}</td>
-                      <td className="px-3 py-2 text-xs font-mono text-slate-200">{r.from_number || '-'}</td>
-                      <td className="px-3 py-2 text-xs font-mono text-slate-200">{r.to_number || '-'}</td>
-                      <td className="px-3 py-2 text-slate-300">{fmtDuration(secondsOf(r))}</td>
-                      <td className="px-3 py-2 text-xs text-slate-400">{fmtDate(r.recording_date || r.created_at)}</td>
-                      <td className="px-3 py-2">
+                    <tr key={r.id} className="transition hover:bg-white/[0.03]">
+                      <td className="px-4 py-3 text-slate-200">{r.organizations?.name || r.org_id}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-200">{r.from_number || '-'}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-200">{r.to_number || '-'}</td>
+                      <td className="px-4 py-3 text-slate-300">{fmtDuration(secondsOf(r))}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(r.recording_date || r.created_at)}</td>
+                      <td className="px-4 py-3">
                         {r.recording_url ? (
-                          <a href={r.recording_url} target="_blank" rel="noopener noreferrer" className="rounded border border-cyan-500/40 bg-cyan-900/20 px-2 py-1 text-xs text-cyan-200 hover:bg-cyan-900/30">Play</a>
+                          <a href={r.recording_url} target="_blank" rel="noopener noreferrer" className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</a>
                         ) : (
                           <span className="text-xs text-slate-500">N/A</span>
                         )}
@@ -198,13 +201,15 @@ const AdminRecordingsPage: FC = () => {
               </table>
 
               {nextOffset !== null && (
-                <div className="p-3 border-t border-slate-800 flex justify-center">
-                  <button onClick={() => loadRecordings(false)} disabled={loadingMore} className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-60">{loadingMore ? 'Loading...' : 'Load more'}</button>
+                <div className="flex justify-center border-t border-white/8 p-4">
+                  <button onClick={() => loadRecordings(false)} disabled={loadingMore} className="vs-button-secondary">
+                    {loadingMore ? 'Loading more...' : 'Load more'}
+                  </button>
                 </div>
               )}
             </div>
           )}
-        </section>
+        </SectionCard>
       </div>
     </PageLayout>
   );
