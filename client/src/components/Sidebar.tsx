@@ -31,14 +31,14 @@ function NavButton({
       onClick={onClick}
       className={`group flex w-full items-center justify-between rounded-2xl px-3.5 py-3 text-left text-sm transition ${
         active
-          ? 'bg-white/[0.07] text-white shadow-[0_10px_28px_rgba(2,6,23,0.26)] ring-1 ring-cyan-400/20'
+          ? 'bg-white/[0.06] text-white shadow-[0_10px_28px_rgba(2,6,23,0.22)]'
           : 'text-slate-300 hover:bg-white/[0.04] hover:text-white'
       }`}
     >
       <span className="font-medium">{item.label}</span>
       {item.badge && (
         <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] ${
-          active ? 'border-cyan-400/20 bg-cyan-400/10 text-cyan-200' : 'border-white/10 text-slate-500'
+          active ? 'border-cyan-400/[0.12] bg-cyan-400/[0.08] text-cyan-200' : 'border-white/[0.04] text-slate-500'
         }`}>
           {item.badge}
         </span>
@@ -104,10 +104,10 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const selectedOrgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
 
   return (
-    <aside className="fixed left-0 top-0 flex h-screen w-72 flex-col border-r border-white/8 bg-[linear-gradient(180deg,rgba(3,7,18,0.96),rgba(7,12,24,0.98))] px-4 pb-4 pt-5 backdrop-blur-xl">
-      <div className="rounded-[28px] border border-white/8 bg-white/[0.03] px-4 py-4 shadow-[0_22px_60px_rgba(2,6,23,0.35)]">
+    <aside className="fixed left-0 top-0 flex h-screen w-72 flex-col border-r border-white/[0.04] bg-[linear-gradient(180deg,rgba(3,7,18,0.96),rgba(7,12,24,0.98))] px-4 pb-4 pt-5 backdrop-blur-xl">
+      <div className="rounded-[28px] border border-white/[0.04] bg-white/[0.03] px-4 py-4 shadow-[0_22px_60px_rgba(2,6,23,0.28)]">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-sm font-semibold tracking-[0.24em] text-cyan-100">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/[0.12] bg-cyan-400/[0.08] text-sm font-semibold tracking-[0.24em] text-cyan-100">
             VS
           </div>
           <div>
@@ -116,7 +116,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 px-3 py-3">
+        <div className="mt-4 rounded-2xl border border-white/[0.04] bg-black/20 px-3 py-3">
           <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Workspace</div>
           <div className="mt-2 text-sm font-medium text-slate-200">{selectedOrgName}</div>
           <div className="mt-1 text-xs text-slate-500">{isAdmin ? 'Platform visibility across organizations' : 'Organization operations view'}</div>
@@ -136,7 +136,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
         ))}
       </nav>
 
-      <div className="space-y-2 rounded-[26px] border border-white/8 bg-white/[0.03] p-3">
+      <div className="space-y-2 rounded-[26px] border border-white/[0.04] bg-white/[0.03] p-3">
         <div className="px-1">
           <div className="text-sm font-medium text-slate-200">{user?.email || 'Signed in'}</div>
           <div className="mt-1 text-xs text-slate-500">Account and access controls</div>
@@ -145,7 +145,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           onClick={() => navigate('/account-settings')}
           className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
             isActivePath(currentPath, '/account-settings')
-              ? 'bg-white/[0.07] text-white ring-1 ring-cyan-400/20'
+              ? 'bg-white/[0.06] text-white'
               : 'text-slate-300 hover:bg-white/[0.04] hover:text-white'
           }`}
         >
@@ -153,7 +153,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
         </button>
         <button
           onClick={() => signOut()}
-          className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
+          className="w-full rounded-2xl border border-white/[0.04] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
         >
           Sign Out
         </button>
