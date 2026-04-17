@@ -1,15 +1,69 @@
-import React, { FC } from "react";
+import React, { FC, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useDashboardMetrics } from "../hooks/useDashboardMetrics";
 import { Sidebar } from "../components/Sidebar";
+import { getOrgAgentLiveStatus } from "../lib/apiClient";
+
+type LiveAgentStatus = {
+  user_id: string;
+  email?: string | null;
+  extension?: string | null;
+  display_name?: string | null;
+  on_call: boolean;
+  counterpart?: string | null;
+  status?: string | null;
+  started_at?: string | null;
+};
 
 const DashboardNewV3: FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { selectedOrgId, globalRole } = useAuth();
+  const { selectedOrgId, globalRole, user } = useAuth();
   const isAdmin = globalRole === 'platform_admin';
   const { metrics, loading } = useDashboardMetrics(selectedOrgId ?? null);
+  const [liveAgents, setLiveAgents] = useState<LiveAgentStatus[]>([]);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveRefreshedAt, setLiveRefreshedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLiveAgents = async () => {
+      if (!selectedOrgId || !user?.id) {
+        if (!cancelled) {
+          setLiveAgents([]);
+          setLiveError(null);
+          setLiveRefreshedAt(null);
+        }
+        return;
+      }
+
+      try {
+        if (!cancelled) {
+          setLiveLoading(true);
+          setLiveError(null);
+        }
+        const json = await getOrgAgentLiveStatus(selectedOrgId, user.id);
+        if (cancelled) return;
+        setLiveAgents((json.items || []) as LiveAgentStatus[]);
+        setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
+      } catch (e: any) {
+        if (cancelled) return;
+        setLiveError(e?.message || "Failed to load live agent status");
+      } finally {
+        if (!cancelled) setLiveLoading(false);
+      }
+    };
+
+    loadLiveAgents();
+    const intervalId = window.setInterval(loadLiveAgents, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [selectedOrgId, user?.id]);
 
   const formatSecondsAsMinutes = (s: number | undefined | null) => {
     if (!s && s !== 0) return '0m 0s';
@@ -17,6 +71,13 @@ const DashboardNewV3: FC = () => {
     const m = Math.floor(secs / 60);
     const sec = secs % 60;
     return `${m}m ${sec}s`;
+  };
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString();
   };
 
   return (
@@ -99,6 +160,87 @@ const DashboardNewV3: FC = () => {
                     onClick={() => navigate(isAdmin ? '/admin/support' : '/support')}
                   />
                 </div>
+              </div>
+
+              <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Live Agent Status</h2>
+                    <p className="text-sm text-slate-400 mt-1">
+                      {selectedOrgId
+                        ? (liveRefreshedAt ? `Updated ${formatDateTime(liveRefreshedAt)}` : 'Status from MightyCall')
+                        : 'Select an organization to view live agent call status'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!selectedOrgId || !user?.id) return;
+                      try {
+                        setLiveLoading(true);
+                        setLiveError(null);
+                        const json = await getOrgAgentLiveStatus(selectedOrgId, user.id);
+                        setLiveAgents((json.items || []) as LiveAgentStatus[]);
+                        setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
+                      } catch (e: any) {
+                        setLiveError(e?.message || "Failed to load live agent status");
+                      } finally {
+                        setLiveLoading(false);
+                      }
+                    }}
+                    disabled={!selectedOrgId || liveLoading}
+                    className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-200 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50"
+                  >
+                    {liveLoading ? 'Refreshing...' : 'Refresh Live'}
+                  </button>
+                </div>
+
+                {liveError && (
+                  <div className="mb-4 rounded-lg border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-300">
+                    {liveError}
+                  </div>
+                )}
+
+                {!selectedOrgId ? (
+                  <div className="text-sm text-slate-400">No organization selected.</div>
+                ) : liveAgents.length === 0 ? (
+                  <div className="text-sm text-slate-400">
+                    {liveLoading ? 'Loading live agent activity...' : 'No agents or live call activity found for this organization.'}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    {liveAgents.map((agent) => (
+                      <div key={agent.user_id} className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-white font-semibold">
+                              {agent.display_name || agent.email || 'Agent'}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-1">
+                              {agent.email || 'No email'}{agent.extension ? ` • Ext ${agent.extension}` : ''}
+                            </div>
+                          </div>
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                            agent.on_call ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-700 text-slate-300'
+                          }`}>
+                            {agent.on_call ? 'On Call' : (agent.status || 'Idle')}
+                          </span>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                          <div className="rounded-md bg-slate-800/80 p-3">
+                            <div className="text-xs uppercase tracking-wide text-slate-500">With</div>
+                            <div className="mt-1 text-slate-200 break-words">{agent.counterpart || '-'}</div>
+                          </div>
+                          <div className="rounded-md bg-slate-800/80 p-3">
+                            <div className="text-xs uppercase tracking-wide text-slate-500">Status</div>
+                            <div className="mt-1 text-slate-200">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+                            <div className="mt-1 text-xs text-slate-500">Started {formatDateTime(agent.started_at)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Recent Activity */}
