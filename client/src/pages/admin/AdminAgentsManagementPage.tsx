@@ -227,9 +227,29 @@ const AdminAgentsManagementPage: FC = () => {
       setManualImportLoading(true);
       setError(null);
       setManualImportMessage(null);
-      await importAdminMightyCallExtension(nextExtension, createOrgId || activeOrgId || null, userId);
+      const json = await importAdminMightyCallExtension(nextExtension, createOrgId || activeOrgId || null, userId);
+      const imported = json?.extension as ExtensionOption | undefined;
       setManualExtension('');
       setManualImportMessage(`Imported extension ${nextExtension} from MightyCall.`);
+      if (imported?.extension) {
+        setGlobalExtensionOptions((prev) => {
+          const next = [...prev];
+          if (!next.some((item) => item.extension === imported.extension)) {
+            next.push(imported);
+          }
+          return next.sort((a, b) => String(a.extension || '').localeCompare(String(b.extension || '')));
+        });
+        if (createOrgId) {
+          setExtensionOptionsByOrg((prev) => {
+            const current = prev[createOrgId] || [];
+            if (current.some((item) => item.extension === imported.extension)) return prev;
+            return {
+              ...prev,
+              [createOrgId]: [...current, imported].sort((a, b) => String(a.extension || '').localeCompare(String(b.extension || '')))
+            };
+          });
+        }
+      }
       await Promise.all([
         loadGlobalExtensions(),
         createOrgId ? refreshExtensionsForOrg(createOrgId) : Promise.resolve()
