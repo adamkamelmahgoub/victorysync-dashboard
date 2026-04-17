@@ -3,7 +3,7 @@ import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
-import { cleanupOrgMightyCallExtensions, getLiveAgentStatus, getOrgMightyCallExtensions } from '../../lib/apiClient';
+import { cleanupOrgMightyCallExtensions, getAdminMightyCallExtensions, getLiveAgentStatus, getOrgMightyCallExtensions } from '../../lib/apiClient';
 
 type Org = { id: string; name: string };
 type AuthUser = { id: string; email: string; role?: string | null };
@@ -19,6 +19,8 @@ type ExtensionOption = {
   display_name?: string | null;
   sources?: string[];
   is_live?: boolean;
+  source_org_id?: string | null;
+  source_org_name?: string | null;
 };
 type LiveAgentStatus = {
   user_id: string;
@@ -73,6 +75,10 @@ const AdminAgentsManagementPage: FC = () => {
   const [extensionsInfoByOrg, setExtensionsInfoByOrg] = useState<Record<string, string | null>>({});
   const [cleanupLoadingByOrg, setCleanupLoadingByOrg] = useState<Record<string, boolean>>({});
   const [cleanupSummary, setCleanupSummary] = useState<string | null>(null);
+  const [globalExtensionOptions, setGlobalExtensionOptions] = useState<ExtensionOption[]>([]);
+  const [globalExtensionsLoading, setGlobalExtensionsLoading] = useState(false);
+  const [globalExtensionsError, setGlobalExtensionsError] = useState<string | null>(null);
+  const [globalExtensionsInfo, setGlobalExtensionsInfo] = useState<string | null>(null);
 
   const activeOrgId = selectedOrgId || '';
 
@@ -155,6 +161,29 @@ const AdminAgentsManagementPage: FC = () => {
       setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: e?.message || 'Failed to load MightyCall extensions' }));
     } finally {
       setExtensionsLoadingByOrg((prev) => ({ ...prev, [orgId]: false }));
+    }
+  };
+
+  const loadGlobalExtensions = async () => {
+    if (!userId) return;
+    setGlobalExtensionsLoading(true);
+    setGlobalExtensionsError(null);
+    setGlobalExtensionsInfo(null);
+    try {
+      const json = await getAdminMightyCallExtensions(userId, { liveOnly: true });
+      const liveOptions = (json.live_extensions || []) as ExtensionOption[];
+      const fallbackOptions = (json.fallback_extensions || []) as ExtensionOption[];
+      const nextOptions = liveOptions.length > 0 ? liveOptions : fallbackOptions;
+      setGlobalExtensionOptions(nextOptions);
+      if (!liveOptions.length && fallbackOptions.length) {
+        setGlobalExtensionsInfo('Showing all org-scoped extensions because no live MightyCall extension list was returned.');
+      } else if (!nextOptions.length) {
+        setGlobalExtensionsError('No MightyCall extensions were found across any org.');
+      }
+    } catch (e: any) {
+      setGlobalExtensionsError(e?.message || 'Failed to load global MightyCall extensions');
+    } finally {
+      setGlobalExtensionsLoading(false);
     }
   };
 
@@ -242,6 +271,10 @@ const AdminAgentsManagementPage: FC = () => {
   }, [userId]);
 
   useEffect(() => {
+    loadGlobalExtensions();
+  }, [userId]);
+
+  useEffect(() => {
     loadLiveStatuses();
   }, [userId, activeOrgId]);
 
@@ -255,7 +288,7 @@ const AdminAgentsManagementPage: FC = () => {
     }
   }, [activeOrgId]);
 
-  const createExtensionOptions = extensionOptionsByOrg[createOrgId] || [];
+  const createExtensionOptions = globalExtensionOptions.length > 0 ? globalExtensionOptions : (extensionOptionsByOrg[createOrgId] || []);
   const detailOrgId = activeOrgId || createOrgId;
   const activeOrgHiddenExtensions = hiddenExtensionOptionsByOrg[detailOrgId] || [];
   const activeOrgExtensionsError = extensionsErrorByOrg[detailOrgId] || null;
@@ -355,11 +388,14 @@ const AdminAgentsManagementPage: FC = () => {
             </div>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => refreshExtensionsForOrg(activeOrgId || createOrgId)}
-                disabled={extensionsLoadingByOrg[activeOrgId || createOrgId] || !(activeOrgId || createOrgId)}
+                onClick={() => {
+                  loadGlobalExtensions();
+                  if (activeOrgId || createOrgId) refreshExtensionsForOrg(activeOrgId || createOrgId);
+                }}
+                disabled={(globalExtensionsLoading || extensionsLoadingByOrg[activeOrgId || createOrgId]) || !(activeOrgId || createOrgId)}
                 className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50"
               >
-                {extensionsLoadingByOrg[activeOrgId || createOrgId] ? 'Refreshing extensions...' : 'Refresh Extensions'}
+                {(globalExtensionsLoading || extensionsLoadingByOrg[activeOrgId || createOrgId]) ? 'Refreshing extensions...' : 'Refresh Extensions'}
               </button>
               <button
                 onClick={handleCleanupExtensions}
@@ -396,10 +432,11 @@ const AdminAgentsManagementPage: FC = () => {
               <option value="org_manager">Org Manager</option>
             </select>
             <select value={createExtension} onChange={(e) => setCreateExtension(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100">
-              <option value="">{extensionsLoadingByOrg[createOrgId] ? 'Loading extensions...' : 'Select extension'}</option>
+              <option value="">{(globalExtensionsLoading || extensionsLoadingByOrg[createOrgId]) ? 'Loading extensions...' : 'Select extension'}</option>
               {createExtensionOptions.map((option) => (
-                <option key={option.extension} value={option.extension}>
+                <option key={`${option.source_org_id || 'global'}:${option.extension}`} value={option.extension}>
                   {option.display_name ? `${option.extension} - ${option.display_name}` : option.extension}
+                  {option.source_org_name ? ` (${option.source_org_name})` : ''}
                 </option>
               ))}
             </select>
@@ -415,10 +452,16 @@ const AdminAgentsManagementPage: FC = () => {
             </button>
           </div>
 
-          {(cleanupSummary || activeOrgExtensionsError || activeOrgExtensionsInfo || activeOrgHiddenExtensions.length > 0) && (
+          {(cleanupSummary || globalExtensionsError || globalExtensionsInfo || activeOrgExtensionsError || activeOrgExtensionsInfo || activeOrgHiddenExtensions.length > 0) && (
             <div className="mt-4 space-y-2">
               {cleanupSummary && (
                 <div className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-300">{cleanupSummary}</div>
+              )}
+              {globalExtensionsInfo && (
+                <div className="rounded-lg border border-cyan-700/60 bg-cyan-950/30 px-4 py-3 text-sm text-cyan-300">{globalExtensionsInfo}</div>
+              )}
+              {globalExtensionsError && (
+                <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">{globalExtensionsError}</div>
               )}
               {activeOrgExtensionsInfo && (
                 <div className="rounded-lg border border-cyan-700/60 bg-cyan-950/30 px-4 py-3 text-sm text-cyan-300">{activeOrgExtensionsInfo}</div>
@@ -483,7 +526,7 @@ const AdminAgentsManagementPage: FC = () => {
                     const key = `${row.user_id}:${row.org_id}`;
                     const isEditing = editingKey === key;
                     const live = liveStatusByAssignment.get(`${row.org_id}:${row.user_id}`);
-                    const options = extensionOptionsByOrg[row.org_id] || [];
+                    const options = globalExtensionOptions.length > 0 ? globalExtensionOptions : (extensionOptionsByOrg[row.org_id] || []);
 
                     return (
                       <tr key={key}>
@@ -502,10 +545,11 @@ const AdminAgentsManagementPage: FC = () => {
                         <td className="py-2 px-3">
                           {isEditing ? (
                             <select value={editExtension} onChange={(e) => setEditExtension(e.target.value)} className="min-w-[180px] rounded border border-slate-700 bg-slate-900 px-2 py-1 text-slate-100">
-                              <option value="">{extensionsLoadingByOrg[row.org_id] ? 'Loading extensions...' : 'Select extension'}</option>
+                              <option value="">{(globalExtensionsLoading || extensionsLoadingByOrg[row.org_id]) ? 'Loading extensions...' : 'Select extension'}</option>
                               {options.map((option) => (
-                                <option key={option.extension} value={option.extension}>
+                                <option key={`${option.source_org_id || row.org_id}:${option.extension}`} value={option.extension}>
                                   {option.display_name ? `${option.extension} - ${option.display_name}` : option.extension}
+                                  {option.source_org_name ? ` (${option.source_org_name})` : ''}
                                 </option>
                               ))}
                             </select>

@@ -3044,24 +3044,7 @@ app.get('/api/orgs/:orgId/agent-extensions', async (req, res) => {
   }
 });
 
-// GET /api/orgs/:orgId/mightycall/extensions - fetch available extensions for dropdown selection
-app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
-  try {
-    const actorId = req.header('x-user-id') || null;
-    const { orgId } = req.params;
-    const liveOnly = String(req.query.live_only || '').toLowerCase() === 'true';
-    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
-
-    const isMember = !!(await supabaseAdmin
-      .from('org_users')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('user_id', actorId)
-      .maybeSingle()
-      .then(r => r.data));
-    const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
-    if (!allowed) return res.status(403).json({ error: 'forbidden' });
-
+async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: boolean) {
     let overrideCreds: any = undefined;
     try {
       const { getOrgIntegration } = await import('./lib/integrationsStore');
@@ -3171,7 +3154,7 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
       ? hiddenExtensions.filter((row) => row.sources.some((source) => source === 'agent_extensions' || source === 'org_users'))
       : [];
 
-    res.json({
+    return {
       extensions: visibleExtensions,
       hidden_extensions: hiddenExtensions,
       fallback_extensions: fallbackExtensions,
@@ -3183,10 +3166,104 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
         cached_only_count: allExtensions.filter((row) => !row.is_live).length,
         fallback_count: fallbackExtensions.length
       }
-    });
+    };
+}
+
+// GET /api/orgs/:orgId/mightycall/extensions - fetch available extensions for dropdown selection
+app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    const liveOnly = String(req.query.live_only || '').toLowerCase() === 'true';
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const isMember = !!(await supabaseAdmin
+      .from('org_users')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('user_id', actorId)
+      .maybeSingle()
+      .then(r => r.data));
+    const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    const inventory = await getMightyCallExtensionInventoryForOrg(orgId, liveOnly);
+    res.json(inventory);
   } catch (err: any) {
     console.error('org_mightycall_extensions_failed:', fmtErr(err));
     res.status(500).json({ error: 'org_mightycall_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// GET /api/admin/mightycall/extensions - aggregate extension inventory across all orgs for platform admins
+app.get('/api/admin/mightycall/extensions', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const liveOnly = String(req.query.live_only || '').toLowerCase() === 'true';
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { data: orgRows, error: orgError } = await supabaseAdmin
+      .from('organizations')
+      .select('id, name')
+      .order('created_at', { ascending: true });
+    if (orgError) throw orgError;
+
+    const liveRows: any[] = [];
+    const hiddenRows: any[] = [];
+    const fallbackRows: any[] = [];
+    const orgsProcessed: any[] = [];
+
+    for (const org of orgRows || []) {
+      const orgId = String((org as any).id || '');
+      const orgName = String((org as any).name || '').trim() || null;
+      if (!orgId) continue;
+      try {
+        const inventory = await getMightyCallExtensionInventoryForOrg(orgId, liveOnly);
+        const decorate = (row: any) => ({ ...row, source_org_id: orgId, source_org_name: orgName });
+        liveRows.push(...(inventory.extensions || []).map(decorate));
+        hiddenRows.push(...(inventory.hidden_extensions || []).map(decorate));
+        fallbackRows.push(...(inventory.fallback_extensions || []).map(decorate));
+        orgsProcessed.push({
+          org_id: orgId,
+          org_name: orgName,
+          live_fetch_ok: !!inventory.live_fetch_ok,
+          live_fetch_error: inventory.live_fetch_error || null,
+          live_count: inventory.source_summary?.live_count || 0,
+          fallback_count: inventory.source_summary?.fallback_count || 0
+        });
+      } catch (e) {
+        orgsProcessed.push({
+          org_id: orgId,
+          org_name: orgName,
+          live_fetch_ok: false,
+          live_fetch_error: fmtErr(e) ?? 'unknown_error',
+          live_count: 0,
+          fallback_count: 0
+        });
+      }
+    }
+
+    const sortRows = (rows: any[]) => rows.sort((a, b) => {
+      const orgCmp = String(a.source_org_name || '').localeCompare(String(b.source_org_name || ''));
+      return orgCmp !== 0 ? orgCmp : String(a.extension || '').localeCompare(String(b.extension || ''));
+    });
+
+    res.json({
+      extensions: sortRows((liveRows.length > 0 ? liveRows : fallbackRows).slice()),
+      live_extensions: sortRows(liveRows.slice()),
+      hidden_extensions: sortRows(hiddenRows.slice()),
+      fallback_extensions: sortRows(fallbackRows.slice()),
+      mode: liveOnly ? 'live_only_admin' : 'merged_admin',
+      orgs_processed: orgsProcessed,
+      source_summary: {
+        live_count: liveRows.length,
+        fallback_count: fallbackRows.length,
+        org_count: orgsProcessed.length
+      }
+    });
+  } catch (err: any) {
+    console.error('admin_mightycall_extensions_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_mightycall_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
