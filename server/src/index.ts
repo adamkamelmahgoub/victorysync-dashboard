@@ -3049,6 +3049,7 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
   try {
     const actorId = req.header('x-user-id') || null;
     const { orgId } = req.params;
+    const liveOnly = String(req.query.live_only || '').toLowerCase() === 'true';
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
 
     const isMember = !!(await supabaseAdmin
@@ -3073,26 +3074,45 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
       }
     } catch {}
 
-    let source = 'mightycall_live';
-    const rows: Array<{ extension: string; display_name: string | null }> = [];
-    const pushRow = (extension: any, displayName?: any) => {
-      const normalized = String(extension || '').trim();
-      if (!normalized) return;
-      rows.push({
-        extension: normalized,
-        display_name: displayName ? String(displayName).trim() || null : null
-      });
+    type ExtensionRow = {
+      extension: string;
+      display_name: string | null;
+      sources: string[];
+      is_live: boolean;
     };
 
+    const rows = new Map<string, ExtensionRow>();
+    const pushRow = (source: string, extension: any, displayName?: any) => {
+      const normalized = String(extension || '').trim();
+      if (!normalized) return;
+      const nextDisplayName = displayName ? String(displayName).trim() || null : null;
+      const existing = rows.get(normalized);
+      if (!existing) {
+        rows.set(normalized, {
+          extension: normalized,
+          display_name: nextDisplayName,
+          sources: [source],
+          is_live: source === 'mightycall_live'
+        });
+        return;
+      }
+      if (!existing.sources.includes(source)) existing.sources.push(source);
+      if (!existing.display_name && nextDisplayName) existing.display_name = nextDisplayName;
+      if (source === 'mightycall_live') existing.is_live = true;
+    };
+
+    let liveFetchOk = false;
+    let liveFetchError: string | null = null;
     try {
       const token = await getMightyCallAccessToken(overrideCreds);
       const live = await fetchMightyCallExtensions(token);
+      liveFetchOk = true;
       for (const item of live || []) {
-        pushRow(item?.extension, item?.display_name);
+        pushRow('mightycall_live', item?.extension, item?.display_name);
       }
 
       // Cache the fetched extensions for future use.
-      for (const item of rows) {
+      for (const item of rows.values()) {
         await supabaseAdmin
           .from('mightycall_extensions')
           .upsert(
@@ -3101,7 +3121,7 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
           );
       }
     } catch (e) {
-      source = 'mightycall_cache';
+      liveFetchError = fmtErr(e) ?? 'unknown_error';
     }
 
     try {
@@ -3111,7 +3131,7 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
         .order('extension', { ascending: true });
       if (cachedError) throw cachedError;
       for (const item of cached || []) {
-        pushRow(item?.extension, item?.display_name);
+        pushRow('mightycall_cache', item?.extension, item?.display_name);
       }
     } catch (e) {
       console.warn('[org_mightycall_extensions] cached extensions lookup failed:', fmtErr(e));
@@ -3124,7 +3144,7 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
         .eq('org_id', orgId);
       if (assignedError) throw assignedError;
       for (const item of assigned || []) {
-        pushRow(item?.extension, null);
+        pushRow('agent_extensions', item?.extension, null);
       }
     } catch (e) {
       console.warn('[org_mightycall_extensions] agent_extensions lookup failed:', fmtErr(e));
@@ -3138,31 +3158,133 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
         .not('mightycall_extension', 'is', null);
       if (orgUsersError) throw orgUsersError;
       for (const item of orgUsers || []) {
-        pushRow(item?.mightycall_extension, null);
+        pushRow('org_users', item?.mightycall_extension, null);
       }
     } catch (e) {
       console.warn('[org_mightycall_extensions] org_users extension lookup failed:', fmtErr(e));
     }
 
-    const unique = new Map<string, { extension: string; display_name: string | null }>();
-    for (const row of rows) {
-      if (!unique.has(row.extension)) {
-        unique.set(row.extension, row);
-        continue;
-      }
-      const existing = unique.get(row.extension)!;
-      if (!existing.display_name && row.display_name) {
-        unique.set(row.extension, row);
-      }
-    }
+    const allExtensions = Array.from(rows.values()).sort((a, b) => a.extension.localeCompare(b.extension));
+    const visibleExtensions = liveOnly ? allExtensions.filter((row) => row.is_live) : allExtensions;
+    const hiddenExtensions = liveOnly ? allExtensions.filter((row) => !row.is_live) : [];
 
     res.json({
-      extensions: Array.from(unique.values()).sort((a, b) => a.extension.localeCompare(b.extension)),
-      source
+      extensions: visibleExtensions,
+      hidden_extensions: hiddenExtensions,
+      mode: liveOnly ? 'live_only' : 'merged',
+      live_fetch_ok: liveFetchOk,
+      live_fetch_error: liveFetchError,
+      source_summary: {
+        live_count: allExtensions.filter((row) => row.is_live).length,
+        cached_only_count: allExtensions.filter((row) => !row.is_live).length
+      }
     });
   } catch (err: any) {
     console.error('org_mightycall_extensions_failed:', fmtErr(err));
     res.status(500).json({ error: 'org_mightycall_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/orgs/:orgId/mightycall/extensions/cleanup - remove stale org-scoped extension assignments not present in live MightyCall
+app.post('/api/orgs/:orgId/mightycall/extensions/cleanup', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const isMember = !!(await supabaseAdmin
+      .from('org_users')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('user_id', actorId)
+      .maybeSingle()
+      .then(r => r.data));
+    const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    let overrideCreds: any = undefined;
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      if (integ && integ.credentials) {
+        overrideCreds = {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+        };
+      }
+    } catch {}
+
+    const token = await getMightyCallAccessToken(overrideCreds);
+    const live = await fetchMightyCallExtensions(token);
+    const liveSet = new Set(
+      (live || [])
+        .map((item: any) => String(item?.extension || '').trim())
+        .filter(Boolean)
+    );
+
+    if (liveSet.size === 0) {
+      return res.status(400).json({ error: 'no_live_extensions_found', detail: 'Cleanup aborted because MightyCall did not return any live extensions.' });
+    }
+
+    const { data: agentRows, error: agentRowsError } = await supabaseAdmin
+      .from('agent_extensions')
+      .select('user_id, extension')
+      .eq('org_id', orgId);
+    if (agentRowsError) throw agentRowsError;
+
+    const staleAgentExtensions = (agentRows || []).filter((row: any) => {
+      const normalized = String(row?.extension || '').trim();
+      return normalized && !liveSet.has(normalized);
+    });
+
+    if (staleAgentExtensions.length > 0) {
+      const staleValues = Array.from(new Set(staleAgentExtensions.map((row: any) => String(row.extension).trim()).filter(Boolean)));
+      const { error: deleteAgentError } = await supabaseAdmin
+        .from('agent_extensions')
+        .delete()
+        .eq('org_id', orgId)
+        .in('extension', staleValues);
+      if (deleteAgentError) throw deleteAgentError;
+    }
+
+    const { data: orgUserRows, error: orgUserRowsError } = await supabaseAdmin
+      .from('org_users')
+      .select('user_id, mightycall_extension')
+      .eq('org_id', orgId)
+      .not('mightycall_extension', 'is', null);
+    if (orgUserRowsError) throw orgUserRowsError;
+
+    const staleOrgUsers = (orgUserRows || []).filter((row: any) => {
+      const normalized = String(row?.mightycall_extension || '').trim();
+      return normalized && !liveSet.has(normalized);
+    });
+
+    if (staleOrgUsers.length > 0) {
+      const staleUserIds = Array.from(new Set(staleOrgUsers.map((row: any) => String(row.user_id || '')).filter(Boolean)));
+      const { error: clearOrgUsersError } = await supabaseAdmin
+        .from('org_users')
+        .update({ mightycall_extension: null })
+        .eq('org_id', orgId)
+        .in('user_id', staleUserIds);
+      if (clearOrgUsersError) throw clearOrgUsersError;
+    }
+
+    res.json({
+      ok: true,
+      live_extensions: Array.from(liveSet.values()).sort((a, b) => a.localeCompare(b)),
+      removed_agent_extensions: staleAgentExtensions.map((row: any) => ({
+        user_id: row.user_id,
+        extension: row.extension
+      })),
+      cleared_org_user_extensions: staleOrgUsers.map((row: any) => ({
+        user_id: row.user_id,
+        extension: row.mightycall_extension
+      })),
+      note: 'Global mightycall_extensions cache was left untouched to avoid removing values that may belong to other org integrations.'
+    });
+  } catch (err: any) {
+    console.error('cleanup_org_mightycall_extensions_failed:', fmtErr(err));
+    res.status(500).json({ error: 'cleanup_org_mightycall_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 

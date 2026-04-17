@@ -3,7 +3,7 @@ import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
-import { getLiveAgentStatus, getOrgMightyCallExtensions } from '../../lib/apiClient';
+import { cleanupOrgMightyCallExtensions, getLiveAgentStatus, getOrgMightyCallExtensions } from '../../lib/apiClient';
 
 type Org = { id: string; name: string };
 type AuthUser = { id: string; email: string; role?: string | null };
@@ -14,7 +14,12 @@ type OrgUser = {
   mightycall_extension?: string | null;
   created_at?: string;
 };
-type ExtensionOption = { extension: string; display_name?: string | null };
+type ExtensionOption = {
+  extension: string;
+  display_name?: string | null;
+  sources?: string[];
+  is_live?: boolean;
+};
 type LiveAgentStatus = {
   user_id: string;
   org_id?: string | null;
@@ -62,7 +67,11 @@ const AdminAgentsManagementPage: FC = () => {
   const [savingEdit, setSavingEdit] = useState(false);
 
   const [extensionOptionsByOrg, setExtensionOptionsByOrg] = useState<Record<string, ExtensionOption[]>>({});
+  const [hiddenExtensionOptionsByOrg, setHiddenExtensionOptionsByOrg] = useState<Record<string, ExtensionOption[]>>({});
   const [extensionsLoadingByOrg, setExtensionsLoadingByOrg] = useState<Record<string, boolean>>({});
+  const [extensionsErrorByOrg, setExtensionsErrorByOrg] = useState<Record<string, string | null>>({});
+  const [cleanupLoadingByOrg, setCleanupLoadingByOrg] = useState<Record<string, boolean>>({});
+  const [cleanupSummary, setCleanupSummary] = useState<string | null>(null);
 
   const activeOrgId = selectedOrgId || '';
 
@@ -103,11 +112,64 @@ const AdminAgentsManagementPage: FC = () => {
     if (!orgId) return;
     if (extensionOptionsByOrg[orgId]?.length) return;
     setExtensionsLoadingByOrg((prev) => ({ ...prev, [orgId]: true }));
+    setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: null }));
     try {
-      const json = await getOrgMightyCallExtensions(orgId, userId);
+      const json = await getOrgMightyCallExtensions(orgId, userId, { liveOnly: true });
       setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.extensions || [] }));
+      setHiddenExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.hidden_extensions || [] }));
+      if (!json.live_fetch_ok) {
+        setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: json.live_fetch_error || 'MightyCall live extensions could not be loaded' }));
+      } else if (!(json.extensions || []).length) {
+        setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org.' }));
+      }
     } finally {
       setExtensionsLoadingByOrg((prev) => ({ ...prev, [orgId]: false }));
+    }
+  };
+
+  const refreshExtensionsForOrg = async (orgId: string) => {
+    if (!orgId) return;
+    setExtensionsLoadingByOrg((prev) => ({ ...prev, [orgId]: true }));
+    setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: null }));
+    try {
+      const json = await getOrgMightyCallExtensions(orgId, userId, { liveOnly: true });
+      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.extensions || [] }));
+      setHiddenExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.hidden_extensions || [] }));
+      if (!json.live_fetch_ok) {
+        setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: json.live_fetch_error || 'MightyCall live extensions could not be loaded' }));
+      } else if (!(json.extensions || []).length) {
+        setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org.' }));
+      }
+    } catch (e: any) {
+      setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: e?.message || 'Failed to load MightyCall extensions' }));
+    } finally {
+      setExtensionsLoadingByOrg((prev) => ({ ...prev, [orgId]: false }));
+    }
+  };
+
+  const handleCleanupExtensions = async () => {
+    if (!activeOrgId) {
+      setError('Select an organization first to clean stale extensions');
+      return;
+    }
+    if (!window.confirm('Remove stale saved extensions for this org that are not currently live in MightyCall?')) return;
+    try {
+      setCleanupLoadingByOrg((prev) => ({ ...prev, [activeOrgId]: true }));
+      setError(null);
+      setCleanupSummary(null);
+      const json = await cleanupOrgMightyCallExtensions(activeOrgId, userId);
+      const removedCount = (json.removed_agent_extensions || []).length;
+      const clearedCount = (json.cleared_org_user_extensions || []).length;
+      setCleanupSummary(`Removed ${removedCount} stale agent extension assignment${removedCount === 1 ? '' : 's'} and cleared ${clearedCount} stale org member extension${clearedCount === 1 ? '' : 's'} for ${orgNameById.get(activeOrgId) || activeOrgId}.`);
+      await Promise.all([
+        loadBaseData(),
+        loadLiveStatuses(),
+        refreshExtensionsForOrg(activeOrgId)
+      ]);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to clean stale MightyCall extensions');
+    } finally {
+      setCleanupLoadingByOrg((prev) => ({ ...prev, [activeOrgId]: false }));
     }
   };
 
@@ -183,6 +245,8 @@ const AdminAgentsManagementPage: FC = () => {
   }, [activeOrgId]);
 
   const createExtensionOptions = extensionOptionsByOrg[createOrgId] || [];
+  const activeOrgHiddenExtensions = hiddenExtensionOptionsByOrg[activeOrgId] || [];
+  const activeOrgExtensionsError = extensionsErrorByOrg[activeOrgId] || null;
 
   const handleCreateAssignment = async () => {
     if (!createUserId || !createOrgId || !createRole) {
@@ -276,13 +340,29 @@ const AdminAgentsManagementPage: FC = () => {
               <h2 className="text-lg font-semibold text-white">Create Assignment</h2>
               <p className="text-sm text-slate-400 mt-1">Assign users to organizations as agents or managers with a MightyCall extension.</p>
             </div>
-            <button
-              onClick={loadLiveStatuses}
-              disabled={liveLoading}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50"
-            >
-              {liveLoading ? 'Refreshing live...' : 'Refresh Live Status'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => refreshExtensionsForOrg(activeOrgId || createOrgId)}
+                disabled={extensionsLoadingByOrg[activeOrgId || createOrgId] || !(activeOrgId || createOrgId)}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50"
+              >
+                {extensionsLoadingByOrg[activeOrgId || createOrgId] ? 'Refreshing extensions...' : 'Refresh Extensions'}
+              </button>
+              <button
+                onClick={handleCleanupExtensions}
+                disabled={cleanupLoadingByOrg[activeOrgId] || !activeOrgId}
+                className="rounded-lg border border-amber-700 bg-slate-900 px-4 py-2 text-sm text-amber-200 hover:border-amber-500 hover:text-amber-100 disabled:opacity-50"
+              >
+                {cleanupLoadingByOrg[activeOrgId] ? 'Cleaning...' : 'Clean Stale Extensions'}
+              </button>
+              <button
+                onClick={loadLiveStatuses}
+                disabled={liveLoading}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50"
+              >
+                {liveLoading ? 'Refreshing live...' : 'Refresh Live Status'}
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-5">
@@ -321,6 +401,31 @@ const AdminAgentsManagementPage: FC = () => {
               {savingCreate ? 'Saving...' : 'Add Agent Assignment'}
             </button>
           </div>
+
+          {(cleanupSummary || activeOrgExtensionsError || activeOrgHiddenExtensions.length > 0) && (
+            <div className="mt-4 space-y-2">
+              {cleanupSummary && (
+                <div className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-300">{cleanupSummary}</div>
+              )}
+              {activeOrgExtensionsError && (
+                <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">{activeOrgExtensionsError}</div>
+              )}
+              {activeOrgHiddenExtensions.length > 0 && (
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
+                  <div className="text-sm font-medium text-slate-200">Hidden stale extensions</div>
+                  <div className="mt-1 text-xs text-slate-400">These were saved in the database but are not currently live in MightyCall, so they are excluded from the dropdown.</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {activeOrgHiddenExtensions.map((option) => (
+                      <span key={option.extension} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-300">
+                        {option.display_name ? `${option.extension} - ${option.display_name}` : option.extension}
+                        {option.sources?.length ? ` (${option.sources.join(', ')})` : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </section>
 
         {(error || liveError) && (

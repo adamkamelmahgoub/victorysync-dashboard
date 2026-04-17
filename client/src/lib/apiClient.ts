@@ -169,8 +169,18 @@ export async function getOrgAgentLiveStatus(orgId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/agents/live-status`, { headers: { 'x-user-id': userId || '' } });
 }
 
-export async function getOrgMightyCallExtensions(orgId: string, userId?: string) {
-  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/mightycall/extensions`, { headers: { 'x-user-id': userId || '' } });
+export async function getOrgMightyCallExtensions(orgId: string, userId?: string, options?: { liveOnly?: boolean }) {
+  const q = new URLSearchParams();
+  if (options?.liveOnly) q.set('live_only', 'true');
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/mightycall/extensions${suffix}`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function cleanupOrgMightyCallExtensions(orgId: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/mightycall/extensions/cleanup`, {
+    method: 'POST',
+    headers: { 'x-user-id': userId || '' }
+  });
 }
 
 export async function getLiveAgentStatus(params?: { orgId?: string | null }, userId?: string) {

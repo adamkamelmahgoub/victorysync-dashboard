@@ -24,6 +24,8 @@ interface AgentLiveStatus {
 interface ExtensionOption {
   extension: string;
   display_name?: string | null;
+  sources?: string[];
+  is_live?: boolean;
 }
 
 function fmtDateTime(value?: string | null) {
@@ -47,6 +49,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
   const [extensionOptions, setExtensionOptions] = useState<ExtensionOption[]>([]);
   const [extensionsLoading, setExtensionsLoading] = useState(false);
   const [extensionsError, setExtensionsError] = useState<string | null>(null);
+  const [extensionsAudit, setExtensionsAudit] = useState<ExtensionOption[]>([]);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
 
   useEffect(() => {
@@ -113,8 +116,14 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
     setExtensionsLoading(true);
     setExtensionsError(null);
     try {
-      const json = await getOrgMightyCallExtensions(orgId, user?.id);
+      const json = await getOrgMightyCallExtensions(orgId, user?.id, { liveOnly: true });
       setExtensionOptions((json.extensions || []) as ExtensionOption[]);
+      setExtensionsAudit((json.hidden_extensions || []) as ExtensionOption[]);
+      if (!json.live_fetch_ok) {
+        setExtensionsError(json.live_fetch_error || 'MightyCall live extensions could not be loaded');
+      } else if (!(json.extensions || []).length) {
+        setExtensionsError('MightyCall returned no live extensions for this org.');
+      }
     } catch (e: any) {
       setExtensionsError(e?.message || 'Failed to load MightyCall extensions');
     } finally {
@@ -187,6 +196,11 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       {error && <div className="text-rose-400 mb-2">{error}</div>}
       {liveError && <div className="text-amber-300 mb-2">{liveError}</div>}
       {extensionsError && <div className="text-amber-300 mb-2">{extensionsError}</div>}
+      {!extensionsError && extensionsAudit.length > 0 && (
+        <div className="text-xs text-slate-400 mb-2">
+          Hidden {extensionsAudit.length} stale saved extension{extensionsAudit.length === 1 ? '' : 's'} that are not currently live in MightyCall.
+        </div>
+      )}
       {loading ? (
         <div className="py-6 text-center text-sm text-gray-400">Loading agents...</div>
       ) : (
