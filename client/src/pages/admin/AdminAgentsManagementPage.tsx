@@ -289,7 +289,7 @@ const AdminAgentsManagementPage: FC = () => {
     }
   }, [activeOrgId]);
 
-  const createExtensionOptions = createOrgId ? (extensionOptionsByOrg[createOrgId] || []) : globalExtensionOptions;
+  const createExtensionOptions = globalExtensionOptions;
   const detailOrgId = activeOrgId || createOrgId;
   const activeOrgHiddenExtensions = hiddenExtensionOptionsByOrg[detailOrgId] || [];
   const activeOrgExtensionsError = extensionsErrorByOrg[detailOrgId] || null;
@@ -527,7 +527,7 @@ const AdminAgentsManagementPage: FC = () => {
                     const key = `${row.user_id}:${row.org_id}`;
                     const isEditing = editingKey === key;
                     const live = liveStatusByAssignment.get(`${row.org_id}:${row.user_id}`);
-                    const options = row.org_id ? (extensionOptionsByOrg[row.org_id] || []) : globalExtensionOptions;
+                    const options = globalExtensionOptions;
 
                     return (
                       <tr key={key}>
