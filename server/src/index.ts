@@ -683,6 +683,125 @@ function isLikelyActiveCallStatus(status: any): boolean {
   return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call'].some((token) => normalized.includes(token));
 }
 
+async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
+  const [{ data: membersData, error: membersError }, { data: extData, error: extError }, { phones }] = await Promise.all([
+    supabaseAdmin
+      .from('org_users')
+      .select('user_id, role, mightycall_extension')
+      .eq('org_id', orgId),
+    supabaseAdmin
+      .from('agent_extensions')
+      .select('user_id, extension')
+      .eq('org_id', orgId),
+    getAssignedPhoneNumbersForOrg(orgId)
+  ]);
+  if (membersError) throw membersError;
+  if (extError) throw extError;
+
+  const memberRows = (membersData || []).filter((row: any) => ['agent', 'org_manager'].includes(String(row?.role || '')));
+  const extensionByUserId = new Map<string, string>();
+  for (const row of memberRows) {
+    const ext = String((row as any)?.mightycall_extension || '').trim();
+    if (ext) extensionByUserId.set(String((row as any).user_id), ext);
+  }
+  for (const row of extData || []) {
+    const ext = String((row as any)?.extension || '').trim();
+    if (ext) extensionByUserId.set(String((row as any).user_id), ext);
+  }
+
+  const userIds = Array.from(new Set(memberRows.map((row: any) => String(row.user_id || '')).filter(Boolean)));
+  const authUsers = await Promise.all(userIds.map(async (userId) => {
+    try {
+      const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+      if (error) return { userId, email: null };
+      return { userId, email: data.user?.email || null };
+    } catch {
+      return { userId, email: null };
+    }
+  }));
+  const emailByUserId = new Map(authUsers.map((row) => [row.userId, row.email]));
+
+  let overrideCreds: any = undefined;
+  try {
+    const { getOrgIntegration } = await import('./lib/integrationsStore');
+    const integ = await getOrgIntegration(orgId, 'mightycall');
+    if (integ && integ.credentials) {
+      overrideCreds = {
+        clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+        clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+      };
+    }
+  } catch {}
+
+  const token = await getMightyCallAccessToken(overrideCreds);
+  const now = Date.now();
+  const callsPromise = fetchMightyCallCalls(token, {
+    startUtc: new Date(now - (12 * 60 * 60 * 1000)).toISOString(),
+    endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
+    pageSize: '500',
+    skip: '0'
+  }).catch(() => []);
+  const extensionsPromise = fetchMightyCallExtensions(token).catch(() => []);
+  const [liveCalls, liveExtensions] = await Promise.all([callsPromise, extensionsPromise]);
+
+  const orgPhoneDigits = new Set((phones || []).map((phone: any) => normalizePhoneDigits(phone?.number)).filter(Boolean) as string[]);
+  const extensionMetaByExt = new Map<string, any>();
+  for (const row of liveExtensions || []) {
+    const ext = normalizeExtension((row as any)?.extension);
+    if (ext) extensionMetaByExt.set(ext, row);
+  }
+
+  return memberRows.map((member: any) => {
+    const userId = String(member.user_id || '');
+    const extension = extensionByUserId.get(userId) || String(member?.mightycall_extension || '').trim() || null;
+    const normalizedExt = normalizeExtension(extension);
+    const extMeta = normalizedExt ? extensionMetaByExt.get(normalizedExt) : null;
+
+    const matchedLiveCall = normalizedExt
+      ? (liveCalls || []).find((call: any) => {
+          const extMatches = collectExtensionCandidates(call).includes(normalizedExt);
+          const status = String(call?.status || call?.state || call?.callStatus || '').trim();
+          return extMatches && (isLikelyActiveCallStatus(status) || !String(call?.endedAt || call?.ended_at || '').trim());
+        }) || null
+      : null;
+
+    const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
+    const callStatus = matchedLiveCall
+      ? String(matchedLiveCall?.status || matchedLiveCall?.state || matchedLiveCall?.callStatus || '').trim() || extStatus
+      : extStatus;
+    const extPayload = (extMeta as any)?.metadata || extMeta;
+    const onCall = !!(
+      matchedLiveCall ||
+      extPayload?.onCall ||
+      extPayload?.inCall ||
+      extPayload?.isOnCall ||
+      extPayload?.currentCall ||
+      extPayload?.current_call ||
+      isLikelyActiveCallStatus(callStatus)
+    );
+    const counterpart = matchedLiveCall
+      ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
+      : extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
+    const startedAt = matchedLiveCall
+      ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
+      : extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
+
+    return {
+      user_id: userId,
+      org_id: orgId,
+      email: emailByUserId.get(userId) || null,
+      role: member.role,
+      extension: extension || null,
+      display_name: (extMeta as any)?.display_name || null,
+      on_call: onCall,
+      counterpart: counterpart || null,
+      status: callStatus || (onCall ? 'On Call' : 'Available'),
+      started_at: startedAt,
+      source: matchedLiveCall ? 'mightycall_calls' : 'mightycall_extensions'
+    };
+  });
+}
+
 function reportVisibleToAssignedPhones(
   report: any,
   assignedIds: Set<string>,
@@ -2925,6 +3044,136 @@ app.get('/api/orgs/:orgId/agent-extensions', async (req, res) => {
   }
 });
 
+// GET /api/orgs/:orgId/mightycall/extensions - fetch available extensions for dropdown selection
+app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const isMember = !!(await supabaseAdmin
+      .from('org_users')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('user_id', actorId)
+      .maybeSingle()
+      .then(r => r.data));
+    const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    let overrideCreds: any = undefined;
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      if (integ && integ.credentials) {
+        overrideCreds = {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+        };
+      }
+    } catch {}
+
+    let source = 'mightycall_live';
+    let rows: Array<{ extension: string; display_name: string | null }> = [];
+
+    try {
+      const token = await getMightyCallAccessToken(overrideCreds);
+      const live = await fetchMightyCallExtensions(token);
+      rows = (live || [])
+        .map((item: any) => ({
+          extension: String(item?.extension || '').trim(),
+          display_name: item?.display_name ? String(item.display_name).trim() : null
+        }))
+        .filter((item) => item.extension);
+
+      // Cache the fetched extensions for future use.
+      for (const item of rows) {
+        await supabaseAdmin
+          .from('mightycall_extensions')
+          .upsert(
+            { extension: item.extension, display_name: item.display_name, external_id: item.extension },
+            { onConflict: 'extension' }
+          );
+      }
+    } catch (e) {
+      source = 'mightycall_cache';
+      const { data: cached, error: cachedError } = await supabaseAdmin
+        .from('mightycall_extensions')
+        .select('extension, display_name')
+        .order('extension', { ascending: true });
+      if (cachedError) throw cachedError;
+      rows = (cached || []).map((item: any) => ({
+        extension: String(item?.extension || '').trim(),
+        display_name: item?.display_name ? String(item.display_name).trim() : null
+      })).filter((item) => item.extension);
+    }
+
+    const unique = new Map<string, { extension: string; display_name: string | null }>();
+    for (const row of rows) {
+      if (!unique.has(row.extension)) unique.set(row.extension, row);
+    }
+
+    res.json({
+      extensions: Array.from(unique.values()).sort((a, b) => a.extension.localeCompare(b.extension)),
+      source
+    });
+  } catch (err: any) {
+    console.error('org_mightycall_extensions_failed:', fmtErr(err));
+    res.status(500).json({ error: 'org_mightycall_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// GET /api/agents/live-status - live MightyCall agent status for current org or all orgs for platform admins
+app.get('/api/agents/live-status', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const orgId = (req.query.org_id as string) || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const isAdmin = await isPlatformAdmin(actorId);
+    let orgIds: string[] = [];
+
+    if (isAdmin) {
+      if (orgId) {
+        orgIds = [orgId];
+      } else {
+        const { data: orgRows, error: orgError } = await supabaseAdmin
+          .from('organizations')
+          .select('id')
+          .order('created_at', { ascending: true });
+        if (orgError) throw orgError;
+        orgIds = (orgRows || []).map((row: any) => String(row.id || '')).filter(Boolean);
+      }
+    } else {
+      const userOrgIds = await getUserOrgIds(actorId);
+      if (userOrgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString() });
+      if (orgId) {
+        if (!userOrgIds.includes(orgId)) return res.status(403).json({ error: 'forbidden' });
+        orgIds = [orgId];
+      } else {
+        orgIds = [userOrgIds[0]];
+      }
+    }
+
+    const chunks = await Promise.all(orgIds.map(async (targetOrgId) => {
+      try {
+        return await getAgentLiveStatusItemsForOrg(targetOrgId);
+      } catch (e) {
+        console.warn('[agents/live-status] org fetch failed', targetOrgId, fmtErr(e));
+        return [];
+      }
+    }));
+
+    res.json({
+      items: chunks.flat(),
+      refreshed_at: new Date().toISOString()
+    });
+  } catch (err: any) {
+    console.error('agents_live_status_failed:', fmtErr(err));
+    res.status(500).json({ error: 'agents_live_status_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
 // GET /api/orgs/:orgId/agents/live-status - live MightyCall agent call state for an org
 app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
   try {
@@ -2942,122 +3191,7 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
     const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
-    const [{ data: membersData, error: membersError }, { data: extData, error: extError }, { phones }] = await Promise.all([
-      supabaseAdmin
-        .from('org_users')
-        .select('user_id, role, mightycall_extension')
-        .eq('org_id', orgId),
-      supabaseAdmin
-        .from('agent_extensions')
-        .select('user_id, extension')
-        .eq('org_id', orgId),
-      getAssignedPhoneNumbersForOrg(orgId)
-    ]);
-    if (membersError) throw membersError;
-    if (extError) throw extError;
-
-    const memberRows = (membersData || []).filter((row: any) => ['agent', 'org_manager'].includes(String(row?.role || '')));
-    const extensionByUserId = new Map<string, string>();
-    for (const row of memberRows) {
-      const ext = String((row as any)?.mightycall_extension || '').trim();
-      if (ext) extensionByUserId.set(String((row as any).user_id), ext);
-    }
-    for (const row of extData || []) {
-      const ext = String((row as any)?.extension || '').trim();
-      if (ext) extensionByUserId.set(String((row as any).user_id), ext);
-    }
-
-    const userIds = Array.from(new Set(memberRows.map((row: any) => String(row.user_id || '')).filter(Boolean)));
-    const authUsers = await Promise.all(userIds.map(async (userId) => {
-      try {
-        const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
-        if (error) return { userId, email: null };
-        return { userId, email: data.user?.email || null };
-      } catch {
-        return { userId, email: null };
-      }
-    }));
-    const emailByUserId = new Map(authUsers.map((row) => [row.userId, row.email]));
-
-    let overrideCreds: any = undefined;
-    try {
-      const { getOrgIntegration } = await import('./lib/integrationsStore');
-      const integ = await getOrgIntegration(orgId, 'mightycall');
-      if (integ && integ.credentials) {
-        overrideCreds = {
-          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
-          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
-        };
-      }
-    } catch {}
-
-    const token = await getMightyCallAccessToken(overrideCreds);
-    const now = Date.now();
-    const callsPromise = fetchMightyCallCalls(token, {
-      startUtc: new Date(now - (12 * 60 * 60 * 1000)).toISOString(),
-      endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
-      pageSize: '500',
-      skip: '0'
-    }).catch(() => []);
-    const extensionsPromise = fetchMightyCallExtensions(token).catch(() => []);
-    const [liveCalls, liveExtensions] = await Promise.all([callsPromise, extensionsPromise]);
-
-    const orgPhoneDigits = new Set((phones || []).map((phone: any) => normalizePhoneDigits(phone?.number)).filter(Boolean) as string[]);
-    const extensionMetaByExt = new Map<string, any>();
-    for (const row of liveExtensions || []) {
-      const ext = normalizeExtension((row as any)?.extension);
-      if (ext) extensionMetaByExt.set(ext, row);
-    }
-
-    const items = memberRows.map((member: any) => {
-      const userId = String(member.user_id || '');
-      const extension = extensionByUserId.get(userId) || String(member?.mightycall_extension || '').trim() || null;
-      const normalizedExt = normalizeExtension(extension);
-      const extMeta = normalizedExt ? extensionMetaByExt.get(normalizedExt) : null;
-
-      const matchedLiveCall = normalizedExt
-        ? (liveCalls || []).find((call: any) => {
-            const extMatches = collectExtensionCandidates(call).includes(normalizedExt);
-            const status = String(call?.status || call?.state || call?.callStatus || '').trim();
-            return extMatches && (isLikelyActiveCallStatus(status) || !String(call?.endedAt || call?.ended_at || '').trim());
-          }) || null
-        : null;
-
-      const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
-      const callStatus = matchedLiveCall
-        ? String(matchedLiveCall?.status || matchedLiveCall?.state || matchedLiveCall?.callStatus || '').trim() || extStatus
-        : extStatus;
-      const extPayload = (extMeta as any)?.metadata || extMeta;
-      const onCall = !!(
-        matchedLiveCall ||
-        extPayload?.onCall ||
-        extPayload?.inCall ||
-        extPayload?.isOnCall ||
-        extPayload?.currentCall ||
-        extPayload?.current_call ||
-        isLikelyActiveCallStatus(callStatus)
-      );
-      const counterpart = matchedLiveCall
-        ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
-        : extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
-      const startedAt = matchedLiveCall
-        ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
-        : extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
-
-      return {
-        user_id: userId,
-        email: emailByUserId.get(userId) || null,
-        role: member.role,
-        extension: extension || null,
-        display_name: (extMeta as any)?.display_name || null,
-        on_call: onCall,
-        counterpart: counterpart || null,
-        status: callStatus || (onCall ? 'On Call' : 'Available'),
-        started_at: startedAt,
-        source: matchedLiveCall ? 'mightycall_calls' : 'mightycall_extensions'
-      };
-    });
-
+    const items = await getAgentLiveStatusItemsForOrg(orgId);
     res.json({ items, refreshed_at: new Date().toISOString() });
   } catch (err: any) {
     console.error('agent_live_status_failed:', fmtErr(err));

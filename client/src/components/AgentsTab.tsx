@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { getOrgAgentLiveStatus, getOrgMembers } from '../lib/apiClient';
+import { getOrgAgentLiveStatus, getOrgMembers, getOrgMightyCallExtensions } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Agent {
@@ -19,6 +19,11 @@ interface AgentLiveStatus {
   counterpart?: string | null;
   status?: string | null;
   started_at?: string | null;
+}
+
+interface ExtensionOption {
+  extension: string;
+  display_name?: string | null;
 }
 
 function fmtDateTime(value?: string | null) {
@@ -39,10 +44,14 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [newExt, setNewExt] = useState('');
+  const [extensionOptions, setExtensionOptions] = useState<ExtensionOption[]>([]);
+  const [extensionsLoading, setExtensionsLoading] = useState(false);
+  const [extensionsError, setExtensionsError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAgents();
+    fetchAvailableExtensions();
     // eslint-disable-next-line
   }, [orgId]);
 
@@ -100,9 +109,25 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
     }
   }
 
+  async function fetchAvailableExtensions() {
+    setExtensionsLoading(true);
+    setExtensionsError(null);
+    try {
+      const json = await getOrgMightyCallExtensions(orgId, user?.id);
+      setExtensionOptions((json.extensions || []) as ExtensionOption[]);
+    } catch (e: any) {
+      setExtensionsError(e?.message || 'Failed to load MightyCall extensions');
+    } finally {
+      setExtensionsLoading(false);
+    }
+  }
+
   async function handleEdit(agentId: string, currentExt: string) {
     setEditing(agentId);
     setNewExt(currentExt || '');
+    if (extensionOptions.length === 0) {
+      fetchAvailableExtensions();
+    }
   }
 
   async function handleSave(agent: Agent) {
@@ -126,6 +151,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       setNewExt('');
       fetchAgents();
       fetchLiveStatuses();
+      fetchAvailableExtensions();
     } catch (e: any) {
       setError(e?.message || 'Failed to save extension');
     }
@@ -141,6 +167,13 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
           </div>
           <button
             className="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded"
+            onClick={() => fetchAvailableExtensions()}
+            disabled={extensionsLoading || apiUnavailable}
+          >
+            {extensionsLoading ? 'Loading extensions...' : 'Refresh Extensions'}
+          </button>
+          <button
+            className="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded"
             onClick={() => fetchLiveStatuses()}
             disabled={liveLoading || apiUnavailable}
           >
@@ -153,6 +186,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       )}
       {error && <div className="text-rose-400 mb-2">{error}</div>}
       {liveError && <div className="text-amber-300 mb-2">{liveError}</div>}
+      {extensionsError && <div className="text-amber-300 mb-2">{extensionsError}</div>}
       {loading ? (
         <div className="py-6 text-center text-sm text-gray-400">Loading agents...</div>
       ) : (
@@ -176,16 +210,23 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                 <tr key={agent.id} className="border-t border-slate-800">
                   <td className="p-3 text-slate-200">{agent.email}</td>
                   <td className="p-3 text-slate-200">{agent.role}</td>
-                  <td className="p-3">
-                    {editing === agent.id ? (
-                      <input
-                        className="p-1 rounded bg-slate-800 border border-slate-700 w-32 text-sm text-slate-200"
-                        value={newExt}
-                        onChange={e => setNewExt(e.target.value)}
-                      />
-                    ) : (
-                      agent.extension || <span className="text-gray-500">(none)</span>
-                    )}
+	                  <td className="p-3">
+	                    {editing === agent.id ? (
+	                      <select
+	                        className="p-1 rounded bg-slate-800 border border-slate-700 min-w-[180px] text-sm text-slate-200"
+	                        value={newExt}
+	                        onChange={e => setNewExt(e.target.value)}
+	                      >
+	                        <option value="">Select extension</option>
+	                        {extensionOptions.map((option) => (
+	                          <option key={option.extension} value={option.extension}>
+	                            {option.display_name ? `${option.extension} - ${option.display_name}` : option.extension}
+	                          </option>
+	                        ))}
+	                      </select>
+	                    ) : (
+	                      agent.extension || <span className="text-gray-500">(none)</span>
+	                    )}
                   </td>
                   <td className="p-3">
                     <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${

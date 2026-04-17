@@ -169,6 +169,17 @@ export async function getOrgAgentLiveStatus(orgId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/agents/live-status`, { headers: { 'x-user-id': userId || '' } });
 }
 
+export async function getOrgMightyCallExtensions(orgId: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/mightycall/extensions`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function getLiveAgentStatus(params?: { orgId?: string | null }, userId?: string) {
+  const q = new URLSearchParams();
+  if (params?.orgId) q.set('org_id', params.orgId);
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/agents/live-status${suffix}`, { headers: { 'x-user-id': userId || '' } });
+}
+
 // MightyCall sync helpers
 export async function triggerMightyCallPhoneNumberSync(userId?: string) {
   return await fetchJson(`/api/mightycall/sync/phone-numbers`, { method: 'POST', headers: { 'x-user-id': userId || '' } });

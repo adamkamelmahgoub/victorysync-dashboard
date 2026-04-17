@@ -45,6 +45,7 @@ import { TeamPage } from "./pages/TeamPage";
 import { DebugAuthPage } from "./pages/DebugAuthPage";
 import { APIKeysPage } from "./pages/APIKeysPage";
 import BillingPage from "./pages/BillingPage";
+import LiveStatusPage from "./pages/LiveStatusPage";
 
 declare global {
   interface Window {
@@ -141,6 +142,14 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <DashboardNewV3 />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/live-status"
+        element={
+          <ProtectedRoute>
+            <LiveStatusPage />
           </ProtectedRoute>
         }
       />
