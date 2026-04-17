@@ -3074,17 +3074,22 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
     } catch {}
 
     let source = 'mightycall_live';
-    let rows: Array<{ extension: string; display_name: string | null }> = [];
+    const rows: Array<{ extension: string; display_name: string | null }> = [];
+    const pushRow = (extension: any, displayName?: any) => {
+      const normalized = String(extension || '').trim();
+      if (!normalized) return;
+      rows.push({
+        extension: normalized,
+        display_name: displayName ? String(displayName).trim() || null : null
+      });
+    };
 
     try {
       const token = await getMightyCallAccessToken(overrideCreds);
       const live = await fetchMightyCallExtensions(token);
-      rows = (live || [])
-        .map((item: any) => ({
-          extension: String(item?.extension || '').trim(),
-          display_name: item?.display_name ? String(item.display_name).trim() : null
-        }))
-        .filter((item) => item.extension);
+      for (const item of live || []) {
+        pushRow(item?.extension, item?.display_name);
+      }
 
       // Cache the fetched extensions for future use.
       for (const item of rows) {
@@ -3097,20 +3102,58 @@ app.get('/api/orgs/:orgId/mightycall/extensions', async (req, res) => {
       }
     } catch (e) {
       source = 'mightycall_cache';
+    }
+
+    try {
       const { data: cached, error: cachedError } = await supabaseAdmin
         .from('mightycall_extensions')
         .select('extension, display_name')
         .order('extension', { ascending: true });
       if (cachedError) throw cachedError;
-      rows = (cached || []).map((item: any) => ({
-        extension: String(item?.extension || '').trim(),
-        display_name: item?.display_name ? String(item.display_name).trim() : null
-      })).filter((item) => item.extension);
+      for (const item of cached || []) {
+        pushRow(item?.extension, item?.display_name);
+      }
+    } catch (e) {
+      console.warn('[org_mightycall_extensions] cached extensions lookup failed:', fmtErr(e));
+    }
+
+    try {
+      const { data: assigned, error: assignedError } = await supabaseAdmin
+        .from('agent_extensions')
+        .select('extension')
+        .eq('org_id', orgId);
+      if (assignedError) throw assignedError;
+      for (const item of assigned || []) {
+        pushRow(item?.extension, null);
+      }
+    } catch (e) {
+      console.warn('[org_mightycall_extensions] agent_extensions lookup failed:', fmtErr(e));
+    }
+
+    try {
+      const { data: orgUsers, error: orgUsersError } = await supabaseAdmin
+        .from('org_users')
+        .select('mightycall_extension')
+        .eq('org_id', orgId)
+        .not('mightycall_extension', 'is', null);
+      if (orgUsersError) throw orgUsersError;
+      for (const item of orgUsers || []) {
+        pushRow(item?.mightycall_extension, null);
+      }
+    } catch (e) {
+      console.warn('[org_mightycall_extensions] org_users extension lookup failed:', fmtErr(e));
     }
 
     const unique = new Map<string, { extension: string; display_name: string | null }>();
     for (const row of rows) {
-      if (!unique.has(row.extension)) unique.set(row.extension, row);
+      if (!unique.has(row.extension)) {
+        unique.set(row.extension, row);
+        continue;
+      }
+      const existing = unique.get(row.extension)!;
+      if (!existing.display_name && row.display_name) {
+        unique.set(row.extension, row);
+      }
     }
 
     res.json({
