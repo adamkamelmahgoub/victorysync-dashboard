@@ -389,6 +389,33 @@ function collectExtensionRows(list: any[]): Array<{ id: string | null; extension
   return Array.from(rows.values());
 }
 
+export async function fetchMightyCallProfileByExtension(extension: string, accessToken?: string) {
+  const normalized = normalizeExtensionValue(extension);
+  if (!normalized) return null;
+  const token = accessToken || await getMightyCallAccessToken();
+  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  const endpoints = [`/profile/${encodeURIComponent(normalized)}`, `/v4/profile/${encodeURIComponent(normalized)}`];
+  for (const ep of endpoints) {
+    for (const url of buildUrlVariants(base, ep)) {
+      const r = await tryFetchJson(url, token);
+      if (!r.ok || !r.body) continue;
+      const body: any = r.body;
+      const data = body?.data ?? body;
+      const resolvedExtension = normalizeExtensionValue(data?.extension || normalized);
+      if (!resolvedExtension) continue;
+      return {
+        id: data?.id || data?.userId || data?.memberId || null,
+        extension: resolvedExtension,
+        display_name: [data?.firstName, data?.lastName].filter(Boolean).join(' ').trim() || data?.name || data?.fullName || data?.email || null,
+        email: data?.email || null,
+        role: data?.role || null,
+        metadata: data
+      };
+    }
+  }
+  return null;
+}
+
 // Lightweight placeholders for extensions/voicemails
 export async function fetchMightyCallExtensions(accessToken?: string) {
   const token = accessToken || await getMightyCallAccessToken();

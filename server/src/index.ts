@@ -35,6 +35,7 @@ import { normalizePhoneDigits, normalizeToE164FromRaw } from './lib/phoneUtils';
 import { 
   fetchMightyCallPhoneNumbers, 
   fetchMightyCallExtensions, 
+  fetchMightyCallProfileByExtension,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
   fetchMightyCallContacts,
@@ -3075,19 +3076,20 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
       const normalized = String(extension || '').trim();
       if (!normalized) return;
       const nextDisplayName = displayName ? String(displayName).trim() || null : null;
+      const isConfirmedLive = source === 'mightycall_live' || source === 'mightycall_profile';
       const existing = rows.get(normalized);
       if (!existing) {
         rows.set(normalized, {
           extension: normalized,
           display_name: nextDisplayName,
           sources: [source],
-          is_live: source === 'mightycall_live'
+          is_live: isConfirmedLive
         });
         return;
       }
       if (!existing.sources.includes(source)) existing.sources.push(source);
       if (!existing.display_name && nextDisplayName) existing.display_name = nextDisplayName;
-      if (source === 'mightycall_live') existing.is_live = true;
+      if (isConfirmedLive) existing.is_live = true;
     };
 
     let liveFetchOk = false;
@@ -3151,6 +3153,25 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
       }
     } catch (e) {
       console.warn('[org_mightycall_extensions] org_users extension lookup failed:', fmtErr(e));
+    }
+
+    try {
+      const token = await getMightyCallAccessToken(overrideCreds);
+      const candidates = Array.from(rows.values())
+        .filter((row) => !row.is_live)
+        .filter((row) => row.sources.some((source) => source === 'agent_extensions' || source === 'org_users'))
+        .map((row) => row.extension);
+      for (const extension of candidates) {
+        try {
+          const profile = await fetchMightyCallProfileByExtension(extension, token);
+          if (!profile?.extension) continue;
+          pushRow('mightycall_profile', profile.extension, profile.display_name || null);
+        } catch (e) {
+          console.warn('[org_mightycall_extensions] profile lookup failed:', extension, fmtErr(e));
+        }
+      }
+    } catch (e) {
+      console.warn('[org_mightycall_extensions] profile validation skipped:', fmtErr(e));
     }
 
     const allExtensions = Array.from(rows.values())
