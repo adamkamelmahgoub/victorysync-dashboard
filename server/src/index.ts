@@ -501,15 +501,186 @@ function extractCandidateNumbersFromReport(report: any): string[] {
     const s = String(v || '').trim();
     if (s) values.push(s);
   };
+  const pushMany = (input: any) => {
+    if (!input) return;
+    if (Array.isArray(input)) {
+      for (const item of input) {
+        if (item && typeof item === 'object') {
+          pushIf(item.phone);
+          pushIf(item.number);
+          pushIf(item.value);
+        } else {
+          pushIf(item);
+        }
+      }
+      return;
+    }
+    if (typeof input === 'object') {
+      for (const value of Object.values(input)) {
+        if (Array.isArray(value) || (value && typeof value === 'object')) pushMany(value);
+        else pushIf(value);
+      }
+      return;
+    }
+    pushIf(input);
+  };
   pushIf(report?.phone_number);
   pushIf(report?.from_number);
   pushIf(report?.to_number);
   pushIf(report?.data?.phone_number);
-  const sample = report?.data?.sample_numbers;
-  if (Array.isArray(sample)) {
-    for (const n of sample) pushIf(n);
-  }
+  pushMany(report?.data?.sample_numbers);
+  pushMany(report?.data?.called);
+  pushMany(report?.data?.to_numbers);
+  pushMany(report?.data?.from_numbers);
+  pushMany(report?.data?.numbers);
+  pushMany(report?.metadata?.called);
+  pushMany(report?.metadata?.to_numbers);
   return Array.from(new Set(values));
+}
+
+function normalizeExtension(v: any): string | null {
+  const raw = String(v || '').trim();
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length > 8) return null;
+  return digits.replace(/^0+(\d)/, '$1');
+}
+
+function collectExtensionCandidates(input: any, depth = 0): string[] {
+  if (input == null || depth > 3) return [];
+  const found = new Set<string>();
+  const add = (value: any) => {
+    const ext = normalizeExtension(value);
+    if (ext) found.add(ext);
+  };
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      for (const ext of collectExtensionCandidates(item, depth + 1)) found.add(ext);
+    }
+    return Array.from(found);
+  }
+
+  if (typeof input !== 'object') {
+    add(input);
+    return Array.from(found);
+  }
+
+  for (const [key, value] of Object.entries(input)) {
+    const lower = key.toLowerCase();
+    if (
+      lower.includes('extension') ||
+      lower === 'ext' ||
+      lower === 'agent' ||
+      lower === 'answered_by' ||
+      lower === 'answeredby' ||
+      lower === 'answer_extension' ||
+      lower === 'agent_extension'
+    ) {
+      if (value && typeof value === 'object') {
+        add((value as any).extension);
+        add((value as any).ext);
+        add((value as any).number);
+        add((value as any).id);
+      } else {
+        add(value);
+      }
+    }
+
+    if (
+      lower === 'agent' ||
+      lower === 'user' ||
+      lower === 'operator' ||
+      lower === 'assignee' ||
+      lower === 'assignedto' ||
+      lower === 'assigned_to' ||
+      lower === 'participant' ||
+      lower === 'participants' ||
+      lower === 'currentcall' ||
+      lower === 'current_call'
+    ) {
+      for (const ext of collectExtensionCandidates(value, depth + 1)) found.add(ext);
+    }
+  }
+
+  return Array.from(found);
+}
+
+function extractLiveStatusLabel(raw: any): string | null {
+  const candidates = [
+    raw?.status,
+    raw?.state,
+    raw?.presence,
+    raw?.presenceStatus,
+    raw?.userStatus,
+    raw?.availability,
+    raw?.callStatus,
+    raw?.currentCall?.status,
+    raw?.current_call?.status
+  ];
+  for (const candidate of candidates) {
+    const s = String(candidate || '').trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+function extractCounterpartyLabel(value: any, orgPhoneDigits: Set<string>, extension?: string | null): string | null {
+  const extDigits = normalizeExtension(extension || '');
+  const candidates = [
+    value?.contact?.name,
+    value?.customer?.name,
+    value?.client?.name,
+    value?.caller?.name,
+    value?.party?.name,
+    value?.currentCall?.contact?.name,
+    value?.current_call?.contact?.name,
+    value?.contact?.phone,
+    value?.customer?.phone,
+    value?.customer?.number,
+    value?.client?.address,
+    value?.caller?.number,
+    value?.source?.number,
+    value?.party?.phone,
+    value?.with,
+    value?.counterparty,
+    value?.otherParty,
+    value?.other_party,
+    value?.from,
+    value?.from_number,
+    value?.to,
+    value?.to_number,
+    value?.destination?.number,
+    value?.called?.[0]?.phone,
+    value?.called?.[0]?.number,
+    value?.businessNumber?.number,
+    value?.currentCall?.from,
+    value?.currentCall?.to,
+    value?.currentCall?.phone,
+    value?.current_call?.from,
+    value?.current_call?.to,
+    value?.current_call?.phone
+  ];
+
+  for (const candidate of candidates) {
+    const raw = String(candidate || '').trim();
+    if (!raw) continue;
+    const digits = normalizePhoneDigits(raw);
+    if (digits) {
+      if (extDigits && digits === extDigits) continue;
+      if (orgPhoneDigits.has(digits)) continue;
+    }
+    return raw;
+  }
+  return null;
+}
+
+function isLikelyActiveCallStatus(status: any): boolean {
+  const normalized = String(status || '').toLowerCase().trim();
+  if (!normalized) return false;
+  if (['completed', 'ended', 'missed', 'failed', 'canceled', 'cancelled', 'voicemail'].includes(normalized)) return false;
+  return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call'].some((token) => normalized.includes(token));
 }
 
 function reportVisibleToAssignedPhones(
@@ -2751,6 +2922,146 @@ app.get('/api/orgs/:orgId/agent-extensions', async (req, res) => {
   } catch (err: any) {
     console.error('agent_extensions_failed:', fmtErr(err));
     res.status(500).json({ error: 'agent_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// GET /api/orgs/:orgId/agents/live-status - live MightyCall agent call state for an org
+app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const isMember = !!(await supabaseAdmin
+      .from('org_users')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('user_id', actorId)
+      .maybeSingle()
+      .then(r => r.data));
+    const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    const [{ data: membersData, error: membersError }, { data: extData, error: extError }, { phones }] = await Promise.all([
+      supabaseAdmin
+        .from('org_users')
+        .select('user_id, role, mightycall_extension')
+        .eq('org_id', orgId),
+      supabaseAdmin
+        .from('agent_extensions')
+        .select('user_id, extension')
+        .eq('org_id', orgId),
+      getAssignedPhoneNumbersForOrg(orgId)
+    ]);
+    if (membersError) throw membersError;
+    if (extError) throw extError;
+
+    const memberRows = (membersData || []).filter((row: any) => ['agent', 'org_manager'].includes(String(row?.role || '')));
+    const extensionByUserId = new Map<string, string>();
+    for (const row of memberRows) {
+      const ext = String((row as any)?.mightycall_extension || '').trim();
+      if (ext) extensionByUserId.set(String((row as any).user_id), ext);
+    }
+    for (const row of extData || []) {
+      const ext = String((row as any)?.extension || '').trim();
+      if (ext) extensionByUserId.set(String((row as any).user_id), ext);
+    }
+
+    const userIds = Array.from(new Set(memberRows.map((row: any) => String(row.user_id || '')).filter(Boolean)));
+    const authUsers = await Promise.all(userIds.map(async (userId) => {
+      try {
+        const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+        if (error) return { userId, email: null };
+        return { userId, email: data.user?.email || null };
+      } catch {
+        return { userId, email: null };
+      }
+    }));
+    const emailByUserId = new Map(authUsers.map((row) => [row.userId, row.email]));
+
+    let overrideCreds: any = undefined;
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      if (integ && integ.credentials) {
+        overrideCreds = {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+        };
+      }
+    } catch {}
+
+    const token = await getMightyCallAccessToken(overrideCreds);
+    const now = Date.now();
+    const callsPromise = fetchMightyCallCalls(token, {
+      startUtc: new Date(now - (12 * 60 * 60 * 1000)).toISOString(),
+      endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
+      pageSize: '500',
+      skip: '0'
+    }).catch(() => []);
+    const extensionsPromise = fetchMightyCallExtensions(token).catch(() => []);
+    const [liveCalls, liveExtensions] = await Promise.all([callsPromise, extensionsPromise]);
+
+    const orgPhoneDigits = new Set((phones || []).map((phone: any) => normalizePhoneDigits(phone?.number)).filter(Boolean) as string[]);
+    const extensionMetaByExt = new Map<string, any>();
+    for (const row of liveExtensions || []) {
+      const ext = normalizeExtension((row as any)?.extension);
+      if (ext) extensionMetaByExt.set(ext, row);
+    }
+
+    const items = memberRows.map((member: any) => {
+      const userId = String(member.user_id || '');
+      const extension = extensionByUserId.get(userId) || String(member?.mightycall_extension || '').trim() || null;
+      const normalizedExt = normalizeExtension(extension);
+      const extMeta = normalizedExt ? extensionMetaByExt.get(normalizedExt) : null;
+
+      const matchedLiveCall = normalizedExt
+        ? (liveCalls || []).find((call: any) => {
+            const extMatches = collectExtensionCandidates(call).includes(normalizedExt);
+            const status = String(call?.status || call?.state || call?.callStatus || '').trim();
+            return extMatches && (isLikelyActiveCallStatus(status) || !String(call?.endedAt || call?.ended_at || '').trim());
+          }) || null
+        : null;
+
+      const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
+      const callStatus = matchedLiveCall
+        ? String(matchedLiveCall?.status || matchedLiveCall?.state || matchedLiveCall?.callStatus || '').trim() || extStatus
+        : extStatus;
+      const extPayload = (extMeta as any)?.metadata || extMeta;
+      const onCall = !!(
+        matchedLiveCall ||
+        extPayload?.onCall ||
+        extPayload?.inCall ||
+        extPayload?.isOnCall ||
+        extPayload?.currentCall ||
+        extPayload?.current_call ||
+        isLikelyActiveCallStatus(callStatus)
+      );
+      const counterpart = matchedLiveCall
+        ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
+        : extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
+      const startedAt = matchedLiveCall
+        ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
+        : extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
+
+      return {
+        user_id: userId,
+        email: emailByUserId.get(userId) || null,
+        role: member.role,
+        extension: extension || null,
+        display_name: (extMeta as any)?.display_name || null,
+        on_call: onCall,
+        counterpart: counterpart || null,
+        status: callStatus || (onCall ? 'On Call' : 'Available'),
+        started_at: startedAt,
+        source: matchedLiveCall ? 'mightycall_calls' : 'mightycall_extensions'
+      };
+    });
+
+    res.json({ items, refreshed_at: new Date().toISOString() });
+  } catch (err: any) {
+    console.error('agent_live_status_failed:', fmtErr(err));
+    res.status(500).json({ error: 'agent_live_status_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
@@ -6955,6 +7266,78 @@ app.get("/s/series", async (req, res) => {
             }
           } catch (e) {
             console.warn('[mightycall/report detail] live MightyCall fallback failed:', fmtErr(e));
+          }
+        }
+
+        // Journal fallback: reports are originally aggregated from MightyCall journal requests,
+        // so use those raw entries before synthesizing placeholders.
+        if (reportDate && rawTotalCalls > 0 && relatedCalls.length === 0) {
+          try {
+            let overrideCreds: any = undefined;
+            try {
+              const { getOrgIntegration } = await import('./lib/integrationsStore');
+              const integ = await getOrgIntegration(report.org_id, 'mightycall');
+              if (integ && integ.credentials) {
+                overrideCreds = {
+                  clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+                  clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+                };
+              }
+            } catch {}
+
+            const { getMightyCallAccessToken, fetchMightyCallJournalRequests } = await import('./integrations/mightycall');
+            const token = await getMightyCallAccessToken(overrideCreds);
+            const journalRows = await fetchMightyCallJournalRequests(token, {
+              from: `${reportDate}T00:00:00Z`,
+              to: `${reportDate}T23:59:59Z`,
+              type: 'Call',
+              pageSize: '1000',
+              page: '1'
+            }).catch(() => []);
+
+            let mappedJournal = (Array.isArray(journalRows) ? journalRows : []).map((row: any, idx: number) => {
+              const fallbackFrom = String(
+                row?.caller?.number ||
+                row?.source?.number ||
+                row?.client?.address ||
+                ''
+              ).trim() || null;
+              const fallbackTo = String(
+                row?.businessNumber?.number ||
+                row?.called?.[0]?.phone ||
+                row?.called?.[0]?.number ||
+                row?.destination?.number ||
+                ''
+              ).trim() || null;
+              const from = String(row?.from || row?.from_number || fallbackFrom || '').trim() || null;
+              const to = String(row?.to || row?.to_number || fallbackTo || '').trim() || null;
+              return {
+                id: String(row?.id || row?.requestGuid || `${report.id}-journal-${idx}`),
+                from_number: from,
+                to_number: to,
+                from_number_digits: normalizePhoneDigits(from || ''),
+                to_number_digits: normalizePhoneDigits(to || ''),
+                status: String(row?.status || row?.state || row?.callStatus || '').toLowerCase() || null,
+                duration_seconds: Number(row?.duration ?? row?.durationSeconds ?? row?.callDuration ?? 0) || 0,
+                started_at: row?.created || row?.dateTimeUtc || null,
+                ended_at: row?.endedAt || row?.ended_at || null
+              };
+            });
+
+            mappedJournal = mappedJournal.filter((row: any) => {
+              if (!hasCandidateNumbers) return true;
+              return rowMatchesCandidateNumbers(row);
+            });
+            if (!isAdmin) {
+              mappedJournal = mappedJournal.filter((row: any) =>
+                reportVisibleToAssignedPhones(row, assignedIdSet, assignedNumberSet, assignedDigitSet)
+              );
+            }
+            if (mappedJournal.length > 0) {
+              relatedCalls = mappedJournal.slice(0, relatedLimit);
+            }
+          } catch (e) {
+            console.warn('[mightycall/report detail] journal fallback failed:', fmtErr(e));
           }
         }
 

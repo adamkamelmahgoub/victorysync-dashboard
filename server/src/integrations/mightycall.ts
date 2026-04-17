@@ -302,7 +302,8 @@ export async function fetchMightyCallExtensions(accessToken?: string) {
           .map((x: any) => ({
             id: x.id || x.externalId || x.extensionId || null,
             extension: String(x.extension || x.ext || x.number || '').trim(),
-            display_name: x.displayName || x.name || x.fullName || null
+            display_name: x.displayName || x.name || x.fullName || null,
+            metadata: x
           }))
           .filter((x: any) => x.extension);
       }

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { getOrgMembers } from '../lib/apiClient';
+import { getOrgAgentLiveStatus, getOrgMembers } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Agent {
@@ -11,14 +11,35 @@ interface Agent {
   extension: string | null;
 }
 
+interface AgentLiveStatus {
+  user_id: string;
+  extension: string | null;
+  display_name?: string | null;
+  on_call: boolean;
+  counterpart?: string | null;
+  status?: string | null;
+  started_at?: string | null;
+}
+
+function fmtDateTime(value?: string | null) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString();
+}
+
 export default function AgentsTab({ orgId }: { orgId: string }) {
   const { user } = useAuth();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [liveStatusByUserId, setLiveStatusByUserId] = useState<Record<string, AgentLiveStatus>>({});
   const [loading, setLoading] = useState(true);
+  const [liveLoading, setLiveLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [newExt, setNewExt] = useState('');
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAgents();
@@ -44,7 +65,9 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       } catch (_) {}
       const extMap: Record<string,string> = {};
       for (const e of extensions) extMap[e.user_id] = e.extension;
-      setAgents(filtered.map((m: any) => ({ id: m.user_id, email: m.email || '', role: m.role, extension: extMap[m.user_id] || '' })));
+      const nextAgents = filtered.map((m: any) => ({ id: m.user_id, email: m.email || '', role: m.role, extension: extMap[m.user_id] || m.mightycall_extension || '' }));
+      setAgents(nextAgents);
+      fetchLiveStatuses();
     } catch (e: any) {
       if (e?.status === 404) {
         setApiUnavailable(true);
@@ -58,6 +81,23 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       }
     }
     setLoading(false);
+  }
+
+  async function fetchLiveStatuses() {
+    setLiveLoading(true);
+    setLiveError(null);
+    try {
+      const json = await getOrgAgentLiveStatus(orgId, user?.id);
+      const rows = json.items || [];
+      const nextMap: Record<string, AgentLiveStatus> = {};
+      for (const row of rows) nextMap[row.user_id] = row;
+      setLiveStatusByUserId(nextMap);
+      setRefreshedAt(json.refreshed_at || new Date().toISOString());
+    } catch (e: any) {
+      setLiveError(e?.message || 'Failed to load live MightyCall agent status');
+    } finally {
+      setLiveLoading(false);
+    }
   }
 
   async function handleEdit(agentId: string, currentExt: string) {
@@ -85,6 +125,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       setEditing(null);
       setNewExt('');
       fetchAgents();
+      fetchLiveStatuses();
     } catch (e: any) {
       setError(e?.message || 'Failed to save extension');
     }
@@ -94,12 +135,24 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
     <div className="p-4">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold">Agents & Extensions</h2>
-        <div className="text-sm text-gray-400">Agents assigned to this organization</div>
+        <div className="flex items-center gap-3">
+          <div className="text-sm text-gray-400">
+            {liveLoading ? 'Refreshing live MightyCall status...' : `Live status ${refreshedAt ? `updated ${fmtDateTime(refreshedAt)}` : 'not loaded yet'}`}
+          </div>
+          <button
+            className="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded"
+            onClick={() => fetchLiveStatuses()}
+            disabled={liveLoading || apiUnavailable}
+          >
+            {liveLoading ? 'Refreshing...' : 'Refresh Live'}
+          </button>
+        </div>
       </div>
       {apiUnavailable && (
         <div className="mb-4 p-3 bg-rose-900/30 text-rose-300 rounded">Members API unavailable (404). Server endpoints may not be deployed; agent list may be incomplete.</div>
       )}
       {error && <div className="text-rose-400 mb-2">{error}</div>}
+      {liveError && <div className="text-amber-300 mb-2">{liveError}</div>}
       {loading ? (
         <div className="py-6 text-center text-sm text-gray-400">Loading agents...</div>
       ) : (
@@ -110,11 +163,16 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                 <th className="p-3 text-sm text-slate-300">Email</th>
                 <th className="p-3 text-sm text-slate-300">Role</th>
                 <th className="p-3 text-sm text-slate-300">Extension</th>
+                <th className="p-3 text-sm text-slate-300">Live</th>
+                <th className="p-3 text-sm text-slate-300">On Call With</th>
+                <th className="p-3 text-sm text-slate-300">Call Status</th>
                 <th className="p-3 text-sm text-slate-300">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {agents.map(agent => (
+              {agents.map(agent => {
+                const live = liveStatusByUserId[agent.id];
+                return (
                 <tr key={agent.id} className="border-t border-slate-800">
                   <td className="p-3 text-slate-200">{agent.email}</td>
                   <td className="p-3 text-slate-200">{agent.role}</td>
@@ -128,6 +186,18 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                     ) : (
                       agent.extension || <span className="text-gray-500">(none)</span>
                     )}
+                  </td>
+                  <td className="p-3">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                      live?.on_call ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-800 text-slate-300'
+                    }`}>
+                      {live?.on_call ? 'On Call' : (live?.status || 'Idle')}
+                    </span>
+                  </td>
+                  <td className="p-3 text-slate-200 text-sm">{live?.counterpart || '—'}</td>
+                  <td className="p-3 text-sm text-slate-300">
+                    <div>{live?.status || '—'}</div>
+                    {live?.started_at && <div className="text-xs text-slate-500">Started {fmtDateTime(live.started_at)}</div>}
                   </td>
                   <td className="p-3">
                     {editing === agent.id ? (
@@ -157,7 +227,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                     )}
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </div>

@@ -165,6 +165,10 @@ export async function getOrgMembers(orgId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members`, { headers: { 'x-user-id': userId || '' } });
 }
 
+export async function getOrgAgentLiveStatus(orgId: string, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/agents/live-status`, { headers: { 'x-user-id': userId || '' } });
+}
+
 // MightyCall sync helpers
 export async function triggerMightyCallPhoneNumberSync(userId?: string) {
   return await fetchJson(`/api/mightycall/sync/phone-numbers`, { method: 'POST', headers: { 'x-user-id': userId || '' } });

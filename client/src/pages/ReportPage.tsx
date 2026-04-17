@@ -40,6 +40,13 @@ type ReportDetailResponse = {
   };
 };
 
+function displayNumber(value?: string, fallback?: string) {
+  const primary = String(value || '').trim();
+  if (primary) return primary;
+  const secondary = String(fallback || '').trim();
+  return secondary || '-';
+}
+
 const PAGE_SIZE = 500;
 
 function fmtDate(v?: string) {
@@ -274,8 +281,8 @@ export default function ReportPage() {
                       <tbody className="divide-y divide-slate-800/60">
                         {detail.related.calls.length === 0 ? (
                           <tr><td className="px-2 py-3 text-slate-400" colSpan={5}>No related calls found for this report.</td></tr>
-                        ) : detail.related.calls.slice(0, 500).map((c) => (
-                          <tr key={c.id}><td className="px-2 py-2 font-mono text-slate-200">{c.from_number || '-'}</td><td className="px-2 py-2 font-mono text-slate-200">{c.to_number || '-'}</td><td className="px-2 py-2 text-slate-300">{c.status || '-'}</td><td className="px-2 py-2 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td><td className="px-2 py-2 text-slate-400">{fmtDate(c.started_at)}</td></tr>
+                        ) : detail.related.calls.map((c) => (
+                          <tr key={c.id}><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(c.from_number, detail.report.from_number)}</td><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(c.to_number, detail.report.to_number)}</td><td className="px-2 py-2 text-slate-300">{c.status || '-'}</td><td className="px-2 py-2 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td><td className="px-2 py-2 text-slate-400">{fmtDate(c.started_at)}</td></tr>
                         ))}
                       </tbody>
                     </table>
@@ -286,8 +293,8 @@ export default function ReportPage() {
                       <tbody className="divide-y divide-slate-800/60">
                         {detail.related.recordings.length === 0 ? (
                           <tr><td className="px-2 py-3 text-slate-400" colSpan={4}>No related recordings found for this report.</td></tr>
-                        ) : detail.related.recordings.slice(0, 500).map((r) => (
-                          <tr key={r.id}><td className="px-2 py-2 font-mono text-slate-200">{r.from_number || '-'}</td><td className="px-2 py-2 font-mono text-slate-200">{r.to_number || '-'}</td><td className="px-2 py-2 text-slate-300">{fmtSeconds(Number(r.duration_seconds || 0))}</td><td className="px-2 py-2 text-slate-400">{fmtDate(r.recording_date)}</td></tr>
+                        ) : detail.related.recordings.map((r) => (
+                          <tr key={r.id}><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(r.from_number, detail.report.from_number)}</td><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(r.to_number, detail.report.to_number)}</td><td className="px-2 py-2 text-slate-300">{fmtSeconds(Number(r.duration_seconds || 0))}</td><td className="px-2 py-2 text-slate-400">{fmtDate(r.recording_date)}</td></tr>
                         ))}
                       </tbody>
                     </table>
@@ -298,8 +305,8 @@ export default function ReportPage() {
                       <tbody className="divide-y divide-slate-800/60">
                         {detail.related.sms.length === 0 ? (
                           <tr><td className="px-2 py-3 text-slate-400" colSpan={4}>No related SMS found for this report.</td></tr>
-                        ) : detail.related.sms.slice(0, 500).map((s) => (
-                          <tr key={s.id}><td className="px-2 py-2 font-mono text-slate-200">{s.from_number || '-'}</td><td className="px-2 py-2 font-mono text-slate-200">{s.to_number || '-'}</td><td className="px-2 py-2 text-slate-300">{s.direction || '-'}</td><td className="px-2 py-2 text-slate-400">{fmtDate(s.created_at)}</td></tr>
+                        ) : detail.related.sms.map((s) => (
+                          <tr key={s.id}><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(s.from_number, detail.report.from_number)}</td><td className="px-2 py-2 font-mono text-slate-200">{displayNumber(s.to_number, detail.report.to_number)}</td><td className="px-2 py-2 text-slate-300">{s.direction || '-'}</td><td className="px-2 py-2 text-slate-400">{fmtDate(s.created_at)}</td></tr>
                         ))}
                       </tbody>
                     </table>
