@@ -3347,16 +3347,18 @@ app.post('/api/admin/mightycall/extensions/import', async (req, res) => {
     if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
     if (!extension) return res.status(400).json({ error: 'missing_extension' });
 
-    const { data: integrationRows, error: integrationError } = await supabaseAdmin
-      .from('org_integrations')
-      .select('org_id, encrypted_credentials')
-      .eq('provider', 'mightycall');
-    if (integrationError) throw integrationError;
+    const [{ data: orgRows, error: orgError }, { data: orgUserRows, error: orgUserError }] = await Promise.all([
+      supabaseAdmin.from('organizations').select('id'),
+      supabaseAdmin.from('org_users').select('org_id')
+    ]);
+    if (orgError) throw orgError;
+    if (orgUserError) throw orgUserError;
 
     const { getOrgIntegration } = await import('./lib/integrationsStore');
     const orderedOrgIds = Array.from(new Set([
       ...(preferredOrgId ? [preferredOrgId] : []),
-      ...((integrationRows || []).map((row: any) => String(row?.org_id || '')).filter(Boolean))
+      ...((orgRows || []).map((row: any) => String(row?.id || '')).filter(Boolean)),
+      ...((orgUserRows || []).map((row: any) => String(row?.org_id || '')).filter(Boolean))
     ]));
 
     for (const orgId of orderedOrgIds) {
@@ -3395,6 +3397,36 @@ app.post('/api/admin/mightycall/extensions/import', async (req, res) => {
       } catch (e) {
         console.warn('[admin_mightycall_extension_import] verification failed for org', orgId, fmtErr(e));
       }
+    }
+
+    try {
+      const token = await getMightyCallAccessToken();
+      const profile = await fetchMightyCallProfileByExtension(extension, token);
+      if (profile?.extension) {
+        await supabaseAdmin
+          .from('mightycall_extensions')
+          .upsert(
+            {
+              extension: profile.extension,
+              display_name: profile.display_name || null,
+              external_id: `verified:${profile.extension}`
+            },
+            { onConflict: 'extension' }
+          );
+
+        return res.json({
+          ok: true,
+          extension: {
+            extension: profile.extension,
+            display_name: profile.display_name || null,
+            sources: ['mightycall_profile', 'mightycall_verified_cache'],
+            is_live: true,
+            source_org_id: null
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('[admin_mightycall_extension_import] global verification failed', fmtErr(e));
     }
 
     return res.status(404).json({ error: 'extension_not_verified', detail: `MightyCall did not verify extension ${extension}.` });
