@@ -19,7 +19,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   const isAdmin = globalRole === 'platform_admin';
 
   const defaultMeta = (
-    <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-left xl:text-right">
+    <div className="rounded-2xl border border-white/[0.03] bg-white/[0.03] px-4 py-3 text-left xl:text-right">
       <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Today</div>
       <div className="mt-2 text-sm font-medium text-slate-200">{new Date().toLocaleDateString()}</div>
     </div>

@@ -18,7 +18,7 @@ export function DashboardShellHeader({
   meta?: ReactNode;
 }) {
   return (
-    <header className="sticky top-0 z-40 border-b border-white/[0.025] bg-[rgba(2,6,23,0.88)] backdrop-blur-xl">
+    <header className="sticky top-0 z-40 border-b border-white/[0.02] bg-[rgba(2,6,23,0.88)] backdrop-blur-xl">
       <div className="px-6 py-5 sm:px-8">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
@@ -61,7 +61,7 @@ export function SectionCard({
   return (
     <section className={cx('vs-surface overflow-hidden', className)}>
       {(title || actions) && (
-        <div className="flex flex-col gap-3 border-b border-white/[0.025] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-white/[0.02] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             {title && <h2 className="text-base font-semibold text-white">{title}</h2>}
             {description && <p className="mt-1 text-sm text-slate-400">{description}</p>}
@@ -93,7 +93,7 @@ export function MetricStatCard({
   };
 
   return (
-    <div className={cx('rounded-3xl border p-5 shadow-[0_18px_45px_rgba(2,6,23,0.18)]', tones[accent])}>
+    <div className={cx('rounded-3xl border border-white/[0.02] p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)]', tones[accent])}>
       <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{label}</div>
       <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-white">{value}</div>
       {hint && <div className="mt-3 text-sm text-slate-400">{hint}</div>}
@@ -132,7 +132,7 @@ export function EmptyStatePanel({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-3xl border border-dashed border-white/[0.03] bg-white/[0.02] px-6 py-10 text-center">
+    <div className="rounded-3xl border border-dashed border-white/[0.02] bg-white/[0.02] px-6 py-10 text-center">
       <div className="text-base font-semibold text-white">{title}</div>
       <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-400">{description}</p>
       {action && <div className="mt-4 flex justify-center">{action}</div>}

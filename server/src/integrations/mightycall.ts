@@ -188,7 +188,7 @@ export async function fetchMightyCallCalls(accessToken: string, filters?: any, a
   return all;
 }
 
-export async function fetchMightyCallJournalRequests(accessToken: string, params: Record<string,string>) {
+export async function fetchMightyCallJournalRequests(accessToken: string, params: Record<string,string>, apiKeyOverride?: string) {
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const ep = '/journal/requests';
   const pageSize = Math.min(Math.max(parseInt(String(params.pageSize || '200'), 10) || 200, 1), 1000);
@@ -209,7 +209,7 @@ export async function fetchMightyCallJournalRequests(accessToken: string, params
       if (params?.type) qp.set('requestType', params.type);
 
       const full = `${url}?${qp.toString()}`;
-      const r = await tryFetchJson(full, accessToken);
+      const r = await tryFetchJson(full, accessToken, apiKeyOverride);
       if (!r.ok || !r.body) break;
 
       const body: any = r.body;

@@ -29,20 +29,20 @@ body {
 .vs-surface {
   background:
     linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(8, 15, 30, 0.96) 100%);
-  border: 1px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.02);
   border-radius: 1.5rem;
-  box-shadow: 0 20px 48px rgba(2, 6, 23, 0.22);
+  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.18);
   backdrop-filter: blur(14px);
 }
 
 .vs-surface-muted {
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.02);
   border-radius: 1.25rem;
 }
 
 .vs-input {
-  @apply rounded-2xl border border-white/[0.05] bg-white/[0.03] px-4 py-3 text-sm text-slate-100 outline-none transition;
+  @apply rounded-2xl border border-white/[0.03] bg-white/[0.03] px-4 py-3 text-sm text-slate-100 outline-none transition;
 }
 
 .vs-input:focus {

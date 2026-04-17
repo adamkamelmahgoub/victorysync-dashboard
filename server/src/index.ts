@@ -39,6 +39,7 @@ import {
   fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
+  fetchMightyCallJournalRequests,
   fetchMightyCallContacts,
   syncMightyCallPhoneNumbers, 
   syncMightyCallReports,
@@ -616,8 +617,10 @@ function collectExtensionCandidates(input: any, depth = 0): string[] {
       lower === 'assigned_to' ||
       lower === 'participant' ||
       lower === 'participants' ||
+      lower === 'users' ||
       lower === 'member' ||
       lower === 'members' ||
+      lower === 'agents' ||
       lower === 'callee' ||
       lower === 'caller' ||
       lower === 'callerinfo' ||
@@ -669,7 +672,9 @@ function extractCounterpartyLabel(value: any, orgPhoneDigits: Set<string>, exten
     value?.customer?.phone,
     value?.customer?.number,
     value?.client?.address,
+    value?.client?.phone,
     value?.caller?.number,
+    value?.client?.number,
     value?.source?.number,
     value?.party?.phone,
     value?.with,
@@ -708,8 +713,27 @@ function extractCounterpartyLabel(value: any, orgPhoneDigits: Set<string>, exten
 function isLikelyActiveCallStatus(status: any): boolean {
   const normalized = String(status || '').toLowerCase().trim();
   if (!normalized) return false;
-  if (['completed', 'ended', 'missed', 'failed', 'canceled', 'cancelled', 'voicemail'].includes(normalized)) return false;
+  if (['completed', 'ended', 'missed', 'failed', 'canceled', 'cancelled', 'voicemail', 'noanswer', 'no_answer', 'abandoned', 'closed', 'done'].includes(normalized)) return false;
   return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call'].some((token) => normalized.includes(token));
+}
+
+function isLikelyLiveJournalRequest(request: any): boolean {
+  const statusCandidates = [
+    request?.state,
+    request?.wfstate?.state,
+    request?.availability,
+    request?.recording?.availability,
+    request?.status,
+  ];
+  if (statusCandidates.some((candidate) => isLikelyActiveCallStatus(candidate))) return true;
+  const workflowState = String(request?.wfstate?.state || '').toLowerCase().trim();
+  const requestState = String(request?.state || '').toLowerCase().trim();
+  const hasResponse = !!String(request?.respondedAt || request?.responded_at || '').trim();
+  const createdAt = Date.parse(String(request?.created || request?.createdAt || ''));
+  const recentEnough = Number.isFinite(createdAt) ? (Date.now() - createdAt) < (20 * 60 * 1000) : false;
+  if ((workflowState === 'open' || requestState === 'ringing' || requestState === 'calling' || requestState === 'dialing') && recentEnough) return true;
+  if (!hasResponse && recentEnough && !['noanswer', 'no_answer', 'failed', 'missed', 'completed', 'ended'].includes(requestState)) return true;
+  return false;
 }
 
 async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
@@ -727,7 +751,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       .select('extension, display_name, metadata, external_id'),
     supabaseAdmin
       .from('calls')
-      .select('id, agent_extension, answered_extension, answered_by, answer_extension, mightycall_extension, agent, status, started_at, ended_at, from_number, to_number')
+      .select('id, agent_extension, status, started_at, answered_at, ended_at, from_number, to_number, metadata')
       .eq('org_id', orgId)
       .gte('started_at', new Date(Date.now() - (6 * 60 * 60 * 1000)).toISOString())
       .order('started_at', { ascending: false })
@@ -781,8 +805,15 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     pageSize: '500',
     skip: '0'
   }, apiKeyOverride).catch(() => []);
+  const journalPromise = fetchMightyCallJournalRequests(token, {
+    from: new Date(now - (2 * 60 * 60 * 1000)).toISOString(),
+    to: new Date(now + (30 * 60 * 1000)).toISOString(),
+    type: 'Call',
+    pageSize: '200',
+    page: '1'
+  }, apiKeyOverride).catch(() => []);
   const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
-  const [liveCalls, liveExtensions] = await Promise.all([callsPromise, extensionsPromise]);
+  const [liveCalls, liveJournal, liveExtensions] = await Promise.all([callsPromise, journalPromise, extensionsPromise]);
   const profileRows = await Promise.all(
     Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
       .map(async (extension) => {
@@ -870,6 +901,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const status = String(call?.status || '').trim();
     return isLikelyActiveCallStatus(status) || !String(call?.ended_at || '').trim();
   });
+  const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
 
   return memberRows.map((member: any) => {
     const userId = String(member.user_id || '');
@@ -888,14 +920,16 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ? activeDbCalls.find((call: any) => {
           const extCandidates = [
             call?.agent_extension,
-            call?.answered_extension,
-            call?.answered_by,
-            call?.answer_extension,
-            call?.mightycall_extension,
-            call?.agent,
+            call?.metadata?.agent_extension,
+            call?.metadata?.agent?.extension,
+            call?.metadata?.user?.extension,
+            call?.metadata?.users?.[0]?.extension,
           ].map((value) => normalizeExtension(value)).filter(Boolean);
           return extCandidates.includes(normalizedExt);
         }) || null
+      : null;
+    const matchedJournalCall = !matchedLiveCall && !matchedDbCall && normalizedExt
+      ? activeJournalCalls.find((call: any) => collectExtensionCandidates(call).includes(normalizedExt)) || null
       : null;
 
     const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
@@ -903,12 +937,15 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ? String(matchedLiveCall?.status || matchedLiveCall?.state || matchedLiveCall?.callStatus || '').trim() || extStatus
       : matchedDbCall
         ? String(matchedDbCall?.status || '').trim() || extStatus
+        : matchedJournalCall
+          ? String(matchedJournalCall?.state || matchedJournalCall?.wfstate?.state || matchedJournalCall?.availability || '').trim() || extStatus
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
     const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
     const onCall = !!(
       matchedLiveCall ||
       matchedDbCall ||
+      matchedJournalCall ||
       statusPayload?.onCall ||
       statusPayload?.inCall ||
       statusPayload?.isOnCall ||
@@ -924,13 +961,17 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : matchedDbCall
         ? extractCounterpartyLabel(matchedDbCall, orgPhoneDigits, normalizedExt)
+        : matchedJournalCall
+          ? extractCounterpartyLabel(matchedJournalCall, orgPhoneDigits, normalizedExt)
         : extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
     const startedAt = matchedLiveCall
       ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
       : matchedDbCall
         ? matchedDbCall?.started_at || null
+        : matchedJournalCall
+          ? matchedJournalCall?.created || matchedJournalCall?.createdAt || null
         : statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
-    const source = matchedLiveCall ? 'mightycall_calls' : matchedDbCall ? 'db_calls' : statusPayload?.status || statusPayload?.state || statusPayload?.presenceStatus || statusPayload?.availability ? 'mightycall_status' : (extMeta ? 'mightycall_extensions' : 'unmatched');
+    const source = matchedLiveCall ? 'mightycall_calls' : matchedDbCall ? 'db_calls' : matchedJournalCall ? 'mightycall_journal' : statusPayload?.status || statusPayload?.state || statusPayload?.presenceStatus || statusPayload?.availability ? 'mightycall_status' : (extMeta ? 'mightycall_extensions' : 'unmatched');
 
     if (normalizedExt) {
       console.info('[agents/live-status] resolved', {
@@ -942,6 +983,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         status: callStatus || null,
         matchedCallCandidates: matchedLiveCall ? collectExtensionCandidates(matchedLiveCall) : [],
         matchedDbCallId: matchedDbCall?.id || null,
+        matchedJournalCallId: matchedJournalCall?.id || null,
       });
     }
 

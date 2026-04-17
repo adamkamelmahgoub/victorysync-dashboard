@@ -104,8 +104,8 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const selectedOrgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
 
   return (
-    <aside className="fixed left-0 top-0 flex h-screen w-72 flex-col border-r border-white/[0.025] bg-[linear-gradient(180deg,rgba(3,7,18,0.96),rgba(7,12,24,0.98))] px-4 pb-4 pt-5 backdrop-blur-xl">
-      <div className="rounded-[28px] border border-white/[0.02] bg-white/[0.03] px-4 py-4 shadow-[0_22px_60px_rgba(2,6,23,0.22)]">
+    <aside className="fixed left-0 top-0 flex h-screen w-72 flex-col border-r border-white/[0.02] bg-[linear-gradient(180deg,rgba(3,7,18,0.96),rgba(7,12,24,0.98))] px-4 pb-4 pt-5 backdrop-blur-xl">
+      <div className="rounded-[28px] border border-white/[0.015] bg-white/[0.03] px-4 py-4 shadow-[0_18px_44px_rgba(2,6,23,0.18)]">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-transparent bg-cyan-400/[0.08] text-sm font-semibold tracking-[0.24em] text-cyan-100">
             VS
@@ -116,7 +116,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-white/[0.02] bg-black/20 px-3 py-3">
+        <div className="mt-4 rounded-2xl border border-white/[0.015] bg-black/20 px-3 py-3">
           <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Workspace</div>
           <div className="mt-2 text-sm font-medium text-slate-200">{selectedOrgName}</div>
           <div className="mt-1 text-xs text-slate-500">{isAdmin ? 'Platform visibility across organizations' : 'Organization operations view'}</div>
@@ -136,7 +136,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
         ))}
       </nav>
 
-      <div className="space-y-2 rounded-[26px] border border-white/[0.02] bg-white/[0.03] p-3">
+      <div className="space-y-2 rounded-[26px] border border-white/[0.015] bg-white/[0.03] p-3">
         <div className="px-1">
           <div className="text-sm font-medium text-slate-200">{user?.email || 'Signed in'}</div>
           <div className="mt-1 text-xs text-slate-500">Account and access controls</div>
@@ -153,7 +153,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
         </button>
         <button
           onClick={() => signOut()}
-          className="w-full rounded-2xl border border-white/[0.02] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
+          className="w-full rounded-2xl border border-white/[0.015] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
         >
           Sign Out
         </button>

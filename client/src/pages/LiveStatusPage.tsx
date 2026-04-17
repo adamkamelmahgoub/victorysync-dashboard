@@ -80,11 +80,11 @@ const LiveStatusPage: FC = () => {
 
   const meta = (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+      <div className="rounded-2xl border border-white/[0.03] bg-white/[0.03] px-4 py-3">
         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Live roster</div>
         <div className="mt-2 text-sm font-medium text-slate-200">{onCall} on call · {idle} available</div>
       </div>
-      <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+      <div className="rounded-2xl border border-white/[0.03] bg-white/[0.03] px-4 py-3">
         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Updated</div>
         <div className="mt-2 text-sm font-medium text-slate-200">{refreshedAt ? fmtDateTime(refreshedAt) : 'Waiting for first sync'}</div>
       </div>
@@ -121,7 +121,7 @@ const LiveStatusPage: FC = () => {
           ) : (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               {items.map((agent) => (
-                <div key={`${agent.org_id || 'global'}:${agent.user_id}`} className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
+                <div key={`${agent.org_id || 'global'}:${agent.user_id}`} className="rounded-3xl border border-white/[0.03] bg-white/[0.025] p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)]">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
