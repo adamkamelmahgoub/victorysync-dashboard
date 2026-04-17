@@ -21,6 +21,7 @@ export default function AdminTopNav() {
     { to: '/admin/sms', label: 'SMS' },
     { to: '/admin/billing', label: 'Billing' },
     { to: '/admin/mightycall', label: 'Integrations' },
+    { to: '/admin/diagnostics', label: 'Diagnostics' },
     { to: '/admin/operations', label: 'Operations' },
   ];
   if (isPlatformAdmin) items.push({ to: '/admin/api-keys', label: 'API Keys' });

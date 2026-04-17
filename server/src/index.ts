@@ -172,6 +172,41 @@ async function getOrgIntegrationHealth(orgId: string) {
   };
 }
 
+async function resolveOrgNamesById(orgIds: string[]) {
+  const ids = Array.from(new Set(orgIds.filter(Boolean)));
+  if (ids.length === 0) return {} as Record<string, string>;
+  try {
+    const { data } = await supabaseAdmin.from('organizations').select('id, name').in('id', ids);
+    const map: Record<string, string> = {};
+    for (const row of data || []) map[String((row as any).id)] = String((row as any).name || '');
+    return map;
+  } catch {
+    return {} as Record<string, string>;
+  }
+}
+
+async function resolveUserEmailsById(userIds: string[]) {
+  const ids = Array.from(new Set(userIds.filter(Boolean)));
+  const map: Record<string, string> = {};
+  if (ids.length === 0) return map;
+
+  try {
+    const { data } = await supabaseAdmin.from('profiles').select('id, email').in('id', ids);
+    for (const row of data || []) {
+      if ((row as any)?.id && (row as any)?.email) map[String((row as any).id)] = String((row as any).email);
+    }
+  } catch {}
+
+  try {
+    const { data } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 500 });
+    for (const user of data?.users || []) {
+      if (ids.includes(user.id) && user.email) map[user.id] = user.email;
+    }
+  } catch {}
+
+  return map;
+}
+
 function looksLikeUuid(v: string | null | undefined): boolean {
   if (!v) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
@@ -1285,7 +1320,40 @@ app.get('/api/admin/membership-drift', async (req, res) => {
     const actorId = req.header('x-user-id') || null;
     if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
     const limit = Math.min(parseInt((req.query.limit as string) || '100', 10), 500);
-    res.json(await getMembershipDriftDetails(limit));
+    const drift = await getMembershipDriftDetails(limit);
+    const orgIds = [
+      ...drift.mismatched_rows.map((row) => row.org_id),
+      ...drift.org_users_only_rows.map((row) => row.org_id),
+      ...drift.org_members_only_rows.map((row) => row.org_id),
+    ];
+    const userIds = [
+      ...drift.mismatched_rows.map((row) => row.user_id),
+      ...drift.org_users_only_rows.map((row) => row.user_id),
+      ...drift.org_members_only_rows.map((row) => row.user_id),
+    ];
+    const [orgNames, userEmails] = await Promise.all([
+      resolveOrgNamesById(orgIds),
+      resolveUserEmailsById(userIds),
+    ]);
+
+    res.json({
+      ...drift,
+      mismatched_rows: drift.mismatched_rows.map((row) => ({
+        ...row,
+        org_name: orgNames[row.org_id] || row.org_id,
+        user_email: userEmails[row.user_id] || row.user_id,
+      })),
+      org_users_only_rows: drift.org_users_only_rows.map((row) => ({
+        ...row,
+        org_name: orgNames[row.org_id] || row.org_id,
+        user_email: userEmails[row.user_id] || row.user_id,
+      })),
+      org_members_only_rows: drift.org_members_only_rows.map((row) => ({
+        ...row,
+        org_name: orgNames[row.org_id] || row.org_id,
+        user_email: userEmails[row.user_id] || row.user_id,
+      })),
+    });
   } catch (err: any) {
     console.error('membership_drift_failed:', fmtErr(err));
     res.status(500).json({ error: 'membership_drift_failed', detail: fmtErr(err) });
@@ -2489,15 +2557,27 @@ app.get('/api/user/profile', async (req, res) => {
 
     const meta: any = authUser.user_metadata || {};
     const globalRole = meta?.global_role || null;
+    const selectedOrgId = req.query.org_id as string | undefined;
+    let organization: any = null;
+    if (selectedOrgId) {
+      const { data: orgRow } = await supabaseAdmin
+        .from('organizations')
+        .select('id, name, logo_url')
+        .eq('id', selectedOrgId)
+        .maybeSingle();
+      organization = orgRow || null;
+    }
     res.json({
       user: {
         id: authUser.id,
         email: authUser.email,
         full_name: meta?.full_name || '',
         phone_number: meta?.phone_number || '',
-        profile_pic_url: meta?.profile_pic_url || ''
+        profile_pic_url: meta?.profile_pic_url || '',
+        theme: meta?.theme || 'dark'
       },
-      profile: { id: userId, global_role: globalRole }
+      profile: { id: userId, global_role: globalRole },
+      organization
     });
   } catch (err: any) {
     console.error('get_user_profile_failed:', fmtErr(err));
@@ -2511,7 +2591,7 @@ app.put('/api/user/profile', async (req, res) => {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
-    const { full_name, email, phone_number } = req.body;
+    const { full_name, email, phone_number, theme } = req.body;
 
     const { data: currentUser, error: currentUserErr } = await supabaseAdmin.auth.admin.getUserById(userId);
     if (currentUserErr || !currentUser?.user) throw (currentUserErr || new Error('user_not_found'));
@@ -2521,7 +2601,8 @@ app.put('/api/user/profile', async (req, res) => {
       user_metadata: {
         ...currentMeta,
         full_name: full_name ?? currentMeta.full_name ?? '',
-        phone_number: phone_number ?? currentMeta.phone_number ?? ''
+        phone_number: phone_number ?? currentMeta.phone_number ?? '',
+        theme: theme ?? currentMeta.theme ?? 'dark'
       }
     };
 
@@ -2539,7 +2620,8 @@ app.put('/api/user/profile', async (req, res) => {
         email: data.user.email,
         full_name: (data.user.user_metadata as any)?.full_name || '',
         phone_number: (data.user.user_metadata as any)?.phone_number || '',
-        profile_pic_url: (data.user.user_metadata as any)?.profile_pic_url || ''
+        profile_pic_url: (data.user.user_metadata as any)?.profile_pic_url || '',
+        theme: (data.user.user_metadata as any)?.theme || 'dark'
       }
     });
   } catch (err: any) {
@@ -6364,7 +6446,19 @@ app.get('/api/admin/audit-logs', async (req, res) => {
     if (action) q = q.eq('action', action);
     const { data, error, count } = await q;
     if (error) return res.json({ logs: [], count: 0 });
-    res.json({ logs: data || [], count: count || 0 });
+    const rows = data || [];
+    const actorIds = rows.map((row: any) => row.actor_id).filter(Boolean);
+    const orgIds = rows.map((row: any) => row.org_id).filter(Boolean);
+    const [userEmails, orgNames] = await Promise.all([
+      resolveUserEmailsById(actorIds),
+      resolveOrgNamesById(orgIds),
+    ]);
+    const enriched = rows.map((row: any) => ({
+      ...row,
+      actor_email: row.actor_id ? (userEmails[row.actor_id] || row.actor_id) : null,
+      org_name: row.org_id ? (orgNames[row.org_id] || row.org_id) : null,
+    }));
+    res.json({ logs: enriched, count: count || 0 });
   } catch (err: any) {
     console.error('admin_audit_logs_failed:', fmtErr(err));
     res.status(500).json({ error: 'admin_audit_logs_failed', detail: fmtErr(err) ?? 'unknown_error' });
@@ -10819,21 +10913,22 @@ app.post('/api/user/upload-org-logo', async (req, res) => {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
-    const { image_data } = req.body;
+    const { image_data, org_id } = req.body;
     if (!image_data) return res.status(400).json({ error: 'no_image_provided' });
 
-    // Get user's primary org
-    const { data: memberships } = await supabaseAdmin
-      .from('org_members')
-      .select('org_id')
-      .eq('user_id', userId)
-      .limit(1);
-
-    if (!memberships || memberships.length === 0) {
-      return res.status(404).json({ error: 'no_org_found' });
+    let orgId = String(org_id || '').trim() || null;
+    if (!orgId) {
+      const [{ data: orgUsers }, { data: orgMembers }] = await Promise.all([
+        supabaseAdmin.from('org_users').select('org_id').eq('user_id', userId).limit(1),
+        supabaseAdmin.from('org_members').select('org_id').eq('user_id', userId).limit(1),
+      ]);
+      orgId = (orgUsers?.[0] as any)?.org_id || (orgMembers?.[0] as any)?.org_id || null;
     }
 
-    const orgId = memberships[0].org_id;
+    if (!orgId) return res.status(404).json({ error: 'no_org_found' });
+
+    const canUpload = (await isPlatformAdmin(userId)) || (await isOrgMember(userId, orgId));
+    if (!canUpload) return res.status(403).json({ error: 'forbidden' });
 
     // Update org with logo
     const { data: org, error } = await supabaseAdmin

@@ -36,7 +36,7 @@ const NumbersPage: FC = () => {
 
   useEffect(() => {
     fetchNumbers();
-  }, [selectedOrgId, userId]);
+  }, [selectedOrgId, userId, isAdmin]);
 
   useEffect(() => {
     // Filter recordings by selected phone
@@ -56,15 +56,27 @@ const NumbersPage: FC = () => {
   }, [globalRole, user]);
 
   const fetchNumbers = async () => {
-    if (!selectedOrgId || !userId) {
+    if (!userId) {
       setLoading(false);
       return;
     }
 
     try {
       setLoading(true);
-      const data = await getOrgPhoneNumbers(selectedOrgId, userId);
-      setNumbers(data || []);
+      if (isAdmin && !selectedOrgId) {
+        const response = await fetch(buildApiUrl('/api/admin/phone-numbers'), {
+          cache: 'no-store',
+          headers: { 'x-user-id': userId }
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'Failed to load all phone numbers');
+        setNumbers(payload.phone_numbers || []);
+      } else if (selectedOrgId) {
+        const data = await getOrgPhoneNumbers(selectedOrgId, userId);
+        setNumbers(data || []);
+      } else {
+        setNumbers([]);
+      }
       
       // Fetch recordings for these numbers
       await fetchRecordings();
@@ -77,7 +89,10 @@ const NumbersPage: FC = () => {
   };
 
   const fetchRecordings = async () => {
-    if (!selectedOrgId || !userId) return;
+    if (!selectedOrgId || !userId) {
+      setRecordings([]);
+      return;
+    }
     
     try {
       setRecordingsLoading(true);
@@ -134,7 +149,7 @@ const NumbersPage: FC = () => {
     setMessage('Syncing phone numbers...');
     try {
       const result: any = await triggerMightyCallPhoneNumberSync(userId);
-      setMessage(`Synced ${result.records_processed || 0} phone numbers`);
+      setMessage(`Synced ${result.records_processed || 0} phone numbers from MightyCall`);
       setTimeout(() => fetchNumbers(), 1000);
     } catch (err: any) {
       setMessage(err?.message || 'Sync failed');
@@ -311,7 +326,7 @@ const NumbersPage: FC = () => {
                   <option value="">All Phone Numbers ({uniquePhoneNumbers.length})</option>
                   {uniquePhoneNumbers.map((phoneId) => (
                     <option key={phoneId} value={phoneId || ''}>
-                      {phoneId}
+                      {numbers.find((n) => n.id === phoneId)?.number || phoneId}
                     </option>
                   ))}
                 </select>

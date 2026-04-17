@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { PageLayout } from '../components/PageLayout';import { buildApiUrl } from '../config';
+import { PageLayout } from '../components/PageLayout';
+import { buildApiUrl } from '../config';
+import { useTheme } from '../contexts/ThemeContext';
 export default function UserSettingsPage() {
-  const { user } = useAuth();
+  const { user, selectedOrgId, refreshProfile } = useAuth();
+  const { theme, setTheme } = useTheme();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [profilePicPreview, setProfilePicPreview] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [orgInfo, setOrgInfo] = useState<any>(null);
   const [apiKeys, setApiKeys] = useState<any[]>([]);
   const [loadingApiKeys, setLoadingApiKeys] = useState(false);
   const [generatingKey, setGeneratingKey] = useState(false);
@@ -32,19 +36,21 @@ export default function UserSettingsPage() {
       fetchProfile();
       // loadApiKeys(); // TODO: user_api_keys table needs migration in production
     }
-  }, [user]);
+  }, [user, selectedOrgId]);
 
   const fetchProfile = async () => {
     if (!user) return;
     setLoading(true);
     try {
-      const response = await fetch(buildApiUrl('/api/user/profile'), {
+      const suffix = selectedOrgId ? `?org_id=${encodeURIComponent(selectedOrgId)}` : '';
+      const response = await fetch(buildApiUrl(`/api/user/profile${suffix}`), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
         const data = await response.json();
         const userData = data.user || data.profile || data;
         setProfile(userData);
+        setOrgInfo(data.organization || null);
         setFormData({
           full_name: userData.full_name || '',
           email: userData.email || '',
@@ -52,6 +58,9 @@ export default function UserSettingsPage() {
         });
         if (userData.profile_pic_url) {
           setProfilePicPreview(userData.profile_pic_url);
+        }
+        if (data.organization?.logo_url) {
+          setLogoPreview(data.organization.logo_url);
         }
       } else {
         setMessage('Failed to load profile');
@@ -188,6 +197,7 @@ export default function UserSettingsPage() {
         setMessage('Profile updated successfully');
         setTimeout(() => setMessage(null), 3000);
         fetchProfile();
+        await refreshProfile();
       } else {
         setMessage('Failed to update profile');
       }
@@ -215,6 +225,7 @@ export default function UserSettingsPage() {
         setMessage('Profile picture updated');
         setTimeout(() => setMessage(null), 3000);
         fetchProfile();
+        await refreshProfile();
       } else {
         setMessage('Failed to upload profile picture');
       }
@@ -235,12 +246,14 @@ export default function UserSettingsPage() {
           'Content-Type': 'application/json',
           'x-user-id': user.id
         },
-        body: JSON.stringify({ image_data: logoPreview })
+        body: JSON.stringify({ image_data: logoPreview, org_id: selectedOrgId })
       });
 
       if (response.ok) {
         setMessage('Organization logo updated');
         setTimeout(() => setMessage(null), 3000);
+        fetchProfile();
+        await refreshProfile();
       } else {
         setMessage('Failed to upload logo');
       }
@@ -314,6 +327,30 @@ export default function UserSettingsPage() {
             <p className="text-sm">{message}</p>
           </div>
         )}
+
+        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
+          <h2 className="text-lg font-semibold text-white mb-6">Appearance</h2>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-200">Theme</div>
+              <div className="mt-1 text-sm text-slate-400">Choose the dashboard appearance for your account.</div>
+            </div>
+            <div className="inline-flex rounded-xl bg-slate-800/70 p-1">
+              <button
+                onClick={() => void setTheme('dark')}
+                className={`rounded-lg px-4 py-2 text-sm transition ${theme === 'dark' ? 'bg-cyan-600 text-white' : 'text-slate-300'}`}
+              >
+                Dark
+              </button>
+              <button
+                onClick={() => void setTheme('light')}
+                className={`rounded-lg px-4 py-2 text-sm transition ${theme === 'light' ? 'bg-cyan-600 text-white' : 'text-slate-300'}`}
+              >
+                Light
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* Profile Picture */}
         <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
@@ -395,7 +432,9 @@ export default function UserSettingsPage() {
         {/* Organization Logo */}
         <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
           <h2 className="text-lg font-semibold text-white mb-6">Organization Logo</h2>
-          <p className="text-sm text-slate-400 mb-4">Upload a logo to display on your dashboard and reports</p>
+          <p className="text-sm text-slate-400 mb-4">
+            {selectedOrgId ? `Upload a logo for ${orgInfo?.name || 'the selected organization'}` : 'Select an organization first to upload an organization logo.'}
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <div className="w-32 h-32 rounded-lg bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden">
@@ -418,7 +457,7 @@ export default function UserSettingsPage() {
               </div>
               <button
                 onClick={uploadOrgLogo}
-                disabled={!logoPreview || saving}
+                disabled={!logoPreview || saving || !selectedOrgId}
                 className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-600 text-white rounded-lg font-semibold transition"
               >
                 {saving ? 'Uploading...' : 'Upload Logo'}

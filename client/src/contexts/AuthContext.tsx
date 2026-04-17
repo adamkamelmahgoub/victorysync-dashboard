@@ -6,10 +6,11 @@ import { buildApiUrl } from "../config";
 
 type AuthContextValue = {
   user: User | null;
-  orgs: Array<{ id: string; name: string }>;
+  orgs: Array<{ id: string; name: string; logo_url?: string | null }>;
   selectedOrgId: string | null;
   loading: boolean;
   globalRole: string | null;
+  profile: { full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null;
   refreshProfile: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
@@ -20,10 +21,11 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
+  const [orgs, setOrgs] = useState<Array<{ id: string; name: string; logo_url?: string | null }>>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [globalRole, setGlobalRole] = useState<string | null>(null);
+  const [profile, setProfile] = useState<{ full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null>(null);
 
   useEffect(() => {
     // Check current session on mount, but timeout to avoid infinite loading
@@ -44,6 +46,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
             if (profileRes.ok) {
               const profileData = await profileRes.json();
               if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
+              if (profileData.user) {
+                setProfile({
+                  full_name: profileData.user.full_name || '',
+                  phone_number: profileData.user.phone_number || '',
+                  profile_pic_url: profileData.user.profile_pic_url || '',
+                  theme: profileData.user.theme || 'dark',
+                });
+              }
             }
           } catch (e) {
             console.warn('[AuthContext] init fetch profile failed', e);
@@ -52,7 +62,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
             const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': user.id } });
             if (orgsRes.ok) {
               const j = await orgsRes.json();
-              const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
+              const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || '' }));
               setOrgs(list);
               const isAdmin = (user.user_metadata?.global_role === 'platform_admin');
               if (isAdmin) {
@@ -87,13 +97,21 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
             if (profileRes.ok) {
               const profileData = await profileRes.json();
               if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
+              if (profileData.user) {
+                setProfile({
+                  full_name: profileData.user.full_name || '',
+                  phone_number: profileData.user.phone_number || '',
+                  profile_pic_url: profileData.user.profile_pic_url || '',
+                  theme: profileData.user.theme || 'dark',
+                });
+              }
             }
           } catch (e) { /* ignore */ }
           try {
             const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': session.user.id } });
             if (orgsRes.ok) {
               const j = await orgsRes.json();
-              const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
+              const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || '' }));
               setOrgs(list);
               const isAdmin = (session.user.user_metadata?.global_role === 'platform_admin');
               if (isAdmin) {
@@ -110,6 +128,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
           setOrgs([]);
           setSelectedOrgId(null);
           setGlobalRole(null);
+          setProfile(null);
         }
         setLoading(false);
       });
@@ -164,6 +183,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
           if (profileRes.ok) {
             const profileData = await profileRes.json();
             if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
+            if (profileData.user) {
+              setProfile({
+                full_name: profileData.user.full_name || '',
+                phone_number: profileData.user.phone_number || '',
+                profile_pic_url: profileData.user.profile_pic_url || '',
+                theme: profileData.user.theme || 'dark',
+              });
+            }
           }
         } catch (profileErr) {
           console.warn('[AuthContext] Failed to fetch profile:', profileErr);
@@ -174,7 +201,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
           const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': data.user.id } });
           if (orgsRes.ok) {
             const j = await orgsRes.json();
-            const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name }));
+            const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || '' }));
             setOrgs(list);
             if (data.user.user_metadata?.global_role === 'platform_admin') {
               setSelectedOrgId(null);
@@ -208,6 +235,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       setOrgs([]);
       setSelectedOrgId(null);
       setGlobalRole(null);
+      setProfile(null);
     } catch (err) {
       console.error("Sign out error:", err);
     }
@@ -217,7 +245,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     try {
       if (!user) return;
       // Fetch latest user profile from backend which has global_role from database
-      const response = await fetch(buildApiUrl('/api/user/profile'), {
+      const response = await fetch(buildApiUrl(`/api/user/profile${selectedOrgId ? `?org_id=${encodeURIComponent(selectedOrgId)}` : ''}`), {
         headers: { 'x-user-id': user.id }
       });
       if (response.ok) {
@@ -225,6 +253,20 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         if (data.profile) {
           setGlobalRole(data.profile.global_role ?? null);
         }
+        if (data.user) {
+          setProfile({
+            full_name: data.user.full_name || '',
+            phone_number: data.user.phone_number || '',
+            profile_pic_url: data.user.profile_pic_url || '',
+            theme: data.user.theme || 'dark',
+          });
+        }
+      }
+      const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': user.id } });
+      if (orgsRes.ok) {
+        const j = await orgsRes.json();
+        const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || '' }));
+        setOrgs(list);
       }
     } catch (e) {
       console.warn('[AuthContext] Failed to refresh profile:', e);
@@ -232,7 +274,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, globalRole, refreshProfile, signIn, signOut, setSelectedOrgId }}>
+    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, globalRole, profile, refreshProfile, signIn, signOut, setSelectedOrgId }}>
       {children}
     </AuthContext.Provider>
   );

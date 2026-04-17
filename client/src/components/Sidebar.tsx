@@ -1,6 +1,7 @@
 import React, { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface SidebarProps {
   isAdmin: boolean;
@@ -49,7 +50,8 @@ function NavButton({
 
 export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const navigate = useNavigate();
-  const { signOut, user, selectedOrgId, orgs } = useAuth();
+  const { signOut, user, selectedOrgId, orgs, profile } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   const navGroups: NavGroup[] = isAdmin
     ? [
@@ -76,6 +78,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Invite Codes', path: '/admin/invites' },
             { label: 'Support', path: '/admin/support' },
             { label: 'Billing', path: '/admin/billing' },
+            { label: 'Diagnostics', path: '/admin/diagnostics' },
             { label: 'Operations', path: '/admin/operations' },
           ],
         },
@@ -102,14 +105,20 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
       ];
 
   const selectedOrgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
+  const selectedOrgLogo = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.logo_url || '' : '';
+  const userDisplayName = profile?.full_name || user?.email || 'Signed in';
 
   return (
     <aside className="fixed left-0 top-0 flex h-screen w-72 flex-col border-r border-white/[0.02] bg-[linear-gradient(180deg,rgba(3,7,18,0.96),rgba(7,12,24,0.98))] px-4 pb-4 pt-5 backdrop-blur-xl">
       <div className="rounded-[28px] border border-white/[0.015] bg-white/[0.03] px-4 py-4 shadow-[0_18px_44px_rgba(2,6,23,0.18)]">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-transparent bg-cyan-400/[0.08] text-sm font-semibold tracking-[0.24em] text-cyan-100">
-            VS
-          </div>
+          {selectedOrgLogo ? (
+            <img src={selectedOrgLogo} alt="Organization logo" className="h-11 w-11 rounded-2xl object-cover ring-1 ring-white/10" />
+          ) : (
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-transparent bg-cyan-400/[0.08] text-sm font-semibold tracking-[0.24em] text-cyan-100">
+              VS
+            </div>
+          )}
           <div>
             <div className="text-base font-semibold tracking-[-0.02em] text-white">VictorySync</div>
             <div className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Operations Hub</div>
@@ -137,20 +146,40 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
       </nav>
 
       <div className="space-y-2 rounded-[26px] border border-white/[0.015] bg-white/[0.03] p-3">
+        <div className="flex items-center gap-3 px-1">
+          {profile?.profile_pic_url ? (
+            <img src={profile.profile_pic_url} alt="User profile" className="h-11 w-11 rounded-2xl object-cover ring-1 ring-white/10" />
+          ) : (
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.05] text-sm font-semibold text-slate-200">
+              {userDisplayName.slice(0, 1).toUpperCase()}
+            </div>
+          )}
+          <div>
+            <div className="text-sm font-medium text-slate-200">{userDisplayName}</div>
+            <div className="mt-1 text-xs text-slate-500">{user?.email || 'Account and access controls'}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => void toggleTheme()}
+            className="w-full rounded-2xl border border-white/[0.015] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
+          >
+            {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          </button>
+          <button
+            onClick={() => navigate('/account-settings')}
+            className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
+              isActivePath(currentPath, '/account-settings')
+                ? 'bg-white/[0.055] text-white'
+                : 'text-slate-300 hover:bg-white/[0.04] hover:text-white'
+            }`}
+          >
+            Settings
+          </button>
+        </div>
         <div className="px-1">
-          <div className="text-sm font-medium text-slate-200">{user?.email || 'Signed in'}</div>
           <div className="mt-1 text-xs text-slate-500">Account and access controls</div>
         </div>
-        <button
-          onClick={() => navigate('/account-settings')}
-          className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
-            isActivePath(currentPath, '/account-settings')
-              ? 'bg-white/[0.055] text-white'
-              : 'text-slate-300 hover:bg-white/[0.04] hover:text-white'
-          }`}
-        >
-          Account Settings
-        </button>
         <button
           onClick={() => signOut()}
           className="w-full rounded-2xl border border-white/[0.015] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"

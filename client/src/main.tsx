@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import "./index.css";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import { OrgProvider, useOrg } from "./contexts/OrgContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import DashboardNewV3 from "./pages/DashboardNewV3";
@@ -47,6 +48,7 @@ import { DebugAuthPage } from "./pages/DebugAuthPage";
 import { APIKeysPage } from "./pages/APIKeysPage";
 import BillingPage from "./pages/BillingPage";
 import LiveStatusPage from "./pages/LiveStatusPage";
+import AdminDiagnosticsPage from "./pages/admin/AdminDiagnosticsPage";
 
 declare global {
   interface Window {
@@ -307,6 +309,14 @@ function AppRouter() {
         }
       />
       <Route
+        path="/admin/diagnostics"
+        element={
+          <AdminRoute>
+            <AdminDiagnosticsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
         path="/admin/api-keys"
         element={
           <AdminRoute>
@@ -386,16 +396,18 @@ function AppRouter() {
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <AuthProvider>
-      <OrgProvider>
-        <BrowserRouter>
-          <ErrorBoundary>
-            {/* ToastProvider provides a simple global toast UI */}
-            <ToastProvider>
-              <AppRouter />
-            </ToastProvider>
-          </ErrorBoundary>
-        </BrowserRouter>
-      </OrgProvider>
+      <ThemeProvider>
+        <OrgProvider>
+          <BrowserRouter>
+            <ErrorBoundary>
+              {/* ToastProvider provides a simple global toast UI */}
+              <ToastProvider>
+                <AppRouter />
+              </ToastProvider>
+            </ErrorBoundary>
+          </BrowserRouter>
+        </OrgProvider>
+      </ThemeProvider>
     </AuthProvider>
   </StrictMode>
 );
