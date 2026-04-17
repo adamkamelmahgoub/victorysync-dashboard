@@ -169,6 +169,7 @@ const AdminAgentsManagementPage: FC = () => {
     setGlobalExtensionsLoading(true);
     setGlobalExtensionsError(null);
     setGlobalExtensionsInfo(null);
+    setGlobalExtensionOptions([]);
     try {
       const json = await getAdminMightyCallExtensions(userId, { liveOnly: true });
       const liveOptions = (json.live_extensions || []) as ExtensionOption[];
@@ -181,6 +182,7 @@ const AdminAgentsManagementPage: FC = () => {
         setGlobalExtensionsError('No MightyCall extensions were found across any org.');
       }
     } catch (e: any) {
+      setGlobalExtensionOptions([]);
       setGlobalExtensionsError(e?.message || 'Failed to load global MightyCall extensions');
     } finally {
       setGlobalExtensionsLoading(false);
