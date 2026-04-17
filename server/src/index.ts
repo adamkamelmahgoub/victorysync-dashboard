@@ -3092,7 +3092,7 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
       const normalized = String(extension || '').trim();
       if (!normalized) return;
       const nextDisplayName = displayName ? String(displayName).trim() || null : null;
-      const isConfirmedLive = source === 'mightycall_live' || source === 'mightycall_profile';
+      const isConfirmedLive = source === 'mightycall_live' || source === 'mightycall_profile' || source === 'mightycall_verified_cache';
       const existing = rows.get(normalized);
       if (!existing) {
         rows.set(normalized, {
@@ -3134,11 +3134,12 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
     try {
       const { data: cached, error: cachedError } = await supabaseAdmin
         .from('mightycall_extensions')
-        .select('extension, display_name')
+        .select('extension, display_name, external_id')
         .order('extension', { ascending: true });
       if (cachedError) throw cachedError;
       for (const item of cached || []) {
-        pushRow('mightycall_cache', item?.extension, item?.display_name);
+        const source = String(item?.external_id || '').startsWith('verified:') ? 'mightycall_verified_cache' : 'mightycall_cache';
+        pushRow(source, item?.extension, item?.display_name);
       }
     } catch (e) {
       console.warn('[org_mightycall_extensions] cached extensions lookup failed:', fmtErr(e));
@@ -3334,6 +3335,72 @@ app.get('/api/admin/mightycall/extensions', async (req, res) => {
   } catch (err: any) {
     console.error('admin_mightycall_extensions_failed:', fmtErr(err));
     res.status(500).json({ error: 'admin_mightycall_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/admin/mightycall/extensions/import - manually verify and import a missing extension into the shared MightyCall pool
+app.post('/api/admin/mightycall/extensions/import', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const extension = String(req.body?.extension || '').trim();
+    const preferredOrgId = String(req.body?.orgId || '').trim() || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    if (!extension) return res.status(400).json({ error: 'missing_extension' });
+
+    const { data: integrationRows, error: integrationError } = await supabaseAdmin
+      .from('org_integrations')
+      .select('org_id, encrypted_credentials')
+      .eq('provider', 'mightycall');
+    if (integrationError) throw integrationError;
+
+    const { getOrgIntegration } = await import('./lib/integrationsStore');
+    const orderedOrgIds = Array.from(new Set([
+      ...(preferredOrgId ? [preferredOrgId] : []),
+      ...((integrationRows || []).map((row: any) => String(row?.org_id || '')).filter(Boolean))
+    ]));
+
+    for (const orgId of orderedOrgIds) {
+      try {
+        const integ = await getOrgIntegration(orgId, 'mightycall');
+        if (!integ?.credentials) continue;
+        const overrideCreds = {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+        };
+        const token = await getMightyCallAccessToken(overrideCreds);
+        const profile = await fetchMightyCallProfileByExtension(extension, token, overrideCreds.clientId || undefined);
+        if (!profile?.extension) continue;
+
+        await supabaseAdmin
+          .from('mightycall_extensions')
+          .upsert(
+            {
+              extension: profile.extension,
+              display_name: profile.display_name || null,
+              external_id: `verified:${profile.extension}`
+            },
+            { onConflict: 'extension' }
+          );
+
+        return res.json({
+          ok: true,
+          extension: {
+            extension: profile.extension,
+            display_name: profile.display_name || null,
+            sources: ['mightycall_profile', 'mightycall_verified_cache'],
+            is_live: true,
+            source_org_id: orgId
+          }
+        });
+      } catch (e) {
+        console.warn('[admin_mightycall_extension_import] verification failed for org', orgId, fmtErr(e));
+      }
+    }
+
+    return res.status(404).json({ error: 'extension_not_verified', detail: `MightyCall did not verify extension ${extension}.` });
+  } catch (err: any) {
+    console.error('admin_mightycall_extension_import_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_mightycall_extension_import_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 

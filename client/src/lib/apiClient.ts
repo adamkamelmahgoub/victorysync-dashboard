@@ -190,6 +190,14 @@ export async function getAdminMightyCallExtensions(userId?: string, options?: { 
   return await fetchJson(`/api/admin/mightycall/extensions${suffix}`, { headers: { 'x-user-id': userId || '' } });
 }
 
+export async function importAdminMightyCallExtension(extension: string, orgId?: string | null, userId?: string) {
+  return await fetchJson(`/api/admin/mightycall/extensions/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ extension, orgId: orgId || null })
+  });
+}
+
 export async function getLiveAgentStatus(params?: { orgId?: string | null }, userId?: string) {
   const q = new URLSearchParams();
   if (params?.orgId) q.set('org_id', params.orgId);

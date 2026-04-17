@@ -3,7 +3,7 @@ import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
-import { cleanupOrgMightyCallExtensions, getAdminMightyCallExtensions, getLiveAgentStatus, getOrgMightyCallExtensions } from '../../lib/apiClient';
+import { cleanupOrgMightyCallExtensions, getAdminMightyCallExtensions, getLiveAgentStatus, getOrgMightyCallExtensions, importAdminMightyCallExtension } from '../../lib/apiClient';
 
 type Org = { id: string; name: string };
 type AuthUser = { id: string; email: string; role?: string | null };
@@ -79,6 +79,9 @@ const AdminAgentsManagementPage: FC = () => {
   const [globalExtensionsLoading, setGlobalExtensionsLoading] = useState(false);
   const [globalExtensionsError, setGlobalExtensionsError] = useState<string | null>(null);
   const [globalExtensionsInfo, setGlobalExtensionsInfo] = useState<string | null>(null);
+  const [manualExtension, setManualExtension] = useState('');
+  const [manualImportLoading, setManualImportLoading] = useState(false);
+  const [manualImportMessage, setManualImportMessage] = useState<string | null>(null);
 
   const activeOrgId = selectedOrgId || '';
 
@@ -211,6 +214,30 @@ const AdminAgentsManagementPage: FC = () => {
       setError(e?.message || 'Failed to clean stale MightyCall extensions');
     } finally {
       setCleanupLoadingByOrg((prev) => ({ ...prev, [activeOrgId]: false }));
+    }
+  };
+
+  const handleManualImport = async () => {
+    const nextExtension = manualExtension.trim();
+    if (!nextExtension) {
+      setError('Enter an extension to import from MightyCall');
+      return;
+    }
+    try {
+      setManualImportLoading(true);
+      setError(null);
+      setManualImportMessage(null);
+      await importAdminMightyCallExtension(nextExtension, createOrgId || activeOrgId || null, userId);
+      setManualExtension('');
+      setManualImportMessage(`Imported extension ${nextExtension} from MightyCall.`);
+      await Promise.all([
+        loadGlobalExtensions(),
+        createOrgId ? refreshExtensionsForOrg(createOrgId) : Promise.resolve()
+      ]);
+    } catch (e: any) {
+      setError(e?.message || `Failed to import extension ${nextExtension} from MightyCall`);
+    } finally {
+      setManualImportLoading(false);
     }
   };
 
@@ -453,8 +480,27 @@ const AdminAgentsManagementPage: FC = () => {
             </button>
           </div>
 
-          {(cleanupSummary || globalExtensionsError || globalExtensionsInfo || activeOrgExtensionsError || activeOrgExtensionsInfo || activeOrgHiddenExtensions.length > 0) && (
+          <div className="mt-4 flex flex-col gap-3 md:flex-row">
+            <input
+              value={manualExtension}
+              onChange={(e) => setManualExtension(e.target.value)}
+              placeholder="Import missing extension from MightyCall"
+              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 md:w-80"
+            />
+            <button
+              onClick={handleManualImport}
+              disabled={manualImportLoading}
+              className="rounded-lg border border-cyan-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-cyan-300 hover:border-cyan-500 hover:text-cyan-200 disabled:opacity-50"
+            >
+              {manualImportLoading ? 'Importing...' : 'Import Extension'}
+            </button>
+          </div>
+
+          {(manualImportMessage || cleanupSummary || globalExtensionsError || globalExtensionsInfo || activeOrgExtensionsError || activeOrgExtensionsInfo || activeOrgHiddenExtensions.length > 0) && (
             <div className="mt-4 space-y-2">
+              {manualImportMessage && (
+                <div className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-300">{manualImportMessage}</div>
+              )}
               {cleanupSummary && (
                 <div className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-300">{cleanupSummary}</div>
               )}
