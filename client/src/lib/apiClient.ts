@@ -198,6 +198,10 @@ export async function importAdminMightyCallExtension(extension: string, orgId?: 
   });
 }
 
+export async function getVerifiedAdminMightyCallExtensions(userId?: string) {
+  return await fetchJson(`/api/admin/mightycall/extensions/verified`, { headers: { 'x-user-id': userId || '' } });
+}
+
 export async function getLiveAgentStatus(params?: { orgId?: string | null }, userId?: string) {
   const q = new URLSearchParams();
   if (params?.orgId) q.set('org_id', params.orgId);

@@ -3362,6 +3362,35 @@ app.get('/api/admin/mightycall/extensions', async (req, res) => {
   }
 });
 
+// GET /api/admin/mightycall/extensions/verified - direct view of verified imported extensions
+app.get('/api/admin/mightycall/extensions/verified', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { data, error } = await supabaseAdmin
+      .from('mightycall_extensions')
+      .select('extension, display_name, external_id')
+      .like('external_id', 'verified:%')
+      .order('extension', { ascending: true });
+    if (error) throw error;
+
+    res.json({
+      extensions: (data || []).map((row: any) => ({
+        extension: String(row?.extension || '').trim(),
+        display_name: row?.display_name ? String(row.display_name) : null,
+        sources: ['mightycall_verified_cache'],
+        is_live: true,
+        source_org_id: null,
+        source_org_name: 'Imported'
+      })).filter((row: any) => row.extension)
+    });
+  } catch (err: any) {
+    console.error('admin_verified_mightycall_extensions_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_verified_mightycall_extensions_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
 // POST /api/admin/mightycall/extensions/import - manually verify and import a missing extension into the shared MightyCall pool
 app.post('/api/admin/mightycall/extensions/import', async (req, res) => {
   try {

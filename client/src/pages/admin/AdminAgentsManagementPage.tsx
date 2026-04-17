@@ -3,7 +3,7 @@ import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
-import { cleanupOrgMightyCallExtensions, getAdminMightyCallExtensions, getLiveAgentStatus, getOrgMightyCallExtensions, importAdminMightyCallExtension } from '../../lib/apiClient';
+import { cleanupOrgMightyCallExtensions, getAdminMightyCallExtensions, getLiveAgentStatus, getOrgMightyCallExtensions, getVerifiedAdminMightyCallExtensions, importAdminMightyCallExtension } from '../../lib/apiClient';
 
 type Org = { id: string; name: string };
 type AuthUser = { id: string; email: string; role?: string | null };
@@ -177,10 +177,15 @@ const AdminAgentsManagementPage: FC = () => {
       const json = await getAdminMightyCallExtensions(userId, { liveOnly: true });
       const liveOptions = (json.live_extensions || []) as ExtensionOption[];
       const fallbackOptions = (json.fallback_extensions || []) as ExtensionOption[];
-      setGlobalExtensionOptions(liveOptions);
+      let nextOptions = liveOptions;
+      if (!nextOptions.length) {
+        const verifiedJson = await getVerifiedAdminMightyCallExtensions(userId);
+        nextOptions = (verifiedJson.extensions || []) as ExtensionOption[];
+      }
+      setGlobalExtensionOptions(nextOptions);
       if (!liveOptions.length && fallbackOptions.length) {
         setGlobalExtensionsInfo('Saved extensions exist, but MightyCall did not verify them yet, so they are hidden.');
-      } else if (!liveOptions.length) {
+      } else if (!nextOptions.length) {
         setGlobalExtensionsError('No MightyCall extensions were found across any org.');
       }
     } catch (e: any) {
