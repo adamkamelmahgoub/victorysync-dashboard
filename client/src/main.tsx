@@ -25,6 +25,7 @@ import AdminNumberChangeRequestsPage from "./pages/admin/AdminNumberChangeReques
 import AdminReportsPage from "./pages/admin/AdminReportsPage";
 import AdminRecordingsPage from "./pages/admin/AdminRecordingsPage";
 import AdminSMSPage from "./pages/admin/AdminSMSPage";
+import AdminAgentsManagementPage from "./pages/admin/AdminAgentsManagementPage";
 import AdminInviteCodesPage from "./pages/admin/AdminInviteCodesPage";
 import { AdminBillingPage } from "./pages/admin/AdminBillingPage";
 import { AdminBillingPageV2 } from "./pages/admin/AdminBillingPageV2";
@@ -254,6 +255,14 @@ function AppRouter() {
         element={
           <AdminRoute>
             <AdminUsersPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/agents-management"
+        element={
+          <AdminRoute>
+            <AdminAgentsManagementPage />
           </AdminRoute>
         }
       />

@@ -15,6 +15,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
     { label: 'Dashboard', path: '/' },
     { label: 'Live Status', path: '/live-status' },
     { label: 'Phone Numbers', path: '/numbers' },
+    { label: 'Agent Management', path: '/admin/agents-management' },
     { label: 'Invite Codes', path: '/admin/invites' },
     { label: 'Reports', path: '/admin/reports' },
     { label: 'Recordings', path: '/admin/recordings' },
