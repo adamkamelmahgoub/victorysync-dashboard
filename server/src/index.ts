@@ -3064,6 +3064,12 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
       is_live: boolean;
     };
 
+    const isPlaceholderExtensionRow = (row: ExtensionRow) => {
+      if (row.is_live) return false;
+      const haystack = `${row.extension || ''} ${row.display_name || ''}`.toLowerCase();
+      return ['dummy', 'placeholder', 'sample', 'example', 'test extension', 'demo extension'].some((token) => haystack.includes(token));
+    };
+
     const rows = new Map<string, ExtensionRow>();
     const pushRow = (source: string, extension: any, displayName?: any) => {
       const normalized = String(extension || '').trim();
@@ -3147,7 +3153,9 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
       console.warn('[org_mightycall_extensions] org_users extension lookup failed:', fmtErr(e));
     }
 
-    const allExtensions = Array.from(rows.values()).sort((a, b) => a.extension.localeCompare(b.extension));
+    const allExtensions = Array.from(rows.values())
+      .filter((row) => !isPlaceholderExtensionRow(row))
+      .sort((a, b) => a.extension.localeCompare(b.extension));
     const visibleExtensions = liveOnly ? allExtensions.filter((row) => row.is_live) : allExtensions;
     const hiddenExtensions = liveOnly ? allExtensions.filter((row) => !row.is_live) : [];
     const fallbackExtensions = liveOnly
