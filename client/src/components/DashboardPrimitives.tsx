@@ -18,12 +18,12 @@ export function DashboardShellHeader({
   meta?: ReactNode;
 }) {
   return (
-    <header className="sticky top-0 z-40 border-b border-white/[0.04] bg-[rgba(2,6,23,0.88)] backdrop-blur-xl">
+    <header className="sticky top-0 z-40 border-b border-white/[0.025] bg-[rgba(2,6,23,0.88)] backdrop-blur-xl">
       <div className="px-6 py-5 sm:px-8">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
             {eyebrow && (
-              <div className="inline-flex items-center rounded-full border border-cyan-400/12 bg-cyan-400/[0.07] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-200/90">
+              <div className="inline-flex items-center rounded-full bg-cyan-400/[0.07] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-200/90">
                 {eyebrow}
               </div>
             )}
@@ -61,7 +61,7 @@ export function SectionCard({
   return (
     <section className={cx('vs-surface overflow-hidden', className)}>
       {(title || actions) && (
-        <div className="flex flex-col gap-3 border-b border-white/[0.04] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-white/[0.025] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             {title && <h2 className="text-base font-semibold text-white">{title}</h2>}
             {description && <p className="mt-1 text-sm text-slate-400">{description}</p>}
@@ -86,10 +86,10 @@ export function MetricStatCard({
   accent?: 'neutral' | 'cyan' | 'emerald' | 'amber';
 }) {
   const tones = {
-    neutral: 'border-white/[0.04] bg-white/[0.022]',
-    cyan: 'border-cyan-400/[0.09] bg-cyan-400/[0.045]',
-    emerald: 'border-emerald-400/[0.09] bg-emerald-400/[0.045]',
-    amber: 'border-amber-400/[0.09] bg-amber-400/[0.045]',
+    neutral: 'border-transparent bg-white/[0.022]',
+    cyan: 'border-transparent bg-cyan-400/[0.04]',
+    emerald: 'border-transparent bg-emerald-400/[0.04]',
+    amber: 'border-transparent bg-amber-400/[0.04]',
   };
 
   return (
@@ -109,10 +109,10 @@ export function StatusBadge({
   children: ReactNode;
 }) {
   const tones = {
-    neutral: 'border-white/[0.05] bg-white/[0.045] text-slate-300',
-    success: 'border-emerald-400/[0.12] bg-emerald-400/[0.08] text-emerald-200',
-    warning: 'border-amber-400/[0.12] bg-amber-400/[0.08] text-amber-200',
-    info: 'border-cyan-400/[0.12] bg-cyan-400/[0.08] text-cyan-200',
+    neutral: 'border-transparent bg-white/[0.045] text-slate-300',
+    success: 'border-transparent bg-emerald-400/[0.08] text-emerald-200',
+    warning: 'border-transparent bg-amber-400/[0.08] text-amber-200',
+    info: 'border-transparent bg-cyan-400/[0.08] text-cyan-200',
   };
 
   return (
@@ -132,7 +132,7 @@ export function EmptyStatePanel({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-3xl border border-dashed border-white/[0.05] bg-white/[0.02] px-6 py-10 text-center">
+    <div className="rounded-3xl border border-dashed border-white/[0.03] bg-white/[0.02] px-6 py-10 text-center">
       <div className="text-base font-semibold text-white">{title}</div>
       <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-400">{description}</p>
       {action && <div className="mt-4 flex justify-center">{action}</div>}

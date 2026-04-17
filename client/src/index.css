@@ -29,15 +29,15 @@ body {
 .vs-surface {
   background:
     linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(8, 15, 30, 0.96) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
   border-radius: 1.5rem;
-  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.28);
+  box-shadow: 0 20px 48px rgba(2, 6, 23, 0.22);
   backdrop-filter: blur(14px);
 }
 
 .vs-surface-muted {
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.025);
+  border: 1px solid transparent;
   border-radius: 1.25rem;
 }
 
@@ -50,7 +50,7 @@ body {
 }
 
 .vs-button-secondary {
-  @apply rounded-2xl border border-white/[0.04] bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-cyan-400/[0.08] hover:text-cyan-200 disabled:opacity-50;
+  @apply rounded-2xl border border-transparent bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-cyan-400/[0.08] hover:text-cyan-200 disabled:opacity-50;
 }
 
 .vs-button-primary {

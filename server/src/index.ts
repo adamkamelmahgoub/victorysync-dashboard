@@ -36,6 +36,7 @@ import {
   fetchMightyCallPhoneNumbers, 
   fetchMightyCallExtensions, 
   fetchMightyCallProfileByExtension,
+  fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
   fetchMightyCallContacts,
@@ -793,6 +794,22 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         }
       })
   );
+  const statusRows = await Promise.all(
+    Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
+      .map(async (extension) => {
+        if (!apiKeyOverride) return null;
+        try {
+          const extensionToken = await getMightyCallAccessToken({
+            clientId: apiKeyOverride,
+            clientSecret: extension,
+          });
+          const status = await fetchMightyCallOwnStatus(extensionToken, apiKeyOverride);
+          return status ? { extension, status } : null;
+        } catch {
+          return null;
+        }
+      })
+  );
 
   const orgPhoneDigits = new Set((phones || []).map((phone: any) => normalizePhoneDigits(phone?.number)).filter(Boolean) as string[]);
   const extensionMetaByExt = new Map<string, any>();
@@ -817,6 +834,30 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         extension: ext,
         display_name: row.profile.display_name || extensionMetaByExt.get(ext)?.display_name || null,
         metadata: row.profile.metadata || row.profile
+      });
+    }
+  }
+  for (const row of statusRows) {
+    const ext = normalizeExtension(row?.extension);
+    if (ext && row?.status) {
+      const existing = extensionMetaByExt.get(ext) || {};
+      const existingMetadata = existing?.metadata || existing;
+      extensionMetaByExt.set(ext, {
+        ...existing,
+        extension: ext,
+        display_name: existing?.display_name || null,
+        metadata: {
+          ...existingMetadata,
+          liveStatus: row.status,
+          currentStatus: row.status,
+          status: row.status?.status || row.status?.state || existingMetadata?.status || null,
+          currentCall: row.status?.currentCall || row.status?.current_call || existingMetadata?.currentCall || existingMetadata?.current_call || null,
+          current_call: row.status?.current_call || row.status?.currentCall || existingMetadata?.current_call || existingMetadata?.currentCall || null,
+          onCall: row.status?.onCall ?? row.status?.inCall ?? row.status?.isOnCall ?? existingMetadata?.onCall ?? existingMetadata?.inCall ?? existingMetadata?.isOnCall ?? false,
+          presence: row.status?.presence || existingMetadata?.presence || null,
+          presenceStatus: row.status?.presenceStatus || existingMetadata?.presenceStatus || null,
+          availability: row.status?.availability || existingMetadata?.availability || null,
+        }
       });
     }
   }
@@ -864,9 +905,14 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         ? String(matchedDbCall?.status || '').trim() || extStatus
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
+    const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
     const onCall = !!(
       matchedLiveCall ||
       matchedDbCall ||
+      statusPayload?.onCall ||
+      statusPayload?.inCall ||
+      statusPayload?.isOnCall ||
+      isLikelyActiveCallStatus(statusPayload?.status || statusPayload?.state || statusPayload?.presenceStatus || statusPayload?.availability) ||
       extPayload?.onCall ||
       extPayload?.inCall ||
       extPayload?.isOnCall ||
@@ -878,13 +924,13 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : matchedDbCall
         ? extractCounterpartyLabel(matchedDbCall, orgPhoneDigits, normalizedExt)
-        : extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
+        : extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
     const startedAt = matchedLiveCall
       ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
       : matchedDbCall
         ? matchedDbCall?.started_at || null
-        : extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
-    const source = matchedLiveCall ? 'mightycall_calls' : matchedDbCall ? 'db_calls' : (extMeta ? 'mightycall_extensions' : 'unmatched');
+        : statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
+    const source = matchedLiveCall ? 'mightycall_calls' : matchedDbCall ? 'db_calls' : statusPayload?.status || statusPayload?.state || statusPayload?.presenceStatus || statusPayload?.availability ? 'mightycall_status' : (extMeta ? 'mightycall_extensions' : 'unmatched');
 
     if (normalizedExt) {
       console.info('[agents/live-status] resolved', {

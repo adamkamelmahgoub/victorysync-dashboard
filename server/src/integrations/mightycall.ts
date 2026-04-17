@@ -416,6 +416,21 @@ export async function fetchMightyCallProfileByExtension(extension: string, acces
   return null;
 }
 
+export async function fetchMightyCallOwnStatus(accessToken: string, apiKeyOverride?: string) {
+  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  const endpoints = ['/profile/status', '/v4/profile/status', '/status', '/profile/get-status'];
+  for (const ep of endpoints) {
+    for (const url of buildUrlVariants(base, ep)) {
+      const r = await tryFetchJson(url, accessToken, apiKeyOverride);
+      if (!r.ok || !r.body) continue;
+      const body: any = r.body;
+      const data = body?.data ?? body;
+      if (data && typeof data === 'object') return data;
+    }
+  }
+  return null;
+}
+
 // Lightweight placeholders for extensions/voicemails
 export async function fetchMightyCallExtensions(accessToken?: string, apiKeyOverride?: string) {
   const token = accessToken || await getMightyCallAccessToken();
