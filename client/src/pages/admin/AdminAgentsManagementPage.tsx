@@ -125,12 +125,12 @@ const AdminAgentsManagementPage: FC = () => {
       const json = await getOrgMightyCallExtensions(orgId, userId, { liveOnly: true });
       const liveOptions = json.extensions || [];
       const fallbackOptions = json.fallback_extensions || [];
-      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: liveOptions.length > 0 ? liveOptions : fallbackOptions }));
+      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: liveOptions }));
       setHiddenExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.hidden_extensions || [] }));
       if (!json.live_fetch_ok) {
         setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: json.live_fetch_error || 'MightyCall live extensions could not be loaded' }));
       } else if (!liveOptions.length && fallbackOptions.length) {
-        setExtensionsInfoByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org, so saved org extensions are shown instead.' }));
+        setExtensionsInfoByOrg((prev) => ({ ...prev, [orgId]: 'Saved org extensions exist, but MightyCall did not verify them yet, so they are hidden.' }));
       } else if (!liveOptions.length) {
         setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org.' }));
       }
@@ -148,12 +148,12 @@ const AdminAgentsManagementPage: FC = () => {
       const json = await getOrgMightyCallExtensions(orgId, userId, { liveOnly: true });
       const liveOptions = json.extensions || [];
       const fallbackOptions = json.fallback_extensions || [];
-      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: liveOptions.length > 0 ? liveOptions : fallbackOptions }));
+      setExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: liveOptions }));
       setHiddenExtensionOptionsByOrg((prev) => ({ ...prev, [orgId]: json.hidden_extensions || [] }));
       if (!json.live_fetch_ok) {
         setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: json.live_fetch_error || 'MightyCall live extensions could not be loaded' }));
       } else if (!liveOptions.length && fallbackOptions.length) {
-        setExtensionsInfoByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org, so saved org extensions are shown instead.' }));
+        setExtensionsInfoByOrg((prev) => ({ ...prev, [orgId]: 'Saved org extensions exist, but MightyCall did not verify them yet, so they are hidden.' }));
       } else if (!liveOptions.length) {
         setExtensionsErrorByOrg((prev) => ({ ...prev, [orgId]: 'MightyCall returned no live extensions for this org.' }));
       }
@@ -174,11 +174,10 @@ const AdminAgentsManagementPage: FC = () => {
       const json = await getAdminMightyCallExtensions(userId, { liveOnly: true });
       const liveOptions = (json.live_extensions || []) as ExtensionOption[];
       const fallbackOptions = (json.fallback_extensions || []) as ExtensionOption[];
-      const nextOptions = liveOptions.length > 0 ? liveOptions : fallbackOptions;
-      setGlobalExtensionOptions(nextOptions);
+      setGlobalExtensionOptions(liveOptions);
       if (!liveOptions.length && fallbackOptions.length) {
-        setGlobalExtensionsInfo('Showing all org-scoped extensions because no live MightyCall extension list was returned.');
-      } else if (!nextOptions.length) {
+        setGlobalExtensionsInfo('Saved extensions exist, but MightyCall did not verify them yet, so they are hidden.');
+      } else if (!liveOptions.length) {
         setGlobalExtensionsError('No MightyCall extensions were found across any org.');
       }
     } catch (e: any) {
@@ -290,7 +289,7 @@ const AdminAgentsManagementPage: FC = () => {
     }
   }, [activeOrgId]);
 
-  const createExtensionOptions = globalExtensionOptions.length > 0 ? globalExtensionOptions : (extensionOptionsByOrg[createOrgId] || []);
+  const createExtensionOptions = createOrgId ? (extensionOptionsByOrg[createOrgId] || []) : globalExtensionOptions;
   const detailOrgId = activeOrgId || createOrgId;
   const activeOrgHiddenExtensions = hiddenExtensionOptionsByOrg[detailOrgId] || [];
   const activeOrgExtensionsError = extensionsErrorByOrg[detailOrgId] || null;
@@ -528,7 +527,7 @@ const AdminAgentsManagementPage: FC = () => {
                     const key = `${row.user_id}:${row.org_id}`;
                     const isEditing = editingKey === key;
                     const live = liveStatusByAssignment.get(`${row.org_id}:${row.user_id}`);
-                    const options = globalExtensionOptions.length > 0 ? globalExtensionOptions : (extensionOptionsByOrg[row.org_id] || []);
+                    const options = row.org_id ? (extensionOptionsByOrg[row.org_id] || []) : globalExtensionOptions;
 
                     return (
                       <tr key={key}>
