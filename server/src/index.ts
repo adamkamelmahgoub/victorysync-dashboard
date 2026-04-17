@@ -3096,7 +3096,7 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
     let liveFetchError: string | null = null;
     try {
       const token = await getMightyCallAccessToken(overrideCreds);
-      const live = await fetchMightyCallExtensions(token);
+      const live = await fetchMightyCallExtensions(token, overrideCreds?.clientId || undefined);
       liveFetchOk = true;
       for (const item of live || []) {
         pushRow('mightycall_live', item?.extension, item?.display_name);
@@ -3163,7 +3163,7 @@ async function getMightyCallExtensionInventoryForOrg(orgId: string, liveOnly: bo
         .map((row) => row.extension);
       for (const extension of candidates) {
         try {
-          const profile = await fetchMightyCallProfileByExtension(extension, token);
+          const profile = await fetchMightyCallProfileByExtension(extension, token, overrideCreds?.clientId || undefined);
           if (!profile?.extension) continue;
           pushRow('mightycall_profile', profile.extension, profile.display_name || null);
         } catch (e) {

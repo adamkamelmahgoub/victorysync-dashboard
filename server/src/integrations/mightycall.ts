@@ -79,8 +79,8 @@ export async function getMightyCallAccessToken(override?: { clientId?: string; c
   throw new Error('Failed to obtain MightyCall access token');
 }
 
-async function tryFetchJson(url: string, token?: string) {
-  const res = await requestWithRetry(url, { method: 'GET', headers: { Accept: 'application/json', 'x-api-key': MIGHTYCALL_API_KEY || '', ...(token ? { Authorization: `Bearer ${token}` } : {}) } }, 2, 300);
+async function tryFetchJson(url: string, token?: string, apiKeyOverride?: string) {
+  const res = await requestWithRetry(url, { method: 'GET', headers: { Accept: 'application/json', 'x-api-key': apiKeyOverride || MIGHTYCALL_API_KEY || '', ...(token ? { Authorization: `Bearer ${token}` } : {}) } }, 2, 300);
   const text = await res.text().catch(() => '');
   if (!res.ok) return { ok: false, status: res.status, body: text };
   try { return { ok: true, status: res.status, body: JSON.parse(text || 'null') }; } catch (e) { return { ok: true, status: res.status, body: text }; }
@@ -389,7 +389,7 @@ function collectExtensionRows(list: any[]): Array<{ id: string | null; extension
   return Array.from(rows.values());
 }
 
-export async function fetchMightyCallProfileByExtension(extension: string, accessToken?: string) {
+export async function fetchMightyCallProfileByExtension(extension: string, accessToken?: string, apiKeyOverride?: string) {
   const normalized = normalizeExtensionValue(extension);
   if (!normalized) return null;
   const token = accessToken || await getMightyCallAccessToken();
@@ -397,7 +397,7 @@ export async function fetchMightyCallProfileByExtension(extension: string, acces
   const endpoints = [`/profile/${encodeURIComponent(normalized)}`, `/v4/profile/${encodeURIComponent(normalized)}`];
   for (const ep of endpoints) {
     for (const url of buildUrlVariants(base, ep)) {
-      const r = await tryFetchJson(url, token);
+      const r = await tryFetchJson(url, token, apiKeyOverride);
       if (!r.ok || !r.body) continue;
       const body: any = r.body;
       const data = body?.data ?? body;
@@ -417,13 +417,13 @@ export async function fetchMightyCallProfileByExtension(extension: string, acces
 }
 
 // Lightweight placeholders for extensions/voicemails
-export async function fetchMightyCallExtensions(accessToken?: string) {
+export async function fetchMightyCallExtensions(accessToken?: string, apiKeyOverride?: string) {
   const token = accessToken || await getMightyCallAccessToken();
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const endpoints = ['/extensions', '/users/extensions', '/v4/extensions', '/users', '/members', '/agents'];
   for (const ep of endpoints) {
     for (const url of buildUrlVariants(base, ep)) {
-      const r = await tryFetchJson(url, token);
+      const r = await tryFetchJson(url, token, apiKeyOverride);
       if (!r.ok || !r.body) continue;
       const list =
         (r.body as any)?.data?.extensions ??
