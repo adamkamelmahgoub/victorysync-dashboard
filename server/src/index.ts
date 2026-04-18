@@ -2210,7 +2210,7 @@ app.get('/api/admin/phone-numbers', async (req, res) => {
         number: r.number,
         label: r.label ?? null,
         orgId: r.org_id ?? null,
-        isActive: !!r.is_active
+        isActive: typeof r.is_active === 'boolean' ? r.is_active : true
       };
     }).filter((p: any) => p.number); // Filter out records with no phone number
     res.json({ phone_numbers: mapped });

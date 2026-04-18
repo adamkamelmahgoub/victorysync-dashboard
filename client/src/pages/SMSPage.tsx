@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
+import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
 interface SMSMessage {
   id: string;
@@ -19,18 +20,16 @@ interface SMSMessage {
 
 const PAGE_SIZE = 500;
 
+function formatTime(message: SMSMessage) {
+  const raw = message.created_at || message.message_date || message.sent_at;
+  return raw ? new Date(raw).toLocaleString() : '-';
+}
+
 export function SMSPage() {
   const { user, orgs, selectedOrgId } = useAuth();
   const { org: currentOrg } = useOrg();
-  const orgId =
-    ((user?.user_metadata as any)?.org_id ?? null) ||
-    selectedOrgId ||
-    currentOrg?.id ||
-    null;
-  const orgName =
-    (orgs.find((o) => o.id === orgId)?.name) ||
-    currentOrg?.name ||
-    'your organization';
+  const orgId = ((user?.user_metadata as any)?.org_id ?? null) || selectedOrgId || currentOrg?.id || null;
+  const orgName = orgs.find((o) => o.id === orgId)?.name || currentOrg?.name || 'your organization';
 
   const [messages, setMessages] = useState<SMSMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -41,13 +40,13 @@ export function SMSPage() {
   const [showSendModal, setShowSendModal] = useState(false);
   const [sending, setSending] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
+  const [search, setSearch] = useState('');
 
   const loadMessages = async (reset = false) => {
     if (!user) return;
     if (!reset && nextOffset == null) return;
 
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
-
     if (reset) {
       setLoading(true);
       setError(null);
@@ -60,12 +59,12 @@ export function SMSPage() {
       q.set('limit', String(PAGE_SIZE));
       q.set('offset', String(activeOffset));
       if (orgId) q.set('org_id', orgId);
-      const url = buildApiUrl(`/api/sms/messages?${q.toString()}`);
-      const response = await fetch(url, {
+
+      const response = await fetch(buildApiUrl(`/api/sms/messages?${q.toString()}`), {
         headers: {
           'x-user-id': user.id,
-          'Content-Type': 'application/json'
-        }
+          'Content-Type': 'application/json',
+        },
       });
 
       if (!response.ok) {
@@ -75,7 +74,7 @@ export function SMSPage() {
 
       const data = await response.json();
       const rows: SMSMessage[] = data.messages || [];
-      setMessages((prev) => (reset ? rows : [...prev, ...rows]));
+      setMessages((previous) => (reset ? rows : [...previous, ...rows]));
       setNextOffset(data.next_offset ?? null);
     } catch (err: any) {
       setError(err?.message || 'Error fetching messages');
@@ -87,9 +86,7 @@ export function SMSPage() {
   };
 
   useEffect(() => {
-    if (user) {
-      loadMessages(true);
-    }
+    if (user) loadMessages(true);
   }, [orgId, user?.id]);
 
   const handleSendSMS = async () => {
@@ -106,20 +103,21 @@ export function SMSPage() {
         method: 'POST',
         headers: {
           'x-user-id': user.id,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ to: recipientNumber, message: newMessage })
+        body: JSON.stringify({ to: recipientNumber, message: newMessage }),
       });
 
-      if (response.ok) {
-        setNewMessage('');
-        setRecipientNumber('');
-        setShowSendModal(false);
-        await loadMessages(true);
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        setError(errorData.message || 'Failed to send SMS');
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        setError(payload.message || 'Failed to send SMS');
+        return;
       }
+
+      setNewMessage('');
+      setRecipientNumber('');
+      setShowSendModal(false);
+      await loadMessages(true);
     } catch (err: any) {
       setError(err?.message || 'Error sending SMS');
     } finally {
@@ -127,131 +125,156 @@ export function SMSPage() {
     }
   };
 
-  const formatTime = (m: SMSMessage) => {
-    const raw = m.created_at || m.message_date || m.sent_at;
-    return raw ? new Date(raw).toLocaleString() : '-';
-  };
+  const filteredMessages = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return messages;
+    return messages.filter((message) => {
+      const haystack = [
+        message.from_number,
+        message.to_number,
+        message.message_text,
+        message.direction,
+        message.status,
+      ]
+        .map((value) => String(value || '').toLowerCase())
+        .join(' ');
+      return haystack.includes(term);
+    });
+  }, [messages, search]);
+
+  const summary = useMemo(() => {
+    const inbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'inbound').length;
+    const outbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'outbound').length;
+    return { inbound, outbound };
+  }, [filteredMessages]);
 
   if (!orgId && (!orgs || orgs.length === 0)) {
     return (
       <PageLayout title="SMS" description="No organization selected">
-        <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-6 text-slate-300">No organization is linked to this account yet. Ask your org admin to assign your account to an organization.</div>
+        <EmptyStatePanel
+          title="No organization linked"
+          description="No organization is linked to this account yet. Ask your org admin to assign your account to an organization before using SMS."
+        />
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout title="SMS Messages" description={`Manage SMS communication for ${orgName}`}>
+    <PageLayout
+      eyebrow="Messaging"
+      title="SMS"
+      description={`Organized conversation history and outbound messaging for ${orgName}.`}
+      actions={
+        <button onClick={() => setShowSendModal(true)} className="vs-button-primary">
+          Send SMS
+        </button>
+      }
+    >
       <div className="space-y-6">
         {error && (
-          <div className="bg-red-900/30 border border-red-700 rounded-lg p-4">
-            <p className="text-red-300 text-sm">{error}</p>
+          <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {error}
           </div>
         )}
 
-        <div className="flex justify-end">
-          <button
-            onClick={() => setShowSendModal(true)}
-            className="px-6 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 transition font-medium"
-          >
-            Send SMS
-          </button>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <MetricStatCard label="Messages" value={messages.length} hint={orgName} />
+          <MetricStatCard label="Inbound" value={summary.inbound} hint="Customer-originated messages" accent="cyan" />
+          <MetricStatCard label="Outbound" value={summary.outbound} hint="Messages sent from the workspace" accent="emerald" />
         </div>
 
-        <div className="bg-slate-900/80 ring-1 ring-slate-800 p-6 rounded-lg">
-          <h2 className="text-sm font-semibold text-slate-200 mb-4">Messages ({messages.length})</h2>
+        <SectionCard title="Message stream" description="Search, scan, and review your SMS traffic in one place.">
+          <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr),auto]">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search numbers, statuses, or message text"
+              className="vs-input w-full"
+            />
+            <button onClick={() => loadMessages(true)} className="vs-button-secondary">
+              Refresh
+            </button>
+          </div>
 
           {loading ? (
-            <div className="text-center py-8">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-emerald-500 mb-2"></div>
-              <div className="text-slate-400 text-sm">Loading messages...</div>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm">No SMS messages found</div>
+            <div className="text-sm text-slate-400">Loading messages...</div>
+          ) : filteredMessages.length === 0 ? (
+            <EmptyStatePanel
+              title="No SMS messages found"
+              description="Once messages are sent or received, they will appear here in a cleaner, searchable conversation view."
+            />
           ) : (
-            <div className="space-y-4">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="border-b border-slate-700/50">
-                    <tr className="text-slate-400">
-                      <th className="text-left py-3 px-4 font-semibold">From / To</th>
-                      <th className="text-left py-3 px-4 font-semibold">Message</th>
-                      <th className="text-left py-3 px-4 font-semibold">Direction</th>
-                      <th className="text-left py-3 px-4 font-semibold">Status</th>
-                      <th className="text-left py-3 px-4 font-semibold">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/30">
-                    {messages.map((msg) => (
-                      <tr key={msg.id} className="hover:bg-slate-800/30 transition">
-                        <td className="py-3 px-4 text-slate-300 font-mono text-xs">{(msg.from_number || '-') + ' -> ' + (msg.to_number || '-')}</td>
-                        <td className="py-3 px-4 text-slate-300 text-xs break-words">{msg.message_text || '-'}</td>
-                        <td className="py-3 px-4 text-slate-300 text-xs">{msg.direction || '-'}</td>
-                        <td className="py-3 px-4 text-slate-400 text-xs">{msg.status || '-'}</td>
-                        <td className="py-3 px-4 text-slate-500 text-xs">{formatTime(msg)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div className="space-y-3">
+              {filteredMessages.map((message) => {
+                const inbound = String(message.direction || '').toLowerCase() === 'inbound';
+                return (
+                  <div key={message.id} className="vs-surface-muted p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge tone={inbound ? 'info' : 'success'}>{inbound ? 'Inbound' : 'Outbound'}</StatusBadge>
+                          {message.status && <StatusBadge tone="neutral">{message.status}</StatusBadge>}
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
+                          <span className="font-mono text-xs text-slate-200">{message.from_number || '-'}</span>
+                          <span>to</span>
+                          <span className="font-mono text-xs text-slate-200">{message.to_number || '-'}</span>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{message.message_text || '-'}</p>
+                      </div>
+                      <div className="text-xs text-slate-500">{formatTime(message)}</div>
+                    </div>
+                  </div>
+                );
+              })}
 
               {nextOffset !== null && (
-                <div className="flex justify-center">
-                  <button
-                    onClick={() => loadMessages(false)}
-                    disabled={loadingMore}
-                    className="px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-200 text-sm hover:bg-slate-700 disabled:opacity-50"
-                  >
+                <div className="flex justify-center pt-2">
+                  <button onClick={() => loadMessages(false)} disabled={loadingMore} className="vs-button-secondary">
                     {loadingMore ? 'Loading more...' : 'Load more'}
                   </button>
                 </div>
               )}
             </div>
           )}
-        </div>
+        </SectionCard>
       </div>
 
       {showSendModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-lg p-6 max-w-md w-full mx-4 border border-slate-800">
-            <h2 className="text-xl font-bold text-white mb-4">Send SMS</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="vs-surface w-full max-w-lg p-6">
+            <div className="mb-5">
+              <h2 className="text-xl font-semibold text-white">Send SMS</h2>
+              <p className="mt-2 text-sm text-slate-400">Send an outbound SMS without leaving the dashboard.</p>
+            </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Recipient Number</label>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recipient Number</label>
                 <input
                   type="tel"
                   value={recipientNumber}
                   onChange={(e) => setRecipientNumber(e.target.value)}
                   placeholder="+1 (555) 000-0000"
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500"
+                  className="vs-input w-full"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Message</label>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Message</label>
                 <textarea
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   placeholder="Type your message..."
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 resize-none"
-                  rows={4}
+                  className="vs-input min-h-[140px] w-full resize-none"
                 />
               </div>
 
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowSendModal(false)}
-                  disabled={sending}
-                  className="flex-1 px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 disabled:opacity-50"
-                >
+              <div className="flex gap-3">
+                <button onClick={() => setShowSendModal(false)} disabled={sending} className="vs-button-secondary flex-1">
                   Cancel
                 </button>
-                <button
-                  onClick={handleSendSMS}
-                  disabled={sending}
-                  className="flex-1 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50"
-                >
+                <button onClick={handleSendSMS} disabled={sending} className="vs-button-primary flex-1">
                   {sending ? 'Sending...' : 'Send'}
                 </button>
               </div>

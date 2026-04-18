@@ -1,6 +1,7 @@
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useEffect, useMemo, useState } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
+import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
 
@@ -11,6 +12,7 @@ interface SMSMessage {
   to_number?: string | null;
   message_text?: string | null;
   direction?: 'inbound' | 'outbound' | string;
+  status?: string | null;
   created_at?: string | null;
   message_date?: string | null;
   sent_at?: string | null;
@@ -24,6 +26,11 @@ interface Org {
 
 const PAGE_SIZE = 500;
 
+function formatTime(message: SMSMessage) {
+  const raw = message.created_at || message.message_date || message.sent_at;
+  return raw ? new Date(raw).toLocaleString() : '-';
+}
+
 const AdminSMSPage: FC = () => {
   const { user } = useAuth();
   const userId = user?.id;
@@ -36,73 +43,51 @@ const AdminSMSPage: FC = () => {
   const [filterDirection, setFilterDirection] = useState('');
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
-
-  useEffect(() => {
-    fetchOrgs();
-  }, []);
-
-  useEffect(() => {
-    loadMessages(true);
-  }, [filterOrgId, filterDirection, userId]);
-
-  useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const interval = setInterval(() => {
-      loadMessages(true);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [autoRefreshEnabled, filterOrgId, filterDirection, userId]);
+  const [search, setSearch] = useState('');
 
   const fetchOrgs = async () => {
     try {
       const response = await fetch(buildApiUrl('/api/admin/orgs'), {
         headers: {
           'x-user-id': userId || '',
-          'x-dev-bypass': 'true'
-        }
+          'x-dev-bypass': 'true',
+        },
       });
-      if (response.ok) {
-        const data = await response.json();
-        setOrgs(data.orgs || []);
-      }
+      if (!response.ok) return;
+      const data = await response.json();
+      setOrgs(data.orgs || []);
     } catch (error) {
       console.error('Error fetching orgs:', error);
     }
   };
 
   const loadMessages = async (reset = false) => {
-    const activeOffset = reset ? 0 : (nextOffset ?? 0);
     if (!userId) return;
     if (!reset && nextOffset == null) return;
+    const activeOffset = reset ? 0 : (nextOffset ?? 0);
 
     try {
       if (reset) setLoading(true);
       else setLoadingMore(true);
 
       let url = buildApiUrl(`/api/sms/messages?limit=${PAGE_SIZE}&offset=${activeOffset}`);
-      if (filterOrgId) {
-        url += `&org_id=${encodeURIComponent(filterOrgId)}`;
-      }
+      if (filterOrgId) url += `&org_id=${encodeURIComponent(filterOrgId)}`;
 
       const response = await fetch(url, {
         headers: {
           'x-user-id': userId,
-          'Content-Type': 'application/json'
-        }
+          'Content-Type': 'application/json',
+        },
       });
 
-      if (!response.ok) {
-        console.error('Failed to fetch messages');
-        return;
-      }
-
+      if (!response.ok) return;
       const data = await response.json();
       let rows: SMSMessage[] = data.messages || [];
       if (filterDirection) {
-        rows = rows.filter((m: SMSMessage) => (m.direction || '').toLowerCase() === filterDirection);
+        rows = rows.filter((message) => String(message.direction || '').toLowerCase() === filterDirection);
       }
 
-      setMessages((prev) => (reset ? rows : [...prev, ...rows]));
+      setMessages((previous) => (reset ? rows : [...previous, ...rows]));
       setNextOffset(data.next_offset ?? null);
     } catch (error) {
       console.error('Error fetching messages:', error);
@@ -112,126 +97,148 @@ const AdminSMSPage: FC = () => {
     }
   };
 
-  const truncateMessage = (text: string, length = 120) => {
-    if ((text || '').length <= length) return text || '';
-    return `${text.substring(0, length)}...`;
-  };
+  useEffect(() => {
+    fetchOrgs();
+  }, [userId]);
 
-  const formatTime = (m: SMSMessage) => {
-    const raw = m.created_at || m.message_date || m.sent_at;
-    return raw ? new Date(raw).toLocaleString() : '-';
-  };
+  useEffect(() => {
+    loadMessages(true);
+  }, [filterOrgId, filterDirection, userId]);
+
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+    const intervalId = window.setInterval(() => {
+      loadMessages(true);
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [autoRefreshEnabled, filterOrgId, filterDirection, userId]);
+
+  const filteredMessages = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return messages;
+    return messages.filter((message) => {
+      const haystack = [
+        message.organizations?.name,
+        message.from_number,
+        message.to_number,
+        message.message_text,
+        message.direction,
+        message.status,
+      ]
+        .map((value) => String(value || '').toLowerCase())
+        .join(' ');
+      return haystack.includes(term);
+    });
+  }, [messages, search]);
+
+  const summary = useMemo(() => {
+    const inbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'inbound').length;
+    const outbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'outbound').length;
+    const uniqueOrgs = new Set(filteredMessages.map((message) => message.org_id).filter(Boolean)).size;
+    return { inbound, outbound, uniqueOrgs };
+  }, [filteredMessages]);
 
   return (
-    <PageLayout title="SMS Messages" description="View and manage SMS messages across all organizations">
+    <PageLayout
+      eyebrow="Admin messaging"
+      title="SMS"
+      description="Cross-organization SMS monitoring with tighter filters, cleaner scanning, and a more operational layout."
+      actions={<button onClick={() => loadMessages(true)} className="vs-button-secondary">Refresh</button>}
+    >
       <div className="space-y-6">
         <AdminTopNav />
 
-        <div className="bg-slate-900/80 ring-1 ring-slate-800 p-6 rounded-lg">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-slate-200">Filters</h2>
-            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <MetricStatCard label="Messages" value={messages.length} hint="Loaded rows in the current window" />
+          <MetricStatCard label="Organizations" value={summary.uniqueOrgs} hint="Active orgs in view" accent="cyan" />
+          <MetricStatCard label="Inbound" value={summary.inbound} hint="Customer-originated messages" accent="cyan" />
+          <MetricStatCard label="Outbound" value={summary.outbound} hint="Messages sent from client workspaces" accent="emerald" />
+        </div>
+
+        <SectionCard
+          title="Filters"
+          description="Keep the message stream organized by organization, direction, and keyword."
+          actions={
+            <label className="inline-flex items-center gap-2 text-sm text-slate-400">
               <input
                 type="checkbox"
                 checked={autoRefreshEnabled}
                 onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-600 text-cyan-500"
               />
               Auto-refresh (5s)
             </label>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Organization</label>
-              <select
-                value={filterOrgId}
-                onChange={(e) => setFilterOrgId(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-50 text-sm"
-              >
-                <option value="">All Organizations</option>
-                {orgs.map((org) => (
-                  <option key={org.id} value={org.id}>{org.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-2">Direction</label>
-              <select
-                value={filterDirection}
-                onChange={(e) => setFilterDirection(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded text-slate-50 text-sm"
-              >
-                <option value="">All Directions</option>
-                <option value="inbound">Inbound</option>
-                <option value="outbound">Outbound</option>
-              </select>
+          }
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search orgs, numbers, or content"
+              className="vs-input w-full"
+            />
+            <select value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="vs-input w-full">
+              <option value="">All organizations</option>
+              {orgs.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+            <select value={filterDirection} onChange={(e) => setFilterDirection(e.target.value)} className="vs-input w-full">
+              <option value="">All directions</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+            <div className="vs-surface-muted flex items-center justify-center px-4 py-3 text-sm text-slate-400">
+              {filteredMessages.length} visible message{filteredMessages.length === 1 ? '' : 's'}
             </div>
           </div>
-        </div>
+        </SectionCard>
 
-        <div className="bg-slate-900/80 ring-1 ring-slate-800 p-6 rounded-lg">
-          <h2 className="text-sm font-semibold text-slate-200 mb-4">Messages ({messages.length})</h2>
-
+        <SectionCard title="Message stream" description="Review the actual conversation flow without raw org ids cluttering the view.">
           {loading ? (
-            <div className="text-center py-8">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-emerald-500 mb-2"></div>
-              <div className="text-slate-400 text-sm">Loading messages...</div>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm">No messages found</div>
+            <div className="text-sm text-slate-400">Loading messages...</div>
+          ) : filteredMessages.length === 0 ? (
+            <EmptyStatePanel
+              title="No messages found"
+              description="No SMS messages matched the current admin filters. Adjust the organization, direction, or search criteria."
+            />
           ) : (
-            <div className="space-y-4">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="border-b border-slate-700/50">
-                    <tr className="text-slate-400">
-                      <th className="text-left py-3 px-4 font-semibold">Organization</th>
-                      <th className="text-left py-3 px-4 font-semibold">From / To</th>
-                      <th className="text-left py-3 px-4 font-semibold">Message</th>
-                      <th className="text-left py-3 px-4 font-semibold">Direction</th>
-                      <th className="text-left py-3 px-4 font-semibold">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/30">
-                    {messages.map((message) => (
-                      <tr key={message.id} className="hover:bg-slate-800/30 transition">
-                        <td className="py-3 px-4 text-slate-200">{message.organizations?.name || message.org_id}</td>
-                        <td className="py-3 px-4 text-slate-300 font-mono text-xs">
-                          {(message.from_number || '-') + ' -> ' + (message.to_number || '-')}
-                        </td>
-                        <td className="py-3 px-4 text-slate-400 text-xs">{truncateMessage(message.message_text || '')}</td>
-                        <td className="py-3 px-4">
-                          <span className={`inline-block px-2 py-1 rounded text-xs font-semibold ${
-                            (message.direction || '').toLowerCase() === 'inbound'
-                              ? 'bg-blue-900/50 text-blue-200 ring-1 ring-blue-800/50'
-                              : 'bg-emerald-900/50 text-emerald-200 ring-1 ring-emerald-800/50'
-                          }`}>
-                            {(message.direction || 'unknown').toString()}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-slate-500 text-xs">{formatTime(message)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div className="space-y-3">
+              {filteredMessages.map((message) => {
+                const inbound = String(message.direction || '').toLowerCase() === 'inbound';
+                return (
+                  <div key={message.id} className="vs-surface-muted p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge tone={inbound ? 'info' : 'success'}>{inbound ? 'Inbound' : 'Outbound'}</StatusBadge>
+                          <StatusBadge tone="neutral">{message.organizations?.name || 'Unassigned org'}</StatusBadge>
+                          {message.status && <StatusBadge tone="neutral">{message.status}</StatusBadge>}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-sm text-slate-400">
+                          <span className="font-mono text-xs text-slate-200">{message.from_number || '-'}</span>
+                          <span>to</span>
+                          <span className="font-mono text-xs text-slate-200">{message.to_number || '-'}</span>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{message.message_text || '-'}</p>
+                      </div>
+                      <div className="text-xs text-slate-500">{formatTime(message)}</div>
+                    </div>
+                  </div>
+                );
+              })}
 
               {nextOffset !== null && (
-                <div className="flex justify-center">
-                  <button
-                    onClick={() => loadMessages(false)}
-                    disabled={loadingMore}
-                    className="px-4 py-2 bg-slate-800 border border-slate-700 rounded text-slate-200 text-sm hover:bg-slate-700 disabled:opacity-50"
-                  >
+                <div className="flex justify-center pt-2">
+                  <button onClick={() => loadMessages(false)} disabled={loadingMore} className="vs-button-secondary">
                     {loadingMore ? 'Loading more...' : 'Load more'}
                   </button>
                 </div>
               )}
             </div>
           )}
-        </div>
+        </SectionCard>
       </div>
     </PageLayout>
   );
