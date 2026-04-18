@@ -50,7 +50,7 @@ const LiveStatusPage: FC = () => {
 
   useEffect(() => {
     load();
-    const intervalId = window.setInterval(load, 30000);
+    const intervalId = window.setInterval(load, 10000);
     return () => window.clearInterval(intervalId);
   }, [user?.id, activeOrgId]);
 

@@ -2,7 +2,7 @@ import React, { FC, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
-import { getOrgAgentLiveStatus } from '../lib/apiClient';
+import { getLiveAgentStatus } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
@@ -65,8 +65,10 @@ const DashboardNewV3: FC = () => {
   useEffect(() => {
     let cancelled = false;
 
+    const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
+
     const loadLiveAgents = async () => {
-      if (!selectedOrgId || !user?.id) {
+      if (!user?.id) {
         if (!cancelled) {
           setLiveAgents([]);
           setLiveError(null);
@@ -80,7 +82,7 @@ const DashboardNewV3: FC = () => {
           setLiveLoading(true);
           setLiveError(null);
         }
-        const json = await getOrgAgentLiveStatus(selectedOrgId, user.id);
+        const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
         if (cancelled) return;
         setLiveAgents((json.items || []) as LiveAgentStatus[]);
         setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
@@ -93,12 +95,12 @@ const DashboardNewV3: FC = () => {
     };
 
     loadLiveAgents();
-    const intervalId = window.setInterval(loadLiveAgents, 30000);
+    const intervalId = window.setInterval(loadLiveAgents, 10000);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [selectedOrgId, user?.id]);
+  }, [selectedOrgId, user?.id, isAdmin, orgs]);
 
   const orgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
   const answered = metrics?.answered_calls_today || 0;

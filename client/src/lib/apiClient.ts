@@ -165,6 +165,15 @@ export async function getOrgMembers(orgId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/members`, { headers: { 'x-user-id': userId || '' } });
 }
 
+export async function getCallLogs(params?: { orgId?: string | null; limit?: number; offset?: number; q?: string }, userId?: string) {
+  const q = new URLSearchParams();
+  if (params?.orgId) q.set("org_id", params.orgId);
+  if (params?.limit) q.set("limit", String(params.limit));
+  if (params?.offset != null) q.set("offset", String(params.offset));
+  if (params?.q) q.set("q", params.q);
+  return await fetchJson(`/api/calls/logs?${q.toString()}`, { headers: { 'x-user-id': userId || '' } });
+}
+
 export async function getOrgAgentLiveStatus(orgId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/agents/live-status`, { headers: { 'x-user-id': userId || '' } });
 }
