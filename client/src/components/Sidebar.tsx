@@ -66,6 +66,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Operations',
           items: [
             { label: 'Phone Numbers', path: '/numbers' },
+            { label: 'Call Logs', path: '/admin/call-logs' },
             { label: 'Agent Management', path: '/admin/agents-management' },
             { label: 'Reports', path: '/admin/reports' },
             { label: 'Recordings', path: '/admin/recordings' },
@@ -95,6 +96,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Workspace',
           items: [
             { label: 'Phone Numbers', path: '/numbers' },
+            { label: 'Call Logs', path: '/call-logs' },
             { label: 'Reports', path: '/reports' },
             { label: 'Recordings', path: '/recordings' },
             { label: 'SMS', path: '/sms' },

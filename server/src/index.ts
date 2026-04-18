@@ -6640,12 +6640,12 @@ app.get('/api/calls/logs', async (req, res) => {
 
     const isAdminActor = await isPlatformAdmin(actorId);
     const fetchSize = Math.max(limit * 4, 250);
-    const baseQuery = supabaseAdmin
+    let baseQuery = supabaseAdmin
       .from('calls')
       .select('id, org_id, direction, from_number, from_number_digits, to_number, to_number_digits, queue_name, status, started_at, answered_at, ended_at, duration_seconds, agent_extension, metadata')
       .order('started_at', { ascending: false });
 
-    if (orgId) baseQuery.eq('org_id', orgId);
+    if (orgId) baseQuery = baseQuery.eq('org_id', orgId);
 
     const { data, error } = await baseQuery.range(offset, offset + fetchSize - 1);
     if (error) throw error;
@@ -6665,7 +6665,10 @@ app.get('/api/calls/logs', async (req, res) => {
           call?.to_number_digits,
           call?.from_number_digits,
         ].map((value) => String(value || '').trim()).filter(Boolean);
-        return candidates.some((candidate) => numbers.includes(candidate) || digits.includes(normalizePhoneDigits(candidate)));
+        return candidates.some((candidate) => {
+          const normalized = normalizePhoneDigits(candidate);
+          return numbers.includes(candidate) || (!!normalized && digits.includes(normalized));
+        });
       });
     }
 

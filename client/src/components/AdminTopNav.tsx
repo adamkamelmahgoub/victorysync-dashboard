@@ -17,6 +17,7 @@ export default function AdminTopNav() {
     { to: '/admin/support', label: 'Support Tickets' },
     { to: '/admin/number-change-requests', label: 'Phone Requests' },
     { to: '/admin/reports', label: 'Reports' },
+    { to: '/admin/call-logs', label: 'Call Logs' },
     { to: '/admin/recordings', label: 'Recordings' },
     { to: '/admin/sms', label: 'SMS' },
     { to: '/admin/billing', label: 'Billing' },
