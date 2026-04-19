@@ -1316,6 +1316,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const shouldUseSingleAgentFallback = memberRows.length === 1;
     const email = emailByUserId.get(userId) || null;
     const agentIdentities = buildAgentIdentityCandidates(member, extMeta, email);
+    const ownStatusMatchesMember = !!ownStatus && payloadMatchesAgent(ownStatus, normalizedExt, agentIdentities);
 
     const matchedLiveCall = normalizedExt
       ? activeCalls.find((call: any) => {
@@ -1349,7 +1350,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
     const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
-    const shouldUseOwnStatusFallback = shouldUseSingleAgentFallback && !!ownStatus;
+    const shouldUseOwnStatusFallback = !!ownStatus && (shouldUseSingleAgentFallback || ownStatusMatchesMember);
     const ownStatusPayload = shouldUseOwnStatusFallback ? ownStatus : null;
     const effectiveStatusPayload = ownStatusPayload || statusPayload;
     const normalizedStatus = normalizeMightyCallStatusActivity(effectiveStatusPayload, normalizedExt);
