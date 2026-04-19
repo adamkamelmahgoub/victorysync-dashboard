@@ -153,10 +153,21 @@ CREATE TABLE IF NOT EXISTS public.org_integrations (
   org_id uuid REFERENCES public.organizations(id) ON DELETE CASCADE,
   provider text NOT NULL,
   credentials jsonb,
+  encrypted_credentials text,
+  metadata jsonb DEFAULT '{}'::jsonb,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now(),
   UNIQUE(org_id, provider)
 );
+
+ALTER TABLE IF EXISTS public.org_integrations
+  ADD COLUMN IF NOT EXISTS encrypted_credentials text,
+  ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+CREATE INDEX IF NOT EXISTS idx_org_integrations_org_id ON public.org_integrations(org_id);
+CREATE INDEX IF NOT EXISTS idx_org_integrations_provider ON public.org_integrations(provider);
 
 CREATE TABLE IF NOT EXISTS public.mightycall_sync_runs (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -167,6 +178,23 @@ CREATE TABLE IF NOT EXISTS public.mightycall_sync_runs (
   status text,
   detail jsonb
 );
+
+CREATE TABLE IF NOT EXISTS public.integration_sync_jobs (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  org_id uuid REFERENCES public.organizations(id) ON DELETE CASCADE,
+  integration_type text NOT NULL,
+  status text NOT NULL DEFAULT 'running',
+  started_at timestamptz DEFAULT now(),
+  completed_at timestamptz,
+  records_processed integer DEFAULT 0,
+  error_message text,
+  metadata jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_integration_sync_jobs_org_id ON public.integration_sync_jobs(org_id);
+CREATE INDEX IF NOT EXISTS idx_integration_sync_jobs_status ON public.integration_sync_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_integration_sync_jobs_type ON public.integration_sync_jobs(integration_type);
 
 /* === 6) Seed default packages === */
 CREATE TABLE IF NOT EXISTS public.packages (

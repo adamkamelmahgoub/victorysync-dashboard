@@ -156,14 +156,7 @@ async function getOrgIntegrationHealth(orgId: string) {
   }
 
   try {
-    const { data } = await supabaseAdmin
-      .from('integration_sync_jobs')
-      .select('*')
-      .eq('org_id', orgId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    syncJob = data || null;
+    syncJob = await getLatestSyncJob(orgId);
   } catch {}
 
   return {
@@ -783,6 +776,195 @@ function collectExtensionCandidates(input: any, depth = 0): string[] {
   }
 
   return Array.from(found);
+}
+
+type SyncJobRef = { id: string; table: 'integration_sync_jobs' | 'mightycall_sync_runs' } | null;
+
+function normalizeSyncJobRow(row: any, table: 'integration_sync_jobs' | 'mightycall_sync_runs') {
+  if (!row) return null;
+  if (table === 'integration_sync_jobs') {
+    return {
+      ...row,
+      integration_type: row.integration_type,
+      completed_at: row.completed_at ?? null,
+      records_processed: Number(row.records_processed ?? 0),
+      error_message: row.error_message ?? null,
+      metadata: row.metadata ?? {},
+    };
+  }
+
+  const detail = row.detail && typeof row.detail === 'object' ? row.detail : {};
+  return {
+    id: row.id,
+    org_id: row.org_id,
+    integration_type: row.sync_type ?? detail.integration_type ?? null,
+    status: row.status ?? null,
+    started_at: row.started_at ?? null,
+    completed_at: row.finished_at ?? null,
+    records_processed: Number(detail.records_processed ?? 0),
+    error_message: detail.error_message ?? null,
+    metadata: detail,
+    created_at: row.started_at ?? null,
+  };
+}
+
+async function insertSyncJob(payload: {
+  org_id: string | null;
+  integration_type: string;
+  status: string;
+  started_at?: string;
+  completed_at?: string | null;
+  records_processed?: number;
+  error_message?: string | null;
+  metadata?: any;
+}): Promise<SyncJobRef> {
+  const startedAt = payload.started_at || new Date().toISOString();
+  const metadata = payload.metadata || {};
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('integration_sync_jobs')
+      .insert({
+        org_id: payload.org_id,
+        integration_type: payload.integration_type,
+        status: payload.status,
+        started_at: startedAt,
+        completed_at: payload.completed_at ?? null,
+        records_processed: payload.records_processed ?? 0,
+        error_message: payload.error_message ?? null,
+        metadata,
+      })
+      .select('id')
+      .single();
+    if (!error && data?.id) {
+      return { id: String(data.id), table: 'integration_sync_jobs' };
+    }
+  } catch {}
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('mightycall_sync_runs')
+      .insert({
+        org_id: payload.org_id,
+        sync_type: payload.integration_type,
+        started_at: startedAt,
+        finished_at: payload.completed_at ?? null,
+        status: payload.status,
+        detail: {
+          ...metadata,
+          integration_type: payload.integration_type,
+          records_processed: payload.records_processed ?? 0,
+          error_message: payload.error_message ?? null,
+        },
+      })
+      .select('id')
+      .single();
+    if (!error && data?.id) {
+      return { id: String(data.id), table: 'mightycall_sync_runs' };
+    }
+  } catch {}
+
+  return null;
+}
+
+async function updateSyncJob(job: SyncJobRef, updates: {
+  status?: string;
+  completed_at?: string | null;
+  records_processed?: number;
+  error_message?: string | null;
+  metadata?: any;
+}) {
+  if (!job) return;
+  if (job.table === 'integration_sync_jobs') {
+    await supabaseAdmin
+      .from('integration_sync_jobs')
+      .update({
+        status: updates.status,
+        completed_at: updates.completed_at ?? null,
+        records_processed: updates.records_processed,
+        error_message: updates.error_message ?? null,
+        metadata: updates.metadata,
+      })
+      .eq('id', job.id);
+    return;
+  }
+
+  await supabaseAdmin
+    .from('mightycall_sync_runs')
+    .update({
+      status: updates.status,
+      finished_at: updates.completed_at ?? null,
+      detail: {
+        ...(updates.metadata || {}),
+        records_processed: updates.records_processed ?? 0,
+        error_message: updates.error_message ?? null,
+      },
+    })
+    .eq('id', job.id);
+}
+
+async function getLatestSyncJob(orgId: string) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('integration_sync_jobs')
+      .select('*')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!error && data) return normalizeSyncJobRow(data, 'integration_sync_jobs');
+  } catch {}
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('mightycall_sync_runs')
+      .select('*')
+      .eq('org_id', orgId)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!error && data) return normalizeSyncJobRow(data, 'mightycall_sync_runs');
+  } catch {}
+
+  return null;
+}
+
+async function listSyncJobsForScope(options: {
+  orgId?: string | null;
+  status?: string | null;
+  limit: number;
+  allowedOrgIds?: string[] | null;
+}) {
+  const { orgId, status, limit, allowedOrgIds } = options;
+
+  const queryIntegrationSyncJobs = async () => {
+    let query = supabaseAdmin.from('integration_sync_jobs').select('*').order('created_at', { ascending: false }).limit(limit);
+    if (orgId) query = query.eq('org_id', orgId);
+    if (!orgId && allowedOrgIds && allowedOrgIds.length >= 0) {
+      query = query.in('org_id', allowedOrgIds.length > 0 ? allowedOrgIds : ['__none__']);
+    }
+    if (status) query = query.eq('status', status);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data || []).map((row: any) => normalizeSyncJobRow(row, 'integration_sync_jobs'));
+  };
+
+  const queryLegacySyncRuns = async () => {
+    let query = supabaseAdmin.from('mightycall_sync_runs').select('*').order('started_at', { ascending: false }).limit(limit);
+    if (orgId) query = query.eq('org_id', orgId);
+    if (!orgId && allowedOrgIds && allowedOrgIds.length >= 0) {
+      query = query.in('org_id', allowedOrgIds.length > 0 ? allowedOrgIds : ['__none__']);
+    }
+    if (status) query = query.eq('status', status);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data || []).map((row: any) => normalizeSyncJobRow(row, 'mightycall_sync_runs'));
+  };
+
+  try {
+    return await queryIntegrationSyncJobs();
+  } catch {
+    return await queryLegacySyncRuns();
+  }
 }
 
 function normalizeIdentityText(value: any): string | null {
@@ -1774,7 +1956,7 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
       metadata: payload,
     });
     try {
-      await supabaseAdmin.from('integration_sync_jobs').insert({
+      await insertSyncJob({
         org_id: payload?.org_id || payload?.orgId || null,
         integration_type: 'mightycall_webhook',
         status: 'received',
@@ -10066,29 +10248,19 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
     console.log(`[MightyCall Sync] Starting reports sync for org ${orgId}, dates ${actualStartDate} to ${actualEndDate}...`);
 
     // Create integration sync job record (optional - table may not exist)
-    let job: any = null;
-    try {
-      const { data: jobData, error: jobError } = await supabaseAdmin
-        .from('integration_sync_jobs')
-        .insert({
-          org_id: orgId,
-          integration_type: 'mightycall_reports',
-          status: 'running',
-          started_at: new Date().toISOString(),
-          records_processed: 0,
-          metadata: { start_date: actualStartDate, end_date: actualEndDate }
-        })
-        .select()
-        .single();
-
-      if (jobError) {
-        console.warn('[MightyCall Sync] Failed to create job record (table may not exist):', jobError);
-      } else {
-        job = jobData;
-      }
-    } catch (e) {
-      console.warn('[MightyCall Sync] Exception creating job record:', e);
-    }
+	    let job: SyncJobRef = null;
+	    try {
+	      job = await insertSyncJob({
+	        org_id: orgId,
+	        integration_type: 'mightycall_reports',
+	        status: 'running',
+	        started_at: new Date().toISOString(),
+	        records_processed: 0,
+	        metadata: { start_date: actualStartDate, end_date: actualEndDate }
+	      });
+	    } catch (e) {
+	      console.warn('[MightyCall Sync] Exception creating job record:', e);
+	    }
 
     try {
       // Attempt to load per-org integration credentials (mightycall)
@@ -10129,25 +10301,22 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
       const phoneNumbersSynced = Number(phoneSyncResult?.upserted || phoneSyncResult?.synced || 0);
 
       // Update job record as completed (if job exists)
-      if (job) {
-        await supabaseAdmin
-          .from('integration_sync_jobs')
-          .update({
-            status: 'completed',
-            completed_at: new Date().toISOString(),
-            records_processed: result.reportsSynced + result.recordingsSynced,
-            metadata: {
-              start_date: actualStartDate,
-              end_date: actualEndDate,
-              phone_numbers_synced: phoneNumbersSynced,
-              reports_synced: result.reportsSynced,
-              recordings_synced: result.recordingsSynced,
-              calls_synced: callsSynced,
-              sms_synced: smsSynced
-            }
-          })
-          .eq('id', job.id);
-      }
+	      if (job) {
+	        await updateSyncJob(job, {
+	          status: 'completed',
+	          completed_at: new Date().toISOString(),
+	          records_processed: result.reportsSynced + result.recordingsSynced,
+	          metadata: {
+	            start_date: actualStartDate,
+	            end_date: actualEndDate,
+	            phone_numbers_synced: phoneNumbersSynced,
+	            reports_synced: result.reportsSynced,
+	            recordings_synced: result.recordingsSynced,
+	            calls_synced: callsSynced,
+	            sms_synced: smsSynced
+	          }
+	        });
+	      }
 
       console.log(`[MightyCall Sync] Report sync completed for org ${orgId}: ${phoneNumbersSynced} phone numbers, ${result.reportsSynced} reports, ${result.recordingsSynced} recordings, ${callsSynced} calls, ${smsSynced} SMS`);
       res.json({
@@ -10163,24 +10332,25 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
 
     } catch (syncError: any) {
       // Update job record as failed (if job exists)
-      if (job) {
-        await supabaseAdmin
-          .from('integration_sync_jobs')
-          .update({
-            status: 'failed',
-            completed_at: new Date().toISOString(),
-            error_message: syncError.message
-          })
-          .eq('id', job.id);
-      }
+	      if (job) {
+	        await updateSyncJob(job, {
+	          status: 'failed',
+	          completed_at: new Date().toISOString(),
+	          error_message: syncError.message,
+	          metadata: {
+	            start_date: actualStartDate,
+	            end_date: actualEndDate,
+	          }
+	        });
+	      }
 
       console.error(`[MightyCall Sync] Reports sync failed for org ${orgId}:`, syncError);
       res.status(500).json({
         error: 'Sync failed',
         detail: syncError.message,
-        job_id: job?.id || null
-      });
-    }
+	        job_id: job?.id || null
+	      });
+	    }
 
   } catch (err: any) {
     console.error('[MightyCall Sync Reports] error:', err);
@@ -10293,29 +10463,19 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
     console.log(`[MightyCall Sync] Starting recordings sync for org ${orgId}, dates ${actualStartDate} to ${actualEndDate}...`);
 
     // Create integration sync job record (optional - table may not exist)
-    let job: any = null;
-    try {
-      const { data: jobData, error: jobError } = await supabaseAdmin
-        .from('integration_sync_jobs')
-        .insert({
-          org_id: orgId,
-          integration_type: 'mightycall_recordings',
-          status: 'running',
-          started_at: new Date().toISOString(),
-          records_processed: 0,
-          metadata: { start_date: actualStartDate, end_date: actualEndDate }
-        })
-        .select()
-        .single();
-
-      if (jobError) {
-        console.warn('[MightyCall Sync] Failed to create job record (table may not exist):', jobError);
-      } else {
-        job = jobData;
-      }
-    } catch (e) {
-      console.warn('[MightyCall Sync] Exception creating job record:', e);
-    }
+	    let job: SyncJobRef = null;
+	    try {
+	      job = await insertSyncJob({
+	        org_id: orgId,
+	        integration_type: 'mightycall_recordings',
+	        status: 'running',
+	        started_at: new Date().toISOString(),
+	        records_processed: 0,
+	        metadata: { start_date: actualStartDate, end_date: actualEndDate }
+	      });
+	    } catch (e) {
+	      console.warn('[MightyCall Sync] Exception creating job record:', e);
+	    }
 
     try {
       // Load per-org integration credentials when available
@@ -10335,22 +10495,19 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
       const result = await syncMightyCallRecordings(supabaseAdmin, orgId, phoneNumberIds, actualStartDate, actualEndDate, overrideCreds);
 
       // Update job record as completed (if job exists)
-      if (job) {
-        await supabaseAdmin
-          .from('integration_sync_jobs')
-          .update({
-            status: 'completed',
-            completed_at: new Date().toISOString(),
-            records_processed: result.recordingsSynced,
-            metadata: {
-              start_date: actualStartDate,
-              end_date: actualEndDate,
-              phone_numbers_synced: Number(phoneSyncResult?.upserted || phoneSyncResult?.synced || 0),
-              recordings_synced: result.recordingsSynced
-            }
-          })
-          .eq('id', job.id);
-      }
+	      if (job) {
+	        await updateSyncJob(job, {
+	          status: 'completed',
+	          completed_at: new Date().toISOString(),
+	          records_processed: result.recordingsSynced,
+	          metadata: {
+	            start_date: actualStartDate,
+	            end_date: actualEndDate,
+	            phone_numbers_synced: Number(phoneSyncResult?.upserted || phoneSyncResult?.synced || 0),
+	            recordings_synced: result.recordingsSynced
+	          }
+	        });
+	      }
 
       console.log(`[MightyCall Sync] Recordings sync completed for org ${orgId}: ${result.recordingsSynced} recordings`);
       res.json({
@@ -10362,16 +10519,17 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
 
     } catch (syncError: any) {
       // Update job record as failed (if job exists)
-      if (job) {
-        await supabaseAdmin
-          .from('integration_sync_jobs')
-          .update({
-            status: 'failed',
-            completed_at: new Date().toISOString(),
-            error_message: syncError.message
-          })
-          .eq('id', job.id);
-      }
+	      if (job) {
+	        await updateSyncJob(job, {
+	          status: 'failed',
+	          completed_at: new Date().toISOString(),
+	          error_message: syncError.message,
+	          metadata: {
+	            start_date: actualStartDate,
+	            end_date: actualEndDate,
+	          }
+	        });
+	      }
 
       console.error(`[MightyCall Sync] Recordings sync failed for org ${orgId}:`, syncError);
       res.status(500).json({
@@ -10397,43 +10555,37 @@ app.get('/api/mightycall/sync/jobs', apiKeyAuthMiddleware, async (req, res) => {
     }
 
     const { orgId, status, limit = 50 } = req.query;
-    let query = supabaseAdmin
-      .from('integration_sync_jobs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(Number(limit));
-
-    // Filter by org if specified and user has permission
-    if (orgId) {
-      if (req.apiKeyScope?.scope === 'org' && req.apiKeyScope.orgId !== orgId) {
-        return res.status(403).json({ error: 'Cannot access sync jobs for other organizations' });
+	    // Filter by org if specified and user has permission
+	    if (orgId) {
+	      if (req.apiKeyScope?.scope === 'org' && req.apiKeyScope.orgId !== orgId) {
+	        return res.status(403).json({ error: 'Cannot access sync jobs for other organizations' });
       }
       if (actorId) {
         const allowed = (await isPlatformAdmin(actorId)) || (await isOrgMember(actorId, String(orgId)));
         if (!allowed) return res.status(403).json({ error: 'Cannot access sync jobs for other organizations' });
       }
-      query = query.eq('org_id', orgId);
-    } else if (req.apiKeyScope?.scope === 'org') {
-      // Org API keys can only see their own org's jobs
-      query = query.eq('org_id', req.apiKeyScope.orgId);
-    } else if (actorId && !(await isPlatformAdmin(actorId))) {
-      const orgIds = await getUserOrgIds(actorId);
-      query = query.in('org_id', orgIds.length > 0 ? orgIds : ['__none__']);
-    }
+	      // no-op; filtered in helper below
+	    }
 
-    // Filter by status if specified
-    if (status) {
-      query = query.eq('status', status);
-    }
+	    const scopedOrgId = orgId
+	      ? String(orgId)
+	      : req.apiKeyScope?.scope === 'org'
+	        ? req.apiKeyScope.orgId
+	        : null;
 
-    const { data, error } = await query;
+	    let allowedOrgIds: string[] | null = null;
+	    if (!scopedOrgId && actorId && !(await isPlatformAdmin(actorId))) {
+	      allowedOrgIds = await getUserOrgIds(actorId);
+	    }
 
-    if (error) {
-      console.error('[MightyCall Sync Jobs] error:', error);
-      return res.status(500).json({ error: 'Failed to fetch sync jobs' });
-    }
+	    const jobs = await listSyncJobsForScope({
+	      orgId: scopedOrgId,
+	      status: status ? String(status) : null,
+	      limit: Number(limit),
+	      allowedOrgIds,
+	    });
 
-    res.json({ jobs: data || [] });
+	    res.json({ jobs });
 
   } catch (err: any) {
     console.error('[MightyCall Sync Jobs] error:', err);

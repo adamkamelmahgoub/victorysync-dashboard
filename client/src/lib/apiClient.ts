@@ -2,14 +2,15 @@
 import { API_BASE_URL, buildApiUrl } from "../config";
 
 type Json = any;
+type FetchJsonInit = RequestInit & { timeoutMs?: number };
 
-export async function fetchJson(path: string, init?: RequestInit) {
+export async function fetchJson(path: string, init?: FetchJsonInit) {
   const url = path.startsWith("http") ? path : buildApiUrl(path);
   // Use a generous timeout to avoid indefinite fetch hangs in the browser
   // 15s gives the backend time to process requests, while still catching hangs
-  const timeoutMs = 15000; // 15s
+  const timeoutMs = init?.timeoutMs ?? 15000; // 15s default
 
-  async function fetchWithTimeout(u: string, i?: RequestInit, t = timeoutMs) {
+  async function fetchWithTimeout(u: string, i?: FetchJsonInit, t = timeoutMs) {
     if (typeof (import.meta as any).env !== 'undefined' && (import.meta as any).env.VITE_DEBUG_API === 'true') {
       // eslint-disable-next-line no-console
       console.debug(`[fetchWithTimeout] -> ${i?.method || 'GET'} ${u} (timeout=${t}ms)`);
@@ -17,7 +18,8 @@ export async function fetchJson(path: string, init?: RequestInit) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), t);
     try {
-      const res = await fetch(u, { cache: (i && (i as any).cache) || 'no-store', ...i, signal: controller.signal });
+      const { timeoutMs: _timeoutMs, ...requestInit } = i || {};
+      const res = await fetch(u, { cache: (requestInit as any).cache || 'no-store', ...requestInit, signal: controller.signal });
       return res;
     } catch (err: any) {
       if (err?.name === 'AbortError') {
@@ -313,7 +315,10 @@ export async function deleteOrgIntegration(orgId: string, integrationId: string,
 }
 
 export async function getOrgIntegrationHealth(orgId: string, userId?: string) {
-  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/integrations/health`, { headers: { 'x-user-id': userId || '' } });
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/integrations/health`, {
+    headers: { 'x-user-id': userId || '' },
+    timeoutMs: 30000,
+  });
 }
 
 export async function getProductionHealth(userId?: string) {

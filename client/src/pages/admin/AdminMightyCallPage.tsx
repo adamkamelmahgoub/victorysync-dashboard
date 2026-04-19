@@ -64,6 +64,10 @@ export default function AdminMightyCallPage() {
       setIntegrationHealth(data);
     } catch (err: any) {
       console.error('failed to load integration health:', err);
+      setIntegrationHealth({
+        error: err?.message || 'Failed to load integration health',
+        checked_at: new Date().toISOString(),
+      });
     }
   };
 
