@@ -1548,7 +1548,8 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
 });
 
 // Resolve authenticated actor from a Supabase bearer token.
-// In development only, a manual x-user-id or x-dev-bypass header can still be used.
+// In production, only a valid Supabase bearer token or API key is accepted.
+// In non-production, x-user-id and x-dev-bypass are still allowed for local testing.
 app.use('/api', async (req, res, next) => {
   try {
     let actor: string | null = null;
@@ -1563,6 +1564,8 @@ app.use('/api', async (req, res, next) => {
         if (!error && data?.user?.id) {
           actor = data.user.id;
           req.headers['x-user-id'] = actor;
+        } else if (error) {
+          console.warn('[auth] bearer verification failed:', fmtErr(error));
         }
       } catch (authErr) {
         console.warn('[auth] bearer verification failed:', fmtErr(authErr));
