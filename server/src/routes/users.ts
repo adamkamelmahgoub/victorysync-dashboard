@@ -10,13 +10,13 @@ function hashApiKey(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-// Middleware to protect admin routes - checks x-dev-bypass or platform_admin role
+// Middleware to protect admin routes.
 router.use(async (req, res, next) => {
-  const isDev = process.env.NODE_ENV !== 'production' || req.header('x-dev-bypass') === 'true';
-  const userId = req.header('x-user-id') || null;
+  const isDev = process.env.NODE_ENV !== 'production';
+  const userId = (req as any).actorId || req.header('x-user-id') || null;
   
   if (isDev && userId) {
-    // In dev mode, allow if x-user-id present
+    // In dev mode, allow if an actor is resolved.
     return next();
   }
   

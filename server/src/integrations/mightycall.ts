@@ -1,10 +1,75 @@
-// --- STUB FOR MISSING syncMightyCallVoicemails ---
 export async function syncMightyCallVoicemails(
   supabaseAdminClient: any,
   orgId: string,
   overrideCreds?: any
 ): Promise<{ voicemailsSynced: number }> {
-  return { voicemailsSynced: 0 };
+  try {
+    const token = await getMightyCallAccessToken(overrideCreds);
+    const apiKeyOverride = overrideCreds?.clientId || undefined;
+    const voicemails = await fetchMightyCallVoicemails(token, apiKeyOverride).catch(() => []);
+
+    const phoneLookup: Record<string, string> = {};
+    try {
+      const { data: phones } = await supabaseAdminClient
+        .from('phone_numbers')
+        .select('id, number, number_digits')
+        .eq('org_id', orgId);
+      for (const p of phones || []) {
+        const num = String((p as any).number || '').trim();
+        const digits = String((p as any).number_digits || num.replace(/\D/g, ''));
+        if (num) phoneLookup[num] = (p as any).id;
+        if (digits) phoneLookup[digits] = (p as any).id;
+      }
+    } catch {}
+
+    const rows = (Array.isArray(voicemails) ? voicemails : []).map((item: any) => {
+      const fromNumber = pickPhoneText(
+        item?.from_number,
+        item?.from,
+        item?.client?.address,
+        item?.client?.number,
+        item?.caller?.number,
+        item?.metadata?.from_number
+      );
+      const toNumber = pickPhoneText(
+        item?.to_number,
+        item?.to,
+        item?.businessNumber?.number,
+        item?.recipient,
+        item?.destination?.number,
+        item?.metadata?.to_number
+      );
+      const mapNumber = String(toNumber || fromNumber || '').trim();
+      const mapDigits = mapNumber.replace(/\D/g, '');
+      return {
+        org_id: orgId,
+        phone_number_id: phoneLookup[mapNumber] || phoneLookup[mapDigits] || null,
+        external_id: String(item?.id || item?.requestGuid || item?.external_id || item?.audio_url || ''),
+        from_number: fromNumber,
+        to_number: toNumber,
+        audio_url: item?.audio_url || null,
+        transcription: item?.transcription || null,
+        duration_seconds: Number(item?.duration_seconds ?? item?.duration ?? 0) || null,
+        message_date: item?.message_date || item?.created || new Date().toISOString(),
+        metadata: item?.metadata || item
+      };
+    }).filter((row: any) => !!row.external_id);
+
+    if (rows.length === 0) return { voicemailsSynced: 0 };
+
+    const { error } = await supabaseAdminClient
+      .from('voicemail_logs')
+      .upsert(rows, { onConflict: 'org_id,external_id' });
+
+    if (error) {
+      console.warn('[MightyCall] voicemail insert failed:', error);
+      return { voicemailsSynced: 0 };
+    }
+    return { voicemailsSynced: rows.length };
+  } catch (err: any) {
+    console.warn('[MightyCall] syncMightyCallVoicemails error:', err?.message || err);
+    return { voicemailsSynced: 0 };
+  }
 }
 import fetch from 'node-fetch';
 import { MIGHTYCALL_API_KEY, MIGHTYCALL_USER_KEY, MIGHTYCALL_BASE_URL } from '../config/env';
@@ -248,7 +313,39 @@ export async function fetchMightyCallJournalRequests(accessToken: string, params
   return all;
 }
 
-export async function fetchMightyCallRecordings(accessToken: string, phoneNumberIds: string[] = [], startDate?: string, endDate?: string) {
+function pickPhoneText(...values: any[]): string | null {
+  for (const value of values) {
+    if (!value) continue;
+    if (typeof value === 'string') {
+      const next = value.trim();
+      if (next) return next;
+      continue;
+    }
+    if (typeof value === 'object') {
+      const nested = pickPhoneText(
+        value.number,
+        value.phone,
+        value.address,
+        value.phoneNumber,
+        value.businessNumber,
+        value.client?.address,
+        value.client?.number,
+        value.caller?.number,
+        value.destination?.number
+      );
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+export async function fetchMightyCallRecordings(
+  accessToken: string,
+  phoneNumberIds: string[] = [],
+  startDate?: string,
+  endDate?: string,
+  apiKeyOverride?: string
+) {
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const recordings: any[] = [];
   const seen = new Set<string>();
@@ -289,7 +386,7 @@ export async function fetchMightyCallRecordings(accessToken: string, phoneNumber
         qp.set('page', String(page));
         qp.set('pageSize', String(pageSize));
         qp.set('limit', String(pageSize));
-        const r = await tryFetchJson(`${url}?${qp.toString()}`, accessToken);
+        const r = await tryFetchJson(`${url}?${qp.toString()}`, accessToken, apiKeyOverride);
         if (!r.ok || !r.body) break;
         const body: any = r.body;
         const list = body?.data?.recordings ?? body?.recordings ?? body?.data?.items ?? body?.items ?? body?.data ?? [];
@@ -302,14 +399,24 @@ export async function fetchMightyCallRecordings(accessToken: string, phoneNumber
     }
   }
 
-  const calls = await fetchMightyCallCalls(accessToken, { startUtc: startDate, endUtc: endDate, pageSize: '1000', skip: '0' });
+  const calls = await fetchMightyCallCalls(accessToken, {
+    startUtc: startDate ? `${startDate}T00:00:00Z` : undefined,
+    endUtc: endDate ? `${endDate}T23:59:59Z` : undefined,
+    pageSize: '1000',
+    skip: '0'
+  }, apiKeyOverride);
   for (const c of calls) {
-    const rec = (c as any)?.callRecord ?? (c as any)?.recording ?? null;
-    if (rec && (rec.uri || rec.fileName || rec.link)) {
+    const rec =
+      (c as any)?.callRecord ??
+      (c as any)?.recording ??
+      (c as any)?.call_record ??
+      (c as any)?.callRecording ??
+      null;
+    if (rec && (rec.uri || rec.fileName || rec.link || rec.downloadUrl || rec.recordingUrl)) {
       addRecording({
         id: (c as any).id || (c as any).callId,
         callId: (c as any).id || (c as any).callId,
-        recordingUrl: rec.uri || rec.fileName || rec.link,
+        recordingUrl: rec.uri || rec.fileName || rec.link || rec.downloadUrl || rec.recordingUrl,
         duration: (c as any).duration ?? null,
         date: (c as any).dateTimeUtc ?? (c as any).created ?? null,
         metadata: c
@@ -317,9 +424,15 @@ export async function fetchMightyCallRecordings(accessToken: string, phoneNumber
     }
   }
 
-  const jr = await fetchMightyCallJournalRequests(accessToken, { from: `${startDate}T00:00:00Z`, to: `${endDate}T23:59:59Z`, type: 'Call', pageSize: '1000', page: '1' });
+  const jr = await fetchMightyCallJournalRequests(accessToken, {
+    from: `${startDate}T00:00:00Z`,
+    to: `${endDate}T23:59:59Z`,
+    type: 'Call',
+    pageSize: '1000',
+    page: '1'
+  }, apiKeyOverride);
   for (const r of jr) {
-    const link = (r as any)?.recording?.link ?? (r as any)?.recording?.uri ?? (r as any)?.textModel?.text ?? null;
+    const link = (r as any)?.recording?.link ?? (r as any)?.recording?.uri ?? (r as any)?.recording?.downloadUrl ?? null;
     if (link) {
       addRecording({
         id: (r as any).id,
@@ -538,7 +651,45 @@ export async function fetchMightyCallExtensions(accessToken?: string, apiKeyOver
   }
   return [];
 }
-export async function fetchMightyCallVoicemails(accessToken?: string) { return []; }
+export async function fetchMightyCallVoicemails(accessToken?: string, apiKeyOverride?: string) {
+  const token = accessToken || await getMightyCallAccessToken();
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  const messageTypes = ['Voicemail', 'VoiceMail', 'VoicemailMessage'];
+
+  for (const type of messageTypes) {
+    const list = await fetchMightyCallJournalRequests(token, {
+      pageSize: '500',
+      page: '1',
+      type
+    }, apiKeyOverride).catch(() => []);
+
+    for (const row of Array.isArray(list) ? list : []) {
+      const audioUrl =
+        row?.recording?.link ||
+        row?.recording?.uri ||
+        row?.recording?.downloadUrl ||
+        row?.audioUrl ||
+        row?.audio_url ||
+        null;
+      const externalId = String(row?.id || row?.requestGuid || audioUrl || '').trim();
+      if (!externalId || seen.has(externalId)) continue;
+      seen.add(externalId);
+      rows.push({
+        id: externalId,
+        from_number: pickPhoneText(row?.from, row?.from_number, row?.client?.address, row?.caller?.number),
+        to_number: pickPhoneText(row?.to, row?.to_number, row?.businessNumber?.number, row?.destination?.number),
+        audio_url: audioUrl,
+        transcription: row?.transcription || row?.textModel?.text || row?.text || null,
+        duration_seconds: Number(row?.duration ?? row?.durationSeconds ?? 0) || null,
+        message_date: row?.created || row?.createdAt || null,
+        metadata: row
+      });
+    }
+  }
+
+  return rows;
+}
 
 // Sync helpers used by server scripts. These perform minimal, safe DB upserts and return counts.
 export async function syncMightyCallPhoneNumbers(
@@ -845,8 +996,9 @@ export async function syncMightyCallRecordings(
   try {
     const token = await getMightyCallAccessToken(overrideCreds);
     const { start, end } = resolveSyncDateRange(startDate, endDate);
+    const apiKeyOverride = overrideCreds?.clientId || undefined;
 
-    const recordings = await fetchMightyCallRecordings(token, phoneNumberIds, start, end).catch(() => []);
+    const recordings = await fetchMightyCallRecordings(token, phoneNumberIds, start, end, apiKeyOverride).catch(() => []);
 
     const phoneLookup: Record<string, string> = {};
     try {
@@ -871,22 +1023,31 @@ export async function syncMightyCallRecordings(
 
         if (metadata) {
           // Try various metadata field names for from_number - prioritize actual call data
-          fromNumber = metadata.from_number ||
-                      metadata.from ||
-                      metadata.businessNumber || 
-                      metadata.caller_number || 
-                      metadata.phone_number ||
-                      (metadata.phoneNumber && typeof metadata.phoneNumber === 'string' ? metadata.phoneNumber : null);
+          fromNumber = pickPhoneText(
+            metadata.from_number,
+            metadata.from,
+            metadata.businessNumber,
+            metadata.client?.address,
+            metadata.client?.number,
+            metadata.caller_number,
+            metadata.caller?.number,
+            metadata.phone_number,
+            metadata.phoneNumber
+          );
 
           // Try various metadata field names for to_number
           if (metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
-            toNumber = metadata.called[0].phone || metadata.called[0].number;
+            toNumber = pickPhoneText(metadata.called[0].phone, metadata.called[0].number, metadata.called[0]);
           }
           if (!toNumber) {
-            toNumber = metadata.to_number ||
-                      metadata.to ||
-                      metadata.recipient ||
-                      metadata.destination_number;
+            toNumber = pickPhoneText(
+              metadata.to_number,
+              metadata.to,
+              metadata.recipient,
+              metadata.destination_number,
+              metadata.destination?.number,
+              metadata.businessNumber?.number
+            );
           }
         }
 
@@ -919,25 +1080,30 @@ export async function syncMightyCallRecordings(
           external_id: externalId,
           org_id: orgId,
           phone_number_id: phoneId,
-          phone_number: String(toNumber || fromNumber || '').trim() || null,
+          phone_number: pickPhoneText(toNumber, fromNumber),
           call_id: r.callId || r.id,
           recording_url: r.recordingUrl,
           duration_seconds: r.duration || null,
-          recording_date: r.date,
-          recorded_at: r.date,
-          from_number: String(fromNumber || '').trim() || null,
-          to_number: String(toNumber || '').trim() || null,
+          recording_date: r.date || metadata?.recordingDate || metadata?.recordedAt || metadata?.created || null,
+          recorded_at: r.date || metadata?.recordingDate || metadata?.recordedAt || metadata?.created || null,
+          from_number: pickPhoneText(fromNumber),
+          to_number: pickPhoneText(toNumber),
           metadata: metadata || r
         };
       }).filter((r: any) => !!r.call_id || !!r.recording_url || !!r.external_id);
 
       const recRows = normalizedRecordings.map((r: any) => ({
         org_id: r.org_id,
+        external_id: r.external_id,
         phone_number_id: r.phone_number_id,
+        phone_number: r.phone_number,
         call_id: r.call_id,
         recording_url: r.recording_url,
         duration_seconds: r.duration_seconds,
         recording_date: r.recording_date,
+        recorded_at: r.recorded_at,
+        from_number: r.from_number,
+        to_number: r.to_number,
         metadata: {
           ...(r.metadata || {}),
           external_id: r.external_id,

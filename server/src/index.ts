@@ -26,7 +26,7 @@
  */
 
 // server/src/index.ts
-import { getEnvironmentHealth } from './config/env';
+import { FRONTEND_ORIGIN, getEnvironmentHealth } from './config/env';
 import express from "express";
 import cors from "cors";
 import crypto from 'crypto';
@@ -856,6 +856,49 @@ function isLikelyActiveCallStatus(status: any): boolean {
   return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call'].some((token) => normalized.includes(token));
 }
 
+function parseTimestampMs(value: any): number | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
+  const startedMs = parseTimestampMs(startedAt);
+  if (startedMs == null) return false;
+  const ageMs = Date.now() - startedMs;
+  return ageMs >= -(5 * 60 * 1000) && ageMs <= maxAgeMs;
+}
+
+function hasFreshStatusCallSignal(payload: any, maxAgeMs = 4 * 60 * 60 * 1000): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const currentCall = payload?.currentCall || payload?.current_call || payload?.call || null;
+  const endedAt = currentCall?.endedAt || currentCall?.ended_at || payload?.endedAt || payload?.ended_at || null;
+  if (String(endedAt || '').trim()) return false;
+
+  const startedAt =
+    currentCall?.startedAt ||
+    currentCall?.started_at ||
+    payload?.startedAt ||
+    payload?.started_at ||
+    payload?.lastUpdatedAt ||
+    payload?.updated_at ||
+    null;
+
+  const activeStatus = isLikelyActiveCallStatus(
+    currentCall?.status ||
+    payload?.status ||
+    payload?.state ||
+    payload?.presenceStatus ||
+    payload?.availability
+  );
+
+  if (activeStatus && isFreshActivity(startedAt, maxAgeMs)) return true;
+  if ((payload?.onCall || payload?.inCall || payload?.isOnCall) && isFreshActivity(startedAt, maxAgeMs)) return true;
+  if (currentCall && isFreshActivity(startedAt, maxAgeMs)) return true;
+  return false;
+}
+
 function isLikelyLiveJournalRequest(request: any): boolean {
   const statusCandidates = [
     request?.state,
@@ -1034,11 +1077,15 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 
   const activeCalls = (liveCalls || []).filter((call: any) => {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
-    return isLikelyActiveCallStatus(status) || !String(call?.endedAt || call?.ended_at || call?.endTime || call?.ended || '').trim();
+    const endedAt = call?.endedAt || call?.ended_at || call?.endTime || call?.ended || null;
+    const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
+    if (String(endedAt || '').trim()) return false;
+    return isLikelyActiveCallStatus(status) || isFreshActivity(startedAt, 4 * 60 * 60 * 1000);
   });
   const activeDbCalls = (recentDbCalls || []).filter((call: any) => {
     const status = String(call?.status || '').trim();
-    return isLikelyActiveCallStatus(status) || !String(call?.ended_at || '').trim();
+    if (String(call?.ended_at || '').trim()) return false;
+    return isLikelyActiveCallStatus(status) && isFreshActivity(call?.started_at, 6 * 60 * 60 * 1000);
   });
   const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
 
@@ -1083,20 +1130,12 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const extPayload = (extMeta as any)?.metadata || extMeta;
     const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
     const normalizedStatus = normalizeMightyCallStatusActivity(statusPayload, normalizedExt);
+    const hasFreshStatusSignal = hasFreshStatusCallSignal(statusPayload) || hasFreshStatusCallSignal(extPayload);
     const onCall = !!(
       matchedLiveCall ||
       matchedDbCall ||
       matchedJournalCall ||
-      statusPayload?.onCall ||
-      statusPayload?.inCall ||
-      statusPayload?.isOnCall ||
-      isLikelyActiveCallStatus(statusPayload?.status || statusPayload?.state || statusPayload?.presenceStatus || statusPayload?.availability) ||
-      extPayload?.onCall ||
-      extPayload?.inCall ||
-      extPayload?.isOnCall ||
-      extPayload?.currentCall ||
-      extPayload?.current_call ||
-      isLikelyActiveCallStatus(callStatus)
+      hasFreshStatusSignal
     );
     const counterpart = matchedLiveCall
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
@@ -1111,8 +1150,10 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         ? matchedDbCall?.started_at || null
         : matchedJournalCall
           ? normalizedJournal?.started_at || matchedJournalCall?.created || matchedJournalCall?.createdAt || null
-        : normalizedStatus?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null;
-    const source = matchedLiveCall ? 'mightycall_calls' : matchedDbCall ? 'db_calls' : matchedJournalCall ? 'mightycall_journal' : statusPayload?.status || statusPayload?.state || statusPayload?.presenceStatus || statusPayload?.availability ? 'mightycall_status' : (extMeta ? 'mightycall_extensions' : 'unmatched');
+        : hasFreshStatusSignal
+          ? normalizedStatus?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
+          : null;
+    const source = matchedLiveCall ? 'mightycall_calls' : matchedDbCall ? 'db_calls' : matchedJournalCall ? 'mightycall_journal' : hasFreshStatusSignal ? 'mightycall_status' : (extMeta ? 'mightycall_extensions' : 'unmatched');
 
     if (normalizedExt) {
       console.info('[agents/live-status] resolved', {
@@ -1137,7 +1178,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       display_name: (extMeta as any)?.display_name || null,
       on_call: onCall,
       counterpart: counterpart || null,
-      status: callStatus || (onCall ? 'On Call' : 'Available'),
+      status: onCall ? (callStatus || 'On Call') : (callStatus || 'Available'),
       started_at: startedAt,
       source
     };
@@ -1249,8 +1290,29 @@ async function resolveAgentNameForExtension(ext: string | null, orgId?: string) 
 }
 
 const app = express();
-// CORS: In production, restrict origin to your frontend domain
-app.use(cors());
+
+function resolveAllowedCorsOrigins(): string[] {
+  const configured = String(FRONTEND_ORIGIN || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (process.env.NODE_ENV !== 'production') {
+    configured.push('http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:5173');
+  }
+
+  return Array.from(new Set(configured));
+}
+
+const allowedCorsOrigins = resolveAllowedCorsOrigins();
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedCorsOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('cors_origin_not_allowed'));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 // Disable ETag generation for API responses to avoid conditional GET returning 304
 app.disable('etag');
@@ -1286,7 +1348,7 @@ app.use('/api', (_req, res, next) => {
   next();
 });
 // Apply API key middleware early so endpoints can detect org-scoped or platform keys
-// app.use(apiKeyAuthMiddleware as any);
+app.use('/api', apiKeyAuthMiddleware as any);
 
 // Using centralized Supabase client from `src/lib/supabaseClient`
 
@@ -1479,22 +1541,38 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
   }
 });
 
-// TEMPORARY DEV BYPASS: Allow testing without auth
-app.use('/api', (req, res, next) => {
-  // For development testing, allow requests with x-dev-bypass header
-  if (req.header('x-dev-bypass') === 'true') {
-    // Set a valid test user ID for development.
-    // Override via DEV_BYPASS_USER_ID env if needed.
-    req.headers['x-user-id'] = process.env.DEV_BYPASS_USER_ID || 'a5f6f998-5ed5-4c0c-88ac-9f27d677697a';
-    console.log('[DEV BYPASS] Allowing request without auth:', req.method, req.path);
-  }
-  next();
-});
-
-// RBAC helper middleware: normalize actor id and cache platform admin check
+// Resolve authenticated actor from a Supabase bearer token.
+// In development only, a manual x-user-id or x-dev-bypass header can still be used.
 app.use('/api', async (req, res, next) => {
   try {
-    const actor = req.header('x-user-id') || null;
+    let actor: string | null = null;
+    const authorization = String(req.header('authorization') || '');
+    const bearer = authorization.toLowerCase().startsWith('bearer ')
+      ? authorization.slice(7).trim()
+      : null;
+
+    if (bearer && !(req as any).apiKeyScope) {
+      try {
+        const { data, error } = await supabaseAdmin.auth.getUser(bearer);
+        if (!error && data?.user?.id) {
+          actor = data.user.id;
+          req.headers['x-user-id'] = actor;
+        }
+      } catch (authErr) {
+        console.warn('[auth] bearer verification failed:', fmtErr(authErr));
+      }
+    }
+
+    if (!actor && process.env.NODE_ENV !== 'production') {
+      if (req.header('x-dev-bypass') === 'true') {
+        actor = process.env.DEV_BYPASS_USER_ID || 'a5f6f998-5ed5-4c0c-88ac-9f27d677697a';
+        req.headers['x-user-id'] = actor;
+        console.log('[DEV BYPASS] Allowing request without auth:', req.method, req.path);
+      } else {
+        actor = req.header('x-user-id') || null;
+      }
+    }
+
     (req as any).actorId = actor;
     if (actor) {
       try {

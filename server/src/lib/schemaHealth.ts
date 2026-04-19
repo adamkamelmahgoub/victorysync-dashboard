@@ -29,6 +29,7 @@ export async function getSchemaHealth() {
     'mightycall_reports',
     'mightycall_recordings',
     'mightycall_sms_messages',
+    'voicemail_logs',
     'integration_sync_jobs',
     'audit_logs',
     'org_integrations',
@@ -39,6 +40,10 @@ export async function getSchemaHealth() {
     { table: 'org_users', column: 'mightycall_extension' },
     { table: 'calls', column: 'agent_extension' },
     { table: 'calls', column: 'metadata' },
+    { table: 'mightycall_recordings', column: 'phone_number_id' },
+    { table: 'mightycall_recordings', column: 'recording_date' },
+    { table: 'mightycall_recordings', column: 'from_number' },
+    { table: 'mightycall_recordings', column: 'to_number' },
     { table: 'integration_sync_jobs', column: 'status' },
   ];
 
