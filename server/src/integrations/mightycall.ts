@@ -610,14 +610,33 @@ export async function fetchMightyCallProfileByExtension(extension: string, acces
 
 export async function fetchMightyCallOwnStatus(accessToken: string, apiKeyOverride?: string) {
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
-  const endpoints = ['/profile/status', '/v4/profile/status', '/status', '/profile/get-status'];
+  const endpoints = [
+    '/profile/status',
+    '/v4/profile/status',
+    '/status',
+    '/profile/get-status',
+    '/profile',
+    '/v4/profile',
+    '/me',
+    '/v4/me',
+    '/user',
+    '/v4/user',
+    '/userinfo',
+    '/v4/userinfo'
+  ];
   for (const ep of endpoints) {
     for (const url of buildUrlVariants(base, ep)) {
       const r = await tryFetchJson(url, accessToken, apiKeyOverride);
       if (!r.ok || !r.body) continue;
       const body: any = r.body;
       const data = body?.data ?? body;
-      if (data && typeof data === 'object') return data;
+      if (!data || typeof data !== 'object') continue;
+      if (Array.isArray(data)) {
+        const firstObject = data.find((item) => item && typeof item === 'object');
+        if (firstObject) return firstObject;
+        continue;
+      }
+      return data;
     }
   }
   return null;

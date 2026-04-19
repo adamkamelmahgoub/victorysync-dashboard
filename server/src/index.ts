@@ -897,22 +897,74 @@ function payloadMatchesAgent(payload: any, normalizedExt: string | null, agentId
 }
 
 function extractLiveStatusLabel(raw: any): string | null {
-  const candidates = [
-    raw?.status,
-    raw?.state,
-    raw?.presence,
-    raw?.presenceStatus,
-    raw?.userStatus,
-    raw?.availability,
-    raw?.callStatus,
-    raw?.currentCall?.status,
-    raw?.current_call?.status
-  ];
-  for (const candidate of candidates) {
-    const s = String(candidate || '').trim();
-    if (s) return s;
-  }
-  return null;
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  const add = (value: any) => {
+    const next = String(value || '').trim();
+    if (!next) return;
+    const normalized = next.toLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    ordered.push(next);
+  };
+  const addFrom = (value: any) => {
+    if (!value) return;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      add(value);
+      return;
+    }
+    if (typeof value !== 'object') return;
+    add((value as any)?.name);
+    add((value as any)?.label);
+    add((value as any)?.title);
+    add((value as any)?.value);
+    add((value as any)?.status);
+    add((value as any)?.state);
+    add((value as any)?.presence);
+    add((value as any)?.presenceStatus);
+    add((value as any)?.presence_status);
+    add((value as any)?.userStatus);
+    add((value as any)?.user_status);
+    add((value as any)?.availability);
+    add((value as any)?.callStatus);
+    add((value as any)?.call_status);
+    add((value as any)?.displayStatus);
+    add((value as any)?.display_status);
+    add((value as any)?.currentStatus);
+    add((value as any)?.current_status);
+  };
+
+  addFrom(raw);
+  addFrom(raw?.status);
+  addFrom(raw?.state);
+  addFrom(raw?.presence);
+  addFrom(raw?.presenceStatus);
+  addFrom(raw?.presence_status);
+  addFrom(raw?.userStatus);
+  addFrom(raw?.user_status);
+  addFrom(raw?.availability);
+  addFrom(raw?.callStatus);
+  addFrom(raw?.call_status);
+  addFrom(raw?.displayStatus);
+  addFrom(raw?.display_status);
+  addFrom(raw?.currentStatus);
+  addFrom(raw?.current_status);
+  addFrom(raw?.currentCall);
+  addFrom(raw?.currentCall?.status);
+  addFrom(raw?.currentCall?.state);
+  addFrom(raw?.currentCall?.presence);
+  addFrom(raw?.currentCall?.availability);
+  addFrom(raw?.current_call);
+  addFrom(raw?.current_call?.status);
+  addFrom(raw?.current_call?.state);
+  addFrom(raw?.current_call?.presence);
+  addFrom(raw?.current_call?.availability);
+
+  const active = ordered.find((candidate) => isLikelyActiveCallStatus(candidate));
+  if (active) return active;
+  const nonTerminal = ordered.find((candidate) => !isLikelyTerminalOrIdleCallStatus(candidate));
+  if (nonTerminal) return nonTerminal;
+  return ordered[0] || null;
 }
 
 function extractCounterpartyLabel(value: any, orgPhoneDigits: Set<string>, extension?: string | null): string | null {
