@@ -8824,14 +8824,20 @@ app.get("/s/series", async (req, res) => {
               const meta = typeof rec.metadata === 'string' ? JSON.parse(rec.metadata) : rec.metadata;
               
               if (!fromNumber) {
-                fromNumber = meta.businessNumber || meta.from_number || meta.caller_number || meta.phone_number || meta.from;
+                fromNumber =
+                  (typeof meta.businessNumber === 'string' ? meta.businessNumber : meta.businessNumber?.number) ||
+                  meta.from_number ||
+                  meta.caller_number ||
+                  meta.phone_number ||
+                  meta.from ||
+                  rec.phone_number;
               }
               
               if (!toNumber) {
                 if (meta.called && Array.isArray(meta.called) && meta.called[0]) {
                   toNumber = meta.called[0].phone || meta.called[0].number;
                 } else {
-                  toNumber = meta.to_number || meta.recipient || meta.destination_number || meta.to;
+                  toNumber = meta.to_number || meta.recipient || meta.destination_number || meta.to || rec.phone_number;
                 }
               }
             }
@@ -8841,7 +8847,7 @@ app.get("/s/series", async (req, res) => {
               from_number: fromNumber,
               to_number: toNumber,
               duration_seconds: rec.duration_seconds || rec.duration || null,
-              recording_date: rec.recording_date || rec.created_at
+              recording_date: rec.recording_date || rec.recorded_at || rec.created_at
             };
           });
         }
@@ -11336,7 +11342,12 @@ app.get('/api/recordings', async (req, res) => {
       
       // From number sources: businessNumber, caller_number, phone_number
       if (!fromNumber) {
-        fromNumber = metadata.businessNumber || metadata.caller_number || metadata.phone_number || null;
+        fromNumber =
+          (typeof metadata.businessNumber === 'string' ? metadata.businessNumber : metadata.businessNumber?.number) ||
+          metadata.caller_number ||
+          metadata.phone_number ||
+          rec.phone_number ||
+          null;
       }
       
       // To number sources: called[0].phone, recipient, destination_number
@@ -11345,7 +11356,7 @@ app.get('/api/recordings', async (req, res) => {
           toNumber = metadata.called[0].phone || metadata.called[0].name || null;
         }
         if (!toNumber) {
-          toNumber = metadata.recipient || metadata.destination_number || null;
+          toNumber = metadata.recipient || metadata.destination_number || rec.phone_number || null;
         }
       }
       
@@ -11353,7 +11364,8 @@ app.get('/api/recordings', async (req, res) => {
       const durationSeconds = callData.duration_seconds || rec.duration_seconds || 0;
       
       // Create a unique identifier for this recording
-      const recordingDate = new Date(callData.started_at || rec.recording_date || '').toISOString().split('T')[0];
+      const rawRecordingDate = callData.started_at || rec.recording_date || rec.recorded_at || '';
+      const recordingDate = rawRecordingDate ? new Date(rawRecordingDate).toISOString().split('T')[0] : 'Unknown date';
       const identifier = `${fromNumber || 'Unknown'} → ${toNumber || 'Unknown'} (${durationSeconds}s, ${recordingDate})`;
       
       return {
@@ -11364,8 +11376,8 @@ app.get('/api/recordings', async (req, res) => {
         to_number: toNumber,
         duration: durationSeconds,
         duration_formatted: `${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`,
-        call_started_at: callData.started_at || rec.recording_date,
-        call_ended_at: callData.ended_at || rec.recording_date,
+        call_started_at: callData.started_at || rec.recording_date || rec.recorded_at,
+        call_ended_at: callData.ended_at || rec.recording_date || rec.recorded_at,
         direction: metadata.direction || 'Unknown',
         // Add readable identifier for admins
         identifier: identifier,

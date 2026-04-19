@@ -864,7 +864,7 @@ export async function syncMightyCallRecordings(
 
     let recordingsSynced = 0;
     if (Array.isArray(recordings) && recordings.length > 0) {
-      const recRows = recordings.map((r: any) => {
+      const normalizedRecordings = recordings.map((r: any) => {
         const metadata = r.metadata || r;
         let fromNumber = null;
         let toNumber = null;
@@ -913,16 +913,48 @@ export async function syncMightyCallRecordings(
         const digits = numForMap.replace(/\D/g, '');
         const phoneId = phoneLookup[numForMap] || phoneLookup[digits] || null;
 
+        const externalId = String(r.callId || r.id || r.recordingUrl || '').trim() || null;
+
         return {
+          external_id: externalId,
           org_id: orgId,
           phone_number_id: phoneId,
+          phone_number: String(toNumber || fromNumber || '').trim() || null,
           call_id: r.callId || r.id,
           recording_url: r.recordingUrl,
           duration_seconds: r.duration || null,
           recording_date: r.date,
+          recorded_at: r.date,
+          from_number: String(fromNumber || '').trim() || null,
+          to_number: String(toNumber || '').trim() || null,
           metadata: metadata || r
         };
-      }).filter((r: any) => !!r.call_id || !!r.recording_url);
+      }).filter((r: any) => !!r.call_id || !!r.recording_url || !!r.external_id);
+
+      const recRows = normalizedRecordings.map((r: any) => ({
+        org_id: r.org_id,
+        phone_number_id: r.phone_number_id,
+        call_id: r.call_id,
+        recording_url: r.recording_url,
+        duration_seconds: r.duration_seconds,
+        recording_date: r.recording_date,
+        metadata: {
+          ...(r.metadata || {}),
+          external_id: r.external_id,
+          from_number: r.from_number,
+          to_number: r.to_number,
+          phone_number: r.phone_number
+        }
+      }));
+
+      const legacyRows = normalizedRecordings.map((r: any) => ({
+        org_id: r.org_id,
+        external_id: r.external_id,
+        phone_number: r.phone_number,
+        recording_url: r.recording_url,
+        duration_seconds: r.duration_seconds,
+        recorded_at: r.recorded_at
+      })).filter((r: any) => !!r.external_id || !!r.recording_url);
 
       try {
         await supabaseAdminClient
@@ -934,8 +966,24 @@ export async function syncMightyCallRecordings(
       } catch {}
 
       const { error } = await supabaseAdminClient.from('mightycall_recordings').insert(recRows);
-      if (error) console.warn('[MightyCall] recordings insert failed:', error);
-      else recordingsSynced = recRows.length;
+      if (!error) {
+        recordingsSynced = recRows.length;
+      } else {
+        console.warn('[MightyCall] recordings insert failed, trying legacy schema fallback:', error);
+
+        try {
+          await supabaseAdminClient
+            .from('mightycall_recordings')
+            .delete()
+            .eq('org_id', orgId)
+            .gte('recorded_at', `${start}T00:00:00Z`)
+            .lte('recorded_at', `${end}T23:59:59Z`);
+        } catch {}
+
+        const legacyInsert = await supabaseAdminClient.from('mightycall_recordings').insert(legacyRows);
+        if (legacyInsert.error) console.warn('[MightyCall] legacy recordings insert failed:', legacyInsert.error);
+        else recordingsSynced = legacyRows.length;
+      }
     }
     return { recordingsSynced };
   } catch (e: any) {
