@@ -1363,7 +1363,8 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       counterpart: counterpart || null,
       status: onCall ? (callStatus || 'On Call') : (callStatus || 'Available'),
       started_at: startedAt,
-      source
+      source,
+      raw_status: callStatus || explicitOwnStatusLabel || extStatus || null
     };
   });
 }

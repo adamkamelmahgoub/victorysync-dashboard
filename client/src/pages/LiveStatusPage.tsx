@@ -14,6 +14,8 @@ type LiveAgentStatus = {
   counterpart?: string | null;
   status?: string | null;
   started_at?: string | null;
+  source?: string | null;
+  raw_status?: string | null;
 };
 
 function fmtDateTime(value?: string | null) {
@@ -145,19 +147,23 @@ const LiveStatusPage: FC = () => {
                     </StatusBadge>
                   </div>
 
-                  <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="vs-surface-muted p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
+                        <div className="mt-3 break-words text-sm text-slate-200">{agent.counterpart || '-'}</div>
+                      </div>
                     <div className="vs-surface-muted p-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
-                      <div className="mt-3 break-words text-sm text-slate-200">{agent.counterpart || '-'}</div>
-                    </div>
-                    <div className="vs-surface-muted p-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
-                      <div className="mt-3 text-sm text-slate-200">{fmtDateTime(agent.started_at)}</div>
-                      <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
+                        <div className="mt-3 text-sm text-slate-200">{fmtDateTime(agent.started_at)}</div>
+                        <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+                        <div className="mt-2 text-xs text-cyan-200/70">
+                          {agent.source || 'unknown_source'}
+                          {agent.raw_status ? ` · raw ${agent.raw_status}` : ''}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </SectionCard>

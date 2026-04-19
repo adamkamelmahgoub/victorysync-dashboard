@@ -15,6 +15,8 @@ type LiveAgentStatus = {
   counterpart?: string | null;
   status?: string | null;
   started_at?: string | null;
+  source?: string | null;
+  raw_status?: string | null;
 };
 
 type WorkflowCardProps = {
@@ -353,6 +355,10 @@ const DashboardNewV3: FC = () => {
                           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Call state</div>
                           <div className="mt-3 text-sm text-slate-200">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
                           <div className="mt-2 text-xs text-slate-500">Started {formatDateTime(agent.started_at)}</div>
+                          <div className="mt-2 text-xs text-cyan-200/70">
+                            {agent.source || 'unknown_source'}
+                            {agent.raw_status ? ` · raw ${agent.raw_status}` : ''}
+                          </div>
                         </div>
                       </div>
                     </div>
