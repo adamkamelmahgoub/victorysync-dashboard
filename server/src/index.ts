@@ -1142,6 +1142,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const extension = extensionByUserId.get(userId) || String(member?.mightycall_extension || '').trim() || null;
     const normalizedExt = normalizeExtension(extension);
     const extMeta = normalizedExt ? extensionMetaByExt.get(normalizedExt) : null;
+    const shouldUseSingleAgentFallback = memberRows.length === 1;
 
     const matchedLiveCall = normalizedExt
       ? activeCalls.find((call: any) => {
@@ -1154,16 +1155,24 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
         }) || null
       : null;
-    const matchedJournalCall = !matchedLiveCall && normalizedExt
+    const inferredLiveCall = !matchedLiveCall && shouldUseSingleAgentFallback && activeCalls.length === 1
+      ? activeCalls[0]
+      : null;
+    const matchedJournalCall = !matchedLiveCall && !inferredLiveCall && normalizedExt
       ? activeJournalCalls.find((call: any) => collectExtensionCandidates(call).includes(normalizedExt)) || null
       : null;
-    const normalizedJournal = matchedJournalCall ? normalizeMightyCallJournalActivity(matchedJournalCall) : null;
+    const inferredJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedJournalCall && shouldUseSingleAgentFallback && activeJournalCalls.length === 1
+      ? activeJournalCalls[0]
+      : null;
+    const normalizedJournal = matchedJournalCall || inferredJournalCall ? normalizeMightyCallJournalActivity(matchedJournalCall || inferredJournalCall) : null;
 
     const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
     const callStatus = matchedLiveCall
       ? String(matchedLiveCall?.status || matchedLiveCall?.state || matchedLiveCall?.callStatus || '').trim() || extStatus
-      : matchedJournalCall
-          ? String(normalizedJournal?.status || matchedJournalCall?.state || matchedJournalCall?.wfstate?.state || matchedJournalCall?.availability || '').trim() || extStatus
+      : inferredLiveCall
+        ? String(inferredLiveCall?.status || inferredLiveCall?.state || inferredLiveCall?.callStatus || '').trim() || extStatus
+      : matchedJournalCall || inferredJournalCall
+          ? String(normalizedJournal?.status || (matchedJournalCall || inferredJournalCall)?.state || (matchedJournalCall || inferredJournalCall)?.wfstate?.state || (matchedJournalCall || inferredJournalCall)?.availability || '').trim() || extStatus
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
     const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
@@ -1171,22 +1180,38 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const hasFreshStatusSignal = hasFreshStatusCallSignal(statusPayload);
     const onCall = !!(
       matchedLiveCall ||
+      inferredLiveCall ||
       matchedJournalCall ||
+      inferredJournalCall ||
       hasFreshStatusSignal
     );
     const counterpart = matchedLiveCall
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
-      : matchedJournalCall
-          ? normalizedJournal?.counterpart || extractCounterpartyLabel(matchedJournalCall, orgPhoneDigits, normalizedExt)
+      : inferredLiveCall
+        ? extractCounterpartyLabel(inferredLiveCall, orgPhoneDigits, normalizedExt)
+      : matchedJournalCall || inferredJournalCall
+          ? normalizedJournal?.counterpart || extractCounterpartyLabel(matchedJournalCall || inferredJournalCall, orgPhoneDigits, normalizedExt)
         : normalizedStatus?.counterpart || extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
     const startedAt = matchedLiveCall
       ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
-      : matchedJournalCall
-          ? normalizedJournal?.started_at || matchedJournalCall?.created || matchedJournalCall?.createdAt || null
+      : inferredLiveCall
+        ? inferredLiveCall?.dateTimeUtc || inferredLiveCall?.started_at || inferredLiveCall?.start_time || inferredLiveCall?.created || null
+      : matchedJournalCall || inferredJournalCall
+          ? normalizedJournal?.started_at || (matchedJournalCall || inferredJournalCall)?.created || (matchedJournalCall || inferredJournalCall)?.createdAt || null
         : hasFreshStatusSignal
           ? normalizedStatus?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
           : null;
-    const source = matchedLiveCall ? 'mightycall_calls' : matchedJournalCall ? 'mightycall_journal' : hasFreshStatusSignal ? 'mightycall_status' : (extMeta ? 'mightycall_extensions' : 'unmatched');
+    const source = matchedLiveCall
+      ? 'mightycall_calls'
+      : inferredLiveCall
+        ? 'mightycall_calls_inferred'
+        : matchedJournalCall
+          ? 'mightycall_journal'
+          : inferredJournalCall
+            ? 'mightycall_journal_inferred'
+            : hasFreshStatusSignal
+              ? 'mightycall_status'
+              : (extMeta ? 'mightycall_extensions' : 'unmatched');
 
     if (normalizedExt) {
       console.info('[agents/live-status] resolved', {
@@ -1197,7 +1222,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         onCall,
         status: callStatus || null,
         matchedCallCandidates: matchedLiveCall ? collectExtensionCandidates(matchedLiveCall) : [],
-        matchedJournalCallId: matchedJournalCall?.id || null,
+        matchedJournalCallId: (matchedJournalCall || inferredJournalCall)?.id || null,
       });
     }
 
