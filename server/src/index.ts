@@ -1297,6 +1297,12 @@ function resolveAllowedCorsOrigins(): string[] {
     .map((value) => value.trim())
     .filter(Boolean);
 
+  // Always allow production domains
+  configured.push(
+    'https://dashboard.victorysync.com',
+    'https://www.dashboard.victorysync.com'
+  );
+
   if (process.env.NODE_ENV !== 'production') {
     configured.push('http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:5173');
   }
