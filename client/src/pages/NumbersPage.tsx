@@ -1,7 +1,7 @@
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { triggerMightyCallPhoneNumberSync } from '../lib/apiClient';
-import { getOrgPhoneNumbers } from '../lib/phonesApi';
+import { getOrgPhoneNumbers, syncPhoneNumbers } from '../lib/phonesApi';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { buildApiUrl } from '../config';
@@ -201,10 +201,16 @@ const NumbersPage: FC = () => {
   const handleSync = async () => {
     if (!userId) return;
     setSyncing(true);
-    setMessage('Syncing all available phone numbers from MightyCall...');
+    setMessage('Syncing phone numbers from MightyCall...');
     try {
-      const result: any = await triggerMightyCallPhoneNumberSync(userId);
-      setMessage(`Synced ${result.records_processed || 0} phone numbers from MightyCall`);
+      let result: any;
+      if (selectedOrgId) {
+        result = await syncPhoneNumbers(selectedOrgId, userId);
+      } else {
+        result = await triggerMightyCallPhoneNumberSync(userId);
+      }
+      const count = result.records_processed ?? result.records_synced ?? result.synced ?? result.upserted ?? 0;
+      setMessage(`Synced ${count} phone numbers from MightyCall`);
       await fetchNumbers();
     } catch (err: any) {
       setMessage(err?.message || 'Sync failed');

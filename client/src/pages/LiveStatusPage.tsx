@@ -50,8 +50,17 @@ const LiveStatusPage: FC = () => {
 
   useEffect(() => {
     load();
-    const intervalId = window.setInterval(load, 10000);
-    return () => window.clearInterval(intervalId);
+    const intervalId = window.setInterval(load, 5000);
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('visibilitychange', onFocus);
+    };
   }, [user?.id, activeOrgId]);
 
   const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));

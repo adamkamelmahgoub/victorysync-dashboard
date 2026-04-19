@@ -95,10 +95,17 @@ const DashboardNewV3: FC = () => {
     };
 
     loadLiveAgents();
-    const intervalId = window.setInterval(loadLiveAgents, 10000);
+    const intervalId = window.setInterval(loadLiveAgents, 5000);
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') loadLiveAgents();
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('visibilitychange', onFocus);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('visibilitychange', onFocus);
     };
   }, [selectedOrgId, user?.id, isAdmin, orgs]);
 

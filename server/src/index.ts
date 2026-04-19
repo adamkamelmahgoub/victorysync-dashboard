@@ -887,15 +887,19 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 4 * 60 * 60 * 1000): 
 
   const activeStatus = isLikelyActiveCallStatus(
     currentCall?.status ||
+    currentCall?.state ||
     payload?.status ||
     payload?.state ||
     payload?.presenceStatus ||
     payload?.availability
   );
 
+  const hasCallFlag =
+    payload?.onCall || payload?.inCall || payload?.isOnCall ||
+    currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
+
   if (activeStatus && isFreshActivity(startedAt, maxAgeMs)) return true;
-  if ((payload?.onCall || payload?.inCall || payload?.isOnCall) && isFreshActivity(startedAt, maxAgeMs)) return true;
-  if (currentCall && isFreshActivity(startedAt, maxAgeMs)) return true;
+  if (hasCallFlag && isFreshActivity(startedAt, maxAgeMs)) return true;
   return false;
 }
 
@@ -2347,57 +2351,49 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
       return res.json({ phone_numbers: mapped, numbers: mapped });
     }
 
-    // Regular user: Get ONLY explicitly assigned phones from org_phone_numbers table
-    const { data: orgPhones, error: opErr } = await supabaseAdmin
-      .from('org_phone_numbers')
-      .select('id, org_id, phone_number_id, phone_number, label, created_at')
-      .eq('org_id', orgId);
-
-    if (opErr) throw opErr;
-    console.log('[get_org_phone_numbers] org_phone_numbers rows:', (orgPhones || []).length);
-
-    // Collect phone IDs to look up full details
-    const phoneIds = new Set<string>();
-    for (const op of (orgPhones || [])) {
-      if (op.phone_number_id) phoneIds.add(op.phone_number_id);
-    }
-
-    if (phoneIds.size === 0) {
-      return res.json({ phone_numbers: [], numbers: [] });
-    }
-
-    // Get full phone details from phone_numbers table
-    const { data: phoneDetails, error: phoneErr } = await supabaseAdmin
-      .from('phone_numbers')
-      .select('id, number, label, created_at')
-      .in('id', Array.from(phoneIds));
-
-    if (phoneErr) throw phoneErr;
-
-    // Map phone details with org_phone_numbers labels (use org label if set, else fall back to phone label, else default to VictorySync LLC)
-    const detailsById: Record<string, any> = {};
-    for (const p of (phoneDetails || [])) {
-      detailsById[p.id] = p;
-    }
-
-    const mapped = (orgPhones || []).map((op: any) => {
-      const details = detailsById[op.phone_number_id];
-      return {
-        id: op.phone_number_id,
-        number: details?.number || op.phone_number || 'unknown',
-        label: op.label || details?.label || 'VictorySync LLC',
-        is_active: true,
-        created_at: op.created_at
-      };
-    });
-
-    res.json({
-      phone_numbers: mapped,
-      numbers: mapped
-    });
+    const assigned = await getAssignedPhoneNumbersForOrg(orgId);
+    return res.json({ phone_numbers: assigned.phones, numbers: assigned.phones });
   } catch (err: any) {
     console.error('[get_org_phone_numbers] error:', fmtErr(err));
     res.status(500).json({ error: 'fetch_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/orgs/:orgId/phone-numbers/sync
+// Sync phone numbers from MightyCall for a specific organization
+app.post('/api/orgs/:orgId/phone-numbers/sync', apiKeyAuthMiddleware, async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const actorId = req.header('x-user-id') || null;
+    const hasApiKey = !!req.apiKeyScope;
+
+    if (hasApiKey && req.apiKeyScope) {
+      const hasPermission = req.apiKeyScope.scope === 'platform' ||
+                            (req.apiKeyScope.scope === 'org' && req.apiKeyScope.orgId === orgId);
+      if (!hasPermission) {
+        return res.status(403).json({ error: 'Insufficient permissions for this organization' });
+      }
+    } else if (actorId) {
+      const isAdmin = await isPlatformAdmin(actorId);
+      const isMember = await isOrgMember(actorId, orgId);
+      if (!isAdmin && !isMember) {
+        return res.status(403).json({ error: 'User is not a member of this organization' });
+      }
+    } else {
+      return res.status(401).json({ error: 'API key or user authentication required' });
+    }
+
+    console.log('[Org MightyCall Sync] actorId:', actorId, 'orgId:', orgId);
+    const result = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
+
+    res.json({
+      success: true,
+      org_id: orgId,
+      records_processed: result.upserted || result.synced || 0
+    });
+  } catch (err: any) {
+    console.error('[Org MightyCall Sync] error:', err);
+    res.status(500).json({ error: 'sync_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 

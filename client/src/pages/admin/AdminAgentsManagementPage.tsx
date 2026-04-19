@@ -344,7 +344,27 @@ const AdminAgentsManagementPage: FC = () => {
   }, [userId]);
 
   useEffect(() => {
-    loadLiveStatuses();
+    let cancelled = false;
+
+    const refresh = async () => {
+      if (cancelled) return;
+      await loadLiveStatuses();
+    };
+
+    refresh();
+    const intervalId = window.setInterval(refresh, 5000);
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('visibilitychange', onFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('visibilitychange', onFocus);
+    };
   }, [userId, activeOrgId]);
 
   useEffect(() => {

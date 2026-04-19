@@ -112,6 +112,10 @@ CREATE TABLE IF NOT EXISTS public.mightycall_recordings (
   UNIQUE(org_id, external_id)
 );
 
+ALTER TABLE IF EXISTS public.mightycall_recordings
+  ADD COLUMN IF NOT EXISTS from_number text,
+  ADD COLUMN IF NOT EXISTS to_number text;
+
 CREATE TABLE IF NOT EXISTS public.mightycall_reports (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   org_id uuid REFERENCES public.organizations(id) ON DELETE CASCADE,
