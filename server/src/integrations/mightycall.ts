@@ -117,12 +117,12 @@ export async function getMightyCallAccessToken(override?: { clientId?: string; c
   const requestOptions: any[] = [
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', 'x-api-key': MIGHTYCALL_API_KEY || '' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', 'x-api-key': clientId || '' },
       body: formBody.toString()
     },
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-api-key': MIGHTYCALL_API_KEY || '' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-api-key': clientId || '' },
       body: JSON.stringify({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret })
     },
     {
