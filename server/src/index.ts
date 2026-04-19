@@ -1260,43 +1260,52 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 
 function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): boolean {
   if (!payload || typeof payload !== 'object') return false;
-  const currentCall = payload?.currentCall || payload?.current_call || payload?.call || null;
-  const endedAt = currentCall?.endedAt || currentCall?.ended_at || payload?.endedAt || payload?.ended_at || null;
+  const currentCall =
+    payload?.currentCall ||
+    payload?.current_call ||
+    payload?.call ||
+    payload?.status?.currentCall ||
+    payload?.status?.current_call ||
+    null;
+  const endedAt =
+    currentCall?.endedAt ||
+    currentCall?.ended_at ||
+    currentCall?.ended ||
+    currentCall?.endTime ||
+    currentCall?.end_time ||
+    payload?.endedAt ||
+    payload?.ended_at ||
+    payload?.ended ||
+    payload?.endTime ||
+    payload?.end_time ||
+    null;
   if (String(endedAt || '').trim()) return false;
 
   const startedAt =
     currentCall?.startedAt ||
     currentCall?.started_at ||
+    currentCall?.dateTimeUtc ||
+    currentCall?.start_time ||
+    currentCall?.created ||
     payload?.startedAt ||
     payload?.started_at ||
+    payload?.dateTimeUtc ||
+    payload?.start_time ||
+    payload?.created ||
     null;
 
-  const activeStatus = isLikelyActiveCallStatus(
-    currentCall?.status ||
-    currentCall?.state ||
-    payload?.status ||
-    payload?.state ||
-    payload?.presenceStatus ||
-    payload?.availability
-  );
-
-  const terminalStatus = isLikelyTerminalOrIdleCallStatus(
-    currentCall?.status ||
-    currentCall?.state ||
-    payload?.status ||
-    payload?.state ||
-    payload?.presence ||
-    payload?.presenceStatus ||
-    payload?.availability
-  );
+  const statusLabel = extractLiveStatusLabel(payload);
+  const activeStatus = isLikelyActiveCallStatus(statusLabel);
+  const terminalStatus = isLikelyTerminalOrIdleCallStatus(statusLabel);
 
   const hasCallFlag =
     payload?.onCall || payload?.inCall || payload?.isOnCall ||
     currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
   const hasCurrentCallPayload = !!(currentCall && typeof currentCall === 'object' && Object.keys(currentCall).length > 0);
 
+  if (hasCurrentCallPayload && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
   if (terminalStatus) return false;
-  if ((activeStatus || hasCallFlag || hasCurrentCallPayload) && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
+  if ((activeStatus || hasCallFlag) && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
   return false;
 }
 
@@ -1581,7 +1590,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           ? String(normalizedJournal?.status || (matchedJournalCall || inferredJournalCall)?.state || (matchedJournalCall || inferredJournalCall)?.wfstate?.state || (matchedJournalCall || inferredJournalCall)?.availability || '').trim() || extStatus
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
-    const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
+    const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload?.current_status || extPayload;
     const shouldUseOwnStatusFallback = !!ownStatus && (shouldUseSingleAgentFallback || ownStatusMatchesMember);
     const ownStatusPayload = shouldUseOwnStatusFallback ? ownStatus : null;
     const effectiveStatusPayload = ownStatusPayload || statusPayload;
