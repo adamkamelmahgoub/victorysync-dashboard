@@ -4,6 +4,7 @@ import { PageLayout } from '../../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
+import { triggerMightyCallRecordingsSync } from '../../lib/apiClient';
 
 type Recording = {
   id: string;
@@ -21,6 +22,10 @@ type Recording = {
 type Org = { id: string; name: string };
 
 const PAGE_SIZE = 500;
+
+function isoDateDaysAgo(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 function fmtDate(v?: string | null) {
   if (!v) return '-';
@@ -40,7 +45,7 @@ function fmtDuration(s: number) {
 }
 
 const AdminRecordingsPage: FC = () => {
-  const { user } = useAuth();
+  const { user, selectedOrgId } = useAuth();
   const userId = user?.id;
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -52,6 +57,7 @@ const AdminRecordingsPage: FC = () => {
   const [search, setSearch] = useState('');
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
+  const [syncing, setSyncing] = useState(false);
 
   const filteredRows = useMemo(() => {
     const q = search.trim();
@@ -80,7 +86,30 @@ const AdminRecordingsPage: FC = () => {
     } catch {}
   };
 
-  const loadRecordings = async (reset = false) => {
+  useEffect(() => {
+    if (filterOrgId) return;
+    if (selectedOrgId) {
+      setFilterOrgId(selectedOrgId);
+      return;
+    }
+    if (orgs.length > 0) {
+      setFilterOrgId(orgs[0].id);
+    }
+  }, [selectedOrgId, orgs, filterOrgId]);
+
+  const syncRecentRecordings = async () => {
+    if (!userId || !filterOrgId) return;
+    setSyncing(true);
+    try {
+      await triggerMightyCallRecordingsSync(filterOrgId, isoDateDaysAgo(2), new Date().toISOString().slice(0, 10), userId);
+    } catch (e: any) {
+      console.warn('[AdminRecordingsPage] recent MightyCall sync failed:', e?.message || e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const loadRecordings = async (reset = false, options?: { syncFirst?: boolean }) => {
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
     if (!userId) return;
     if (!reset && nextOffset == null) return;
@@ -91,6 +120,10 @@ const AdminRecordingsPage: FC = () => {
         setListError(null);
       } else {
         setLoadingMore(true);
+      }
+
+      if (reset && options?.syncFirst && filterOrgId) {
+        await syncRecentRecordings();
       }
 
       let url = buildApiUrl(`/api/mightycall/recordings?limit=${PAGE_SIZE}&offset=${activeOffset}`);
@@ -116,11 +149,11 @@ const AdminRecordingsPage: FC = () => {
   };
 
   useEffect(() => { fetchOrgs(); }, [userId]);
-  useEffect(() => { loadRecordings(true); }, [filterOrgId, userId]);
+  useEffect(() => { loadRecordings(true, { syncFirst: true }); }, [filterOrgId, userId]);
 
   useEffect(() => {
     if (!autoRefreshEnabled) return;
-    const interval = setInterval(() => loadRecordings(true), 10000);
+    const interval = setInterval(() => loadRecordings(true, { syncFirst: true }), 10000);
     return () => clearInterval(interval);
   }, [autoRefreshEnabled, filterOrgId, userId]);
 
@@ -129,7 +162,7 @@ const AdminRecordingsPage: FC = () => {
       eyebrow="Admin recordings"
       title="Recordings"
       description="Cross-organization recording review with playback access and queue-quality visibility."
-      actions={<button onClick={() => loadRecordings(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>}
+      actions={<button onClick={() => loadRecordings(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">{loading || syncing ? 'Refreshing...' : 'Refresh'}</button>}
     >
       <div className="space-y-6">
         <AdminTopNav />
@@ -149,7 +182,7 @@ const AdminRecordingsPage: FC = () => {
             </div>
             <label className="flex items-center justify-start gap-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
               <input type="checkbox" checked={autoRefreshEnabled} onChange={(e) => setAutoRefreshEnabled(e.target.checked)} />
-              Auto-refresh every 10 seconds
+              {syncing ? 'Syncing recent MightyCall recordings...' : 'Auto-refresh every 10 seconds'}
             </label>
           </div>
         </SectionCard>

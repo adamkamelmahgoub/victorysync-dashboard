@@ -4,6 +4,7 @@ import { PageLayout } from '../../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
+import { triggerMightyCallReportsSync } from '../../lib/apiClient';
 
 type Report = {
   id: string;
@@ -53,6 +54,10 @@ function displayNumber(value?: string, fallback?: string) {
 
 const PAGE_SIZE = 500;
 
+function isoDateDaysAgo(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 function fmtDate(v?: string) {
   if (!v) return '-';
   const d = new Date(v);
@@ -67,7 +72,7 @@ function fmtSeconds(total: number) {
 }
 
 const AdminReportsPage: FC = () => {
-  const { user } = useAuth();
+  const { user, selectedOrgId } = useAuth();
   const userId = user?.id;
 
   const [reports, setReports] = useState<Report[]>([]);
@@ -85,6 +90,7 @@ const AdminReportsPage: FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'calls' | 'recordings' | 'sms'>('calls');
+  const [syncing, setSyncing] = useState(false);
 
   const summary = useMemo(() => {
     const totalReports = reports.length;
@@ -114,7 +120,30 @@ const AdminReportsPage: FC = () => {
     } catch {}
   };
 
-  const loadReports = async (reset = false) => {
+  useEffect(() => {
+    if (filterOrgId) return;
+    if (selectedOrgId) {
+      setFilterOrgId(selectedOrgId);
+      return;
+    }
+    if (orgs.length > 0) {
+      setFilterOrgId(orgs[0].id);
+    }
+  }, [selectedOrgId, orgs, filterOrgId]);
+
+  const syncRecentReports = async () => {
+    if (!userId || !filterOrgId) return;
+    setSyncing(true);
+    try {
+      await triggerMightyCallReportsSync(filterOrgId, isoDateDaysAgo(2), new Date().toISOString().slice(0, 10), userId);
+    } catch (e: any) {
+      console.warn('[AdminReportsPage] recent MightyCall sync failed:', e?.message || e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const loadReports = async (reset = false, options?: { syncFirst?: boolean }) => {
     if (!userId) return;
     if (!reset && nextOffset == null) return;
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
@@ -125,6 +154,10 @@ const AdminReportsPage: FC = () => {
         setListError(null);
       } else {
         setLoadingMore(true);
+      }
+
+      if (reset && options?.syncFirst && filterOrgId) {
+        await syncRecentReports();
       }
 
       let url = buildApiUrl(`/api/mightycall/reports?type=${encodeURIComponent(filterType)}&limit=${PAGE_SIZE}&offset=${activeOffset}`);
@@ -185,7 +218,7 @@ const AdminReportsPage: FC = () => {
   };
 
   useEffect(() => { fetchOrgs(); }, [userId]);
-  useEffect(() => { loadReports(true); }, [filterOrgId, filterType, userId]);
+  useEffect(() => { loadReports(true, { syncFirst: true }); }, [filterOrgId, filterType, userId]);
   useEffect(() => {
     if (selectedReportId) openDetail(selectedReportId);
   }, [selectedReportId]);
@@ -195,7 +228,7 @@ const AdminReportsPage: FC = () => {
       eyebrow="Admin reporting"
       title="Reports"
       description="Cross-organization reporting, called-number visibility, and report drill-down activity for platform operations."
-      actions={<button onClick={() => loadReports(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing reports...' : 'Refresh'}</button>}
+      actions={<button onClick={() => loadReports(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">{loading || syncing ? 'Refreshing reports...' : 'Refresh'}</button>}
     >
       <div className="space-y-6">
         <AdminTopNav />
@@ -217,7 +250,7 @@ const AdminReportsPage: FC = () => {
                 <option value="analytics">Analytics</option>
               </select>
             </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">Loaded {reports.length} rows for admin review</div>
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">{syncing ? 'Syncing recent MightyCall activity...' : `Loaded ${reports.length} rows for admin review`}</div>
           </div>
         </SectionCard>
 
