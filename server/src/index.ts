@@ -910,8 +910,6 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): bool
     currentCall?.started_at ||
     payload?.startedAt ||
     payload?.started_at ||
-    payload?.lastUpdatedAt ||
-    payload?.updated_at ||
     null;
 
   const activeStatus = isLikelyActiveCallStatus(
@@ -936,9 +934,10 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): bool
   const hasCallFlag =
     payload?.onCall || payload?.inCall || payload?.isOnCall ||
     currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
+  const hasCurrentCallPayload = !!(currentCall && typeof currentCall === 'object' && Object.keys(currentCall).length > 0);
 
   if (terminalStatus) return false;
-  if (activeStatus && isFreshActivity(startedAt, maxAgeMs)) return true;
+  if (activeStatus && (hasCallFlag || hasCurrentCallPayload) && isFreshActivity(startedAt, maxAgeMs)) return true;
   if (hasCallFlag && isFreshActivity(startedAt, maxAgeMs)) return true;
   return false;
 }
@@ -1099,21 +1098,36 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     if (ext && row?.status) {
       const existing = extensionMetaByExt.get(ext) || {};
       const existingMetadata = existing?.metadata || existing;
+      const liveStatus = row.status;
+      const liveStatusValue =
+        liveStatus?.status ||
+        liveStatus?.state ||
+        liveStatus?.presenceStatus ||
+        liveStatus?.availability ||
+        liveStatus?.presence ||
+        null;
+      const liveCurrentCall =
+        liveStatus?.currentCall ||
+        liveStatus?.current_call ||
+        null;
+      const statusLooksIdle = isLikelyTerminalOrIdleCallStatus(liveStatusValue);
       extensionMetaByExt.set(ext, {
         ...existing,
         extension: ext,
         display_name: existing?.display_name || null,
         metadata: {
           ...existingMetadata,
-          liveStatus: row.status,
-          currentStatus: row.status,
-          status: row.status?.status || row.status?.state || existingMetadata?.status || null,
-          currentCall: row.status?.currentCall || row.status?.current_call || existingMetadata?.currentCall || existingMetadata?.current_call || null,
-          current_call: row.status?.current_call || row.status?.currentCall || existingMetadata?.current_call || existingMetadata?.currentCall || null,
-          onCall: row.status?.onCall ?? row.status?.inCall ?? row.status?.isOnCall ?? existingMetadata?.onCall ?? existingMetadata?.inCall ?? existingMetadata?.isOnCall ?? false,
-          presence: row.status?.presence || existingMetadata?.presence || null,
-          presenceStatus: row.status?.presenceStatus || existingMetadata?.presenceStatus || null,
-          availability: row.status?.availability || existingMetadata?.availability || null,
+          liveStatus,
+          currentStatus: liveStatus,
+          status: liveStatusValue,
+          currentCall: statusLooksIdle ? null : liveCurrentCall,
+          current_call: statusLooksIdle ? null : liveCurrentCall,
+          onCall: statusLooksIdle
+            ? false
+            : (liveStatus?.onCall ?? liveStatus?.inCall ?? liveStatus?.isOnCall ?? false),
+          presence: liveStatus?.presence || null,
+          presenceStatus: liveStatus?.presenceStatus || null,
+          availability: liveStatus?.availability || null,
         }
       });
     }
@@ -1179,7 +1193,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const extPayload = (extMeta as any)?.metadata || extMeta;
     const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
     const normalizedStatus = normalizeMightyCallStatusActivity(statusPayload, normalizedExt);
-    const hasFreshStatusSignal = hasFreshStatusCallSignal(statusPayload) || hasFreshStatusCallSignal(extPayload);
+    const hasFreshStatusSignal = hasFreshStatusCallSignal(statusPayload);
     const onCall = !!(
       matchedLiveCall ||
       matchedDbCall ||
