@@ -778,6 +778,124 @@ function collectExtensionCandidates(input: any, depth = 0): string[] {
   return Array.from(found);
 }
 
+function normalizeIdentityText(value: any): string | null {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  return raw.replace(/\s+/g, ' ');
+}
+
+function collectIdentityCandidates(input: any, depth = 0): string[] {
+  if (input == null || depth > 3) return [];
+  const found = new Set<string>();
+  const add = (value: any) => {
+    const normalized = normalizeIdentityText(value);
+    if (normalized) found.add(normalized);
+  };
+
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      for (const value of collectIdentityCandidates(item, depth + 1)) found.add(value);
+    }
+    return Array.from(found);
+  }
+
+  if (typeof input !== 'object') {
+    add(input);
+    return Array.from(found);
+  }
+
+  for (const [key, value] of Object.entries(input)) {
+    const lower = key.toLowerCase();
+    if (
+      lower === 'id' ||
+      lower === 'userid' ||
+      lower === 'user_id' ||
+      lower === 'memberid' ||
+      lower === 'member_id' ||
+      lower === 'agentid' ||
+      lower === 'agent_id' ||
+      lower === 'operatorid' ||
+      lower === 'operator_id' ||
+      lower === 'ownerid' ||
+      lower === 'owner_id' ||
+      lower === 'email' ||
+      lower === 'useremail' ||
+      lower === 'user_email' ||
+      lower === 'name' ||
+      lower === 'fullname' ||
+      lower === 'full_name' ||
+      lower === 'displayname' ||
+      lower === 'display_name'
+    ) {
+      add(value);
+    }
+
+    if (
+      lower === 'agent' ||
+      lower === 'user' ||
+      lower === 'operator' ||
+      lower === 'owner' ||
+      lower === 'assignee' ||
+      lower === 'assignedto' ||
+      lower === 'assigned_to' ||
+      lower === 'participant' ||
+      lower === 'participants' ||
+      lower === 'users' ||
+      lower === 'member' ||
+      lower === 'members' ||
+      lower === 'agents' ||
+      lower === 'callee' ||
+      lower === 'caller' ||
+      lower === 'currentcall' ||
+      lower === 'current_call'
+    ) {
+      for (const nested of collectIdentityCandidates(value, depth + 1)) found.add(nested);
+    }
+  }
+
+  return Array.from(found);
+}
+
+function buildAgentIdentityCandidates(member: any, extMeta: any, email: string | null): Set<string> {
+  const found = new Set<string>();
+  const add = (value: any) => {
+    const normalized = normalizeIdentityText(value);
+    if (normalized) found.add(normalized);
+  };
+
+  const extPayload = extMeta?.metadata || extMeta || {};
+  add(extMeta?.id);
+  add(extMeta?.external_id);
+  add(extMeta?.display_name);
+  add(extPayload?.id);
+  add(extPayload?.external_id);
+  add(extPayload?.userId);
+  add(extPayload?.user_id);
+  add(extPayload?.memberId);
+  add(extPayload?.member_id);
+  add(extPayload?.agentId);
+  add(extPayload?.agent_id);
+  add(extPayload?.name);
+  add(extPayload?.fullName);
+  add(extPayload?.full_name);
+  add(extPayload?.displayName);
+  add(extPayload?.display_name);
+  add(extPayload?.email);
+  add(member?.user_id);
+  add(email);
+  return found;
+}
+
+function payloadMatchesAgent(payload: any, normalizedExt: string | null, agentIdentities: Set<string>): boolean {
+  if (normalizedExt) {
+    const extCandidates = collectExtensionCandidates(payload);
+    if (extCandidates.includes(normalizedExt)) return true;
+  }
+  if (agentIdentities.size === 0) return false;
+  const payloadIdentities = collectIdentityCandidates(payload);
+  return payloadIdentities.some((candidate) => agentIdentities.has(candidate));
+}
+
 function extractLiveStatusLabel(raw: any): string | null {
   const candidates = [
     raw?.status,
@@ -1144,12 +1262,14 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const normalizedExt = normalizeExtension(extension);
     const extMeta = normalizedExt ? extensionMetaByExt.get(normalizedExt) : null;
     const shouldUseSingleAgentFallback = memberRows.length === 1;
+    const email = emailByUserId.get(userId) || null;
+    const agentIdentities = buildAgentIdentityCandidates(member, extMeta, email);
 
     const matchedLiveCall = normalizedExt
       ? activeCalls.find((call: any) => {
-          const extMatches = collectExtensionCandidates(call).includes(normalizedExt);
+          const agentMatches = payloadMatchesAgent(call, normalizedExt, agentIdentities);
           const status = String(call?.status || call?.state || call?.callStatus || '').trim();
-          if (!extMatches) return false;
+          if (!agentMatches) return false;
           if (String(call?.endedAt || call?.ended_at || '').trim()) return false;
           if (isLikelyTerminalOrIdleCallStatus(status)) return false;
           const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
@@ -1160,7 +1280,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ? activeCalls[0]
       : null;
     const matchedJournalCall = !matchedLiveCall && !inferredLiveCall && normalizedExt
-      ? activeJournalCalls.find((call: any) => collectExtensionCandidates(call).includes(normalizedExt)) || null
+      ? activeJournalCalls.find((call: any) => payloadMatchesAgent(call, normalizedExt, agentIdentities)) || null
       : null;
     const inferredJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedJournalCall && shouldUseSingleAgentFallback && activeJournalCalls.length === 1
       ? activeJournalCalls[0]
@@ -1235,7 +1355,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     return {
       user_id: userId,
       org_id: orgId,
-      email: emailByUserId.get(userId) || null,
+      email,
       role: member.role,
       extension: extension || null,
       display_name: (extMeta as any)?.display_name || null,
