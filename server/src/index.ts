@@ -950,6 +950,7 @@ function isLikelyLiveJournalRequest(request: any): boolean {
     request?.recording?.availability,
     request?.status,
   ];
+  if (statusCandidates.some((candidate) => isLikelyTerminalOrIdleCallStatus(candidate))) return false;
   if (statusCandidates.some((candidate) => isLikelyActiveCallStatus(candidate))) return true;
   const workflowState = String(request?.wfstate?.state || '').toLowerCase().trim();
   const requestState = String(request?.state || '').toLowerCase().trim();
@@ -957,7 +958,7 @@ function isLikelyLiveJournalRequest(request: any): boolean {
   const createdAt = Date.parse(String(request?.created || request?.createdAt || ''));
   const recentEnough = Number.isFinite(createdAt) ? (Date.now() - createdAt) < (20 * 60 * 1000) : false;
   if ((workflowState === 'open' || requestState === 'ringing' || requestState === 'calling' || requestState === 'dialing') && recentEnough) return true;
-  if (!hasResponse && recentEnough && !['noanswer', 'no_answer', 'failed', 'missed', 'completed', 'ended'].includes(requestState)) return true;
+  if (!hasResponse && recentEnough && !isLikelyTerminalOrIdleCallStatus(requestState)) return true;
   return false;
 }
 
