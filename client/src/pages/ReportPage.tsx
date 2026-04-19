@@ -5,6 +5,7 @@ import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../co
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
+import { triggerMightyCallReportsSync } from '../lib/apiClient';
 
 type ReportRow = {
   id: string;
@@ -51,6 +52,10 @@ function displayNumber(value?: string, fallback?: string) {
 
 const PAGE_SIZE = 500;
 
+function isoDateDaysAgo(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 function fmtDate(v?: string) {
   if (!v) return '-';
   const d = new Date(v);
@@ -80,6 +85,7 @@ export default function ReportPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'calls' | 'recordings' | 'sms'>('calls');
+  const [syncing, setSyncing] = useState(false);
 
   const isAdmin = globalRole === 'platform_admin';
 
@@ -105,7 +111,19 @@ export default function ReportPage() {
     return { totalReports, totalCalls, answered, missed };
   }, [reports]);
 
-  const loadReports = async (reset = false) => {
+  const syncRecentReports = async () => {
+    if (!user?.id || !org?.id) return;
+    setSyncing(true);
+    try {
+      await triggerMightyCallReportsSync(org.id, isoDateDaysAgo(2), new Date().toISOString().slice(0, 10), user.id);
+    } catch (e: any) {
+      console.warn('[ReportPage] recent MightyCall sync failed:', e?.message || e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const loadReports = async (reset = false, options?: { syncFirst?: boolean }) => {
     if (!user) return;
     if (!reset && nextOffset == null) return;
 
@@ -117,6 +135,10 @@ export default function ReportPage() {
         setListError(null);
       } else {
         setLoadingMore(true);
+      }
+
+      if (reset && options?.syncFirst && org?.id) {
+        await syncRecentReports();
       }
 
       let url = buildApiUrl(`/api/mightycall/reports?type=${encodeURIComponent(filterType)}&limit=${PAGE_SIZE}&offset=${activeOffset}`);
@@ -178,14 +200,14 @@ export default function ReportPage() {
     }
   };
 
-  useEffect(() => { loadReports(true); }, [user?.id, filterType, org?.id]);
+  useEffect(() => { loadReports(true, { syncFirst: true }); }, [user?.id, filterType, org?.id]);
   useEffect(() => {
     if (selectedReportId) openDetail(selectedReportId);
   }, [selectedReportId]);
 
   const actions = (
-    <button onClick={() => loadReports(true)} disabled={loading} className="vs-button-secondary">
-      {loading ? 'Refreshing reports...' : 'Refresh'}
+    <button onClick={() => loadReports(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">
+      {loading || syncing ? 'Refreshing reports...' : 'Refresh'}
     </button>
   );
 
@@ -211,7 +233,7 @@ export default function ReportPage() {
               Scope: Assigned numbers only
             </div>
             <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-400">
-              Loaded {reports.length} report{reports.length === 1 ? '' : 's'}
+              {syncing ? 'Syncing recent MightyCall activity...' : `Loaded ${reports.length} report${reports.length === 1 ? '' : 's'}`}
             </div>
           </div>
         </SectionCard>

@@ -4,6 +4,7 @@ import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard } from '../components/DashboardPrimitives';
+import { triggerMightyCallRecordingsSync } from '../lib/apiClient';
 
 type Recording = {
   id: string;
@@ -16,6 +17,10 @@ type Recording = {
   recording_url?: string | null;
   created_at?: string | null;
 };
+
+function isoDateDaysAgo(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 function fmtDate(v?: string | null) {
   if (!v) return '-';
@@ -53,6 +58,7 @@ export function RecordingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [nextOffset, setNextOffset] = useState<number | null>(0);
+  const [syncing, setSyncing] = useState(false);
 
   const filteredRows = useMemo(() => {
     const q = search.trim();
@@ -67,7 +73,19 @@ export function RecordingsPage() {
     return { total, totalSeconds, avgSeconds };
   }, [filteredRows]);
 
-  const fetchRecordings = async (reset = true) => {
+  const syncRecentRecordings = async () => {
+    if (!user?.id || !orgId) return;
+    setSyncing(true);
+    try {
+      await triggerMightyCallRecordingsSync(orgId, isoDateDaysAgo(2), new Date().toISOString().slice(0, 10), user.id);
+    } catch (e: any) {
+      console.warn('[RecordingsPage] recent MightyCall sync failed:', e?.message || e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const fetchRecordings = async (reset = true, options?: { syncFirst?: boolean }) => {
     if (!user) return;
     if (!reset && nextOffset == null) return;
 
@@ -79,6 +97,10 @@ export function RecordingsPage() {
         setError(null);
       } else {
         setLoadingMore(true);
+      }
+
+      if (reset && options?.syncFirst && orgId) {
+        await syncRecentRecordings();
       }
 
       const q = new URLSearchParams();
@@ -108,7 +130,7 @@ export function RecordingsPage() {
   };
 
   useEffect(() => {
-    if (user) fetchRecordings(true);
+    if (user) fetchRecordings(true, { syncFirst: true });
   }, [orgId, user?.id]);
 
   const handleDownload = async (recording: Recording) => {
@@ -147,7 +169,7 @@ export function RecordingsPage() {
       eyebrow="Quality review"
       title="Recordings"
       description={`Organized recording history, playback, and download actions for ${orgName}.`}
-      actions={<button onClick={() => fetchRecordings(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>}
+      actions={<button onClick={() => fetchRecordings(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">{loading || syncing ? 'Refreshing...' : 'Refresh'}</button>}
     >
       <div className="space-y-6">
         <SectionCard title="Recording filters" description="Search recording activity by the numbers involved.">
@@ -156,7 +178,7 @@ export function RecordingsPage() {
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Search Number</label>
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="vs-input w-full" />
             </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">Scope: assigned numbers only</div>
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">{syncing ? 'Syncing recent MightyCall recordings...' : 'Scope: assigned numbers only'}</div>
           </div>
         </SectionCard>
 
