@@ -856,6 +856,35 @@ function isLikelyActiveCallStatus(status: any): boolean {
   return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call'].some((token) => normalized.includes(token));
 }
 
+function isLikelyTerminalOrIdleCallStatus(status: any): boolean {
+  const normalized = String(status || '').toLowerCase().trim();
+  if (!normalized) return false;
+  return [
+    'completed',
+    'ended',
+    'end',
+    'missed',
+    'failed',
+    'canceled',
+    'cancelled',
+    'voicemail',
+    'noanswer',
+    'no_answer',
+    'abandoned',
+    'closed',
+    'done',
+    'idle',
+    'available',
+    'offline',
+    'disconnected',
+    'hangup',
+    'hang_up',
+    'wrapup',
+    'wrap_up',
+    'after_call',
+  ].some((token) => normalized.includes(token));
+}
+
 function parseTimestampMs(value: any): number | null {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -870,7 +899,7 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
   return ageMs >= -(5 * 60 * 1000) && ageMs <= maxAgeMs;
 }
 
-function hasFreshStatusCallSignal(payload: any, maxAgeMs = 4 * 60 * 60 * 1000): boolean {
+function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): boolean {
   if (!payload || typeof payload !== 'object') return false;
   const currentCall = payload?.currentCall || payload?.current_call || payload?.call || null;
   const endedAt = currentCall?.endedAt || currentCall?.ended_at || payload?.endedAt || payload?.ended_at || null;
@@ -894,10 +923,21 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 4 * 60 * 60 * 1000): 
     payload?.availability
   );
 
+  const terminalStatus = isLikelyTerminalOrIdleCallStatus(
+    currentCall?.status ||
+    currentCall?.state ||
+    payload?.status ||
+    payload?.state ||
+    payload?.presence ||
+    payload?.presenceStatus ||
+    payload?.availability
+  );
+
   const hasCallFlag =
     payload?.onCall || payload?.inCall || payload?.isOnCall ||
     currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
 
+  if (terminalStatus) return false;
   if (activeStatus && isFreshActivity(startedAt, maxAgeMs)) return true;
   if (hasCallFlag && isFreshActivity(startedAt, maxAgeMs)) return true;
   return false;
@@ -1084,7 +1124,8 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const endedAt = call?.endedAt || call?.ended_at || call?.endTime || call?.ended || null;
     const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
     if (String(endedAt || '').trim()) return false;
-    return isLikelyActiveCallStatus(status) || isFreshActivity(startedAt, 4 * 60 * 60 * 1000);
+    if (isLikelyTerminalOrIdleCallStatus(status)) return false;
+    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
   });
   const activeDbCalls = (recentDbCalls || []).filter((call: any) => {
     const status = String(call?.status || '').trim();
@@ -1103,7 +1144,11 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ? activeCalls.find((call: any) => {
           const extMatches = collectExtensionCandidates(call).includes(normalizedExt);
           const status = String(call?.status || call?.state || call?.callStatus || '').trim();
-          return extMatches && (isLikelyActiveCallStatus(status) || !String(call?.endedAt || call?.ended_at || '').trim());
+          if (!extMatches) return false;
+          if (String(call?.endedAt || call?.ended_at || '').trim()) return false;
+          if (isLikelyTerminalOrIdleCallStatus(status)) return false;
+          const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
+          return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
         }) || null
       : null;
     const matchedDbCall = !matchedLiveCall && normalizedExt
