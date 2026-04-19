@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
@@ -82,6 +83,10 @@ export default function ReportPage() {
 
   const isAdmin = globalRole === 'platform_admin';
 
+  if (isAdmin) {
+    return <Navigate to="/admin/reports" replace />;
+  }
+
   const rowNumbers = (r: ReportRow) => {
     const values = [
       ...(r.numbers_called || []),
@@ -115,7 +120,7 @@ export default function ReportPage() {
       }
 
       let url = buildApiUrl(`/api/mightycall/reports?type=${encodeURIComponent(filterType)}&limit=${PAGE_SIZE}&offset=${activeOffset}`);
-      if (!isAdmin && org?.id) url += `&org_id=${encodeURIComponent(org.id)}`;
+      if (org?.id) url += `&org_id=${encodeURIComponent(org.id)}`;
 
       const response = await fetch(url, {
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
@@ -173,7 +178,7 @@ export default function ReportPage() {
     }
   };
 
-  useEffect(() => { loadReports(true); }, [user?.id, filterType, org?.id, isAdmin]);
+  useEffect(() => { loadReports(true); }, [user?.id, filterType, org?.id]);
   useEffect(() => {
     if (selectedReportId) openDetail(selectedReportId);
   }, [selectedReportId]);
@@ -185,12 +190,12 @@ export default function ReportPage() {
   );
 
   return (
-    <PageLayout
-      eyebrow="Reporting"
-      title="Reports"
-      description="Assigned-number reporting, answer-performance review, and full report drill-down from one workspace."
-      actions={actions}
-    >
+      <PageLayout
+        eyebrow="Reporting"
+        title="Reports"
+        description="Reporting for the phone numbers assigned to you, with drill-down into related calls, recordings, and SMS."
+        actions={actions}
+      >
       <div className="space-y-6">
         <SectionCard title="Report filters" description="Narrow the report inventory before drilling into specific activity.">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,320px),1fr,auto] md:items-end">
@@ -203,7 +208,7 @@ export default function ReportPage() {
               </select>
             </div>
             <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
-              Scope: {isAdmin ? 'Platform-wide' : 'Assigned numbers only'}
+              Scope: Assigned numbers only
             </div>
             <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-400">
               Loaded {reports.length} report{reports.length === 1 ? '' : 's'}

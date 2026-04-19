@@ -45,6 +45,7 @@ import {
   syncMightyCallReports,
   syncMightyCallVoicemails,
   syncMightyCallCallHistory,
+  syncMightyCallSMS,
   syncMightyCallContacts,
   syncSMSLog
 } from './integrations/mightycall';
@@ -6482,6 +6483,31 @@ app.post('/api/admin/audit-logs', async (req, res) => {
 
 // ============== CALL DATA ENDPOINTS ==============
 
+async function fetchCallRows(options: {
+  orgId?: string;
+  limit?: number;
+  offset?: number;
+  fields: string;
+}): Promise<any[]> {
+  const { orgId, limit, offset, fields } = options;
+
+  let callsQuery = supabaseAdmin
+    .from('calls')
+    .select(fields)
+    .order('started_at', { ascending: false });
+
+  if (orgId) callsQuery = callsQuery.eq('org_id', orgId);
+  if (typeof offset === 'number' && typeof limit === 'number') {
+    callsQuery = callsQuery.range(offset, offset + limit - 1);
+  } else if (typeof limit === 'number') {
+    callsQuery = callsQuery.limit(limit);
+  }
+
+  const { data: callsData, error: callsError } = await callsQuery;
+  if (callsError) throw callsError;
+  return (callsData || []) as any[];
+}
+
 // GET /api/calls/recent?org_id=...&limit=20
 // Returns recent calls for a given org, or across all orgs if org_id is missing
 app.get("/api/calls/recent", async (req, res) => {
@@ -6503,17 +6529,11 @@ app.get("/api/calls/recent", async (req, res) => {
 
       // Fetch a larger recent set and filter in-memory to avoid complex OR queries
       const fetchLimit = Math.max(limit * 5, 200);
-      const { data, error } = await supabaseAdmin
-        .from('calls')
-        .select('id, org_id, direction, from_number, from_number_digits, to_number, to_number_digits, queue_name, status, started_at, answered_at, ended_at')
-        .eq('org_id', orgId)
-        .order('started_at', { ascending: false })
-        .limit(fetchLimit);
-
-      if (error) {
-        console.error('[calls/recent] Supabase error (org scoped):', fmtErr(error));
-        throw error;
-      }
+      const data = await fetchCallRows({
+        orgId,
+        limit: fetchLimit,
+        fields: 'id, org_id, direction, from_number, from_number_digits, to_number, to_number_digits, queue_name, status, started_at, answered_at, ended_at, duration_seconds, agent_extension, metadata',
+      });
 
       const filtered = (data || []).filter((c: any) => {
         const tn = c.to_number || null;
@@ -6569,16 +6589,10 @@ app.get("/api/calls/recent", async (req, res) => {
     }
 
     // Global (non-org) recent calls
-    const { data, error } = await supabaseAdmin
-      .from("calls")
-      .select("id, direction, from_number, to_number, queue_name, status, started_at, answered_at, ended_at")
-      .order("started_at", { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('[calls/recent] Supabase error:', fmtErr(error));
-      throw error;
-    }
+    const data = await fetchCallRows({
+      limit,
+      fields: 'id, org_id, direction, from_number, to_number, queue_name, status, started_at, answered_at, ended_at, duration_seconds, agent_extension, metadata',
+    });
     if (!data || data.length === 0) {
       try {
         const { data: reports } = await supabaseAdmin
@@ -6624,94 +6638,6 @@ app.get("/api/calls/recent", async (req, res) => {
       return res.status(502).json({ error: 'calls_recent_failed', detail: `upstream_fetch_failed: ${msg}` });
     }
     res.status(500).json({ error: 'calls_recent_failed', detail: msg });
-  }
-});
-
-// GET /api/calls/logs?org_id=...&limit=50&offset=0&q=...
-app.get('/api/calls/logs', async (req, res) => {
-  try {
-    const orgId = req.query.org_id as string | undefined;
-    const actorId = req.header('x-user-id') || null;
-    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 50, 1), 200);
-    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-    const search = String(req.query.q || '').trim().toLowerCase();
-
-    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
-
-    const isAdminActor = await isPlatformAdmin(actorId);
-    const fetchSize = Math.max(limit * 4, 250);
-    let baseQuery = supabaseAdmin
-      .from('calls')
-      .select('id, org_id, direction, from_number, from_number_digits, to_number, to_number_digits, queue_name, status, started_at, answered_at, ended_at, duration_seconds, agent_extension, metadata')
-      .order('started_at', { ascending: false });
-
-    if (orgId) baseQuery = baseQuery.eq('org_id', orgId);
-
-    const { data, error } = await baseQuery.range(offset, offset + fetchSize - 1);
-    if (error) throw error;
-
-    let rows = data || [];
-    if (!isAdminActor) {
-      const targetOrgId = orgId || (rows[0] as any)?.org_id || null;
-      if (!targetOrgId) return res.json({ items: [], next_offset: null });
-      const { numbers, digits } = await getUserAssignedPhoneNumbers(targetOrgId, actorId);
-      if ((numbers.length === 0) && (digits.length === 0)) {
-        return res.json({ items: [], next_offset: null });
-      }
-      rows = rows.filter((call: any) => {
-        const candidates = [
-          call?.to_number,
-          call?.from_number,
-          call?.to_number_digits,
-          call?.from_number_digits,
-        ].map((value) => String(value || '').trim()).filter(Boolean);
-        return candidates.some((candidate) => {
-          const normalized = normalizePhoneDigits(candidate);
-          return numbers.includes(candidate) || (!!normalized && digits.includes(normalized));
-        });
-      });
-    }
-
-    if (search) {
-      rows = rows.filter((call: any) => {
-        const haystack = [
-          call?.from_number,
-          call?.to_number,
-          call?.status,
-          call?.direction,
-          call?.queue_name,
-          call?.agent_extension,
-        ].map((value) => String(value || '').toLowerCase()).join(' ');
-        return haystack.includes(search);
-      });
-    }
-
-    const sliced = rows.slice(0, limit);
-    const orgNameMap = await resolveOrgNamesById(sliced.map((row: any) => String(row?.org_id || '')).filter(Boolean));
-    const items = await Promise.all(sliced.map(async (call: any) => ({
-      id: call.id,
-      org_id: call.org_id || null,
-      org_name: call.org_id ? (orgNameMap[String(call.org_id)] || null) : null,
-      direction: call.direction || null,
-      status: call.status || null,
-      from_number: call.from_number || null,
-      to_number: call.to_number || null,
-      queue_name: call.queue_name || null,
-      started_at: call.started_at || null,
-      answered_at: call.answered_at || null,
-      ended_at: call.ended_at || null,
-      duration_seconds: Number(call.duration_seconds || 0) || 0,
-      agent_name: await resolveAgentNameForExtension(call.mightycall_extension || call.answered_extension || call.answered_by || call.answer_extension || call.agent_extension || call.agent || null),
-      agent_extension: call.agent_extension || call.metadata?.agent_extension || call.metadata?.agent?.extension || null,
-    })));
-
-    res.json({
-      items,
-      next_offset: rows.length > limit ? offset + limit : null,
-    });
-  } catch (err: any) {
-    console.error('[calls/logs] Fatal error:', String(err?.message ?? err), err);
-    res.status(500).json({ error: 'calls_logs_failed', detail: String(err?.message ?? err) });
   }
 });
 
@@ -9770,7 +9696,7 @@ app.post('/api/mightycall/sync/phone-numbers', apiKeyAuthMiddleware, async (req,
 });
 
 // POST /api/mightycall/sync/reports
-// Sync reports and recordings from MightyCall for a specific organization
+// Sync reporting-related MightyCall data for a specific organization.
 app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) => {
   try {
     const { orgId, startDate, endDate } = req.body;
@@ -9799,14 +9725,6 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
       }
     } else {
       return res.status(401).json({ error: 'API key or user authentication required' });
-    }
-
-    // Get phone numbers for this org
-    const assignedPhones = await getAssignedPhoneNumbersForOrg(orgId);
-    const phoneNumberIds = assignedPhones.phones.map((p: any) => p.id || p.number).filter(Boolean);
-
-    if (phoneNumberIds.length === 0) {
-      return res.status(400).json({ error: 'No phone numbers assigned to this organization' });
     }
 
     // Default date range to today if not provided
@@ -9854,6 +9772,18 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
         console.warn('[MightyCall Sync] failed to load org integration:', ie);
       }
 
+      // Refresh phone inventory first so downstream report/call/recording/SMS syncs
+      // are matched against the latest MightyCall-owned numbers for this org.
+      const phoneSyncResult = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
+
+      // Get phone numbers for this org after refresh
+      const assignedPhones = await getAssignedPhoneNumbersForOrg(orgId);
+      const phoneNumberIds = assignedPhones.phones.map((p: any) => p.id || p.number).filter(Boolean);
+
+      if (phoneNumberIds.length === 0) {
+        return res.status(400).json({ error: 'No phone numbers assigned to this organization after MightyCall sync' });
+      }
+
       // Perform the sync using per-org creds when available
       const result = await syncMightyCallReports(supabaseAdmin, orgId, phoneNumberIds, actualStartDate, actualEndDate, overrideCreds);
       const callHistoryResult = await syncMightyCallCallHistory(
@@ -9863,6 +9793,9 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
         overrideCreds
       );
       const callsSynced = Number(callHistoryResult?.callsSynced || 0);
+      const smsSyncResult = await syncMightyCallSMS(supabaseAdmin, orgId, overrideCreds);
+      const smsSynced = Number(smsSyncResult?.smsSynced || 0);
+      const phoneNumbersSynced = Number(phoneSyncResult?.upserted || phoneSyncResult?.synced || 0);
 
       // Update job record as completed (if job exists)
       if (job) {
@@ -9875,21 +9808,25 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
             metadata: {
               start_date: actualStartDate,
               end_date: actualEndDate,
+              phone_numbers_synced: phoneNumbersSynced,
               reports_synced: result.reportsSynced,
               recordings_synced: result.recordingsSynced,
-              calls_synced: callsSynced
+              calls_synced: callsSynced,
+              sms_synced: smsSynced
             }
           })
           .eq('id', job.id);
       }
 
-      console.log(`[MightyCall Sync] Reports sync completed for org ${orgId}: ${result.reportsSynced} reports, ${result.recordingsSynced} recordings, ${callsSynced} calls`);
+      console.log(`[MightyCall Sync] Report sync completed for org ${orgId}: ${phoneNumbersSynced} phone numbers, ${result.reportsSynced} reports, ${result.recordingsSynced} recordings, ${callsSynced} calls, ${smsSynced} SMS`);
       res.json({
         success: true,
         org_id: orgId,
+        phone_numbers_synced: phoneNumbersSynced,
         reports_synced: result.reportsSynced,
         recordings_synced: result.recordingsSynced,
         calls_synced: callsSynced,
+        sms_synced: smsSynced,
         job_id: job?.id || null
       });
 
@@ -10171,7 +10108,7 @@ app.get('/api/mightycall/sync/jobs', apiKeyAuthMiddleware, async (req, res) => {
 });
 
 // GET /api/mightycall/test-connection?org_id=...&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-// Attempts to obtain a MightyCall access token and fetch a small sample of calls and recordings.
+// Attempts to obtain a MightyCall access token and fetch small samples directly from MightyCall.
 app.get('/api/mightycall/test-connection', apiKeyAuthMiddleware, async (req, res) => {
   try {
     const orgId = req.query.org_id as string | undefined;
@@ -10201,7 +10138,15 @@ app.get('/api/mightycall/test-connection', apiKeyAuthMiddleware, async (req, res
     const startDate = (req.query.startDate as string) || new Date().toISOString().split('T')[0];
     const endDate = (req.query.endDate as string) || startDate;
 
-    const { getMightyCallAccessToken, fetchMightyCallCalls, fetchMightyCallRecordings } = await import('./integrations/mightycall');
+    const {
+      getMightyCallAccessToken,
+      fetchMightyCallCalls,
+      fetchMightyCallRecordings,
+      fetchMightyCallPhoneNumbers,
+      fetchMightyCallSMS,
+      fetchMightyCallExtensions,
+      fetchMightyCallJournalRequests
+    } = await import('./integrations/mightycall');
 
     // Get token
     let token: string | null = null;
@@ -10212,12 +10157,39 @@ app.get('/api/mightycall/test-connection', apiKeyAuthMiddleware, async (req, res
       return res.status(502).json({ error: 'auth_failed', detail: e?.message ?? String(e) });
     }
 
-    // Fetch calls and recordings (small sample)
+    // Fetch direct API samples across the main MightyCall-backed datasets.
     try {
-      const calls = await fetchMightyCallCalls(token, { dateStart: startDate, dateEnd: endDate, limit: 20 });
-      const recs = await fetchMightyCallRecordings(token, [], startDate, endDate);
+      const [phoneNumbers, extensions, calls, journalCalls, recs, sms] = await Promise.all([
+        fetchMightyCallPhoneNumbers(token).catch(() => []),
+        fetchMightyCallExtensions(token, overrideCreds?.clientId || undefined).catch(() => []),
+        fetchMightyCallCalls(token, { dateStart: startDate, dateEnd: endDate, limit: 20 }).catch(() => []),
+        fetchMightyCallJournalRequests(token, {
+          from: `${startDate}T00:00:00Z`,
+          to: `${endDate}T23:59:59Z`,
+          type: 'Call',
+          pageSize: '20',
+          page: '1'
+        }, overrideCreds?.clientId || undefined).catch(() => []),
+        fetchMightyCallRecordings(token, [], startDate, endDate).catch(() => []),
+        fetchMightyCallSMS(token).catch(() => [])
+      ]);
 
-      return res.json({ success: true, calls_count: calls.length, recordings_count: recs.length, calls_sample: calls.slice(0, 5), recordings_sample: recs.slice(0, 5) });
+      return res.json({
+        success: true,
+        source: 'mightycall_api',
+        phone_numbers_count: phoneNumbers.length,
+        extensions_count: extensions.length,
+        calls_count: calls.length,
+        journal_calls_count: journalCalls.length,
+        recordings_count: recs.length,
+        sms_count: sms.length,
+        phone_numbers_sample: phoneNumbers.slice(0, 5),
+        extensions_sample: extensions.slice(0, 5),
+        calls_sample: calls.slice(0, 5),
+        journal_calls_sample: journalCalls.slice(0, 5),
+        recordings_sample: recs.slice(0, 5),
+        sms_sample: sms.slice(0, 5)
+      });
     } catch (e: any) {
       console.error('[MightyCall Test] fetch failed:', e?.message ?? e);
       return res.status(502).json({ error: 'fetch_failed', detail: e?.message ?? String(e) });

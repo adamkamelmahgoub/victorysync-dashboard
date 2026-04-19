@@ -200,8 +200,6 @@ function normalizeCallRecord(raw: JsonRecord) {
     external_id: externalId,
     from_number: fromNumber,
     to_number: toNumber,
-    from_digits: normalizeDigits(fromNumber),
-    to_digits: normalizeDigits(toNumber),
     started_at: startedAt,
     answered_at: answeredAt,
     ended_at: endedAt,
@@ -227,7 +225,7 @@ async function resolveOrgIdForCall(supabase: ReturnType<typeof createClient>, ca
   );
   if (explicitOrgId) return explicitOrgId;
 
-  const digitsToMatch = [call.to_digits, call.from_digits].filter(Boolean);
+  const digitsToMatch = [normalizeDigits(call.to_number), normalizeDigits(call.from_number)].filter(Boolean);
   if (digitsToMatch.length === 0) return null;
 
   const { data, error } = await supabase

@@ -123,12 +123,6 @@ const DashboardNewV3: FC = () => {
       onClick: () => navigate(isAdmin ? '/admin/reports' : '/reports'),
     },
     {
-      title: 'Audit recent call flow',
-      description: 'Open the full call log to review statuses, queues, durations, and assigned-number activity.',
-      actionLabel: 'Open call logs',
-      onClick: () => navigate(isAdmin ? '/admin/call-logs' : '/call-logs'),
-    },
-    {
       title: 'Manage numbers and routing',
       description: 'Keep client phone inventory aligned with teams, assignments, and operational ownership.',
       actionLabel: 'Open numbers',

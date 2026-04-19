@@ -49,7 +49,6 @@ import { APIKeysPage } from "./pages/APIKeysPage";
 import BillingPage from "./pages/BillingPage";
 import LiveStatusPage from "./pages/LiveStatusPage";
 import AdminDiagnosticsPage from "./pages/admin/AdminDiagnosticsPage";
-import CallLogsPage from "./pages/CallLogsPage";
 
 declare global {
   interface Window {
@@ -170,14 +169,6 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <NumbersPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/call-logs"
-        element={
-          <ProtectedRoute>
-            <CallLogsPage />
           </ProtectedRoute>
         }
       />
@@ -370,14 +361,6 @@ function AppRouter() {
         element={
           <AdminRoute>
             <AdminReportsPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/call-logs"
-        element={
-          <AdminRoute>
-            <CallLogsPage />
           </AdminRoute>
         }
       />
