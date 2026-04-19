@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS public.mightycall_recordings (
   org_id uuid REFERENCES public.organizations(id) ON DELETE CASCADE,
   external_id text,
   phone_number text,
+  from_number text,
+  to_number text,
   recording_url text,
   duration_seconds integer,
   recorded_at timestamptz,
@@ -165,7 +167,7 @@ CREATE TABLE IF NOT EXISTS public.mightycall_sync_runs (
 /* === 6) Seed default packages === */
 CREATE TABLE IF NOT EXISTS public.packages (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  name text NOT NULL,
+  name text NOT NULL UNIQUE,
   description text,
   price numeric DEFAULT 0,
   features jsonb DEFAULT '[]'::jsonb,
@@ -173,12 +175,25 @@ CREATE TABLE IF NOT EXISTS public.packages (
   created_at timestamptz DEFAULT now()
 );
 
-INSERT INTO public.packages (name, description, price, features)
-SELECT * FROM (VALUES
-  ('Basic','Basic package',49.00,'["calls","sms"]'::jsonb),
-  ('Pro','Pro package',149.00,'["calls","sms","recordings"]'::jsonb)
-) AS v(name,description,price,features)
-ON CONFLICT (name) DO NOTHING;
+-- Ensure all required columns exist
+ALTER TABLE IF EXISTS public.packages ADD COLUMN IF NOT EXISTS name text;
+ALTER TABLE IF EXISTS public.packages ADD COLUMN IF NOT EXISTS description text;
+ALTER TABLE IF EXISTS public.packages ADD COLUMN IF NOT EXISTS price numeric DEFAULT 0;
+ALTER TABLE IF EXISTS public.packages ADD COLUMN IF NOT EXISTS features jsonb DEFAULT '[]'::jsonb;
+ALTER TABLE IF EXISTS public.packages ADD COLUMN IF NOT EXISTS active boolean DEFAULT true;
+ALTER TABLE IF EXISTS public.packages ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
+
+-- Insert default packages
+DO $$
+BEGIN
+  INSERT INTO public.packages (name, description, price, features, active)
+  VALUES 
+    ('Basic', 'Basic package', 49.00, '["calls","sms"]'::jsonb, true),
+    ('Pro', 'Pro package', 149.00, '["calls","sms","recordings"]'::jsonb, true)
+  ON CONFLICT (name) DO NOTHING;
+EXCEPTION WHEN others THEN
+  NULL;
+END $$;
 
 /* === 7) RLS and policies === */
 -- Enable RLS where applicable
