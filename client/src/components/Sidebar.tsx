@@ -1,4 +1,4 @@
-import React, { FC } from 'react';
+import React, { FC, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -52,6 +52,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const navigate = useNavigate();
   const { signOut, user, selectedOrgId, orgs, profile } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navGroups: NavGroup[] = isAdmin
     ? [
@@ -107,9 +108,67 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const selectedOrgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
   const selectedOrgLogo = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.logo_url || '' : '';
   const userDisplayName = profile?.full_name || user?.email || 'Signed in';
+  const workspaceSummary = isAdmin ? 'Platform visibility across organizations' : 'Organization operations view';
 
-  return (
-    <aside className="fixed left-0 top-0 flex h-screen w-72 flex-col border-r border-white/[0.02] bg-[linear-gradient(180deg,rgba(3,7,18,0.96),rgba(7,12,24,0.98))] px-4 pb-4 pt-5 backdrop-blur-xl">
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [currentPath]);
+
+  const navigateTo = (path: string) => {
+    setMobileMenuOpen(false);
+    navigate(path);
+  };
+
+  const accountControls = (
+    <div className="space-y-2 rounded-[26px] border border-white/[0.015] bg-white/[0.03] p-3">
+      <div className="flex items-center gap-3 px-1">
+        {profile?.profile_pic_url ? (
+          <img src={profile.profile_pic_url} alt="User profile" className="h-11 w-11 rounded-2xl object-cover ring-1 ring-white/10" />
+        ) : (
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.05] text-sm font-semibold text-slate-200">
+            {userDisplayName.slice(0, 1).toUpperCase()}
+          </div>
+        )}
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-slate-200">{userDisplayName}</div>
+          <div className="mt-1 truncate text-xs text-slate-500">{user?.email || 'Account and access controls'}</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => void toggleTheme()}
+          className="w-full rounded-2xl border border-white/[0.015] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
+        >
+          {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+        </button>
+        <button
+          onClick={() => navigateTo('/account-settings')}
+          className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
+            isActivePath(currentPath, '/account-settings')
+              ? 'bg-white/[0.055] text-white'
+              : 'text-slate-300 hover:bg-white/[0.04] hover:text-white'
+          }`}
+        >
+          Settings
+        </button>
+      </div>
+      <div className="px-1">
+        <div className="mt-1 text-xs text-slate-500">Account and access controls</div>
+      </div>
+      <button
+        onClick={() => {
+          setMobileMenuOpen(false);
+          void signOut();
+        }}
+        className="w-full rounded-2xl border border-white/[0.015] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
+      >
+        Sign Out
+      </button>
+    </div>
+  );
+
+  const sidebarContent = (
+    <>
       <div className="rounded-[28px] border border-white/[0.015] bg-white/[0.03] px-4 py-4 shadow-[0_18px_44px_rgba(2,6,23,0.18)]">
         <div className="flex items-center gap-3">
           {selectedOrgLogo ? (
@@ -128,7 +187,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
         <div className="mt-4 rounded-2xl border border-white/[0.015] bg-black/20 px-3 py-3">
           <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Workspace</div>
           <div className="mt-2 text-sm font-medium text-slate-200">{selectedOrgName}</div>
-          <div className="mt-1 text-xs text-slate-500">{isAdmin ? 'Platform visibility across organizations' : 'Organization operations view'}</div>
+          <div className="mt-1 text-xs text-slate-500">{workspaceSummary}</div>
         </div>
       </div>
 
@@ -138,56 +197,51 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             <div className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{group.label}</div>
             <div className="space-y-1.5">
               {group.items.map((item) => (
-                <NavButton key={item.path} item={item} currentPath={currentPath} onClick={() => navigate(item.path)} />
+                <NavButton key={item.path} item={item} currentPath={currentPath} onClick={() => navigateTo(item.path)} />
               ))}
             </div>
           </div>
         ))}
       </nav>
 
-      <div className="space-y-2 rounded-[26px] border border-white/[0.015] bg-white/[0.03] p-3">
-        <div className="flex items-center gap-3 px-1">
-          {profile?.profile_pic_url ? (
-            <img src={profile.profile_pic_url} alt="User profile" className="h-11 w-11 rounded-2xl object-cover ring-1 ring-white/10" />
-          ) : (
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.05] text-sm font-semibold text-slate-200">
-              {userDisplayName.slice(0, 1).toUpperCase()}
-            </div>
-          )}
-          <div>
-            <div className="text-sm font-medium text-slate-200">{userDisplayName}</div>
-            <div className="mt-1 text-xs text-slate-500">{user?.email || 'Account and access controls'}</div>
+      {accountControls}
+    </>
+  );
+
+  return (
+    <>
+      <div className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.04] bg-[rgba(2,6,23,0.92)] px-4 py-3 backdrop-blur-xl lg:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">VictorySync</div>
+            <div className="truncate text-sm font-medium text-slate-200">{selectedOrgName}</div>
           </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
           <button
-            onClick={() => void toggleTheme()}
-            className="w-full rounded-2xl border border-white/[0.015] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
+            type="button"
+            aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={mobileMenuOpen}
+            onClick={() => setMobileMenuOpen((open) => !open)}
+            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/[0.05] bg-white/[0.04] text-slate-200 transition hover:bg-white/[0.08] hover:text-white"
           >
-            {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-          </button>
-          <button
-            onClick={() => navigate('/account-settings')}
-            className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
-              isActivePath(currentPath, '/account-settings')
-                ? 'bg-white/[0.055] text-white'
-                : 'text-slate-300 hover:bg-white/[0.04] hover:text-white'
-            }`}
-          >
-            Settings
+            <span className="flex flex-col gap-1.5">
+              <span className={`h-0.5 w-5 rounded-full bg-current transition ${mobileMenuOpen ? 'translate-y-2 rotate-45' : ''}`} />
+              <span className={`h-0.5 w-5 rounded-full bg-current transition ${mobileMenuOpen ? 'opacity-0' : ''}`} />
+              <span className={`h-0.5 w-5 rounded-full bg-current transition ${mobileMenuOpen ? '-translate-y-2 -rotate-45' : ''}`} />
+            </span>
           </button>
         </div>
-        <div className="px-1">
-          <div className="mt-1 text-xs text-slate-500">Account and access controls</div>
-        </div>
-        <button
-          onClick={() => signOut()}
-          className="w-full rounded-2xl border border-white/[0.015] bg-black/20 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.04] hover:text-white"
-        >
-          Sign Out
-        </button>
       </div>
-    </aside>
+
+      <div className={`fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm transition lg:hidden ${mobileMenuOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`} onClick={() => setMobileMenuOpen(false)} />
+
+      <aside className={`fixed left-0 top-0 z-50 flex h-screen w-[88vw] max-w-xs flex-col border-r border-white/[0.02] bg-[linear-gradient(180deg,rgba(3,7,18,0.98),rgba(7,12,24,1))] px-4 pb-4 pt-5 backdrop-blur-xl transition-transform duration-300 lg:hidden ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        {sidebarContent}
+      </aside>
+
+      <aside className="fixed left-0 top-0 hidden h-screen w-72 flex-col border-r border-white/[0.02] bg-[linear-gradient(180deg,rgba(3,7,18,0.96),rgba(7,12,24,0.98))] px-4 pb-4 pt-5 backdrop-blur-xl lg:flex">
+        {sidebarContent}
+      </aside>
+    </>
   );
 };
 

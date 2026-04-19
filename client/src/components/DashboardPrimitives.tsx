@@ -18,8 +18,8 @@ export function DashboardShellHeader({
   meta?: ReactNode;
 }) {
   return (
-    <header className="sticky top-0 z-40 border-b border-white/[0.02] bg-[rgba(2,6,23,0.88)] backdrop-blur-xl">
-      <div className="px-6 py-5 sm:px-8">
+    <header className="sticky top-16 z-40 border-b border-white/[0.02] bg-[rgba(2,6,23,0.88)] backdrop-blur-xl lg:top-0">
+      <div className="px-4 py-5 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
             {eyebrow && (

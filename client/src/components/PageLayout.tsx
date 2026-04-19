@@ -29,7 +29,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
     <div className="flex min-h-screen text-white">
       <Sidebar isAdmin={isAdmin} currentPath={location.pathname} />
 
-      <main className="ml-72 flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto pt-16 lg:ml-72 lg:pt-0">
         <DashboardShellHeader
           eyebrow={eyebrow}
           title={title}
@@ -38,7 +38,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
           meta={meta || defaultMeta}
         />
 
-        <div className="px-6 py-6 sm:px-8">
+        <div className="px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
           {children}
         </div>
       </main>
