@@ -1144,7 +1144,8 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   const activeDbCalls = (recentDbCalls || []).filter((call: any) => {
     const status = String(call?.status || '').trim();
     if (String(call?.ended_at || '').trim()) return false;
-    return isLikelyActiveCallStatus(status) && isFreshActivity(call?.started_at, 6 * 60 * 60 * 1000);
+    const referenceTime = call?.answered_at || call?.started_at || null;
+    return isLikelyActiveCallStatus(status) && isFreshActivity(referenceTime, 20 * 60 * 1000);
   });
   const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
 
