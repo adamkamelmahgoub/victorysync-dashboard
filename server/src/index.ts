@@ -1478,7 +1478,6 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         liveStatus?.currentCall ||
         liveStatus?.current_call ||
         null;
-      const statusLooksIdle = isLikelyTerminalOrIdleCallStatus(liveStatusValue);
       extensionMetaByExt.set(ext, {
         ...existing,
         extension: ext,
@@ -1488,11 +1487,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           liveStatus,
           currentStatus: liveStatus,
           status: liveStatusValue,
-          currentCall: statusLooksIdle ? null : liveCurrentCall,
-          current_call: statusLooksIdle ? null : liveCurrentCall,
-          onCall: statusLooksIdle
-            ? false
-            : (liveStatus?.onCall ?? liveStatus?.inCall ?? liveStatus?.isOnCall ?? false),
+          currentCall: liveCurrentCall,
+          current_call: liveCurrentCall,
+          onCall: (liveStatus?.onCall ?? liveStatus?.inCall ?? liveStatus?.isOnCall ?? liveCurrentCall?.onCall ?? liveCurrentCall?.inCall ?? liveCurrentCall?.isOnCall ?? false),
           presence: liveStatus?.presence || null,
           presenceStatus: liveStatus?.presenceStatus || null,
           availability: liveStatus?.availability || null,
