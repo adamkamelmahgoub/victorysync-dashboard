@@ -1,0 +1,7 @@
+project_id = "edsyhtlaqwiicxlzorca"
+
+[functions.mightycall-webhook]
+verify_jwt = false
+
+[functions.mightycall-call-log-webhook]
+verify_jwt = false
