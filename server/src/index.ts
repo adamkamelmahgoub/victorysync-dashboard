@@ -1295,8 +1295,9 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): bool
     currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
   const hasCurrentCallPayload = !!(currentCall && typeof currentCall === 'object' && Object.keys(currentCall).length > 0);
 
+  if (hasCurrentCallPayload && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
   if (terminalStatus) return false;
-  if ((activeStatus || hasCallFlag || hasCurrentCallPayload) && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
+  if ((activeStatus || hasCallFlag) && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
   return false;
 }
 
