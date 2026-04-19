@@ -27,6 +27,16 @@ function buildUrlVariants(base: string, endpoint: string) {
   return [`${b}${ep}`, `${b}/api${ep}`];
 }
 
+const DEFAULT_MIGHTYCALL_HISTORY_START = '2020-01-01';
+
+function resolveSyncDateRange(startDate?: string, endDate?: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    start: startDate || DEFAULT_MIGHTYCALL_HISTORY_START,
+    end: endDate || today
+  };
+}
+
 export async function getMightyCallAccessToken(override?: { clientId?: string; clientSecret?: string }): Promise<string> {
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const clientId = override?.clientId || MIGHTYCALL_API_KEY || '';
@@ -239,18 +249,87 @@ export async function fetchMightyCallJournalRequests(accessToken: string, params
 }
 
 export async function fetchMightyCallRecordings(accessToken: string, phoneNumberIds: string[] = [], startDate?: string, endDate?: string) {
-  const calls = await fetchMightyCallCalls(accessToken, { startUtc: startDate, endUtc: endDate, pageSize: '1000', skip: '0' });
+  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const recordings: any[] = [];
+  const seen = new Set<string>();
+  const addRecording = (row: any) => {
+    const normalized = {
+      id: row?.id || row?.recordingId || row?.externalId || row?.callId || null,
+      callId: row?.callId || row?.call_id || row?.id || row?.externalId || null,
+      recordingUrl: row?.recordingUrl || row?.recording_url || row?.uri || row?.link || row?.downloadUrl || row?.fileName || null,
+      duration: row?.duration ?? row?.durationSeconds ?? row?.lengthSeconds ?? null,
+      date: row?.recordingDate || row?.recordedAt || row?.date || row?.created || row?.createdAt || null,
+      metadata: row?.metadata || row
+    };
+    if (!normalized.recordingUrl && !normalized.callId && !normalized.id) return;
+    const key = String(normalized.callId || normalized.id || normalized.recordingUrl || '');
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    recordings.push(normalized);
+  };
+
+  const directEndpoints = ['/recordings', '/call-recordings', '/callrecordings', '/v4/recordings', '/v4/call-recordings'];
+  const pageSize = 200;
+  const maxPages = 50;
+  for (const ep of directEndpoints) {
+    for (const url of buildUrlVariants(base, ep)) {
+      let page = 1;
+      for (let i = 0; i < maxPages; i++) {
+        const qp = new URLSearchParams();
+        if (startDate) {
+          qp.set('from', `${startDate}T00:00:00Z`);
+          qp.set('startUtc', `${startDate}T00:00:00Z`);
+          qp.set('dateStart', startDate);
+        }
+        if (endDate) {
+          qp.set('to', `${endDate}T23:59:59Z`);
+          qp.set('endUtc', `${endDate}T23:59:59Z`);
+          qp.set('dateEnd', endDate);
+        }
+        qp.set('page', String(page));
+        qp.set('pageSize', String(pageSize));
+        qp.set('limit', String(pageSize));
+        const r = await tryFetchJson(`${url}?${qp.toString()}`, accessToken);
+        if (!r.ok || !r.body) break;
+        const body: any = r.body;
+        const list = body?.data?.recordings ?? body?.recordings ?? body?.data?.items ?? body?.items ?? body?.data ?? [];
+        if (!Array.isArray(list) || list.length === 0) break;
+        for (const row of list) addRecording(row);
+        const hasMore = body?.hasMore === true || body?.data?.hasMore === true;
+        if (list.length < pageSize && !hasMore) break;
+        page += 1;
+      }
+    }
+  }
+
+  const calls = await fetchMightyCallCalls(accessToken, { startUtc: startDate, endUtc: endDate, pageSize: '1000', skip: '0' });
   for (const c of calls) {
     const rec = (c as any)?.callRecord ?? (c as any)?.recording ?? null;
-    if (rec && (rec.uri || rec.fileName || rec.link)) recordings.push({ id: (c as any).id || (c as any).callId, callId: (c as any).id || (c as any).callId, recordingUrl: rec.uri || rec.fileName || rec.link, duration: (c as any).duration ?? null, date: (c as any).dateTimeUtc ?? (c as any).created ?? null, metadata: c });
+    if (rec && (rec.uri || rec.fileName || rec.link)) {
+      addRecording({
+        id: (c as any).id || (c as any).callId,
+        callId: (c as any).id || (c as any).callId,
+        recordingUrl: rec.uri || rec.fileName || rec.link,
+        duration: (c as any).duration ?? null,
+        date: (c as any).dateTimeUtc ?? (c as any).created ?? null,
+        metadata: c
+      });
+    }
   }
-  if (recordings.length > 0) return recordings;
 
   const jr = await fetchMightyCallJournalRequests(accessToken, { from: `${startDate}T00:00:00Z`, to: `${endDate}T23:59:59Z`, type: 'Call', pageSize: '1000', page: '1' });
   for (const r of jr) {
     const link = (r as any)?.recording?.link ?? (r as any)?.recording?.uri ?? (r as any)?.textModel?.text ?? null;
-    if (link) recordings.push({ id: (r as any).id, callId: (r as any).id, recordingUrl: link, duration: null, date: (r as any).created ?? null, metadata: r });
+    if (link) {
+      addRecording({
+        id: (r as any).id,
+        callId: (r as any).id,
+        recordingUrl: link,
+        duration: null,
+        date: (r as any).created ?? null,
+        metadata: r
+      });
+    }
   }
   return recordings;
 }
@@ -521,8 +600,7 @@ export async function syncMightyCallReports(
 ): Promise<{ reportsSynced: number; recordingsSynced: number }> {
   try {
     const token = await getMightyCallAccessToken(overrideCreds);
-    const start = startDate || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const end = endDate || new Date().toISOString().split('T')[0];
+    const { start, end } = resolveSyncDateRange(startDate, endDate);
 
     const phoneLookup: Record<string, string> = {};
     try {
@@ -538,7 +616,7 @@ export async function syncMightyCallReports(
       }
     } catch {}
 
-    const journal = await fetchMightyCallJournalRequests(token, {
+    const callJournal = await fetchMightyCallJournalRequests(token, {
       from: `${start}T00:00:00Z`,
       to: `${end}T23:59:59Z`,
       type: 'Call',
@@ -546,42 +624,193 @@ export async function syncMightyCallReports(
       page: '1'
     }).catch(() => []);
 
-    const buckets = new Map<string, any>();
-    for (const r of Array.isArray(journal) ? journal : []) {
+    const messageTypes = ['Message', 'SMS', 'Sms'];
+    const messageJournalLists = await Promise.all(
+      messageTypes.map((type) => fetchMightyCallJournalRequests(token, {
+        from: `${start}T00:00:00Z`,
+        to: `${end}T23:59:59Z`,
+        type,
+        pageSize: '200',
+        page: '1'
+      }).catch(() => []))
+    );
+    const messageJournal = Array.from(
+      new Map(
+        messageJournalLists
+          .flat()
+          .map((row: any) => [String(row?.id || row?.requestGuid || `${row?.created || ''}:${row?.textModel?.text || row?.text || ''}`), row])
+      ).values()
+    );
+
+    const bucketKey = (dateKey: string, phoneId: string | null, digits: string) => `${dateKey}:${phoneId || digits || 'unknown'}`;
+    const pushSampleNumber = (row: any, value: any) => {
+      const next = String(value || '').trim();
+      if (!next) return;
+      row.data.sample_numbers = Array.isArray(row.data.sample_numbers) ? row.data.sample_numbers : [];
+      if (!row.data.sample_numbers.includes(next)) row.data.sample_numbers.push(next);
+    };
+    const pushSampleActivity = (row: any, sample: any) => {
+      row.data.sample_activity = Array.isArray(row.data.sample_activity) ? row.data.sample_activity : [];
+      if (row.data.sample_activity.length < 10) row.data.sample_activity.push(sample);
+    };
+    const resolvePhoneId = (...values: any[]) => {
+      for (const value of values) {
+        const text = String(value || '').trim();
+        if (!text) continue;
+        const digits = text.replace(/\D/g, '');
+        if (phoneLookup[text]) return phoneLookup[text];
+        if (digits && phoneLookup[digits]) return phoneLookup[digits];
+      }
+      return null;
+    };
+
+    const callBuckets = new Map<string, any>();
+    for (const r of Array.isArray(callJournal) ? callJournal : []) {
       const created = String(r?.created || r?.dateTimeUtc || new Date().toISOString());
       const dateKey = created.slice(0, 10);
       const fromNumber = String(r?.from || r?.from_number || r?.client?.address || '').trim();
       const toNumber = String(r?.to || r?.to_number || r?.businessNumber?.number || '').trim();
       const numForMap = toNumber || fromNumber;
       const digits = numForMap.replace(/\D/g, '');
-      const phoneId = phoneLookup[numForMap] || phoneLookup[digits] || null;
-      const key = `${dateKey}:${phoneId || digits || 'unknown'}`;
-      if (!buckets.has(key)) {
-        buckets.set(key, {
+      const phoneId = resolvePhoneId(toNumber, fromNumber);
+      const key = bucketKey(dateKey, phoneId, digits);
+      if (!callBuckets.has(key)) {
+        callBuckets.set(key, {
           org_id: orgId,
           phone_number_id: phoneId,
           report_type: 'calls',
           report_date: dateKey,
-          data: { calls_count: 0, answered_count: 0, missed_count: 0, total_duration: 0, sample_numbers: [] as string[] }
+          data: {
+            source: 'mightycall_api',
+            calls_count: 0,
+            answered_count: 0,
+            missed_count: 0,
+            total_duration: 0,
+            sample_numbers: [] as string[],
+            status_breakdown: {} as Record<string, number>,
+            raw_entries_count: 0,
+            sample_activity: [] as any[]
+          }
         });
       }
-      const row = buckets.get(key);
+      const row = callBuckets.get(key);
       row.data.calls_count += 1;
       const st = String(r?.status || r?.callStatus || '').toLowerCase();
+      row.data.status_breakdown[st || 'unknown'] = Number(row.data.status_breakdown[st || 'unknown'] || 0) + 1;
+      row.data.raw_entries_count += 1;
       if (st.includes('answer') || st.includes('complete')) row.data.answered_count += 1;
       else if (st.includes('miss')) row.data.missed_count += 1;
       const dur = Number(r?.duration || r?.durationSeconds || 0);
       if (Number.isFinite(dur) && dur > 0) row.data.total_duration += dur;
-      if (numForMap && !row.data.sample_numbers.includes(numForMap)) row.data.sample_numbers.push(numForMap);
+      pushSampleNumber(row, fromNumber);
+      pushSampleNumber(row, toNumber);
+      pushSampleActivity(row, {
+        id: r?.id || r?.requestGuid || null,
+        created,
+        status: st || null,
+        from_number: fromNumber || null,
+        to_number: toNumber || null,
+        duration_seconds: Number.isFinite(dur) ? dur : null
+      });
     }
 
-    const reportRows = Array.from(buckets.values());
+    const messageBuckets = new Map<string, any>();
+    for (const m of Array.isArray(messageJournal) ? messageJournal : []) {
+      const created = String(m?.created || m?.sent_at || new Date().toISOString());
+      const dateKey = created.slice(0, 10);
+      const fromNumber = String(m?.client?.address || m?.from || m?.from_number || '').trim();
+      const toNumber = String(m?.businessNumber?.number || m?.to || m?.to_number || '').trim();
+      const numForMap = toNumber || fromNumber;
+      const digits = numForMap.replace(/\D/g, '');
+      const phoneId = resolvePhoneId(toNumber, fromNumber);
+      const key = bucketKey(dateKey, phoneId, digits);
+      if (!messageBuckets.has(key)) {
+        messageBuckets.set(key, {
+          org_id: orgId,
+          phone_number_id: phoneId,
+          report_type: 'messages',
+          report_date: dateKey,
+          data: {
+            source: 'mightycall_api',
+            messages_count: 0,
+            inbound_count: 0,
+            outbound_count: 0,
+            delivered_count: 0,
+            failed_count: 0,
+            sample_numbers: [] as string[],
+            status_breakdown: {} as Record<string, number>,
+            raw_entries_count: 0,
+            sample_activity: [] as any[]
+          }
+        });
+      }
+      const row = messageBuckets.get(key);
+      const direction = String(m?.direction || '').toLowerCase();
+      const status = String(m?.status || '').toLowerCase();
+      row.data.messages_count += 1;
+      row.data.raw_entries_count += 1;
+      row.data.status_breakdown[status || 'unknown'] = Number(row.data.status_breakdown[status || 'unknown'] || 0) + 1;
+      if (direction.includes('out')) row.data.outbound_count += 1;
+      else row.data.inbound_count += 1;
+      if (status.includes('deliver') || status.includes('sent')) row.data.delivered_count += 1;
+      if (status.includes('fail') || status.includes('error')) row.data.failed_count += 1;
+      pushSampleNumber(row, fromNumber);
+      pushSampleNumber(row, toNumber);
+      pushSampleActivity(row, {
+        id: m?.id || m?.requestGuid || null,
+        created,
+        direction: direction || null,
+        status: status || null,
+        from_number: fromNumber || null,
+        to_number: toNumber || null,
+        text: m?.textModel?.text || m?.text || null
+      });
+    }
+
+    const analyticsKeys = new Set([...callBuckets.keys(), ...messageBuckets.keys()]);
+    const analyticsRows = Array.from(analyticsKeys).map((key) => {
+      const callRow = callBuckets.get(key);
+      const messageRow = messageBuckets.get(key);
+      const callData = callRow?.data || {};
+      const messageData = messageRow?.data || {};
+      const sampleNumbers = Array.from(new Set([...(callData.sample_numbers || []), ...(messageData.sample_numbers || [])]));
+      const totalCalls = Number(callData.calls_count || 0);
+      const answeredCalls = Number(callData.answered_count || 0);
+      const totalDuration = Number(callData.total_duration || 0);
+      return {
+        org_id: orgId,
+        phone_number_id: callRow?.phone_number_id || messageRow?.phone_number_id || null,
+        report_type: 'analytics',
+        report_date: callRow?.report_date || messageRow?.report_date || key.slice(0, 10),
+        data: {
+          source: 'mightycall_api',
+          calls_count: totalCalls,
+          answered_count: answeredCalls,
+          missed_count: Number(callData.missed_count || 0),
+          total_duration: totalDuration,
+          messages_count: Number(messageData.messages_count || 0),
+          inbound_messages: Number(messageData.inbound_count || 0),
+          outbound_messages: Number(messageData.outbound_count || 0),
+          delivered_messages: Number(messageData.delivered_count || 0),
+          failed_messages: Number(messageData.failed_count || 0),
+          answer_rate: totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 1000) / 10 : 0,
+          avg_call_duration_seconds: totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0,
+          sample_numbers: sampleNumbers
+        }
+      };
+    });
+
+    const reportRows = [
+      ...Array.from(callBuckets.values()),
+      ...Array.from(messageBuckets.values()),
+      ...analyticsRows
+    ];
     try {
       await supabaseAdminClient
         .from('mightycall_reports')
         .delete()
         .eq('org_id', orgId)
-        .eq('report_type', 'calls')
+        .in('report_type', ['calls', 'messages', 'analytics'])
         .gte('report_date', start)
         .lte('report_date', end);
     } catch {}
@@ -615,8 +844,7 @@ export async function syncMightyCallRecordings(
 ): Promise<{ recordingsSynced: number }> {
   try {
     const token = await getMightyCallAccessToken(overrideCreds);
-    const start = startDate || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const end = endDate || new Date().toISOString().split('T')[0];
+    const { start, end } = resolveSyncDateRange(startDate, endDate);
 
     const recordings = await fetchMightyCallRecordings(token, phoneNumberIds, start, end).catch(() => []);
 
@@ -786,8 +1014,12 @@ export async function syncMightyCallCallHistory(
   overrideCreds?: any
 ): Promise<{ callsSynced: number }> {
   const token = await getMightyCallAccessToken(overrideCreds);
-  const start = String(filters?.dateStart || filters?.startUtc || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
-  const end = String(filters?.dateEnd || filters?.endUtc || new Date().toISOString().slice(0, 10));
+  const range = resolveSyncDateRange(
+    String(filters?.dateStart || filters?.startUtc || ''),
+    String(filters?.dateEnd || filters?.endUtc || '')
+  );
+  const start = range.start;
+  const end = range.end;
   let calls = await fetchMightyCallCalls(token, {
     startUtc: start.includes('T') ? start : `${start}T00:00:00Z`,
     endUtc: end.includes('T') ? end : `${end}T23:59:59Z`,

@@ -58,6 +58,8 @@ import { getMembershipDriftDetails, getMembershipDriftSummary } from './lib/memb
 import { getSchemaHealth } from './lib/schemaHealth';
 import { normalizeMightyCallJournalActivity, normalizeMightyCallStatusActivity } from './lib/mightycallNormalizer';
 
+const DEFAULT_MIGHTYCALL_HISTORY_START = '2020-01-01';
+
 // Extend Express Request interface to include apiKeyScope
 declare global {
   namespace Express {
@@ -9727,9 +9729,9 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
       return res.status(401).json({ error: 'API key or user authentication required' });
     }
 
-    // Default date range to today if not provided
+    // Default date range to a full historical backfill if not provided
     const today = new Date().toISOString().split('T')[0];
-    const actualStartDate = startDate || today;
+    const actualStartDate = startDate || DEFAULT_MIGHTYCALL_HISTORY_START;
     const actualEndDate = endDate || today;
 
     console.log(`[MightyCall Sync] Starting reports sync for org ${orgId}, dates ${actualStartDate} to ${actualEndDate}...`);
@@ -9944,17 +9946,19 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
       return res.status(401).json({ error: 'API key or user authentication required' });
     }
 
+    const phoneSyncResult = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
+
     // Get phone numbers for this org
     const assignedPhones = await getAssignedPhoneNumbersForOrg(orgId);
     const phoneNumberIds = assignedPhones.phones.map((p: any) => p.id || p.number).filter(Boolean);
 
     if (phoneNumberIds.length === 0) {
-      return res.status(400).json({ error: 'No phone numbers assigned to this organization' });
+      return res.status(400).json({ error: 'No phone numbers assigned to this organization after MightyCall sync' });
     }
 
-    // Default date range to today if not provided
+    // Default date range to a full historical backfill if not provided
     const today = new Date().toISOString().split('T')[0];
-    const actualStartDate = startDate || today;
+    const actualStartDate = startDate || DEFAULT_MIGHTYCALL_HISTORY_START;
     const actualEndDate = endDate || today;
 
     console.log(`[MightyCall Sync] Starting recordings sync for org ${orgId}, dates ${actualStartDate} to ${actualEndDate}...`);
@@ -10012,6 +10016,7 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
             metadata: {
               start_date: actualStartDate,
               end_date: actualEndDate,
+              phone_numbers_synced: Number(phoneSyncResult?.upserted || phoneSyncResult?.synced || 0),
               recordings_synced: result.recordingsSynced
             }
           })
