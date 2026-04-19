@@ -121,6 +121,8 @@ async function getOrgIntegrationHealth(orgId: string) {
   let profileHealthy = false;
   let liveCallsHealthy = false;
   let journalHealthy = false;
+  let ownStatusHealthy = false;
+  let ownStatusLabel: string | null = null;
   let syncJob: any = null;
   let error: string | null = null;
 
@@ -137,14 +139,17 @@ async function getOrgIntegrationHealth(orgId: string) {
     tokenHealthy = !!token;
     if (token) {
       const apiKeyOverride = overrideCreds?.clientId || undefined;
-      const [profile, calls, journal] = await Promise.all([
+      const [profile, calls, journal, ownStatus] = await Promise.all([
         fetchMightyCallProfileByExtension('100', token, apiKeyOverride).catch(() => null),
         fetchMightyCallCalls(token, { pageSize: '5', skip: '0' }, apiKeyOverride).catch(() => []),
         fetchMightyCallJournalRequests(token, { pageSize: '5', page: '1', type: 'Call' }, apiKeyOverride).catch(() => []),
+        fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null),
       ]);
       profileHealthy = !!profile;
       liveCallsHealthy = Array.isArray(calls);
       journalHealthy = Array.isArray(journal);
+      ownStatusHealthy = !!ownStatus && typeof ownStatus === 'object';
+      ownStatusLabel = extractLiveStatusLabel(ownStatus);
     }
   } catch (err: any) {
     error = err?.message || String(err);
@@ -169,6 +174,8 @@ async function getOrgIntegrationHealth(orgId: string) {
     profile_healthy: profileHealthy,
     live_calls_healthy: liveCallsHealthy,
     journal_healthy: journalHealthy,
+    own_status_healthy: ownStatusHealthy,
+    own_status_label: ownStatusLabel,
     latest_sync_job: syncJob,
     error,
     checked_at: new Date().toISOString(),
