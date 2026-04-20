@@ -700,7 +700,7 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
 
   const extensionCalls = await fetchMightyCallCalls(accessToken, {
     extension: normalized,
-    startUtc: new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString(),
+    startUtc: new Date(Date.now() - (72 * 60 * 60 * 1000)).toISOString(),
     endUtc: new Date(Date.now() + (5 * 60 * 1000)).toISOString(),
     pageSize: '50',
     skip: '0',

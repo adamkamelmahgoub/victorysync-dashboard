@@ -1261,6 +1261,9 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
   return ageMs >= -(5 * 60 * 1000) && ageMs <= maxAgeMs;
 }
 
+const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
+const ACTIVE_CALL_MAX_AGE_MS = LIVE_CALL_LOOKBACK_MS;
+
 function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): boolean {
   if (!payload || typeof payload !== 'object') return false;
   
@@ -1360,7 +1363,7 @@ function isLikelyLiveJournalRequest(request: any): boolean {
 }
 
 async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
-  const liveCallsWindowStart = new Date(Date.now() - (12 * 60 * 60 * 1000)).toISOString();
+  const liveCallsWindowStart = new Date(Date.now() - LIVE_CALL_LOOKBACK_MS).toISOString();
   const [
     { data: membersData, error: membersError },
     { data: extData, error: extError },
@@ -1430,9 +1433,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   const token = await getMightyCallAccessToken(overrideCreds);
   const apiKeyOverride = overrideCreds?.clientId || undefined;
   const now = Date.now();
-  const callsPromise = fetchMightyCallCalls(token, {
-    startUtc: new Date(now - (12 * 60 * 60 * 1000)).toISOString(),
-    endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
+	  const callsPromise = fetchMightyCallCalls(token, {
+	    startUtc: new Date(now - LIVE_CALL_LOOKBACK_MS).toISOString(),
+	    endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
     pageSize: '500',
     skip: '0'
   }, apiKeyOverride).catch(() => []);
@@ -1562,7 +1565,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
     if (String(endedAt || '').trim()) return false;
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
-    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
+	    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS);
   });
   const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
   const activeStoredCalls = (recentCallRows || []).filter((call: any) => {
@@ -1571,7 +1574,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const startedAt = call?.started_at || call?.dateTimeUtc || call?.start_time || call?.created || null;
     if (String(endedAt || '').trim()) return false;
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
-    if (isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000)) return true;
+    if (isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS)) return true;
     const metadata = call?.metadata && typeof call.metadata === 'object' ? call.metadata : {};
     return hasFreshStatusCallSignal({
       ...metadata,
@@ -1581,7 +1584,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ended_at: endedAt,
       endedAt: endedAt,
       currentCall: metadata?.currentCall || metadata?.current_call || null,
-    }, 2 * 60 * 60 * 1000);
+    }, ACTIVE_CALL_MAX_AGE_MS);
   });
 
   return memberRows.map((member: any) => {
@@ -1602,7 +1605,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           if (String(call?.endedAt || call?.ended_at || '').trim()) return false;
           if (isLikelyTerminalOrIdleCallStatus(status)) return false;
           const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
-          return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
+	          return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS);
         }) || null
       : null;
     const inferredLiveCall = !matchedLiveCall && shouldUseSingleAgentFallback && activeCalls.length === 1
@@ -4898,10 +4901,11 @@ app.get('/api/agents/live-status', async (req, res) => {
       }
     }));
 
-    res.json({
-      items: chunks.flat(),
-      refreshed_at: new Date().toISOString()
-    });
+	    res.json({
+	      items: chunks.flat(),
+	      refreshed_at: new Date().toISOString(),
+	      live_status_version: 'mightycall-api-extension-v3'
+	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
     res.status(500).json({ error: 'agents_live_status_failed', detail: fmtErr(err) ?? 'unknown_error' });
