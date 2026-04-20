@@ -1264,6 +1264,7 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 
 const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = LIVE_CALL_LOOKBACK_MS;
+const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 
 function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): boolean {
@@ -1352,13 +1353,25 @@ function isLikelyLiveJournalRequest(request: any): boolean {
     request?.recording?.availability,
     request?.status,
   ];
-  if (statusCandidates.some((candidate) => isLikelyActiveCallStatus(candidate))) return true;
-  if (statusCandidates.some((candidate) => isLikelyTerminalOrIdleCallStatus(candidate))) return false;
+  const hasActiveStatus = statusCandidates.some((candidate) => isLikelyActiveCallStatus(candidate));
+  const hasTerminalStatus = statusCandidates.some((candidate) => isLikelyTerminalOrIdleCallStatus(candidate));
   const workflowState = String(request?.wfstate?.state || '').toLowerCase().trim();
   const requestState = String(request?.state || '').toLowerCase().trim();
   const hasResponse = !!String(request?.respondedAt || request?.responded_at || '').trim();
-  const createdAt = Date.parse(String(request?.created || request?.createdAt || ''));
-  const recentEnough = Number.isFinite(createdAt) ? (Date.now() - createdAt) < (20 * 60 * 1000) : false;
+  const startedAt =
+    request?.created ||
+    request?.createdAt ||
+    request?.startedAt ||
+    request?.started_at ||
+    request?.dateTimeUtc ||
+    request?.date_time_utc ||
+    null;
+  const recentEnough = isFreshActivity(startedAt, JOURNAL_LIVE_SIGNAL_MAX_AGE_MS);
+
+  // Journal rows are historical call activity. "Connected" means the call was
+  // connected at some point, so only trust it as live while it is very fresh.
+  if (hasActiveStatus) return recentEnough;
+  if (hasTerminalStatus) return false;
   if ((workflowState === 'open' || requestState === 'ringing' || requestState === 'calling' || requestState === 'dialing') && recentEnough) return true;
   if (!hasResponse && recentEnough && !isLikelyTerminalOrIdleCallStatus(requestState)) return true;
   return false;
@@ -4959,7 +4972,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-	      live_status_version: 'mightycall-contact-center-v5'
+	      live_status_version: 'mightycall-contact-center-v6'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
