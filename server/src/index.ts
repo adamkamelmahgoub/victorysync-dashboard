@@ -1511,7 +1511,7 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 }
 
 const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
-const ACTIVE_CALL_MAX_AGE_MS = LIVE_CALL_LOOKBACK_MS;
+const ACTIVE_CALL_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 
@@ -1880,10 +1880,6 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
 	    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS);
   });
-  const activeJournalCalls = [
-    ...(liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call)),
-    ...(contactCenterCommunications || []).filter((call: any) => isLikelyLiveContactCenterCommunication(call)),
-  ];
   const activeStoredCalls = (recentCallRows || []).filter((call: any) => {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
     const endedAt = call?.ended_at || call?.endedAt || call?.endTime || call?.ended || null;
@@ -1937,14 +1933,6 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const inferredStoredCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && shouldUseSingleAgentFallback && activeStoredCalls.length === 1
       ? activeStoredCalls[0]
       : null;
-    const matchedJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && normalizedExt
-      ? activeJournalCalls.find((call: any) => payloadMatchesAgent(call, normalizedExt, agentIdentities)) || null
-      : null;
-    const inferredJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && !matchedJournalCall && shouldUseSingleAgentFallback && activeJournalCalls.length === 1
-      ? activeJournalCalls[0]
-      : null;
-    const normalizedJournal = matchedJournalCall || inferredJournalCall ? normalizeMightyCallJournalActivity(matchedJournalCall || inferredJournalCall) : null;
-
     const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
     const callStatus = matchedLiveCall
       ? String(matchedLiveCall?.status || matchedLiveCall?.state || matchedLiveCall?.callStatus || '').trim() || extStatus
@@ -1954,8 +1942,6 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           ? String((matchedStoredCall as any)?.status || (matchedStoredCall as any)?.state || (matchedStoredCall as any)?.callStatus || '').trim() || extStatus
         : inferredStoredCall
             ? String((inferredStoredCall as any)?.status || (inferredStoredCall as any)?.state || (inferredStoredCall as any)?.callStatus || '').trim() || extStatus
-      : matchedJournalCall || inferredJournalCall
-          ? String(normalizedJournal?.status || (matchedJournalCall || inferredJournalCall)?.state || (matchedJournalCall || inferredJournalCall)?.wfstate?.state || (matchedJournalCall || inferredJournalCall)?.availability || '').trim() || extStatus
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
     const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload?.current_status || extPayload;
@@ -1967,53 +1953,43 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const ownStatusSaysOnCall = shouldUseOwnStatusFallback && !!explicitOwnStatusLabel && isLikelyActiveCallStatus(explicitOwnStatusLabel);
     const hasFreshStatusSignal = hasFreshStatusCallSignal(effectiveStatusPayload) || ownStatusSaysOnCall;
     const onCall = !!(
-      matchedLiveCall ||
-      inferredLiveCall ||
-      matchedStoredCall ||
-      inferredStoredCall ||
-      matchedJournalCall ||
-      inferredJournalCall ||
-      hasFreshStatusSignal
-    );
+	      matchedLiveCall ||
+	      inferredLiveCall ||
+	      matchedStoredCall ||
+	      inferredStoredCall ||
+	      hasFreshStatusSignal
+	    );
     const counterpart = matchedLiveCall
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : inferredLiveCall
         ? extractCounterpartyLabel(inferredLiveCall, orgPhoneDigits, normalizedExt)
-      : matchedStoredCall
-          ? extractCounterpartyLabel(matchedStoredCall?.metadata || matchedStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(matchedStoredCall, orgPhoneDigits, normalizedExt)
-        : inferredStoredCall
-            ? extractCounterpartyLabel(inferredStoredCall?.metadata || inferredStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(inferredStoredCall, orgPhoneDigits, normalizedExt)
-      : matchedJournalCall || inferredJournalCall
-          ? normalizedJournal?.counterpart || extractCounterpartyLabel(matchedJournalCall || inferredJournalCall, orgPhoneDigits, normalizedExt)
-        : normalizedStatus?.counterpart || extractCounterpartyLabel(effectiveStatusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
+	      : matchedStoredCall
+	          ? extractCounterpartyLabel(matchedStoredCall?.metadata || matchedStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(matchedStoredCall, orgPhoneDigits, normalizedExt)
+	        : inferredStoredCall
+	            ? extractCounterpartyLabel(inferredStoredCall?.metadata || inferredStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(inferredStoredCall, orgPhoneDigits, normalizedExt)
+	        : normalizedStatus?.counterpart || extractCounterpartyLabel(effectiveStatusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
     const startedAt = matchedLiveCall
       ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
       : inferredLiveCall
         ? inferredLiveCall?.dateTimeUtc || inferredLiveCall?.started_at || inferredLiveCall?.start_time || inferredLiveCall?.created || null
-      : matchedStoredCall
-          ? (matchedStoredCall as any)?.started_at || (matchedStoredCall as any)?.dateTimeUtc || (matchedStoredCall as any)?.start_time || (matchedStoredCall as any)?.created || null
-        : inferredStoredCall
-            ? (inferredStoredCall as any)?.started_at || (inferredStoredCall as any)?.dateTimeUtc || (inferredStoredCall as any)?.start_time || (inferredStoredCall as any)?.created || null
-      : matchedJournalCall || inferredJournalCall
-          ? normalizedJournal?.started_at || (matchedJournalCall || inferredJournalCall)?.created || (matchedJournalCall || inferredJournalCall)?.createdAt || null
-        : hasFreshStatusSignal
-          ? normalizedStatus?.started_at || effectiveStatusPayload?.currentCall?.startedAt || effectiveStatusPayload?.currentCall?.started_at || effectiveStatusPayload?.current_call?.startedAt || effectiveStatusPayload?.current_call?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
-          : null;
+	      : matchedStoredCall
+	          ? (matchedStoredCall as any)?.started_at || (matchedStoredCall as any)?.dateTimeUtc || (matchedStoredCall as any)?.start_time || (matchedStoredCall as any)?.created || null
+	        : inferredStoredCall
+	            ? (inferredStoredCall as any)?.started_at || (inferredStoredCall as any)?.dateTimeUtc || (inferredStoredCall as any)?.start_time || (inferredStoredCall as any)?.created || null
+	        : hasFreshStatusSignal
+	          ? normalizedStatus?.started_at || effectiveStatusPayload?.currentCall?.startedAt || effectiveStatusPayload?.currentCall?.started_at || effectiveStatusPayload?.current_call?.startedAt || effectiveStatusPayload?.current_call?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
+	          : null;
     const source = matchedLiveCall
       ? 'mightycall_calls'
       : inferredLiveCall
         ? 'mightycall_calls_inferred'
         : matchedStoredCall
           ? 'stored_calls'
-          : inferredStoredCall
-            ? 'stored_calls_inferred'
-        : matchedJournalCall
-          ? 'mightycall_journal'
-          : inferredJournalCall
-            ? 'mightycall_journal_inferred'
-            : hasFreshStatusSignal
-              ? (ownStatusSaysOnCall ? 'mightycall_own_status' : 'mightycall_status')
-              : (extMeta ? 'mightycall_extensions' : 'unmatched');
+	      : inferredStoredCall
+	            ? 'stored_calls_inferred'
+	        : hasFreshStatusSignal
+	              ? (ownStatusSaysOnCall ? 'mightycall_own_status' : 'mightycall_status')
+	              : (extMeta ? 'mightycall_extensions' : 'unmatched');
 
     if (normalizedExt) {
       console.info('[agents/live-status] resolved', {
@@ -2024,7 +2000,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         onCall,
         status: callStatus || null,
         matchedCallCandidates: matchedLiveCall ? collectExtensionCandidates(matchedLiveCall) : [],
-        matchedJournalCallId: (matchedJournalCall || inferredJournalCall)?.id || null,
+        matchedStoredCallId: (matchedStoredCall || inferredStoredCall)?.id || null,
       });
     }
 
@@ -5236,7 +5212,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-	      live_status_version: 'mightycall-webhook-state-v7'
+	      live_status_version: 'mightycall-webhook-only-v8'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
