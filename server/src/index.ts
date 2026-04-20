@@ -1264,6 +1264,7 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 
 const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = LIVE_CALL_LOOKBACK_MS;
+const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 
 function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): boolean {
   if (!payload || typeof payload !== 'object') return false;
@@ -1361,6 +1362,40 @@ function isLikelyLiveJournalRequest(request: any): boolean {
   if ((workflowState === 'open' || requestState === 'ringing' || requestState === 'calling' || requestState === 'dialing') && recentEnough) return true;
   if (!hasResponse && recentEnough && !isLikelyTerminalOrIdleCallStatus(requestState)) return true;
   return false;
+}
+
+function isLikelyLiveContactCenterCommunication(request: any): boolean {
+  const statusCandidates = [
+    request?.state,
+    request?.wfstate?.state,
+    request?.status,
+    request?.callStatus,
+  ];
+  if (!statusCandidates.some((candidate) => isLikelyActiveCallStatus(candidate))) return false;
+  if (statusCandidates.some((candidate) => isLikelyTerminalOrIdleCallStatus(candidate))) return false;
+
+  const endedAt =
+    request?.endedAt ||
+    request?.ended_at ||
+    request?.finishedAt ||
+    request?.finished_at ||
+    request?.completedAt ||
+    request?.completed_at ||
+    null;
+  if (String(endedAt || '').trim()) return false;
+
+  const startedAt =
+    request?.created ||
+    request?.createdAt ||
+    request?.startedAt ||
+    request?.started_at ||
+    request?.dateTimeUtc ||
+    request?.date_time_utc ||
+    null;
+
+  // Contact Center communications are historical records. A "connected" state
+  // means the call connected at some point, not necessarily that it is live now.
+  return isFreshActivity(startedAt, CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS);
 }
 
 async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
@@ -1584,7 +1619,10 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
 	    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS);
   });
-  const activeJournalCalls = ([...(liveJournal || []), ...(contactCenterCommunications || [])]).filter((call: any) => isLikelyLiveJournalRequest(call));
+  const activeJournalCalls = [
+    ...(liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call)),
+    ...(contactCenterCommunications || []).filter((call: any) => isLikelyLiveContactCenterCommunication(call)),
+  ];
   const activeStoredCalls = (recentCallRows || []).filter((call: any) => {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
     const endedAt = call?.ended_at || call?.endedAt || call?.endTime || call?.ended || null;
@@ -4921,7 +4959,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-	      live_status_version: 'mightycall-contact-center-v4'
+	      live_status_version: 'mightycall-contact-center-v5'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
