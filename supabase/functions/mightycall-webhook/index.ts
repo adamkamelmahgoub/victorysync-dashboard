@@ -63,10 +63,13 @@ function extractCallCandidates(payload: any): JsonRecord[] {
 }
 
 function normalizeStatus(raw: any): string {
+  const eventType = String(raw?.EventType ?? raw?.eventType ?? raw?.event_name ?? "").trim();
   const status = String(
     raw?.status ??
       raw?.state ??
       raw?.callStatus ??
+      raw?.CallStatus ??
+      eventType ??
       raw?.eventType ??
       raw?.event_name ??
       raw?.type ??
@@ -76,6 +79,8 @@ function normalizeStatus(raw: any): string {
     .toLowerCase();
 
   if (!status) return "ringing";
+  if (status.includes("completed") || status.includes("complete")) return "completed";
+  if (status.includes("stopringing") || status.includes("stop_ringing")) return "no_answer";
   if (status.includes("answer") || status.includes("connect")) return "answered";
   if (status.includes("ring")) return "ringing";
   if (status.includes("progress") || status.includes("dial")) return "in_progress";
@@ -90,9 +95,15 @@ function normalizeStatus(raw: any): string {
 function normalizeDirection(raw: any): string | null {
   const direction = String(
     raw?.direction ??
+      raw?.Direction ??
       raw?.callDirection ??
       raw?.call_direction ??
+      raw?.Body?.Direction ??
+      raw?.body?.Direction ??
+      raw?.body?.direction ??
       raw?.metadata?.direction ??
+      raw?.EventType ??
+      raw?.eventType ??
       "",
   )
     .trim()
@@ -108,6 +119,11 @@ function extractAgentExtension(raw: any): string | null {
   return firstNonEmpty(
     raw?.agent_extension,
     raw?.agentExtension,
+    raw?.Extension,
+    raw?.extension,
+    raw?.Body?.Extension,
+    raw?.body?.Extension,
+    raw?.body?.extension,
     raw?.agent?.extension,
     raw?.user?.extension,
     raw?.member?.extension,
@@ -123,6 +139,11 @@ function extractFromNumber(raw: any): string | null {
   return firstNonEmpty(
     raw?.from_number,
     raw?.fromNumber,
+    raw?.From,
+    raw?.from,
+    raw?.Body?.From,
+    raw?.body?.From,
+    raw?.body?.from,
     raw?.callerNumber,
     raw?.caller_number,
     raw?.caller?.number,
@@ -140,6 +161,11 @@ function extractToNumber(raw: any): string | null {
   return firstNonEmpty(
     raw?.to_number,
     raw?.toNumber,
+    raw?.To,
+    raw?.to,
+    raw?.Body?.To,
+    raw?.body?.To,
+    raw?.body?.to,
     raw?.calleeNumber,
     raw?.callee_number,
     raw?.destination?.number,
@@ -160,7 +186,11 @@ function extractExternalId(raw: any, fromNumber: string | null, toNumber: string
       raw?.externalId,
       raw?.call_id,
       raw?.callId,
+      raw?.Id,
       raw?.id,
+      raw?.Body?.Id,
+      raw?.body?.Id,
+      raw?.body?.id,
       raw?.requestGuid,
       raw?.request_guid,
       raw?.guid,
@@ -175,6 +205,9 @@ function extractExternalId(raw: any, fromNumber: string | null, toNumber: string
 }
 
 function normalizeCallRecord(raw: JsonRecord) {
+  const eventType = String(raw?.EventType ?? raw?.eventType ?? "").trim();
+  const eventTypeLower = eventType.toLowerCase();
+  const eventTimestamp = raw?.Timestamp ?? raw?.timestamp ?? raw?.created_at ?? raw?.createdAt;
   const fromNumber = extractFromNumber(raw);
   const toNumber = extractToNumber(raw);
   const startedAt = asIso(
@@ -182,13 +215,33 @@ function normalizeCallRecord(raw: JsonRecord) {
       raw?.startedAt ??
       raw?.start_time ??
       raw?.startTime ??
+      raw?.DateTimeUtc ??
+      raw?.dateTimeUtc ??
+      raw?.Body?.DateTimeUtc ??
+      raw?.body?.DateTimeUtc ??
+      raw?.body?.dateTimeUtc ??
+      eventTimestamp ??
       raw?.created_at ??
       raw?.createdAt ??
       raw?.created ??
       raw?.timestamp,
   );
-  const answeredAt = asIso(raw?.answered_at ?? raw?.answeredAt ?? raw?.connectTime ?? raw?.connectedAt);
-  const endedAt = asIso(raw?.ended_at ?? raw?.endedAt ?? raw?.end_time ?? raw?.endTime ?? raw?.finished_at ?? raw?.finishedAt);
+  const answeredAt = asIso(
+    raw?.answered_at ??
+      raw?.answeredAt ??
+      raw?.connectTime ??
+      raw?.connectedAt ??
+      (eventTypeLower.includes("connected") ? eventTimestamp : null)
+  );
+  const endedAt = asIso(
+    raw?.ended_at ??
+      raw?.endedAt ??
+      raw?.end_time ??
+      raw?.endTime ??
+      raw?.finished_at ??
+      raw?.finishedAt ??
+      (eventTypeLower.includes("completed") || eventTypeLower.includes("stopringing") ? eventTimestamp : null)
+  );
   const direction = normalizeDirection(raw);
   const status = normalizeStatus(raw);
   const externalId = extractExternalId(raw, fromNumber, toNumber, startedAt);

@@ -1260,6 +1260,12 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 
 function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): boolean {
   if (!payload || typeof payload !== 'object') return false;
+  
+  // According to MightyCall docs, active-call signals come from:
+  // 1. currentCall object in status payload (modern API response)
+  // 2. Explicit onCall/inCall/isOnCall flags
+  // 3. Active status labels (Connected, Talking, etc.)
+  
   const currentCall =
     payload?.currentCall ||
     payload?.current_call ||
@@ -1267,6 +1273,8 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): bool
     payload?.status?.currentCall ||
     payload?.status?.current_call ||
     null;
+  
+  // Check if call has ended (terminate the signal early)
   const endedAt =
     currentCall?.endedAt ||
     currentCall?.ended_at ||
@@ -1298,14 +1306,26 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): bool
   const activeStatus = isLikelyActiveCallStatus(statusLabel);
   const terminalStatus = isLikelyTerminalOrIdleCallStatus(statusLabel);
 
+  // Explicit on-call flags take precedence
   const hasCallFlag =
     payload?.onCall || payload?.inCall || payload?.isOnCall ||
     currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
+  
+  // A non-empty currentCall object is strong evidence of an active call
   const hasCurrentCallPayload = !!(currentCall && typeof currentCall === 'object' && Object.keys(currentCall).length > 0);
 
+  // Priority 1: If there's an explicit on-call flag and it's recent, trust it immediately
+  if (hasCallFlag && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
+  
+  // Priority 2: If we have a currentCall payload (non-empty object) and it looks fresh, that's on-call
   if (hasCurrentCallPayload && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
+  
+  // Priority 3: If status is explicitly terminal/idle, reject even if other signals exist
   if (terminalStatus) return false;
-  if ((activeStatus || hasCallFlag) && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
+  
+  // Priority 4: If status is actively connected/talking and recent, it's on-call
+  if (activeStatus && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
+  
   return false;
 }
 
