@@ -37,7 +37,6 @@ import {
   fetchMightyCallExtensions, 
   fetchMightyCallProfileByExtension,
   fetchMightyCallLiveCallByExtension,
-  fetchMightyCallProfileStatusByExtension,
   fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
@@ -1515,6 +1514,21 @@ const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
+const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3500;
+
+async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timeout: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timeout = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): boolean {
   if (!payload || typeof payload !== 'object') return false;
@@ -1728,48 +1742,32 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     }
   } catch {}
 
-	  const token = await getMightyCallAccessToken(overrideCreds);
-	  const apiKeyOverride = overrideCreds?.clientId || undefined;
-		  const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
-		  const ownStatusPromise = fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null);
-	  const [liveExtensions, ownStatus] = await Promise.all([
-	    extensionsPromise,
-	    ownStatusPromise
-	  ]);
-  const liveCalls: any[] = [];
-  const profileRows = await Promise.all(
-    Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
-      .map(async (extension) => {
-        try {
-          const profile = await fetchMightyCallProfileByExtension(extension, token, apiKeyOverride);
-          return profile ? { extension, profile } : null;
-        } catch {
-          return null;
-        }
-      })
-  );
-	  const statusRows = await Promise.all(
-	    Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
-	      .map(async (extension) => {
-	        try {
-	          const status = await fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride);
-	          return status ? { extension, status } : null;
-	        } catch {
-	          return null;
-	        }
-	      })
-	  );
-  const apiLiveCallRows = await Promise.all(
-    Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
-      .map(async (extension) => {
+  const uniqueExtensions = Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]));
+  const mightyCallSnapshot = await withDeadline((async () => {
+    const token = await getMightyCallAccessToken(overrideCreds);
+    const apiKeyOverride = overrideCreds?.clientId || undefined;
+    const [liveExtensions, ownStatus, apiLiveCallRows] = await Promise.all([
+      fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []),
+      fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null),
+      Promise.all(uniqueExtensions.map(async (extension) => {
         try {
           const liveCall = await fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride);
           return liveCall ? { extension, liveCall } : null;
         } catch {
           return null;
         }
-      })
-  );
+      })),
+    ]);
+    return { liveExtensions, ownStatus, apiLiveCallRows };
+  })(), LIVE_STATUS_MIGHTYCALL_DEADLINE_MS, {
+    liveExtensions: [] as any[],
+    ownStatus: null as any,
+    apiLiveCallRows: [] as any[],
+  });
+  const { liveExtensions, ownStatus, apiLiveCallRows } = mightyCallSnapshot;
+	  const liveCalls: any[] = [];
+  const profileRows: any[] = [];
+  const statusRows: any[] = [];
 
   const orgPhoneDigits = new Set((phones || []).map((phone: any) => normalizePhoneDigits(phone?.number)).filter(Boolean) as string[]);
   const extensionMetaByExt = new Map<string, any>();
@@ -5214,7 +5212,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-		      live_status_version: 'mightycall-fast-api-poll-v10'
+		      live_status_version: 'mightycall-deadline-fail-open-v11'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
