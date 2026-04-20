@@ -1,4 +1,4 @@
-import React, { FC, useEffect, useMemo, useState } from 'react';
+import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getLiveAgentStatus } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
@@ -32,21 +32,25 @@ const LiveStatusPage: FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const liveRequestSeq = useRef(0);
 
   const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
 
   const load = async () => {
     if (!user?.id) return;
+    const requestSeq = ++liveRequestSeq.current;
     try {
       setLoading(true);
       setError(null);
       const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
+      if (requestSeq !== liveRequestSeq.current) return;
       setItems((json.items || []) as LiveAgentStatus[]);
       setRefreshedAt(json.refreshed_at || new Date().toISOString());
     } catch (e: any) {
+      if (requestSeq !== liveRequestSeq.current) return;
       setError(e?.message || 'Failed to load live agent status');
     } finally {
-      setLoading(false);
+      if (requestSeq === liveRequestSeq.current) setLoading(false);
     }
   };
 

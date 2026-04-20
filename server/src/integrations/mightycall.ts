@@ -652,6 +652,233 @@ function collectExtensionRows(list: any[]): Array<{ id: string | null; extension
   return Array.from(rows.values());
 }
 
+function parseMightyCallTimestampMs(value: any): number | null {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function extractMightyCallStartedAt(call: any): string | null {
+  return (
+    call?.dateTimeUtc ||
+    call?.startedAt ||
+    call?.started_at ||
+    call?.startTime ||
+    call?.start_time ||
+    call?.createdAt ||
+    call?.created_at ||
+    call?.created ||
+    call?.time ||
+    null
+  );
+}
+
+function extractMightyCallEndedAt(call: any): string | null {
+  return (
+    call?.endedAt ||
+    call?.ended_at ||
+    call?.endTime ||
+    call?.end_time ||
+    call?.completedAt ||
+    call?.completed_at ||
+    call?.finishedAt ||
+    call?.finished_at ||
+    call?.ended ||
+    null
+  );
+}
+
+function parseMightyCallDurationSeconds(value: any): number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const parts = raw.split(':').map((part) => Number(part));
+  if (parts.length >= 2 && parts.every((part) => Number.isFinite(part))) {
+    return parts.reduce((total, part) => (total * 60) + part, 0);
+  }
+  return null;
+}
+
+function extractMightyCallDurationSeconds(call: any): number | null {
+  return parseMightyCallDurationSeconds(
+    call?.duration_seconds ??
+    call?.durationSeconds ??
+    call?.duration ??
+    call?.callDuration ??
+    call?.talkTime ??
+    call?.talk_time
+  );
+}
+
+function extractMightyCallStatusCandidates(call: any): string[] {
+  const values = [
+    call?.status,
+    call?.state,
+    call?.callStatus,
+    call?.call_status,
+    call?.availability,
+    call?.presence,
+    call?.result,
+    call?.caller?.status,
+    call?.caller?.state,
+    call?.agent?.status,
+    call?.agent?.state,
+    call?.user?.status,
+    call?.user?.state,
+  ];
+  for (const row of Array.isArray(call?.called) ? call.called : []) {
+    values.push(row?.status, row?.state, row?.callStatus, row?.call_status);
+  }
+  for (const row of Array.isArray(call?.participants) ? call.participants : []) {
+    values.push(row?.status, row?.state, row?.callStatus, row?.call_status);
+  }
+  return values.map((value) => String(value || '').trim()).filter(Boolean);
+}
+
+function isMightyCallTerminalStatus(status: any): boolean {
+  const normalized = String(status || '').toLowerCase().trim();
+  if (!normalized) return false;
+  return [
+    'completed',
+    'ended',
+    'end',
+    'missed',
+    'failed',
+    'canceled',
+    'cancelled',
+    'voicemail',
+    'noanswer',
+    'no_answer',
+    'abandoned',
+    'closed',
+    'done',
+    'idle',
+    'available',
+    'offline',
+    'disconnected',
+    'hangup',
+    'hang_up',
+    'wrapup',
+    'wrap_up',
+    'after_call',
+  ].some((token) => normalized.includes(token));
+}
+
+function isMightyCallActiveStatus(status: any): boolean {
+  const normalized = String(status || '').toLowerCase().trim();
+  if (!normalized || isMightyCallTerminalStatus(normalized)) return false;
+  return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call'].some((token) => normalized.includes(token));
+}
+
+function participantHasConnectedSignal(participant: any): boolean {
+  if (!participant || typeof participant !== 'object') return false;
+  if (participant.isConnected === true || participant.connected === true || participant.is_connected === true) return true;
+  return extractMightyCallStatusCandidates(participant).some((status) => isMightyCallActiveStatus(status));
+}
+
+function callHasConnectedParticipantForExtension(call: any, normalizedExtension: string): boolean {
+  const participants = [
+    call?.caller,
+    call?.agent,
+    call?.user,
+    ...(Array.isArray(call?.called) ? call.called : []),
+    ...(Array.isArray(call?.participants) ? call.participants : []),
+  ].filter(Boolean);
+
+  return participants.some((participant) => (
+    collectExtensionCandidatesFromPayload(participant).includes(normalizedExtension) &&
+    participantHasConnectedSignal(participant)
+  ));
+}
+
+function isMightyCallLiveCallForExtension(call: any, normalizedExtension: string, nowMs = Date.now()): boolean {
+  if (!call || typeof call !== 'object') return false;
+  if (!collectExtensionCandidatesFromPayload(call).includes(normalizedExtension)) return false;
+
+  const statuses = extractMightyCallStatusCandidates(call);
+  if (statuses.some((status) => isMightyCallTerminalStatus(status))) return false;
+  if (String(extractMightyCallEndedAt(call) || '').trim()) return false;
+
+  const startedAt = extractMightyCallStartedAt(call);
+  const startedMs = parseMightyCallTimestampMs(startedAt);
+  const ageMs = startedMs == null ? null : nowMs - startedMs;
+  if (ageMs != null && (ageMs < -(5 * 60 * 1000) || ageMs > (6 * 60 * 60 * 1000))) return false;
+
+  if (callHasConnectedParticipantForExtension(call, normalizedExtension)) return true;
+
+  const hasActiveStatus = statuses.some((status) => isMightyCallActiveStatus(status));
+  if (!hasActiveStatus) return false;
+
+  const durationSeconds = extractMightyCallDurationSeconds(call);
+  if (durationSeconds != null && durationSeconds > 0 && ageMs != null && ageMs > (15 * 60 * 1000)) {
+    return false;
+  }
+
+  return true;
+}
+
+export async function fetchMightyCallLiveCallByExtension(extension: string, accessToken: string, apiKeyOverride?: string) {
+  const normalized = normalizeExtensionValue(extension);
+  if (!normalized) return null;
+
+  const now = Date.now();
+  const startUtc = new Date(now - (6 * 60 * 60 * 1000)).toISOString();
+  const endUtc = new Date(now + (5 * 60 * 1000)).toISOString();
+  const batches: any[][] = [];
+
+  for (const callFilter of ['Connected', 'InProgress', 'Ringing']) {
+    const rows = await fetchMightyCallCalls(accessToken, {
+      extension: normalized,
+      callFilter,
+      startUtc,
+      endUtc,
+      pageSize: '25',
+      skip: '0',
+    }, apiKeyOverride).catch(() => []);
+    if (Array.isArray(rows) && rows.length > 0) batches.push(rows);
+  }
+
+  const fallbackRows = await fetchMightyCallCalls(accessToken, {
+    extension: normalized,
+    startUtc: new Date(now - (15 * 60 * 1000)).toISOString(),
+    endUtc,
+    pageSize: '25',
+    skip: '0',
+  }, apiKeyOverride).catch(() => []);
+  if (Array.isArray(fallbackRows) && fallbackRows.length > 0) batches.push(fallbackRows);
+
+  const seen = new Set<string>();
+  const candidates = batches.flat().filter((call) => {
+    const key = String(call?.id || call?.callId || call?.requestGuid || `${extractMightyCallStartedAt(call) || ''}:${JSON.stringify(call?.called || '')}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return isMightyCallLiveCallForExtension(call, normalized, now);
+  });
+
+  candidates.sort((a, b) => {
+    const bTime = parseMightyCallTimestampMs(extractMightyCallStartedAt(b)) || 0;
+    const aTime = parseMightyCallTimestampMs(extractMightyCallStartedAt(a)) || 0;
+    return bTime - aTime;
+  });
+
+  const currentCall = candidates[0] || null;
+  return currentCall
+    ? {
+        extension: normalized,
+        status: extractMightyCallStatusCandidates(currentCall).find((status) => isMightyCallActiveStatus(status)) || 'Connected',
+        onCall: true,
+        currentCall,
+        sourceEndpoint: '/calls?extension&callFilter=Connected',
+      }
+    : null;
+}
+
 export async function fetchMightyCallProfileByExtension(extension: string, accessToken?: string, apiKeyOverride?: string) {
   const normalized = normalizeExtensionValue(extension);
   if (!normalized) return null;
