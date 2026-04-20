@@ -1728,41 +1728,15 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     }
   } catch {}
 
-  const token = await getMightyCallAccessToken(overrideCreds);
-  const apiKeyOverride = overrideCreds?.clientId || undefined;
-  const now = Date.now();
-	  const callsPromise = fetchMightyCallCalls(token, {
-	    startUtc: new Date(now - LIVE_CALL_LOOKBACK_MS).toISOString(),
-	    endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
-    pageSize: '500',
-    skip: '0'
-  }, apiKeyOverride).catch(() => []);
-	  const journalPromise = fetchMightyCallJournalRequests(token, {
-	    from: new Date(now - LIVE_CALL_LOOKBACK_MS).toISOString(),
-	    to: new Date(now + (30 * 60 * 1000)).toISOString(),
-	    type: 'Call',
-	    pageSize: '200',
-	    page: '1'
-	  }, apiKeyOverride).catch(() => []);
-  const contactCenterPromise = fetchMightyCallContactCenterCommunications(token, {
-    from: new Date(now - LIVE_CALL_LOOKBACK_MS).toISOString(),
-    to: new Date(now + (30 * 60 * 1000)).toISOString(),
-    type: 'Call',
-    state: 'Connected',
-    origin: 'All',
-    showUsers: 'true',
-    pageSize: '200',
-    page: '1'
-  }, apiKeyOverride).catch(() => []);
-	  const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
-	  const ownStatusPromise = fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null);
-  const [liveCalls, liveJournal, contactCenterCommunications, liveExtensions, ownStatus] = await Promise.all([
-    callsPromise,
-    journalPromise,
-    contactCenterPromise,
-    extensionsPromise,
-    ownStatusPromise
-  ]);
+	  const token = await getMightyCallAccessToken(overrideCreds);
+	  const apiKeyOverride = overrideCreds?.clientId || undefined;
+		  const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
+		  const ownStatusPromise = fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null);
+	  const [liveExtensions, ownStatus] = await Promise.all([
+	    extensionsPromise,
+	    ownStatusPromise
+	  ]);
+  const liveCalls: any[] = [];
   const profileRows = await Promise.all(
     Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
       .map(async (extension) => {
@@ -5240,7 +5214,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-		      live_status_version: 'mightycall-api-poll-v9'
+		      live_status_version: 'mightycall-fast-api-poll-v10'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));

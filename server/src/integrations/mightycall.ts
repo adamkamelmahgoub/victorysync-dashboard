@@ -193,9 +193,9 @@ export async function fetchMightyCallPhoneNumbers(accessToken: string) {
 
 export async function fetchMightyCallCalls(accessToken: string, filters?: any, apiKeyOverride?: string) {
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
-  const endpoints = ['/calls', '/api/calls', '/v4/calls', '/api/calls/list', '/journal/calls', '/call-history', '/callhistory'];
+  const endpoints = filters?.fast ? ['/calls'] : ['/calls', '/api/calls', '/v4/calls', '/api/calls/list', '/journal/calls', '/call-history', '/callhistory'];
   const pageSize = Math.min(Math.max(parseInt(String(filters?.pageSize || '200'), 10) || 200, 1), 1000);
-  const maxPages = 50;
+  const maxPages = Math.min(Math.max(parseInt(String(filters?.maxPages || '50'), 10) || 50, 1), 50);
   const all: any[] = [];
   const seen = new Set<string>();
 
@@ -260,7 +260,7 @@ export async function fetchMightyCallCalls(accessToken: string, filters?: any, a
         }
       }
 
-      if (success && all.length > 0) return all;
+      if (success && (all.length > 0 || filters?.returnOnFirstSuccess)) return all;
     }
   }
   return all;
@@ -828,33 +828,21 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
   if (!normalized) return null;
 
   const now = Date.now();
-  const startUtc = new Date(now - (6 * 60 * 60 * 1000)).toISOString();
+  const startUtc = new Date(now - (20 * 60 * 1000)).toISOString();
   const endUtc = new Date(now + (5 * 60 * 1000)).toISOString();
-  const batches: any[][] = [];
-
-  for (const callFilter of ['Connected', 'InProgress', 'Ringing']) {
-    const rows = await fetchMightyCallCalls(accessToken, {
-      extension: normalized,
-      callFilter,
-      startUtc,
-      endUtc,
-      pageSize: '25',
-      skip: '0',
-    }, apiKeyOverride).catch(() => []);
-    if (Array.isArray(rows) && rows.length > 0) batches.push(rows);
-  }
-
-  const fallbackRows = await fetchMightyCallCalls(accessToken, {
+  const rows = await fetchMightyCallCalls(accessToken, {
     extension: normalized,
-    startUtc: new Date(now - (15 * 60 * 1000)).toISOString(),
+    startUtc,
     endUtc,
     pageSize: '25',
+    maxPages: '1',
     skip: '0',
+    fast: true,
+    returnOnFirstSuccess: true,
   }, apiKeyOverride).catch(() => []);
-  if (Array.isArray(fallbackRows) && fallbackRows.length > 0) batches.push(fallbackRows);
 
   const seen = new Set<string>();
-  const candidates = batches.flat().filter((call) => {
+  const candidates = (Array.isArray(rows) ? rows : []).filter((call) => {
     const key = String(call?.id || call?.callId || call?.requestGuid || `${extractMightyCallStartedAt(call) || ''}:${JSON.stringify(call?.called || '')}`);
     if (seen.has(key)) return false;
     seen.add(key);
@@ -991,31 +979,6 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
       }
       if (profileStatus) break;
     }
-  }
-
-  const extensionCalls = await fetchMightyCallCalls(accessToken, {
-    extension: normalized,
-    startUtc: new Date(Date.now() - (72 * 60 * 60 * 1000)).toISOString(),
-    endUtc: new Date(Date.now() + (5 * 60 * 1000)).toISOString(),
-    pageSize: '50',
-    skip: '0',
-  }, apiKeyOverride).catch(() => []);
-
-  const activeCall = (Array.isArray(extensionCalls) ? extensionCalls : []).find((call: any) => {
-    const status = String(call?.status || call?.state || call?.callStatus || '').toLowerCase();
-    const endedAt = call?.endedAt || call?.ended_at || call?.endTime || call?.ended || null;
-    if (String(endedAt || '').trim()) return false;
-    return ['connected', 'answer', 'answered', 'active', 'progress', 'talk', 'hold', 'ring'].some((token) => status.includes(token));
-  });
-
-  if (activeCall) {
-    return {
-      extension: normalized,
-      status: activeCall?.callStatus || activeCall?.status || activeCall?.state || 'Connected',
-      onCall: true,
-      currentCall: activeCall,
-      sourceEndpoint: '/calls?extension',
-    };
   }
 
   return profileStatus;
