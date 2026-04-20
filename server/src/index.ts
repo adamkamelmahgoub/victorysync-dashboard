@@ -780,6 +780,254 @@ function collectExtensionCandidates(input: any, depth = 0): string[] {
   return Array.from(found);
 }
 
+function firstWebhookValue(...values: any[]): string | null {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+function webhookIso(value: any): string | null {
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function webhookSeconds(value: any): number | null {
+  if (value == null || value === '') return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return Math.max(0, Math.round(numeric));
+  return null;
+}
+
+function extractMightyCallWebhookEvents(payload: any): any[] {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload.filter(Boolean);
+  const containers = [
+    payload?.calls,
+    payload?.callLogs,
+    payload?.records,
+    payload?.items,
+    payload?.events,
+    payload?.data,
+    payload?.payload,
+    payload?.requests,
+  ];
+  for (const container of containers) {
+    if (Array.isArray(container)) return container.filter(Boolean);
+    if (Array.isArray(container?.items)) return container.items.filter(Boolean);
+    if (Array.isArray(container?.data)) return container.data.filter(Boolean);
+  }
+  return [payload];
+}
+
+function normalizeMightyCallWebhookStatus(raw: any): string {
+  const eventType = String(raw?.EventType ?? raw?.eventType ?? raw?.event_name ?? '').trim();
+  const status = String(
+    raw?.status ??
+      raw?.state ??
+      raw?.callStatus ??
+      raw?.CallStatus ??
+      eventType ??
+      raw?.type ??
+      '',
+  ).trim().toLowerCase();
+
+  if (!status) return 'ringing';
+  if (status.includes('completed') || status.includes('complete') || status.includes('hang')) return 'completed';
+  if (status.includes('stopringing') || status.includes('stop_ringing')) return 'no_answer';
+  if (status.includes('answer') || status.includes('connect')) return 'answered';
+  if (status.includes('ring')) return 'ringing';
+  if (status.includes('progress') || status.includes('dial')) return 'in_progress';
+  if (status.includes('miss')) return 'missed';
+  if (status.includes('fail')) return 'failed';
+  if (status.includes('cancel')) return 'cancelled';
+  if (status.includes('voicemail')) return 'voicemail';
+  return status;
+}
+
+function normalizeMightyCallWebhookCall(raw: any) {
+  const eventType = String(raw?.EventType ?? raw?.eventType ?? '').trim();
+  const eventTypeLower = eventType.toLowerCase();
+  const timestamp = raw?.Timestamp ?? raw?.timestamp ?? raw?.created_at ?? raw?.createdAt ?? new Date().toISOString();
+  const fromNumber = firstWebhookValue(
+    raw?.from_number,
+    raw?.fromNumber,
+    raw?.From,
+    raw?.from,
+    raw?.Body?.From,
+    raw?.body?.From,
+    raw?.body?.from,
+    raw?.callerNumber,
+    raw?.caller_number,
+    raw?.caller?.number,
+    raw?.source?.number,
+    raw?.phone,
+    raw?.number,
+    raw?.metadata?.from_number,
+  );
+  const toNumber = firstWebhookValue(
+    raw?.to_number,
+    raw?.toNumber,
+    raw?.To,
+    raw?.to,
+    raw?.Body?.To,
+    raw?.body?.To,
+    raw?.body?.to,
+    raw?.calleeNumber,
+    raw?.callee_number,
+    raw?.destination?.number,
+    raw?.line?.number,
+    raw?.did,
+    raw?.dnis,
+    raw?.metadata?.to_number,
+  );
+  const startedAt = webhookIso(
+    raw?.started_at ??
+      raw?.startedAt ??
+      raw?.start_time ??
+      raw?.startTime ??
+      raw?.DateTimeUtc ??
+      raw?.dateTimeUtc ??
+      raw?.Body?.DateTimeUtc ??
+      raw?.body?.DateTimeUtc ??
+      raw?.body?.dateTimeUtc ??
+      timestamp,
+  );
+  const answeredAt = webhookIso(
+    raw?.answered_at ??
+      raw?.answeredAt ??
+      raw?.connectTime ??
+      raw?.connectedAt ??
+      (eventTypeLower.includes('connected') ? timestamp : null),
+  );
+  const endedAt = webhookIso(
+    raw?.ended_at ??
+      raw?.endedAt ??
+      raw?.end_time ??
+      raw?.endTime ??
+      raw?.finished_at ??
+      raw?.finishedAt ??
+      (eventTypeLower.includes('completed') || eventTypeLower.includes('stopringing') ? timestamp : null),
+  );
+  const externalId = firstWebhookValue(
+    raw?.external_id,
+    raw?.externalId,
+    raw?.call_id,
+    raw?.callId,
+    raw?.Id,
+    raw?.id,
+    raw?.Body?.Id,
+    raw?.body?.Id,
+    raw?.body?.id,
+    raw?.requestGuid,
+    raw?.request_guid,
+    raw?.guid,
+    raw?.uuid,
+    raw?.sessionId,
+    raw?.session_id,
+    raw?.metadata?.external_id,
+    raw?.metadata?.call_id,
+  ) || [normalizePhoneDigits(fromNumber), normalizePhoneDigits(toNumber), startedAt || timestamp].join(':');
+  const directionText = String(raw?.direction ?? raw?.Direction ?? raw?.Body?.Direction ?? raw?.body?.Direction ?? eventType).toLowerCase();
+  const direction = directionText.includes('out') ? 'outbound' : directionText.includes('in') ? 'inbound' : null;
+
+  return {
+    external_id: externalId,
+    from_number: fromNumber,
+    to_number: toNumber,
+    started_at: startedAt,
+    answered_at: answeredAt,
+    ended_at: endedAt,
+    duration_seconds: webhookSeconds(raw?.duration_seconds ?? raw?.durationSeconds ?? raw?.duration),
+    status: normalizeMightyCallWebhookStatus(raw),
+    direction,
+    agent_extension: firstWebhookValue(
+      raw?.agent_extension,
+      raw?.agentExtension,
+      raw?.Extension,
+      raw?.extension,
+      raw?.Body?.Extension,
+      raw?.body?.Extension,
+      raw?.body?.extension,
+      raw?.agent?.extension,
+      raw?.user?.extension,
+      raw?.metadata?.agent_extension,
+    ),
+    payload: raw,
+  };
+}
+
+async function resolveMightyCallWebhookOrgId(call: ReturnType<typeof normalizeMightyCallWebhookCall>): Promise<string | null> {
+  const explicitOrgId = firstWebhookValue(
+    call.payload?.org_id,
+    call.payload?.orgId,
+    call.payload?.organization_id,
+    call.payload?.organizationId,
+    call.payload?.metadata?.org_id,
+    call.payload?.metadata?.orgId,
+  );
+  if (explicitOrgId) return explicitOrgId;
+
+  const digitsToMatch = [normalizePhoneDigits(call.to_number), normalizePhoneDigits(call.from_number)].filter(Boolean);
+  if (digitsToMatch.length === 0) return null;
+
+  const { data, error } = await supabaseAdmin.from('phone_numbers').select('*').limit(5000);
+  if (error) {
+    console.error('[mightycall webhook] phone lookup failed:', fmtErr(error));
+    return null;
+  }
+
+  for (const row of data || []) {
+    const rowDigits = normalizePhoneDigits(row?.number ?? row?.phone_number ?? row?.e164 ?? row?.metadata?.number);
+    if (rowDigits && digitsToMatch.includes(rowDigits) && row?.org_id) return String(row.org_id);
+  }
+  return null;
+}
+
+async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMightyCallWebhookCall>) {
+  const orgId = await resolveMightyCallWebhookOrgId(call);
+  let existing: any = null;
+  if (orgId) {
+    const { data } = await supabaseAdmin
+      .from('calls')
+      .select('id, started_at, agent_extension, metadata')
+      .eq('org_id', orgId)
+      .eq('external_id', call.external_id)
+      .maybeSingle();
+    existing = data || null;
+  }
+
+  const metadata = existing?.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
+  const row: any = {
+    org_id: orgId,
+    external_id: call.external_id,
+    from_number: call.from_number,
+    to_number: call.to_number,
+    started_at: call.started_at || existing?.started_at || new Date().toISOString(),
+    answered_at: call.answered_at,
+    ended_at: call.ended_at,
+    duration_seconds: call.duration_seconds,
+    status: call.status,
+    agent_extension: normalizeExtension(call.agent_extension) || existing?.agent_extension || null,
+    metadata: {
+      ...metadata,
+      source: 'mightycall_webhook',
+      event_type: call.payload?.EventType ?? call.payload?.eventType ?? null,
+      raw: call.payload,
+    },
+  };
+
+  const query = orgId
+    ? supabaseAdmin.from('calls').upsert(row, { onConflict: 'org_id,external_id' })
+    : supabaseAdmin.from('calls').insert(row);
+  const { error } = await query;
+  if (error) throw error;
+  return { org_id: orgId, external_id: call.external_id, status: call.status };
+}
+
 type SyncJobRef = { id: string; table: 'integration_sync_jobs' | 'mightycall_sync_runs' } | null;
 
 function normalizeSyncJobRow(row: any, table: 'integration_sync_jobs' | 'mightycall_sync_runs') {
@@ -2133,6 +2381,22 @@ app.get('/api/admin/backups/export', async (req, res) => {
 app.post('/api/webhooks/mightycall', async (req, res) => {
   try {
     const payload = req.body || {};
+    const events = extractMightyCallWebhookEvents(payload);
+    const results: Array<{ org_id: string | null; external_id: string; status: string }> = [];
+
+    for (const event of events) {
+      const call = normalizeMightyCallWebhookCall(event);
+      if (!call.external_id || (!call.from_number && !call.to_number)) continue;
+      try {
+        results.push(await upsertMightyCallWebhookCall(call));
+      } catch (error) {
+        console.error('[mightycall webhook] call upsert failed:', fmtErr(error), {
+          external_id: call.external_id,
+          status: call.status,
+        });
+      }
+    }
+
     await writeAuditLog({
       actor_id: 'mightycall:webhook',
       action: 'mightycall.webhook.received',
@@ -2148,11 +2412,11 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
         status: 'received',
         started_at: new Date().toISOString(),
         completed_at: new Date().toISOString(),
-        records_processed: 1,
-        metadata: payload,
+        records_processed: results.length,
+        metadata: { payload, results },
       });
     } catch {}
-    res.json({ ok: true });
+    res.json({ ok: true, processed: results.length, received: events.length, results });
   } catch (err: any) {
     console.error('mightycall_webhook_failed:', fmtErr(err));
     res.status(500).json({ error: 'mightycall_webhook_failed', detail: fmtErr(err) });
@@ -4972,7 +5236,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-	      live_status_version: 'mightycall-contact-center-v6'
+	      live_status_version: 'mightycall-webhook-state-v7'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
