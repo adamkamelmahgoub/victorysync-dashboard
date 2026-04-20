@@ -1090,8 +1090,10 @@ function extractLiveStatusLabel(raw: any): string | null {
   const seen = new Set<string>();
   const ordered: string[] = [];
   const add = (value: any) => {
-    const next = String(value || '').trim();
+    if (value == null || typeof value === 'object') return;
+    const next = String(value).trim();
     if (!next) return;
+    if (next === '[object Object]' || next === '[object Array]') return;
     const normalized = next.toLowerCase();
     if (seen.has(normalized)) return;
     seen.add(normalized);
@@ -1267,13 +1269,17 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): bool
   // 2. Explicit onCall/inCall/isOnCall flags
   // 3. Active status labels (Connected, Talking, etc.)
   
-  const currentCall =
-    payload?.currentCall ||
-    payload?.current_call ||
-    payload?.call ||
-    payload?.status?.currentCall ||
-    payload?.status?.current_call ||
-    null;
+	  const currentCall =
+	    payload?.currentCall ||
+	    payload?.current_call ||
+	    payload?.call ||
+	    payload?.status?.currentCall ||
+	    payload?.status?.current_call ||
+	    payload?.currentStatus?.currentCall ||
+	    payload?.currentStatus?.current_call ||
+	    payload?.current_status?.currentCall ||
+	    payload?.current_status?.current_call ||
+	    null;
   
   // Check if call has ended (terminate the signal early)
   const endedAt =
@@ -1308,9 +1314,12 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): bool
   const terminalStatus = isLikelyTerminalOrIdleCallStatus(statusLabel);
 
   // Explicit on-call flags take precedence
-  const hasCallFlag =
-    payload?.onCall || payload?.inCall || payload?.isOnCall ||
-    currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
+	  const hasCallFlag =
+	    payload?.onCall || payload?.inCall || payload?.isOnCall ||
+	    payload?.status?.onCall || payload?.status?.inCall || payload?.status?.isOnCall ||
+	    payload?.currentStatus?.onCall || payload?.currentStatus?.inCall || payload?.currentStatus?.isOnCall ||
+	    payload?.current_status?.onCall || payload?.current_status?.inCall || payload?.current_status?.isOnCall ||
+	    currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
   
   // A non-empty currentCall object is strong evidence of an active call
   const hasCurrentCallPayload = !!(currentCall && typeof currentCall === 'object' && Object.keys(currentCall).length > 0);
@@ -1491,18 +1500,25 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     if (ext && row?.status) {
       const existing = extensionMetaByExt.get(ext) || {};
       const existingMetadata = existing?.metadata || existing;
-      const liveStatus = row.status;
-      const liveStatusValue =
-        liveStatus?.status ||
-        liveStatus?.state ||
-        liveStatus?.presenceStatus ||
-        liveStatus?.availability ||
-        liveStatus?.presence ||
-        null;
-      const liveCurrentCall =
-        liveStatus?.currentCall ||
-        liveStatus?.current_call ||
-        null;
+	    const liveStatus = row.status;
+	      const liveStatusValue =
+	        extractLiveStatusLabel(liveStatus?.status) ||
+	        extractLiveStatusLabel(liveStatus?.state) ||
+	        extractLiveStatusLabel(liveStatus?.presenceStatus) ||
+	        extractLiveStatusLabel(liveStatus?.availability) ||
+	        extractLiveStatusLabel(liveStatus?.presence) ||
+	        extractLiveStatusLabel(liveStatus) ||
+	        null;
+	      const liveCurrentCall =
+	        liveStatus?.currentCall ||
+	        liveStatus?.current_call ||
+	        liveStatus?.status?.currentCall ||
+	        liveStatus?.status?.current_call ||
+	        liveStatus?.currentStatus?.currentCall ||
+	        liveStatus?.currentStatus?.current_call ||
+	        liveStatus?.current_status?.currentCall ||
+	        liveStatus?.current_status?.current_call ||
+	        null;
       extensionMetaByExt.set(ext, {
         ...existing,
         extension: ext,
@@ -1514,7 +1530,24 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           status: liveStatusValue,
           currentCall: liveCurrentCall,
           current_call: liveCurrentCall,
-          onCall: (liveStatus?.onCall ?? liveStatus?.inCall ?? liveStatus?.isOnCall ?? liveCurrentCall?.onCall ?? liveCurrentCall?.inCall ?? liveCurrentCall?.isOnCall ?? false),
+	          onCall: (
+	            liveStatus?.onCall ??
+	            liveStatus?.inCall ??
+	            liveStatus?.isOnCall ??
+	            liveStatus?.status?.onCall ??
+	            liveStatus?.status?.inCall ??
+	            liveStatus?.status?.isOnCall ??
+	            liveStatus?.currentStatus?.onCall ??
+	            liveStatus?.currentStatus?.inCall ??
+	            liveStatus?.currentStatus?.isOnCall ??
+	            liveStatus?.current_status?.onCall ??
+	            liveStatus?.current_status?.inCall ??
+	            liveStatus?.current_status?.isOnCall ??
+	            liveCurrentCall?.onCall ??
+	            liveCurrentCall?.inCall ??
+	            liveCurrentCall?.isOnCall ??
+	            false
+	          ),
           presence: liveStatus?.presence || null,
           presenceStatus: liveStatus?.presenceStatus || null,
           availability: liveStatus?.availability || null,
