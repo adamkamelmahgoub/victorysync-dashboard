@@ -36,6 +36,7 @@ import {
   fetchMightyCallPhoneNumbers, 
   fetchMightyCallExtensions, 
   fetchMightyCallProfileByExtension,
+  fetchMightyCallProfileStatusByExtension,
   fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
@@ -1450,13 +1451,8 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   const statusRows = await Promise.all(
     Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
       .map(async (extension) => {
-        if (!apiKeyOverride) return null;
         try {
-          const extensionToken = await getMightyCallAccessToken({
-            clientId: apiKeyOverride,
-            clientSecret: extension,
-          });
-          const status = await fetchMightyCallOwnStatus(extensionToken, apiKeyOverride);
+          const status = await fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride);
           return status ? { extension, status } : null;
         } catch {
           return null;

@@ -227,6 +227,9 @@ export async function fetchMightyCallCalls(accessToken: string, filters?: any, a
           params.append('skip', String(skip));
           params.append('offset', String(skip));
           params.append('page', String(page));
+          if (filters?.extension) params.append('extension', String(filters.extension));
+          if (filters?.callFilter) params.append('callFilter', String(filters.callFilter));
+          if (filters?.customFilter) params.append('customFilter', String(filters.customFilter));
 
           const full = `${url}?${params.toString()}`;
           const r = await tryFetchJson(full, accessToken, apiKeyOverride);
@@ -640,6 +643,87 @@ export async function fetchMightyCallOwnStatus(accessToken: string, apiKeyOverri
     }
   }
   return null;
+}
+
+export async function fetchMightyCallProfileStatusByExtension(extension: string, accessToken: string, apiKeyOverride?: string) {
+  const normalized = normalizeExtensionValue(extension);
+  if (!normalized) return null;
+
+  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  let profileStatus: any = null;
+  const queryEndpoints = [
+    '/profile/status',
+    '/profile/get-status',
+    '/status',
+    '/user/status',
+    '/users/status',
+    '/extensions/status',
+  ];
+  const pathEndpoints = [
+    `/profile/${encodeURIComponent(normalized)}/status`,
+    `/users/${encodeURIComponent(normalized)}/status`,
+    `/extensions/${encodeURIComponent(normalized)}/status`,
+    `/agents/${encodeURIComponent(normalized)}/status`,
+  ];
+
+  for (const ep of queryEndpoints) {
+    for (const url of buildUrlVariants(base, ep)) {
+      const params = new URLSearchParams();
+      params.set('extension', normalized);
+      params.set('ext', normalized);
+      params.set('extensionNumber', normalized);
+      const r = await tryFetchJson(`${url}?${params.toString()}`, accessToken, apiKeyOverride);
+      if (!r.ok || !r.body) continue;
+      const body: any = r.body;
+      const data = body?.data ?? body;
+      if (!data || typeof data !== 'object') continue;
+      profileStatus = profileStatus || { ...data, extension: data?.extension || normalized, sourceEndpoint: ep };
+      break;
+    }
+    if (profileStatus) break;
+  }
+
+  if (!profileStatus) {
+    for (const ep of pathEndpoints) {
+      for (const url of buildUrlVariants(base, ep)) {
+        const r = await tryFetchJson(url, accessToken, apiKeyOverride);
+        if (!r.ok || !r.body) continue;
+        const body: any = r.body;
+        const data = body?.data ?? body;
+        if (!data || typeof data !== 'object') continue;
+        profileStatus = { ...data, extension: data?.extension || normalized, sourceEndpoint: ep };
+        break;
+      }
+      if (profileStatus) break;
+    }
+  }
+
+  const extensionCalls = await fetchMightyCallCalls(accessToken, {
+    extension: normalized,
+    startUtc: new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString(),
+    endUtc: new Date(Date.now() + (5 * 60 * 1000)).toISOString(),
+    pageSize: '50',
+    skip: '0',
+  }, apiKeyOverride).catch(() => []);
+
+  const activeCall = (Array.isArray(extensionCalls) ? extensionCalls : []).find((call: any) => {
+    const status = String(call?.status || call?.state || call?.callStatus || '').toLowerCase();
+    const endedAt = call?.endedAt || call?.ended_at || call?.endTime || call?.ended || null;
+    if (String(endedAt || '').trim()) return false;
+    return ['connected', 'answer', 'answered', 'active', 'progress', 'talk', 'hold', 'ring'].some((token) => status.includes(token));
+  });
+
+  if (activeCall) {
+    return {
+      extension: normalized,
+      status: activeCall?.callStatus || activeCall?.status || activeCall?.state || 'Connected',
+      onCall: true,
+      currentCall: activeCall,
+      sourceEndpoint: '/calls?extension',
+    };
+  }
+
+  return profileStatus;
 }
 
 // Lightweight placeholders for extensions/voicemails
