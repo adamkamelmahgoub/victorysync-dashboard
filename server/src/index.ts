@@ -1351,8 +1351,8 @@ function isLikelyLiveJournalRequest(request: any): boolean {
     request?.recording?.availability,
     request?.status,
   ];
-  if (statusCandidates.some((candidate) => isLikelyTerminalOrIdleCallStatus(candidate))) return false;
   if (statusCandidates.some((candidate) => isLikelyActiveCallStatus(candidate))) return true;
+  if (statusCandidates.some((candidate) => isLikelyTerminalOrIdleCallStatus(candidate))) return false;
   const workflowState = String(request?.wfstate?.state || '').toLowerCase().trim();
   const requestState = String(request?.state || '').toLowerCase().trim();
   const hasResponse = !!String(request?.respondedAt || request?.responded_at || '').trim();
