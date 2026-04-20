@@ -36,7 +36,7 @@ import {
   fetchMightyCallPhoneNumbers, 
   fetchMightyCallExtensions, 
   fetchMightyCallProfileByExtension,
-  fetchMightyCallLiveCallByExtension,
+  fetchMightyCallProfileStatusByExtension,
   fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
@@ -1746,28 +1746,28 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   const mightyCallSnapshot = await withDeadline((async () => {
     const token = await getMightyCallAccessToken(overrideCreds);
     const apiKeyOverride = overrideCreds?.clientId || undefined;
-    const [liveExtensions, ownStatus, apiLiveCallRows] = await Promise.all([
+    const [liveExtensions, ownStatus, apiProfileStatusRows] = await Promise.all([
       fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []),
       fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null),
       Promise.all(uniqueExtensions.map(async (extension) => {
         try {
-          const liveCall = await fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride);
-          return liveCall ? { extension, liveCall } : null;
+          const status = await fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride);
+          return status ? { extension, status } : null;
         } catch {
           return null;
         }
       })),
     ]);
-    return { liveExtensions, ownStatus, apiLiveCallRows };
+    return { liveExtensions, ownStatus, apiProfileStatusRows };
   })(), LIVE_STATUS_MIGHTYCALL_DEADLINE_MS, {
     liveExtensions: [] as any[],
     ownStatus: null as any,
-    apiLiveCallRows: [] as any[],
+    apiProfileStatusRows: [] as any[],
   });
-  const { liveExtensions, ownStatus, apiLiveCallRows } = mightyCallSnapshot;
+  const { liveExtensions, ownStatus, apiProfileStatusRows } = mightyCallSnapshot;
 	  const liveCalls: any[] = [];
   const profileRows: any[] = [];
-  const statusRows: any[] = [];
+  const statusRows: any[] = apiProfileStatusRows || [];
 
   const orgPhoneDigits = new Set((phones || []).map((phone: any) => normalizePhoneDigits(phone?.number)).filter(Boolean) as string[]);
   const extensionMetaByExt = new Map<string, any>();
@@ -1855,11 +1855,40 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       });
     }
 	  }
-  const apiLiveCallByExt = new Map<string, any>();
-  for (const row of apiLiveCallRows) {
-    const ext = normalizeExtension(row?.extension);
-    if (ext && row?.liveCall) apiLiveCallByExt.set(ext, row.liveCall);
-  }
+	  const apiLiveCallByExt = new Map<string, any>();
+	  for (const row of apiProfileStatusRows || []) {
+	    const ext = normalizeExtension(row?.extension);
+	    if (!ext || !row?.status) continue;
+	    const profileStatus = row.status;
+	    const statusLabel =
+	      extractLiveStatusLabel(profileStatus?.currentCall) ||
+	      extractLiveStatusLabel(profileStatus?.current_call) ||
+	      extractLiveStatusLabel(profileStatus?.status) ||
+	      extractLiveStatusLabel(profileStatus?.state) ||
+	      extractLiveStatusLabel(profileStatus?.presenceStatus) ||
+	      extractLiveStatusLabel(profileStatus?.availability) ||
+	      extractLiveStatusLabel(profileStatus) ||
+	      'Available';
+	    const currentCall =
+	      profileStatus?.currentCall ||
+	      profileStatus?.current_call ||
+	      profileStatus?.status?.currentCall ||
+	      profileStatus?.status?.current_call ||
+	      profileStatus?.currentStatus?.currentCall ||
+	      profileStatus?.currentStatus?.current_call ||
+	      profileStatus?.current_status?.currentCall ||
+	      profileStatus?.current_status?.current_call ||
+	      null;
+	    const onCall = hasFreshStatusCallSignal(profileStatus) || isLikelyActiveCallStatus(statusLabel);
+	    apiLiveCallByExt.set(ext, {
+	      extension: ext,
+	      status: statusLabel,
+	      onCall,
+	      currentCall,
+	      sourceEndpoint: profileStatus?.sourceEndpoint || '/profile/status',
+	      rawStatus: profileStatus,
+	    });
+	  }
 
 	  const activeCalls = (liveCalls || []).filter((call: any) => {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
@@ -5212,7 +5241,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-		      live_status_version: 'mightycall-deadline-fail-open-v11'
+		      live_status_version: 'mightycall-profile-status-by-extension-v12'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
