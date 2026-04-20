@@ -41,6 +41,7 @@ import {
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
   fetchMightyCallJournalRequests,
+  fetchMightyCallContactCenterCommunications,
   fetchMightyCallContacts,
   syncMightyCallPhoneNumbers, 
   syncMightyCallReports,
@@ -1439,16 +1440,32 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     pageSize: '500',
     skip: '0'
   }, apiKeyOverride).catch(() => []);
-  const journalPromise = fetchMightyCallJournalRequests(token, {
-    from: new Date(now - (2 * 60 * 60 * 1000)).toISOString(),
+	  const journalPromise = fetchMightyCallJournalRequests(token, {
+	    from: new Date(now - LIVE_CALL_LOOKBACK_MS).toISOString(),
+	    to: new Date(now + (30 * 60 * 1000)).toISOString(),
+	    type: 'Call',
+	    pageSize: '200',
+	    page: '1'
+	  }, apiKeyOverride).catch(() => []);
+  const contactCenterPromise = fetchMightyCallContactCenterCommunications(token, {
+    from: new Date(now - LIVE_CALL_LOOKBACK_MS).toISOString(),
     to: new Date(now + (30 * 60 * 1000)).toISOString(),
     type: 'Call',
+    state: 'Connected',
+    origin: 'All',
+    showUsers: 'true',
     pageSize: '200',
     page: '1'
   }, apiKeyOverride).catch(() => []);
-  const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
-  const ownStatusPromise = fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null);
-  const [liveCalls, liveJournal, liveExtensions, ownStatus] = await Promise.all([callsPromise, journalPromise, extensionsPromise, ownStatusPromise]);
+	  const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
+	  const ownStatusPromise = fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null);
+  const [liveCalls, liveJournal, contactCenterCommunications, liveExtensions, ownStatus] = await Promise.all([
+    callsPromise,
+    journalPromise,
+    contactCenterPromise,
+    extensionsPromise,
+    ownStatusPromise
+  ]);
   const profileRows = await Promise.all(
     Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
       .map(async (extension) => {
@@ -1567,7 +1584,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
 	    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS);
   });
-  const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
+  const activeJournalCalls = ([...(liveJournal || []), ...(contactCenterCommunications || [])]).filter((call: any) => isLikelyLiveJournalRequest(call));
   const activeStoredCalls = (recentCallRows || []).filter((call: any) => {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
     const endedAt = call?.ended_at || call?.endedAt || call?.endTime || call?.ended || null;
@@ -4904,7 +4921,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-	      live_status_version: 'mightycall-api-extension-v3'
+	      live_status_version: 'mightycall-contact-center-v4'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));

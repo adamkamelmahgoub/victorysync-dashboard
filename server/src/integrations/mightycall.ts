@@ -316,6 +316,74 @@ export async function fetchMightyCallJournalRequests(accessToken: string, params
   return all;
 }
 
+export async function fetchMightyCallContactCenterCommunications(accessToken: string, params: Record<string,string>, apiKeyOverride?: string) {
+  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  const ep = '/contactCenter/communications';
+  const pageSize = Math.min(Math.max(parseInt(String(params.pageSize || '200'), 10) || 200, 1), 1000);
+  const maxPages = 20;
+  const all: any[] = [];
+  const seen = new Set<string>();
+
+  for (const url of buildUrlVariants(base, ep)) {
+    let page = parseInt(String(params.page || '1'), 10) || 1;
+    let success = false;
+
+    for (let i = 0; i < maxPages; i++) {
+      const qp = new URLSearchParams(params);
+      qp.set('page', String(page));
+      qp.set('pageSize', String(pageSize));
+      qp.set('showUsers', String(params.showUsers || 'true'));
+      qp.set('resolveContacts', String(params.resolveContacts || 'false'));
+      if (params?.from) {
+        qp.set('from', params.from);
+        qp.set('earliest', params.from);
+      }
+      if (params?.to) {
+        qp.set('to', params.to);
+        qp.set('latest', params.to);
+      }
+      if (params?.type) qp.set('type', params.type);
+      if (params?.state) qp.set('state', params.state);
+      if (params?.origin) qp.set('origin', params.origin);
+
+      const r = await tryFetchJson(`${url}?${qp.toString()}`, accessToken, apiKeyOverride);
+      if (!r.ok || !r.body) break;
+
+      const body: any = r.body;
+      const list =
+        body?.data?.requests ??
+        body?.data?.communications ??
+        body?.requests ??
+        body?.communications ??
+        body?.data?.items ??
+        body?.items ??
+        body?.data ??
+        [];
+      if (!Array.isArray(list) || list.length === 0) {
+        success = true;
+        break;
+      }
+
+      for (const row of list) {
+        const key = String(row?.id || row?.requestGuid || row?.guid || `${row?.created || ''}:${row?.agent?.extension || ''}:${row?.client?.address || ''}`);
+        if (!seen.has(key)) {
+          seen.add(key);
+          all.push(row);
+        }
+      }
+
+      success = true;
+      const hasMore = body?.hasMore === true || body?.data?.hasMore === true;
+      if (list.length < pageSize && !hasMore) break;
+      page += 1;
+    }
+
+    if (success && all.length > 0) return all;
+  }
+
+  return all;
+}
+
 function pickPhoneText(...values: any[]): string | null {
   for (const value of values) {
     if (!value) continue;
