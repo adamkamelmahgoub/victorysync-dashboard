@@ -37,7 +37,6 @@ import {
   fetchMightyCallExtensions, 
   fetchMightyCallProfileByExtension,
   fetchMightyCallProfileStatusByExtension,
-  fetchMightyCallLiveCallByExtension,
   fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
@@ -1465,7 +1464,7 @@ function isLikelyActiveCallStatus(status: any): boolean {
   const normalized = String(status || '').toLowerCase().trim();
   if (!normalized) return false;
   if (['completed', 'ended', 'missed', 'failed', 'canceled', 'cancelled', 'voicemail', 'noanswer', 'no_answer', 'abandoned', 'closed', 'done'].includes(normalized)) return false;
-  return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call'].some((token) => normalized.includes(token));
+  return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call', 'busy', 'occupied'].some((token) => normalized.includes(token));
 }
 
 function isLikelyTerminalOrIdleCallStatus(status: any): boolean {
@@ -1755,7 +1754,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   const mightyCallSnapshot = await withDeadline((async () => {
     const token = await getMightyCallAccessToken(overrideCreds);
     const apiKeyOverride = overrideCreds?.clientId || undefined;
-    const [liveExtensions, ownStatus, apiProfileStatusRows, apiLiveCallRows] = await Promise.all([
+    const [liveExtensions, ownStatus, apiProfileStatusRows] = await Promise.all([
       fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []),
       fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null),
       Promise.all(uniqueExtensions.map(async (extension) => {
@@ -1766,23 +1765,14 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           return null;
         }
       })),
-      Promise.all(uniqueExtensions.map(async (extension) => {
-        try {
-          const liveCall = await fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride);
-          return liveCall ? { extension, liveCall } : null;
-        } catch {
-          return null;
-        }
-      })),
     ]);
-    return { liveExtensions, ownStatus, apiProfileStatusRows, apiLiveCallRows };
+    return { liveExtensions, ownStatus, apiProfileStatusRows };
   })(), LIVE_STATUS_MIGHTYCALL_DEADLINE_MS, {
     liveExtensions: [] as any[],
     ownStatus: null as any,
     apiProfileStatusRows: [] as any[],
-    apiLiveCallRows: [] as any[],
   });
-  const { liveExtensions, ownStatus, apiProfileStatusRows, apiLiveCallRows } = mightyCallSnapshot;
+  const { liveExtensions, ownStatus, apiProfileStatusRows } = mightyCallSnapshot;
 	  const liveCalls: any[] = [];
   const profileRows: any[] = [];
   const statusRows: any[] = apiProfileStatusRows || [];
@@ -1874,15 +1864,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     }
 	  }
 	  const apiLiveCallByExt = new Map<string, any>();
-	  for (const row of apiLiveCallRows || []) {
-	    const ext = normalizeExtension(row?.extension);
-	    if (!ext || !row?.liveCall) continue;
-	    apiLiveCallByExt.set(ext, row.liveCall);
-	  }
 	  for (const row of apiProfileStatusRows || []) {
 	    const ext = normalizeExtension(row?.extension);
 	    if (!ext || !row?.status) continue;
-	    if (apiLiveCallByExt.has(ext)) continue;
 	    const profileStatus = row.status;
 	    const statusLabel =
 	      extractLiveStatusLabel(profileStatus?.currentCall) ||
@@ -1903,13 +1887,28 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	      profileStatus?.current_status?.currentCall ||
 	      profileStatus?.current_status?.current_call ||
 	      null;
-	    const onCall = hasFreshStatusCallSignal(profileStatus) || isLikelyActiveCallStatus(statusLabel);
+	    const endedAt =
+	      currentCall?.endedAt ||
+	      currentCall?.ended_at ||
+	      currentCall?.ended ||
+	      currentCall?.endTime ||
+	      currentCall?.end_time ||
+	      profileStatus?.endedAt ||
+	      profileStatus?.ended_at ||
+	      null;
+	    const hasCurrentCallPayload = !!(currentCall && typeof currentCall === 'object' && Object.keys(currentCall).length > 0);
+	    const profileStatusSaysIdle = isLikelyTerminalOrIdleCallStatus(statusLabel);
+	    const onCall = !String(endedAt || '').trim() && (
+	      hasFreshStatusCallSignal(profileStatus) ||
+	      isLikelyActiveCallStatus(statusLabel) ||
+	      (hasCurrentCallPayload && !profileStatusSaysIdle)
+	    );
 	    apiLiveCallByExt.set(ext, {
 	      extension: ext,
 	      status: statusLabel,
 	      onCall,
 	      currentCall,
-	      sourceEndpoint: profileStatus?.sourceEndpoint || '/profile/status',
+	      sourceEndpoint: profileStatus?.sourceEndpoint || '/profile/status?extension',
 	      rawStatus: profileStatus,
 	    });
 	  }

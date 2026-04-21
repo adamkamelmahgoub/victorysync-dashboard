@@ -934,6 +934,19 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
 
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   let profileStatus: any = null;
+  const pickStatusPayload = (body: any) => {
+    const data = body?.data ?? body;
+    if (!data) return null;
+    const rows = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : null);
+    if (rows) {
+      return rows.find((item: any) => (
+        item &&
+        typeof item === 'object' &&
+        normalizeExtensionValue(item?.extension || item?.ext || item?.extensionNumber || item?.extension_number) === normalized
+      )) || rows.find((item: any) => item && typeof item === 'object') || null;
+    }
+    return typeof data === 'object' ? data : null;
+  };
   const queryEndpoints = [
     '/profile/status',
     '/profile/get-status',
@@ -943,6 +956,8 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
     '/extensions/status',
   ];
   const pathEndpoints = [
+    `/profile/status/${encodeURIComponent(normalized)}`,
+    `/profile/get-status/${encodeURIComponent(normalized)}`,
     `/profile/${encodeURIComponent(normalized)}/status`,
     `/users/${encodeURIComponent(normalized)}/status`,
     `/extensions/${encodeURIComponent(normalized)}/status`,
@@ -951,17 +966,17 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
 
   for (const ep of queryEndpoints) {
     for (const url of buildUrlVariants(base, ep)) {
-      const params = new URLSearchParams();
-      params.set('extension', normalized);
-      params.set('ext', normalized);
-      params.set('extensionNumber', normalized);
-      const r = await tryFetchJson(`${url}?${params.toString()}`, accessToken, apiKeyOverride);
-      if (!r.ok || !r.body) continue;
-      const body: any = r.body;
-      const data = body?.data ?? body;
-      if (!data || typeof data !== 'object') continue;
-      profileStatus = profileStatus || { ...data, extension: data?.extension || normalized, sourceEndpoint: ep };
-      break;
+      for (const paramName of ['extension', 'ext', 'extensionNumber', 'extension_number']) {
+        const params = new URLSearchParams();
+        params.set(paramName, normalized);
+        const r = await tryFetchJson(`${url}?${params.toString()}`, accessToken, apiKeyOverride);
+        if (!r.ok || !r.body) continue;
+        const data = pickStatusPayload(r.body);
+        if (!data) continue;
+        profileStatus = profileStatus || { ...data, extension: data?.extension || normalized, sourceEndpoint: `${ep}?${paramName}` };
+        break;
+      }
+      if (profileStatus) break;
     }
     if (profileStatus) break;
   }
@@ -971,9 +986,8 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
       for (const url of buildUrlVariants(base, ep)) {
         const r = await tryFetchJson(url, accessToken, apiKeyOverride);
         if (!r.ok || !r.body) continue;
-        const body: any = r.body;
-        const data = body?.data ?? body;
-        if (!data || typeof data !== 'object') continue;
+        const data = pickStatusPayload(r.body);
+        if (!data) continue;
         profileStatus = { ...data, extension: data?.extension || normalized, sourceEndpoint: ep };
         break;
       }
