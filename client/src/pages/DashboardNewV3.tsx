@@ -338,7 +338,7 @@ const DashboardNewV3: FC = () => {
                           <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
                           <div className="mt-1 text-sm text-slate-400">
                             {agent.email || 'No email'}
-                            {agent.extension ? ` · Ext ${agent.extension}` : ''}
+                            {agent.extension ? ` - Ext ${agent.extension}` : ''}
                           </div>
                         </div>
                         <StatusBadge tone={agent.on_call ? 'success' : 'neutral'}>
@@ -349,16 +349,12 @@ const DashboardNewV3: FC = () => {
                       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div className="vs-surface-muted p-4">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Counterpart</div>
-                          <div className="mt-3 text-sm text-slate-200 break-words">{agent.counterpart || '-'}</div>
+                          <div className="mt-3 text-sm text-slate-200 break-words">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
                         </div>
                         <div className="vs-surface-muted p-4">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Call state</div>
                           <div className="mt-3 text-sm text-slate-200">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-                          <div className="mt-2 text-xs text-slate-500">Started {formatDateTime(agent.started_at)}</div>
-                          <div className="mt-2 text-xs text-cyan-200/70">
-                            {agent.source || 'unknown_source'}
-                            {agent.raw_status ? ` · raw ${agent.raw_status}` : ''}
-                          </div>
+                          <div className="mt-2 text-xs text-slate-500">Started {agent.on_call ? formatDateTime(agent.started_at) : '-'}</div>
                         </div>
                       </div>
                     </div>

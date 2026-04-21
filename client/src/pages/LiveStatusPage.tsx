@@ -97,7 +97,7 @@ const LiveStatusPage: FC = () => {
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="rounded-2xl border border-white/[0.03] bg-white/[0.03] px-4 py-3">
         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Live roster</div>
-        <div className="mt-2 text-sm font-medium text-slate-200">{onCall} on call · {idle} available</div>
+        <div className="mt-2 text-sm font-medium text-slate-200">{onCall} on call - {idle} available</div>
       </div>
       <div className="rounded-2xl border border-white/[0.03] bg-white/[0.03] px-4 py-3">
         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Updated</div>
@@ -154,16 +154,12 @@ const LiveStatusPage: FC = () => {
                     <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="vs-surface-muted p-4">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
-                        <div className="mt-3 break-words text-sm text-slate-200">{agent.counterpart || '-'}</div>
+                        <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
                       </div>
                     <div className="vs-surface-muted p-4">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
-                        <div className="mt-3 text-sm text-slate-200">{fmtDateTime(agent.started_at)}</div>
+                        <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
                         <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-                        <div className="mt-2 text-xs text-cyan-200/70">
-                          {agent.source || 'unknown_source'}
-                          {agent.raw_status ? ` · raw ${agent.raw_status}` : ''}
-                        </div>
                       </div>
                     </div>
                   </div>

@@ -37,7 +37,7 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
     const contentType = res.headers.get('content-type') || 'unknown';
     let snippet = '';
     try {
-      const text = await res.text();
+      const text = await res.clone().text();
       snippet = text.slice(0, 200);
     } catch (e) {
       snippet = '<unable to read response text>';

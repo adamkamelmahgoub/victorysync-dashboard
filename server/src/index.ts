@@ -1579,32 +1579,40 @@ function hasFreshStatusCallSignal(payload: any, maxAgeMs = 15 * 60 * 1000): bool
     null;
 
   const statusLabel = extractLiveStatusLabel(payload);
+  const currentCallStatusLabel = extractLiveStatusLabel(currentCall);
   const activeStatus = isLikelyActiveCallStatus(statusLabel);
+  const activeCurrentCallStatus = isLikelyActiveCallStatus(currentCallStatusLabel);
   const terminalStatus = isLikelyTerminalOrIdleCallStatus(statusLabel);
 
   // Explicit on-call flags take precedence
-	  const hasCallFlag =
-	    payload?.onCall || payload?.inCall || payload?.isOnCall ||
-	    payload?.status?.onCall || payload?.status?.inCall || payload?.status?.isOnCall ||
-	    payload?.currentStatus?.onCall || payload?.currentStatus?.inCall || payload?.currentStatus?.isOnCall ||
-	    payload?.current_status?.onCall || payload?.current_status?.inCall || payload?.current_status?.isOnCall ||
-	    currentCall?.onCall || currentCall?.inCall || currentCall?.isOnCall;
+  const rawCallFlags = [
+    payload?.onCall, payload?.inCall, payload?.isOnCall,
+    payload?.status?.onCall, payload?.status?.inCall, payload?.status?.isOnCall,
+    payload?.currentStatus?.onCall, payload?.currentStatus?.inCall, payload?.currentStatus?.isOnCall,
+    payload?.current_status?.onCall, payload?.current_status?.inCall, payload?.current_status?.isOnCall,
+    currentCall?.onCall, currentCall?.inCall, currentCall?.isOnCall,
+  ];
+  const hasCallFlag = rawCallFlags.some((value) => {
+    if (value === true || value === 1) return true;
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
+  });
   
   // A non-empty currentCall object is strong evidence of an active call
   const hasCurrentCallPayload = !!(currentCall && typeof currentCall === 'object' && Object.keys(currentCall).length > 0);
 
-  // Priority 1: If there's an explicit on-call flag and it's recent, trust it immediately
+  // Priority 1: Explicit on-call flags are strongest when the signal is fresh
   if (hasCallFlag && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
-  
-  // Priority 2: If we have a currentCall payload (non-empty object) and it looks fresh, that's on-call
-  if (hasCurrentCallPayload && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
-  
-  // Priority 3: If status is explicitly terminal/idle, reject even if other signals exist
+
+  // Priority 2: Terminal/idle status always wins to avoid sticky false positives
   if (terminalStatus) return false;
-  
-  // Priority 4: If status is actively connected/talking and recent, it's on-call
+
+  // Priority 3: currentCall object is only trusted when call state looks active
+  if (hasCurrentCallPayload && (activeCurrentCallStatus || activeStatus) && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
+
+  // Priority 4: active status labels can imply live call when fresh
   if (activeStatus && (startedAt == null || isFreshActivity(startedAt, maxAgeMs))) return true;
-  
+
   return false;
 }
 
@@ -1973,19 +1981,21 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const explicitOwnStatusLabel = extractLiveStatusLabel(ownStatusPayload);
     const ownStatusSaysOnCall = shouldUseOwnStatusFallback && !!explicitOwnStatusLabel && isLikelyActiveCallStatus(explicitOwnStatusLabel);
     const hasFreshStatusSignal = hasFreshStatusCallSignal(effectiveStatusPayload) || ownStatusSaysOnCall;
-	    const onCall = !!(
-          matchedApiLiveCall ||
+    const apiSaysOnCall = !!matchedApiLiveCall?.onCall;
+    const onCall = !!(
+          apiSaysOnCall ||
 		      matchedLiveCall ||
 		      inferredLiveCall ||
-	      matchedStoredCall ||
-	      inferredStoredCall ||
-	      hasFreshStatusSignal
-	    );
+		      matchedStoredCall ||
+		      inferredStoredCall ||
+		      hasFreshStatusSignal
+		    );
+    const activeApiLiveCall = apiSaysOnCall ? matchedApiLiveCall : null;
     const apiCurrentCall = matchedApiLiveCall?.currentCall || matchedApiLiveCall;
-	    const counterpart = matchedApiLiveCall
+		    const counterpart = activeApiLiveCall
       ? extractCounterpartyLabel(apiCurrentCall, orgPhoneDigits, normalizedExt)
       : matchedLiveCall
-	      ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
+		      ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : inferredLiveCall
         ? extractCounterpartyLabel(inferredLiveCall, orgPhoneDigits, normalizedExt)
 	      : matchedStoredCall
@@ -1993,10 +2003,10 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	        : inferredStoredCall
 	            ? extractCounterpartyLabel(inferredStoredCall?.metadata || inferredStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(inferredStoredCall, orgPhoneDigits, normalizedExt)
 	        : normalizedStatus?.counterpart || extractCounterpartyLabel(effectiveStatusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
-	    const startedAt = matchedApiLiveCall
+		    const startedAt = activeApiLiveCall
       ? apiCurrentCall?.dateTimeUtc || apiCurrentCall?.startedAt || apiCurrentCall?.started_at || apiCurrentCall?.startTime || apiCurrentCall?.start_time || apiCurrentCall?.createdAt || apiCurrentCall?.created_at || apiCurrentCall?.created || null
       : matchedLiveCall
-	      ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
+		      ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
       : inferredLiveCall
         ? inferredLiveCall?.dateTimeUtc || inferredLiveCall?.started_at || inferredLiveCall?.start_time || inferredLiveCall?.created || null
 	      : matchedStoredCall
@@ -2006,10 +2016,10 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	        : hasFreshStatusSignal
 	          ? normalizedStatus?.started_at || effectiveStatusPayload?.currentCall?.startedAt || effectiveStatusPayload?.currentCall?.started_at || effectiveStatusPayload?.current_call?.startedAt || effectiveStatusPayload?.current_call?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
 	          : null;
-	    const source = matchedApiLiveCall
+		    const source = activeApiLiveCall
       ? 'mightycall_api_poll'
       : matchedLiveCall
-	      ? 'mightycall_calls'
+		      ? 'mightycall_calls'
       : inferredLiveCall
         ? 'mightycall_calls_inferred'
         : matchedStoredCall
