@@ -33,11 +33,14 @@ const LiveStatusPage: FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const liveRequestSeq = useRef(0);
+  const liveRequestInFlight = useRef(false);
 
   const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
 
   const load = async () => {
     if (!user?.id) return;
+    if (liveRequestInFlight.current) return;
+    liveRequestInFlight.current = true;
     const requestSeq = ++liveRequestSeq.current;
     try {
       setLoading(true);
@@ -50,13 +53,14 @@ const LiveStatusPage: FC = () => {
       if (requestSeq !== liveRequestSeq.current) return;
       setError(e?.message || 'Failed to load live agent status');
     } finally {
+      liveRequestInFlight.current = false;
       if (requestSeq === liveRequestSeq.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-    const intervalId = window.setInterval(load, 5000);
+    const intervalId = window.setInterval(load, 15000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') load();
     };

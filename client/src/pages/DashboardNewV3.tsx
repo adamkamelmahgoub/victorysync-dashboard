@@ -1,4 +1,4 @@
-import React, { FC, useEffect, useMemo, useState } from 'react';
+import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
@@ -63,6 +63,7 @@ const DashboardNewV3: FC = () => {
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [liveRefreshedAt, setLiveRefreshedAt] = useState<string | null>(null);
+  const liveRequestInFlight = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +71,7 @@ const DashboardNewV3: FC = () => {
     const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
 
     const loadLiveAgents = async () => {
+      if (liveRequestInFlight.current) return;
       if (!user?.id) {
         if (!cancelled) {
           setLiveAgents([]);
@@ -79,6 +81,7 @@ const DashboardNewV3: FC = () => {
         return;
       }
 
+      liveRequestInFlight.current = true;
       try {
         if (!cancelled) {
           setLiveLoading(true);
@@ -92,12 +95,13 @@ const DashboardNewV3: FC = () => {
         if (cancelled) return;
         setLiveError(e?.message || 'Failed to load live agent status');
       } finally {
+        liveRequestInFlight.current = false;
         if (!cancelled) setLiveLoading(false);
       }
     };
 
     loadLiveAgents();
-    const intervalId = window.setInterval(loadLiveAgents, 5000);
+    const intervalId = window.setInterval(loadLiveAgents, 15000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') loadLiveAgents();
     };

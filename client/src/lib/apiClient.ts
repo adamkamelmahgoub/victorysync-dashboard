@@ -208,7 +208,10 @@ export async function getLiveAgentStatus(params?: { orgId?: string | null }, use
   const q = new URLSearchParams();
   if (params?.orgId) q.set('org_id', params.orgId);
   const suffix = q.toString() ? `?${q.toString()}` : '';
-  return await fetchJson(`/api/agents/live-status${suffix}`, { headers: { 'x-user-id': userId || '' } });
+  return await fetchJson(`/api/agents/live-status${suffix}`, {
+    headers: { 'x-user-id': userId || '' },
+    timeoutMs: 30000,
+  });
 }
 
 // MightyCall sync helpers
