@@ -1514,7 +1514,7 @@ const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
-const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 1500;
+const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 750;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   let timeout: NodeJS.Timeout | null = null;
@@ -1774,7 +1774,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   };
   const mightyCallSnapshot = await (async () => {
     try {
-      const token = await withDeadline(getMightyCallAccessToken(overrideCreds), 700, null as any);
+      const token = await withDeadline(getMightyCallAccessToken(overrideCreds), 200, null as any);
       if (!token) return mightyCallFallback;
 
       const apiKeyOverride = overrideCreds?.clientId || undefined;
@@ -1786,16 +1786,16 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         skip: '0',
         fast: true,
         returnOnFirstSuccess: true,
-      }, apiKeyOverride).catch(() => []), 700, [] as any[]);
+      }, apiKeyOverride).catch(() => []), 300, [] as any[]);
       const journalPromise = withDeadline(fetchMightyCallJournalRequests(token, {
         from: new Date(now - (2 * 60 * 60 * 1000)).toISOString(),
         to: new Date(now + (30 * 60 * 1000)).toISOString(),
         type: 'Call',
         pageSize: '50',
         page: '1'
-      }, apiKeyOverride).catch(() => []), 700, [] as any[]);
-      const extensionsPromise = withDeadline(fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []), 700, [] as any[]);
-      const ownStatusPromise = withDeadline(fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null), 700, null as any);
+      }, apiKeyOverride).catch(() => []), 300, [] as any[]);
+      const extensionsPromise = withDeadline(fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []), 300, [] as any[]);
+      const ownStatusPromise = withDeadline(fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null), 300, null as any);
       const profileRowsPromise = withDeadline(Promise.all(
         uniqueExtensions.map(async (extension) => {
           try {
@@ -1805,7 +1805,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
             return null;
           }
         })
-      ), 1000, [] as any[]);
+      ), 400, [] as any[]);
       const statusRowsPromise = withDeadline(Promise.all(
         uniqueExtensions.map(async (extension) => {
           try {
@@ -1815,7 +1815,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
             return null;
           }
         })
-      ), 1000, [] as any[]);
+      ), 400, [] as any[]);
 
       const [liveCalls, liveJournal, liveExtensions, ownStatus, profileRows, statusRows] = await Promise.all([
         callsPromise,
@@ -5363,7 +5363,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-			      live_status_version: 'sub-two-second-live-status-v17'
+			      live_status_version: 'one-second-live-status-v18'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
