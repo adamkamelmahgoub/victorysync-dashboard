@@ -560,15 +560,39 @@ function normalizeExtensionValue(value: any): string {
 }
 
 function pickDisplayName(value: any): string | null {
+  const joinedNames = [
+    [value?.firstName, value?.lastName],
+    [value?.first_name, value?.last_name],
+    [value?.user?.firstName, value?.user?.lastName],
+    [value?.user?.first_name, value?.user?.last_name],
+    [value?.member?.firstName, value?.member?.lastName],
+    [value?.member?.first_name, value?.member?.last_name],
+  ]
+    .map((parts) => parts.map((part) => String(part || '').trim()).filter(Boolean).join(' ').trim())
+    .find(Boolean);
+  if (joinedNames) return joinedNames;
+
   const candidates = [
     value?.displayName,
+    value?.display_name,
     value?.name,
     value?.fullName,
     value?.full_name,
+    value?.profile?.displayName,
+    value?.profile?.display_name,
+    value?.profile?.name,
+    value?.profile?.fullName,
+    value?.profile?.full_name,
     value?.user?.displayName,
+    value?.user?.display_name,
     value?.user?.name,
+    value?.user?.fullName,
+    value?.user?.full_name,
     value?.member?.displayName,
+    value?.member?.display_name,
     value?.member?.name,
+    value?.member?.fullName,
+    value?.member?.full_name,
     value?.contact?.name
   ];
   for (const candidate of candidates) {
@@ -871,6 +895,35 @@ export async function fetchMightyCallProfileByExtension(extension: string, acces
   const normalized = normalizeExtensionValue(extension);
   if (!normalized) return null;
   const token = accessToken || await getMightyCallAccessToken();
+  if (apiKeyOverride) {
+    try {
+      const extensionToken = await getMightyCallAccessToken({
+        clientId: apiKeyOverride,
+        clientSecret: normalized,
+      });
+      const profile = await fetchMightyCallOwnProfile(extensionToken, apiKeyOverride);
+      const resolvedExtension = normalizeExtensionValue(
+        profile?.extension ||
+        profile?.ext ||
+        profile?.extensionNumber ||
+        profile?.extension_number ||
+        profile?.internalNumber ||
+        profile?.shortNumber ||
+        normalized
+      );
+      if (profile && (!resolvedExtension || resolvedExtension === normalized)) {
+        return {
+          id: profile?.id || profile?.userId || profile?.memberId || null,
+          extension: resolvedExtension || normalized,
+          display_name: pickDisplayName(profile) || profile?.email || profile?.login || null,
+          email: profile?.email || profile?.login || null,
+          role: profile?.role || null,
+          metadata: profile
+        };
+      }
+    } catch {}
+  }
+
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const endpoints = [`/profile/${encodeURIComponent(normalized)}`, `/v4/profile/${encodeURIComponent(normalized)}`];
   for (const ep of endpoints) {
@@ -884,11 +937,40 @@ export async function fetchMightyCallProfileByExtension(extension: string, acces
       return {
         id: data?.id || data?.userId || data?.memberId || null,
         extension: resolvedExtension,
-        display_name: [data?.firstName, data?.lastName].filter(Boolean).join(' ').trim() || data?.name || data?.fullName || data?.email || null,
-        email: data?.email || null,
+        display_name: pickDisplayName(data) || data?.email || data?.login || null,
+        email: data?.email || data?.login || null,
         role: data?.role || null,
         metadata: data
       };
+    }
+  }
+  return null;
+}
+
+export async function fetchMightyCallOwnProfile(accessToken: string, apiKeyOverride?: string) {
+  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  const endpoints = [
+    '/profile',
+    '/v4/profile',
+    '/me',
+    '/v4/me',
+    '/user',
+    '/v4/user',
+    '/userinfo',
+    '/v4/userinfo'
+  ];
+  for (const ep of endpoints) {
+    for (const url of buildUrlVariants(base, ep)) {
+      const r = await tryFetchJson(url, accessToken, apiKeyOverride);
+      if (!r.ok || !r.body) continue;
+      const data = (r.body as any)?.data ?? r.body;
+      if (!data || typeof data !== 'object') continue;
+      if (Array.isArray(data)) {
+        const firstObject = data.find((item) => item && typeof item === 'object');
+        if (firstObject) return firstObject;
+        continue;
+      }
+      return data;
     }
   }
   return null;
@@ -947,6 +1029,17 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
     }
     return typeof data === 'object' ? data : null;
   };
+  if (apiKeyOverride) {
+    try {
+      const extensionToken = await getMightyCallAccessToken({
+        clientId: apiKeyOverride,
+        clientSecret: normalized,
+      });
+      const status = await fetchMightyCallOwnStatus(extensionToken, apiKeyOverride);
+      if (status) return { ...status, extension: normalized, sourceEndpoint: '/profile/status as extension' };
+    } catch {}
+  }
+
   const queryEndpoints = [
     '/profile/status',
     '/profile/get-status',

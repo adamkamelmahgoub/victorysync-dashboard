@@ -1697,7 +1697,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       .eq('org_id', orgId),
     supabaseAdmin
       .from('agent_extensions')
-      .select('user_id, extension')
+      .select('user_id, extension, display_name')
       .eq('org_id', orgId),
     supabaseAdmin
       .from('mightycall_extensions')
@@ -1717,12 +1717,12 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 
   const memberRows = (membersData || []).filter((row: any) => ['agent', 'org_manager'].includes(String(row?.role || '')));
   const extensionByUserId = new Map<string, string>();
-  for (const row of memberRows) {
-    const ext = String((row as any)?.mightycall_extension || '').trim();
-    if (ext) extensionByUserId.set(String((row as any).user_id), ext);
-  }
   for (const row of extData || []) {
     const ext = String((row as any)?.extension || '').trim();
+    if (ext) extensionByUserId.set(String((row as any).user_id), ext);
+  }
+  for (const row of memberRows) {
+    const ext = String((row as any)?.mightycall_extension || '').trim();
     if (ext) extensionByUserId.set(String((row as any).user_id), ext);
   }
 
@@ -1833,6 +1833,17 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         extension: ext,
         display_name: (row as any)?.display_name || null,
         metadata: (row as any)?.metadata || row
+      });
+    }
+  }
+  for (const row of extData || []) {
+    const ext = normalizeExtension((row as any)?.extension);
+    const displayName = String((row as any)?.display_name || '').trim();
+    if (ext && displayName && !extensionMetaByExt.has(ext)) {
+      extensionMetaByExt.set(ext, {
+        extension: ext,
+        display_name: displayName,
+        metadata: row
       });
     }
   }
@@ -3032,11 +3043,97 @@ app.post("/api/admin/org_users", async (req, res) => {
       return res.status(400).json({ error: "invalid_role", detail: `role must be one of: ${validRoles.join(', ')}` });
     }
 
+    const normalizedExtension = mightycall_extension ? normalizeExtension(mightycall_extension) : null;
+    if (mightycall_extension && !normalizedExtension) {
+      return res.status(400).json({ error: "invalid_extension", detail: "mightycall_extension must be a short numeric extension" });
+    }
+
+    let mightyCallLookupOk = false;
+    let mightyCallLookupError: string | null = null;
+    let profile: any = null;
+    let status: any = null;
+    let displayName: string | null = null;
+
+    if (normalizedExtension) {
+      try {
+        const { getOrgIntegration } = await import('./lib/integrationsStore');
+        const integ = await getOrgIntegration(org_id, 'mightycall');
+        const overrideCreds = integ?.credentials ? {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+        } : undefined;
+        const token = await getMightyCallAccessToken(overrideCreds);
+        const apiKeyOverride = overrideCreds?.clientId || undefined;
+        [profile, status] = await Promise.all([
+          fetchMightyCallProfileByExtension(normalizedExtension, token, apiKeyOverride).catch(() => null),
+          fetchMightyCallProfileStatusByExtension(normalizedExtension, token, apiKeyOverride).catch(() => null),
+        ]);
+        displayName =
+          profile?.display_name ||
+          profile?.displayName ||
+          profile?.display_name ||
+          profile?.name ||
+          profile?.fullName ||
+          profile?.full_name ||
+          [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim() ||
+          [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim() ||
+          profile?.email ||
+          null;
+        mightyCallLookupOk = !!(profile || status);
+
+        if (profile || status) {
+          const { error: cacheWithMetadataError } = await supabaseAdmin
+            .from('mightycall_extensions')
+            .upsert({
+              extension: normalizedExtension,
+              display_name: displayName,
+              external_id: profile?.id || profile?.userId || profile?.memberId || `verified:${normalizedExtension}`,
+              metadata: {
+                profile: profile?.metadata || profile || null,
+                status,
+                synced_at: new Date().toISOString(),
+              }
+            }, { onConflict: 'extension' });
+          if (cacheWithMetadataError) {
+            await supabaseAdmin
+              .from('mightycall_extensions')
+              .upsert({
+                extension: normalizedExtension,
+                display_name: displayName,
+                external_id: profile?.id || profile?.userId || profile?.memberId || `verified:${normalizedExtension}`,
+              }, { onConflict: 'extension' });
+          }
+        }
+
+        await supabaseAdmin
+          .from('agent_extensions')
+          .upsert(
+            { org_id, user_id, extension: normalizedExtension, display_name: displayName },
+            { onConflict: 'org_id,user_id' }
+          );
+      } catch (e) {
+        mightyCallLookupError = fmtErr(e) ?? 'unknown_error';
+        console.warn('[admin_org_users] MightyCall profile/status lookup failed', org_id, normalizedExtension, mightyCallLookupError);
+      }
+      await supabaseAdmin
+        .from('agent_extensions')
+        .upsert(
+          { org_id, user_id, extension: normalizedExtension, display_name: displayName },
+          { onConflict: 'org_id,user_id' }
+        );
+    } else {
+      await supabaseAdmin
+        .from('agent_extensions')
+        .delete()
+        .eq('org_id', org_id)
+        .eq('user_id', user_id);
+    }
+
     const payload = {
       user_id,
       org_id,
       role,
-      mightycall_extension: mightycall_extension ?? null,
+      mightycall_extension: normalizedExtension,
     };
 
     const { data, error } = await supabaseAdmin
@@ -3052,9 +3149,15 @@ app.post("/api/admin/org_users", async (req, res) => {
       org_id,
       entity_type: 'org_user',
       entity_id: `${org_id}:${user_id}`,
-      metadata: { role, mightycall_extension: mightycall_extension ?? null },
+      metadata: { role, mightycall_extension: normalizedExtension },
     });
-    res.json({ org_user: data });
+    res.json({
+      org_user: data,
+      mightycall_lookup_ok: mightyCallLookupOk,
+      mightycall_lookup_error: mightyCallLookupError,
+      mightycall_profile: profile,
+      mightycall_status: status
+    });
   } catch (err: any) {
     console.error("admin_upsert_org_user_failed:", fmtErr(err));
     res.status(500).json({ error: "admin_upsert_org_user_failed", detail: fmtErr(err) ?? "unknown_error" });
@@ -5290,12 +5393,87 @@ app.post('/api/orgs/:orgId/agents/:userId/extension', async (req, res) => {
     const allowed = (await isPlatformAdmin(actorId)) || (await isOrgAdmin(actorId, orgId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
-    if (!extension) return res.status(400).json({ error: 'missing_required_fields' });
+    const normalizedExtension = normalizeExtension(extension);
+    if (!normalizedExtension) return res.status(400).json({ error: 'invalid_extension' });
 
-    const payload = { org_id: orgId, user_id: userId, extension };
+    let profile: any = null;
+    let status: any = null;
+    let displayName: string | null = null;
+    let mightyCallLookupOk = false;
+    let mightyCallLookupError: string | null = null;
+
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      const overrideCreds = integ?.credentials ? {
+        clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+        clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined
+      } : undefined;
+      const token = await getMightyCallAccessToken(overrideCreds);
+      const apiKeyOverride = overrideCreds?.clientId || undefined;
+      [profile, status] = await Promise.all([
+        fetchMightyCallProfileByExtension(normalizedExtension, token, apiKeyOverride).catch(() => null),
+        fetchMightyCallProfileStatusByExtension(normalizedExtension, token, apiKeyOverride).catch(() => null),
+      ]);
+      displayName =
+        profile?.display_name ||
+        profile?.displayName ||
+        profile?.display_name ||
+        profile?.name ||
+        profile?.fullName ||
+        profile?.full_name ||
+        [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim() ||
+        [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim() ||
+        profile?.email ||
+        null;
+      mightyCallLookupOk = !!(profile || status);
+
+      if (profile || status) {
+        const metadata = {
+          profile: profile?.metadata || profile || null,
+          status,
+          synced_at: new Date().toISOString(),
+        };
+        const { error: cacheWithMetadataError } = await supabaseAdmin
+          .from('mightycall_extensions')
+          .upsert({
+            extension: normalizedExtension,
+            display_name: displayName,
+            external_id: profile?.id || profile?.userId || profile?.memberId || `verified:${normalizedExtension}`,
+            metadata
+          }, { onConflict: 'extension' });
+        if (cacheWithMetadataError) {
+          await supabaseAdmin
+            .from('mightycall_extensions')
+            .upsert({
+              extension: normalizedExtension,
+              display_name: displayName,
+              external_id: profile?.id || profile?.userId || profile?.memberId || `verified:${normalizedExtension}`,
+            }, { onConflict: 'extension' });
+        }
+      }
+    } catch (e) {
+      mightyCallLookupError = fmtErr(e) ?? 'unknown_error';
+      console.warn('[set_agent_extension] MightyCall profile/status lookup failed', orgId, normalizedExtension, mightyCallLookupError);
+    }
+
+    const payload = { org_id: orgId, user_id: userId, extension: normalizedExtension, display_name: displayName };
     const { data, error } = await supabaseAdmin.from('agent_extensions').upsert(payload, { onConflict: 'org_id,user_id' }).select().maybeSingle();
     if (error) throw error;
-    res.json({ extension: data });
+
+    await supabaseAdmin
+      .from('org_users')
+      .update({ mightycall_extension: normalizedExtension })
+      .eq('org_id', orgId)
+      .eq('user_id', userId);
+
+    res.json({
+      extension: data,
+      mightycall_profile: profile,
+      mightycall_status: status,
+      mightycall_lookup_ok: mightyCallLookupOk,
+      mightycall_lookup_error: mightyCallLookupError
+    });
   } catch (err: any) {
     console.error('set_agent_extension_failed:', fmtErr(err));
     res.status(500).json({ error: 'set_agent_extension_failed', detail: fmtErr(err) ?? 'unknown_error' });
