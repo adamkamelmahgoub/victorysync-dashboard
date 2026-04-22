@@ -1514,7 +1514,7 @@ const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
-const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 12000;
+const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 5000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   let timeout: NodeJS.Timeout | null = null;
@@ -1750,52 +1750,75 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     }
   } catch {}
 
-  const token = await getMightyCallAccessToken(overrideCreds);
-  const apiKeyOverride = overrideCreds?.clientId || undefined;
-  const now = Date.now();
-  const callsPromise = fetchMightyCallCalls(token, {
-    startUtc: new Date(now - (12 * 60 * 60 * 1000)).toISOString(),
-    endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
-    pageSize: '500',
-    skip: '0'
-  }, apiKeyOverride).catch(() => []);
-  const journalPromise = fetchMightyCallJournalRequests(token, {
-    from: new Date(now - (2 * 60 * 60 * 1000)).toISOString(),
-    to: new Date(now + (30 * 60 * 1000)).toISOString(),
-    type: 'Call',
-    pageSize: '200',
-    page: '1'
-  }, apiKeyOverride).catch(() => []);
-  const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
-  const ownStatusPromise = fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null);
-  const [liveCalls, liveJournal, liveExtensions, ownStatus] = await Promise.all([callsPromise, journalPromise, extensionsPromise, ownStatusPromise]);
-  const profileRows = await Promise.all(
-    Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
-      .map(async (extension) => {
-        try {
-          const profile = await fetchMightyCallProfileByExtension(extension, token, apiKeyOverride);
-          return profile ? { extension, profile } : null;
-        } catch {
-          return null;
-        }
-      })
-  );
-  const statusRows = await Promise.all(
-    Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
-      .map(async (extension) => {
-        if (!apiKeyOverride) return null;
-        try {
-          const extensionToken = await getMightyCallAccessToken({
-            clientId: apiKeyOverride,
-            clientSecret: extension,
-          });
-          const status = await fetchMightyCallOwnStatus(extensionToken, apiKeyOverride);
-          return status ? { extension, status } : null;
-        } catch {
-          return null;
-        }
-      })
-  );
+  const uniqueExtensions = Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]));
+  const mightyCallFallback = {
+    liveCalls: [] as any[],
+    liveJournal: [] as any[],
+    liveExtensions: [] as any[],
+    ownStatus: null as any,
+    profileRows: [] as any[],
+    statusRows: [] as any[],
+  };
+  const mightyCallSnapshot = await withDeadline((async () => {
+    try {
+      const token = await getMightyCallAccessToken(overrideCreds);
+      const apiKeyOverride = overrideCreds?.clientId || undefined;
+      const now = Date.now();
+      const callsPromise = fetchMightyCallCalls(token, {
+        startUtc: new Date(now - (12 * 60 * 60 * 1000)).toISOString(),
+        endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
+        pageSize: '500',
+        skip: '0'
+      }, apiKeyOverride).catch(() => []);
+      const journalPromise = fetchMightyCallJournalRequests(token, {
+        from: new Date(now - (2 * 60 * 60 * 1000)).toISOString(),
+        to: new Date(now + (30 * 60 * 1000)).toISOString(),
+        type: 'Call',
+        pageSize: '200',
+        page: '1'
+      }, apiKeyOverride).catch(() => []);
+      const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
+      const ownStatusPromise = fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null);
+      const profileRowsPromise = Promise.all(
+        uniqueExtensions.map(async (extension) => {
+          try {
+            const profile = await fetchMightyCallProfileByExtension(extension, token, apiKeyOverride);
+            return profile ? { extension, profile } : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const statusRowsPromise = Promise.all(
+        uniqueExtensions.map(async (extension) => {
+          if (!apiKeyOverride) return null;
+          try {
+            const extensionToken = await getMightyCallAccessToken({
+              clientId: apiKeyOverride,
+              clientSecret: extension,
+            });
+            const status = await fetchMightyCallOwnStatus(extensionToken, apiKeyOverride);
+            return status ? { extension, status } : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const [liveCalls, liveJournal, liveExtensions, ownStatus, profileRows, statusRows] = await Promise.all([
+        callsPromise,
+        journalPromise,
+        extensionsPromise,
+        ownStatusPromise,
+        profileRowsPromise,
+        statusRowsPromise,
+      ]);
+      return { liveCalls, liveJournal, liveExtensions, ownStatus, profileRows, statusRows };
+    } catch (err) {
+      console.warn('[agents/live-status] MightyCall snapshot failed', orgId, fmtErr(err));
+      return mightyCallFallback;
+    }
+  })(), LIVE_STATUS_MIGHTYCALL_DEADLINE_MS, mightyCallFallback);
+  const { liveCalls, liveJournal, liveExtensions, ownStatus, profileRows, statusRows } = mightyCallSnapshot;
 
   const orgPhoneDigits = new Set((phones || []).map((phone: any) => normalizePhoneDigits(phone?.number)).filter(Boolean) as string[]);
   const extensionMetaByExt = new Map<string, any>();
