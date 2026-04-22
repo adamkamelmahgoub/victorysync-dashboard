@@ -1512,8 +1512,8 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 
 const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 4 * 60 * 60 * 1000;
-const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
-const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
+const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
+const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 5000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -1626,6 +1626,18 @@ function isLikelyLiveJournalRequest(request: any): boolean {
   ];
   const hasActiveStatus = statusCandidates.some((candidate) => isLikelyActiveCallStatus(candidate));
   const hasTerminalStatus = statusCandidates.some((candidate) => isLikelyTerminalOrIdleCallStatus(candidate));
+  const endedAt =
+    request?.endedAt ||
+    request?.ended_at ||
+    request?.endTime ||
+    request?.end_time ||
+    request?.finishedAt ||
+    request?.finished_at ||
+    request?.completedAt ||
+    request?.completed_at ||
+    request?.respondedAt ||
+    request?.responded_at ||
+    null;
   const workflowState = String(request?.wfstate?.state || '').toLowerCase().trim();
   const requestState = String(request?.state || '').toLowerCase().trim();
   const hasResponse = !!String(request?.respondedAt || request?.responded_at || '').trim();
@@ -1641,6 +1653,7 @@ function isLikelyLiveJournalRequest(request: any): boolean {
 
   // Journal rows are historical call activity. "Connected" means the call was
   // connected at some point, so only trust it as live while it is very fresh.
+  if (String(endedAt || '').trim()) return false;
   if (hasActiveStatus) return recentEnough;
   if (hasTerminalStatus) return false;
   if ((workflowState === 'open' || requestState === 'ringing' || requestState === 'calling' || requestState === 'dialing') && recentEnough) return true;
@@ -5350,7 +5363,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-			      live_status_version: 'mightycall-status-split-v15'
+			      live_status_version: 'short-lived-journal-signals-v16'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
