@@ -3,7 +3,7 @@
  * 
  * PRODUCTION SETUP:
  * - Deployed on Vercel or similar Node.js host
- * - CORS is enabled for all origins (app.use(cors())) — for production, consider restricting
+ * - CORS is enabled for all origins (app.use(cors())) Ã¢â‚¬â€ for production, consider restricting
  *   to your frontend domain: cors({ origin: 'https://dashboard.victorysync.com' })
  * - All endpoints are unauthenticated or use x-user-id header for simple testing
  * - IMPORTANT: Before going to production, implement proper JWT validation via Supabase Auth
@@ -16,13 +16,13 @@
  * - MIGHTYCALL_USER_KEY
  * 
  * KEY ENDPOINTS:
- * - GET  /api/client-metrics?org_id={optional}  — Dashboard KPI metrics (global or per-org)
- * - GET  /api/calls/recent?org_id={optional}   — Recent calls for the dashboard
- * - GET  /api/calls/series?range=day&org_id={optional} — Hourly/daily call series for charts
- * - GET  /api/calls/queue-summary?org_id={optional} — Queue breakdown
- * - GET  /api/admin/orgs                        — List all organizations
- * - GET  /api/admin/orgs/:orgId                 — Org details with members, phones, stats
- * - POST /api/admin/orgs/:orgId/phone-numbers   — Assign phone numbers to org
+ * - GET  /api/client-metrics?org_id={optional}  Ã¢â‚¬â€ Dashboard KPI metrics (global or per-org)
+ * - GET  /api/calls/recent?org_id={optional}   Ã¢â‚¬â€ Recent calls for the dashboard
+ * - GET  /api/calls/series?range=day&org_id={optional} Ã¢â‚¬â€ Hourly/daily call series for charts
+ * - GET  /api/calls/queue-summary?org_id={optional} Ã¢â‚¬â€ Queue breakdown
+ * - GET  /api/admin/orgs                        Ã¢â‚¬â€ List all organizations
+ * - GET  /api/admin/orgs/:orgId                 Ã¢â‚¬â€ Org details with members, phones, stats
+ * - POST /api/admin/orgs/:orgId/phone-numbers   Ã¢â‚¬â€ Assign phone numbers to org
  */
 
 // server/src/index.ts
@@ -37,7 +37,6 @@ import {
   fetchMightyCallExtensions, 
   fetchMightyCallProfileByExtension,
   fetchMightyCallProfileStatusByExtension,
-  fetchMightyCallLiveCallByExtension,
   fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
@@ -376,7 +375,7 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
 
     const phones: Array<{ id: string; number: string; number_digits?: string | null; label?: string | null; created_at?: string }> = [];
     for (const r of rowsArr) {
-      // Modern schema: phone_number_id → look up in phonesById
+      // Modern schema: phone_number_id Ã¢â€ â€™ look up in phonesById
       if (r.phone_number_id && phonesById[r.phone_number_id]) {
         const p = phonesById[r.phone_number_id];
         phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
@@ -387,12 +386,12 @@ async function getAssignedPhoneNumbersForOrg(orgId: string) {
         console.log('[getAssignedPhoneNumbersForOrg] found phone_number field containing UUID', r.phone_number, 'in phonesById lookup');
         phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
       }
-      // Legacy schema: phone_number text → look up in phonesByNumber
+      // Legacy schema: phone_number text Ã¢â€ â€™ look up in phonesByNumber
       else if (r.phone_number && phonesByNumber[r.phone_number]) {
         const p = phonesByNumber[r.phone_number];
         phones.push({ id: p.id, number: p.number, number_digits: p.number_digits ?? null, label: r.label ?? p.label ?? null, created_at: r.created_at });
       }
-      // Legacy schema: phone_number text but not found in phone_numbers table → use as-is with org_phone_numbers row id as synthetic id
+      // Legacy schema: phone_number text but not found in phone_numbers table Ã¢â€ â€™ use as-is with org_phone_numbers row id as synthetic id
       else if (r.phone_number && !r.phone_number_id && !r.phone_number.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
         console.log('[getAssignedPhoneNumbersForOrg] legacy phone_number', r.phone_number, 'not found in phone_numbers table, using synthetic id:', r.id);
         phones.push({ id: r.id, number: r.phone_number, number_digits: r.phone_number.replace(/\D/g, ''), label: r.label ?? null, created_at: r.created_at });
@@ -1684,7 +1683,7 @@ function isLikelyLiveContactCenterCommunication(request: any): boolean {
 }
 
 async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
-  const liveCallsWindowStart = new Date(Date.now() - LIVE_CALL_LOOKBACK_MS).toISOString();
+  const liveCallsWindowStart = new Date(Date.now() - (12 * 60 * 60 * 1000)).toISOString();
   const [
     { data: membersData, error: membersError },
     { data: extData, error: extError },
@@ -1751,41 +1750,52 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     }
   } catch {}
 
-  const uniqueExtensions = Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]));
-  const mightyCallSnapshot = await withDeadline((async () => {
-    const token = await getMightyCallAccessToken(overrideCreds);
-    const apiKeyOverride = overrideCreds?.clientId || undefined;
-    const [liveExtensions, ownStatus, apiProfileStatusRows, apiLiveCallRows] = await Promise.all([
-      fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []),
-      fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null),
-      Promise.all(uniqueExtensions.map(async (extension) => {
+  const token = await getMightyCallAccessToken(overrideCreds);
+  const apiKeyOverride = overrideCreds?.clientId || undefined;
+  const now = Date.now();
+  const callsPromise = fetchMightyCallCalls(token, {
+    startUtc: new Date(now - (12 * 60 * 60 * 1000)).toISOString(),
+    endUtc: new Date(now + (2 * 60 * 60 * 1000)).toISOString(),
+    pageSize: '500',
+    skip: '0'
+  }, apiKeyOverride).catch(() => []);
+  const journalPromise = fetchMightyCallJournalRequests(token, {
+    from: new Date(now - (2 * 60 * 60 * 1000)).toISOString(),
+    to: new Date(now + (30 * 60 * 1000)).toISOString(),
+    type: 'Call',
+    pageSize: '200',
+    page: '1'
+  }, apiKeyOverride).catch(() => []);
+  const extensionsPromise = fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []);
+  const ownStatusPromise = fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null);
+  const [liveCalls, liveJournal, liveExtensions, ownStatus] = await Promise.all([callsPromise, journalPromise, extensionsPromise, ownStatusPromise]);
+  const profileRows = await Promise.all(
+    Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
+      .map(async (extension) => {
         try {
-          const status = await fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride);
+          const profile = await fetchMightyCallProfileByExtension(extension, token, apiKeyOverride);
+          return profile ? { extension, profile } : null;
+        } catch {
+          return null;
+        }
+      })
+  );
+  const statusRows = await Promise.all(
+    Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]))
+      .map(async (extension) => {
+        if (!apiKeyOverride) return null;
+        try {
+          const extensionToken = await getMightyCallAccessToken({
+            clientId: apiKeyOverride,
+            clientSecret: extension,
+          });
+          const status = await fetchMightyCallOwnStatus(extensionToken, apiKeyOverride);
           return status ? { extension, status } : null;
         } catch {
           return null;
         }
-      })),
-      Promise.all(uniqueExtensions.map(async (extension) => {
-        try {
-          const liveCall = await fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride);
-          return liveCall ? { extension, liveCall } : null;
-        } catch {
-          return null;
-        }
-      })),
-    ]);
-    return { liveExtensions, ownStatus, apiProfileStatusRows, apiLiveCallRows };
-  })(), LIVE_STATUS_MIGHTYCALL_DEADLINE_MS, {
-    liveExtensions: [] as any[],
-    ownStatus: null as any,
-    apiProfileStatusRows: [] as any[],
-    apiLiveCallRows: [] as any[],
-  });
-  const { liveExtensions, ownStatus, apiProfileStatusRows, apiLiveCallRows } = mightyCallSnapshot;
-	  const liveCalls: any[] = [];
-  const profileRows: any[] = [];
-  const statusRows: any[] = apiProfileStatusRows || [];
+      })
+  );
 
   const orgPhoneDigits = new Set((phones || []).map((phone: any) => normalizePhoneDigits(phone?.number)).filter(Boolean) as string[]);
   const extensionMetaByExt = new Map<string, any>();
@@ -1813,30 +1823,24 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       });
     }
   }
-	  for (const row of statusRows) {
+  for (const row of statusRows) {
     const ext = normalizeExtension(row?.extension);
     if (ext && row?.status) {
       const existing = extensionMetaByExt.get(ext) || {};
       const existingMetadata = existing?.metadata || existing;
-	    const liveStatus = row.status;
-	      const liveStatusValue =
-	        extractLiveStatusLabel(liveStatus?.status) ||
-	        extractLiveStatusLabel(liveStatus?.state) ||
-	        extractLiveStatusLabel(liveStatus?.presenceStatus) ||
-	        extractLiveStatusLabel(liveStatus?.availability) ||
-	        extractLiveStatusLabel(liveStatus?.presence) ||
-	        extractLiveStatusLabel(liveStatus) ||
-	        null;
-	      const liveCurrentCall =
-	        liveStatus?.currentCall ||
-	        liveStatus?.current_call ||
-	        liveStatus?.status?.currentCall ||
-	        liveStatus?.status?.current_call ||
-	        liveStatus?.currentStatus?.currentCall ||
-	        liveStatus?.currentStatus?.current_call ||
-	        liveStatus?.current_status?.currentCall ||
-	        liveStatus?.current_status?.current_call ||
-	        null;
+      const liveStatus = row.status;
+      const liveStatusValue =
+        liveStatus?.status ||
+        liveStatus?.state ||
+        liveStatus?.presenceStatus ||
+        liveStatus?.availability ||
+        liveStatus?.presence ||
+        null;
+      const liveCurrentCall =
+        liveStatus?.currentCall ||
+        liveStatus?.current_call ||
+        null;
+      const statusLooksIdle = isLikelyTerminalOrIdleCallStatus(liveStatusValue);
       extensionMetaByExt.set(ext, {
         ...existing,
         extension: ext,
@@ -1846,112 +1850,35 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           liveStatus,
           currentStatus: liveStatus,
           status: liveStatusValue,
-          currentCall: liveCurrentCall,
-          current_call: liveCurrentCall,
-	          onCall: (
-	            liveStatus?.onCall ??
-	            liveStatus?.inCall ??
-	            liveStatus?.isOnCall ??
-	            liveStatus?.status?.onCall ??
-	            liveStatus?.status?.inCall ??
-	            liveStatus?.status?.isOnCall ??
-	            liveStatus?.currentStatus?.onCall ??
-	            liveStatus?.currentStatus?.inCall ??
-	            liveStatus?.currentStatus?.isOnCall ??
-	            liveStatus?.current_status?.onCall ??
-	            liveStatus?.current_status?.inCall ??
-	            liveStatus?.current_status?.isOnCall ??
-	            liveCurrentCall?.onCall ??
-	            liveCurrentCall?.inCall ??
-	            liveCurrentCall?.isOnCall ??
-	            false
-	          ),
+          currentCall: statusLooksIdle ? null : liveCurrentCall,
+          current_call: statusLooksIdle ? null : liveCurrentCall,
+          onCall: statusLooksIdle
+            ? false
+            : (liveStatus?.onCall ?? liveStatus?.inCall ?? liveStatus?.isOnCall ?? false),
           presence: liveStatus?.presence || null,
           presenceStatus: liveStatus?.presenceStatus || null,
           availability: liveStatus?.availability || null,
         }
       });
     }
-	  }
-	  const apiLiveCallByExt = new Map<string, any>();
-	  for (const row of apiLiveCallRows || []) {
-	    const ext = normalizeExtension(row?.extension);
-	    const liveCall = row?.liveCall;
-	    if (!ext || !liveCall?.onCall) continue;
-	    apiLiveCallByExt.set(ext, {
-	      extension: ext,
-	      status: liveCall?.status || 'Connected',
-	      onCall: true,
-	      currentCall: liveCall?.currentCall || null,
-	      sourceEndpoint: liveCall?.sourceEndpoint || '/calls?extension',
-	      rawStatus: liveCall,
-	    });
-	  }
-	  for (const row of apiProfileStatusRows || []) {
-	    const ext = normalizeExtension(row?.extension);
-	    if (!ext || !row?.status) continue;
-	    const profileStatus = row.status;
-	    const statusLabel =
-	      extractLiveStatusLabel(profileStatus?.currentCall) ||
-	      extractLiveStatusLabel(profileStatus?.current_call) ||
-	      extractLiveStatusLabel(profileStatus?.status) ||
-	      extractLiveStatusLabel(profileStatus?.state) ||
-	      extractLiveStatusLabel(profileStatus?.presenceStatus) ||
-	      extractLiveStatusLabel(profileStatus?.availability) ||
-	      extractLiveStatusLabel(profileStatus) ||
-	      'Available';
-	    const currentCall =
-	      profileStatus?.currentCall ||
-	      profileStatus?.current_call ||
-	      profileStatus?.status?.currentCall ||
-	      profileStatus?.status?.current_call ||
-	      profileStatus?.currentStatus?.currentCall ||
-	      profileStatus?.currentStatus?.current_call ||
-	      profileStatus?.current_status?.currentCall ||
-	      profileStatus?.current_status?.current_call ||
-	      null;
-	    const endedAt =
-	      currentCall?.endedAt ||
-	      currentCall?.ended_at ||
-	      currentCall?.ended ||
-	      currentCall?.endTime ||
-	      currentCall?.end_time ||
-	      profileStatus?.endedAt ||
-	      profileStatus?.ended_at ||
-	      null;
-	    const hasCurrentCallPayload = !!(currentCall && typeof currentCall === 'object' && Object.keys(currentCall).length > 0);
-	    const profileStatusSaysIdle = isLikelyTerminalOrIdleCallStatus(statusLabel);
-	    const onCall = !String(endedAt || '').trim() && (
-	      hasFreshStatusCallSignal(profileStatus) ||
-	      isLikelyActiveCallStatus(statusLabel) ||
-	      (hasCurrentCallPayload && !profileStatusSaysIdle)
-	    );
-	    if (apiLiveCallByExt.has(ext) && !onCall) continue;
-	    apiLiveCallByExt.set(ext, {
-	      extension: ext,
-	      status: statusLabel,
-	      onCall,
-	      currentCall,
-	      sourceEndpoint: profileStatus?.sourceEndpoint || '/profile/status?extension',
-	      rawStatus: profileStatus,
-	    });
-	  }
+  }
 
-	  const activeCalls = (liveCalls || []).filter((call: any) => {
+  const activeCalls = (liveCalls || []).filter((call: any) => {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
     const endedAt = call?.endedAt || call?.ended_at || call?.endTime || call?.ended || null;
     const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
     if (String(endedAt || '').trim()) return false;
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
-	    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS);
+    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
   });
+  const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
   const activeStoredCalls = (recentCallRows || []).filter((call: any) => {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
     const endedAt = call?.ended_at || call?.endedAt || call?.endTime || call?.ended || null;
     const startedAt = call?.started_at || call?.dateTimeUtc || call?.start_time || call?.created || null;
     if (String(endedAt || '').trim()) return false;
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
-    if (isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS)) return true;
+    if (isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000)) return true;
     const metadata = call?.metadata && typeof call.metadata === 'object' ? call.metadata : {};
     return hasFreshStatusCallSignal({
       ...metadata,
@@ -1961,7 +1888,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ended_at: endedAt,
       endedAt: endedAt,
       currentCall: metadata?.currentCall || metadata?.current_call || null,
-    }, ACTIVE_CALL_MAX_AGE_MS);
+    }, 2 * 60 * 60 * 1000);
   });
 
   return memberRows.map((member: any) => {
@@ -1972,10 +1899,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const shouldUseSingleAgentFallback = memberRows.length === 1;
     const email = emailByUserId.get(userId) || null;
     const agentIdentities = buildAgentIdentityCandidates(member, extMeta, email);
-	    const ownStatusMatchesMember = !!ownStatus && payloadMatchesAgent(ownStatus, normalizedExt, agentIdentities);
-    const matchedApiLiveCall = normalizedExt ? apiLiveCallByExt.get(normalizedExt) || null : null;
-	
-	    const matchedLiveCall = normalizedExt
+    const ownStatusMatchesMember = !!ownStatus && payloadMatchesAgent(ownStatus, normalizedExt, agentIdentities);
+
+    const matchedLiveCall = normalizedExt
       ? activeCalls.find((call: any) => {
           const agentMatches = payloadMatchesAgent(call, normalizedExt, agentIdentities);
           const status = String(call?.status || call?.state || call?.callStatus || '').trim();
@@ -1983,7 +1909,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           if (String(call?.endedAt || call?.ended_at || '').trim()) return false;
           if (isLikelyTerminalOrIdleCallStatus(status)) return false;
           const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
-	          return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, ACTIVE_CALL_MAX_AGE_MS);
+          return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
         }) || null
       : null;
     const inferredLiveCall = !matchedLiveCall && shouldUseSingleAgentFallback && activeCalls.length === 1
@@ -1999,20 +1925,28 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const inferredStoredCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && shouldUseSingleAgentFallback && activeStoredCalls.length === 1
       ? activeStoredCalls[0]
       : null;
+    const matchedJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && normalizedExt
+      ? activeJournalCalls.find((call: any) => payloadMatchesAgent(call, normalizedExt, agentIdentities)) || null
+      : null;
+    const inferredJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && !matchedJournalCall && shouldUseSingleAgentFallback && activeJournalCalls.length === 1
+      ? activeJournalCalls[0]
+      : null;
+    const normalizedJournal = matchedJournalCall || inferredJournalCall ? normalizeMightyCallJournalActivity(matchedJournalCall || inferredJournalCall) : null;
+
     const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
-    const callStatus = matchedApiLiveCall
-      ? String(matchedApiLiveCall?.status || matchedApiLiveCall?.state || matchedApiLiveCall?.callStatus || matchedApiLiveCall?.currentCall?.status || matchedApiLiveCall?.currentCall?.state || matchedApiLiveCall?.currentCall?.callStatus || '').trim() || extStatus
-      : matchedLiveCall
-	      ? String(matchedLiveCall?.status || matchedLiveCall?.state || matchedLiveCall?.callStatus || '').trim() || extStatus
-	      : inferredLiveCall
-	        ? String(inferredLiveCall?.status || inferredLiveCall?.state || inferredLiveCall?.callStatus || '').trim() || extStatus
+    const callStatus = matchedLiveCall
+      ? String(matchedLiveCall?.status || matchedLiveCall?.state || matchedLiveCall?.callStatus || '').trim() || extStatus
+      : inferredLiveCall
+        ? String(inferredLiveCall?.status || inferredLiveCall?.state || inferredLiveCall?.callStatus || '').trim() || extStatus
       : matchedStoredCall
           ? String((matchedStoredCall as any)?.status || (matchedStoredCall as any)?.state || (matchedStoredCall as any)?.callStatus || '').trim() || extStatus
         : inferredStoredCall
             ? String((inferredStoredCall as any)?.status || (inferredStoredCall as any)?.state || (inferredStoredCall as any)?.callStatus || '').trim() || extStatus
+      : matchedJournalCall || inferredJournalCall
+          ? String(normalizedJournal?.status || (matchedJournalCall || inferredJournalCall)?.state || (matchedJournalCall || inferredJournalCall)?.wfstate?.state || (matchedJournalCall || inferredJournalCall)?.availability || '').trim() || extStatus
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
-    const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload?.current_status || extPayload;
+    const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
     const shouldUseOwnStatusFallback = !!ownStatus && (shouldUseSingleAgentFallback || ownStatusMatchesMember);
     const ownStatusPayload = shouldUseOwnStatusFallback ? ownStatus : null;
     const effectiveStatusPayload = ownStatusPayload || statusPayload;
@@ -2020,54 +1954,54 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const explicitOwnStatusLabel = extractLiveStatusLabel(ownStatusPayload);
     const ownStatusSaysOnCall = shouldUseOwnStatusFallback && !!explicitOwnStatusLabel && isLikelyActiveCallStatus(explicitOwnStatusLabel);
     const hasFreshStatusSignal = hasFreshStatusCallSignal(effectiveStatusPayload) || ownStatusSaysOnCall;
-    const apiSaysOnCall = !!matchedApiLiveCall?.onCall;
     const onCall = !!(
-          apiSaysOnCall ||
-		      matchedLiveCall ||
-		      inferredLiveCall ||
-		      matchedStoredCall ||
-		      inferredStoredCall ||
-		      hasFreshStatusSignal
-		    );
-    const activeApiLiveCall = apiSaysOnCall ? matchedApiLiveCall : null;
-    const apiCurrentCall = matchedApiLiveCall?.currentCall || matchedApiLiveCall;
-		    const counterpart = activeApiLiveCall
-      ? extractCounterpartyLabel(apiCurrentCall, orgPhoneDigits, normalizedExt)
-      : matchedLiveCall
-		      ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
+      matchedLiveCall ||
+      inferredLiveCall ||
+      matchedStoredCall ||
+      inferredStoredCall ||
+      matchedJournalCall ||
+      inferredJournalCall ||
+      hasFreshStatusSignal
+    );
+    const counterpart = matchedLiveCall
+      ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : inferredLiveCall
         ? extractCounterpartyLabel(inferredLiveCall, orgPhoneDigits, normalizedExt)
-	      : matchedStoredCall
-	          ? extractCounterpartyLabel(matchedStoredCall?.metadata || matchedStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(matchedStoredCall, orgPhoneDigits, normalizedExt)
-	        : inferredStoredCall
-	            ? extractCounterpartyLabel(inferredStoredCall?.metadata || inferredStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(inferredStoredCall, orgPhoneDigits, normalizedExt)
-	        : normalizedStatus?.counterpart || extractCounterpartyLabel(effectiveStatusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
-		    const startedAt = activeApiLiveCall
-      ? apiCurrentCall?.dateTimeUtc || apiCurrentCall?.startedAt || apiCurrentCall?.started_at || apiCurrentCall?.startTime || apiCurrentCall?.start_time || apiCurrentCall?.createdAt || apiCurrentCall?.created_at || apiCurrentCall?.created || null
-      : matchedLiveCall
-		      ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
+      : matchedStoredCall
+          ? extractCounterpartyLabel(matchedStoredCall?.metadata || matchedStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(matchedStoredCall, orgPhoneDigits, normalizedExt)
+        : inferredStoredCall
+            ? extractCounterpartyLabel(inferredStoredCall?.metadata || inferredStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(inferredStoredCall, orgPhoneDigits, normalizedExt)
+      : matchedJournalCall || inferredJournalCall
+          ? normalizedJournal?.counterpart || extractCounterpartyLabel(matchedJournalCall || inferredJournalCall, orgPhoneDigits, normalizedExt)
+        : normalizedStatus?.counterpart || extractCounterpartyLabel(effectiveStatusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
+    const startedAt = matchedLiveCall
+      ? matchedLiveCall?.dateTimeUtc || matchedLiveCall?.started_at || matchedLiveCall?.start_time || matchedLiveCall?.created || null
       : inferredLiveCall
         ? inferredLiveCall?.dateTimeUtc || inferredLiveCall?.started_at || inferredLiveCall?.start_time || inferredLiveCall?.created || null
-	      : matchedStoredCall
-	          ? (matchedStoredCall as any)?.started_at || (matchedStoredCall as any)?.dateTimeUtc || (matchedStoredCall as any)?.start_time || (matchedStoredCall as any)?.created || null
-	        : inferredStoredCall
-	            ? (inferredStoredCall as any)?.started_at || (inferredStoredCall as any)?.dateTimeUtc || (inferredStoredCall as any)?.start_time || (inferredStoredCall as any)?.created || null
-	        : hasFreshStatusSignal
-	          ? normalizedStatus?.started_at || effectiveStatusPayload?.currentCall?.startedAt || effectiveStatusPayload?.currentCall?.started_at || effectiveStatusPayload?.current_call?.startedAt || effectiveStatusPayload?.current_call?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
-	          : null;
-		    const source = activeApiLiveCall
-      ? 'mightycall_api_poll'
-      : matchedLiveCall
-		      ? 'mightycall_calls'
+      : matchedStoredCall
+          ? (matchedStoredCall as any)?.started_at || (matchedStoredCall as any)?.dateTimeUtc || (matchedStoredCall as any)?.start_time || (matchedStoredCall as any)?.created || null
+        : inferredStoredCall
+            ? (inferredStoredCall as any)?.started_at || (inferredStoredCall as any)?.dateTimeUtc || (inferredStoredCall as any)?.start_time || (inferredStoredCall as any)?.created || null
+      : matchedJournalCall || inferredJournalCall
+          ? normalizedJournal?.started_at || (matchedJournalCall || inferredJournalCall)?.created || (matchedJournalCall || inferredJournalCall)?.createdAt || null
+        : hasFreshStatusSignal
+          ? normalizedStatus?.started_at || effectiveStatusPayload?.currentCall?.startedAt || effectiveStatusPayload?.currentCall?.started_at || effectiveStatusPayload?.current_call?.startedAt || effectiveStatusPayload?.current_call?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
+          : null;
+    const source = matchedLiveCall
+      ? 'mightycall_calls'
       : inferredLiveCall
         ? 'mightycall_calls_inferred'
         : matchedStoredCall
           ? 'stored_calls'
-	      : inferredStoredCall
-	            ? 'stored_calls_inferred'
-	        : hasFreshStatusSignal
-	              ? (ownStatusSaysOnCall ? 'mightycall_own_status' : 'mightycall_status')
-	              : (extMeta ? 'mightycall_extensions' : 'unmatched');
+          : inferredStoredCall
+            ? 'stored_calls_inferred'
+        : matchedJournalCall
+          ? 'mightycall_journal'
+          : inferredJournalCall
+            ? 'mightycall_journal_inferred'
+            : hasFreshStatusSignal
+              ? (ownStatusSaysOnCall ? 'mightycall_own_status' : 'mightycall_status')
+              : (extMeta ? 'mightycall_extensions' : 'unmatched');
 
     if (normalizedExt) {
       console.info('[agents/live-status] resolved', {
@@ -2076,9 +2010,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         extension: normalizedExt,
         source,
         onCall,
-	        status: callStatus || null,
-	        matchedCallCandidates: matchedApiLiveCall ? collectExtensionCandidates(apiCurrentCall) : (matchedLiveCall ? collectExtensionCandidates(matchedLiveCall) : []),
-	        matchedStoredCallId: (matchedStoredCall || inferredStoredCall)?.id || null,
+        status: callStatus || null,
+        matchedCallCandidates: matchedLiveCall ? collectExtensionCandidates(matchedLiveCall) : [],
+        matchedJournalCallId: (matchedJournalCall || inferredJournalCall)?.id || null,
       });
     }
 
@@ -2779,7 +2713,7 @@ app.get("/api/client-metrics", async (req, res) => {
 // ============== ADMIN ENDPOINTS ==============
 
 // ------------------ API Keys Management ------------------
-// Platform keys (platform admins only) — Create
+// Platform keys (platform admins only) Ã¢â‚¬â€ Create
 app.post('/api/admin/platform-api-keys', async (req, res) => {
   try {
     const actorId = req.header('x-user-id') || null;
@@ -2801,7 +2735,7 @@ app.post('/api/admin/platform-api-keys', async (req, res) => {
   }
 });
 
-// Platform keys — List
+// Platform keys Ã¢â‚¬â€ List
 app.get('/api/admin/platform-api-keys', async (req, res) => {
   try {
     const actorId = req.header('x-user-id') || null;
@@ -2817,7 +2751,7 @@ app.get('/api/admin/platform-api-keys', async (req, res) => {
   }
 });
 
-// Platform keys — Delete
+// Platform keys Ã¢â‚¬â€ Delete
 app.delete('/api/admin/platform-api-keys/:id', async (req, res) => {
   try {
     const actorId = req.header('x-user-id') || null;
@@ -3788,7 +3722,7 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
     if (phoneRows && Array.isArray(phoneRows)) {
       for (const p of phoneRows) {
         idToNumber[p.id] = p.number;
-        console.log('[assign_phone_numbers] resolved phone', p.id, '→', p.number);
+        console.log('[assign_phone_numbers] resolved phone', p.id, 'Ã¢â€ â€™', p.number);
       }
     }
     console.log('[assign_phone_numbers] id-to-number mapping:', idToNumber);
@@ -3812,7 +3746,7 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
           .insert({ org_id: orgId, phone_number_id: phoneId, phone_number: numberStr || '' });
         
         if (!modernErr) {
-          console.log('[assign_phone_numbers] ✓ successfully assigned via modern schema:', phoneId);
+          console.log('[assign_phone_numbers] Ã¢Å“â€œ successfully assigned via modern schema:', phoneId);
           successCount++;
           assigned = true;
         } else {
@@ -3830,7 +3764,7 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
               .eq('phone_number', numberStr)
               .select('id');
             if (!updateErr) {
-              console.log('[assign_phone_numbers] ✓ successfully reassigned via UPDATE:', phoneId);
+              console.log('[assign_phone_numbers] Ã¢Å“â€œ successfully reassigned via UPDATE:', phoneId);
               successCount++;
               assigned = true;
             } else {
@@ -3859,13 +3793,13 @@ app.post("/api/admin/orgs/:orgId/phone-numbers", async (req, res) => {
             continue;
           }
 
-          console.log('[assign_phone_numbers] trying legacy schema for phoneId:', phoneId, '→', numberStr);
+          console.log('[assign_phone_numbers] trying legacy schema for phoneId:', phoneId, 'Ã¢â€ â€™', numberStr);
           const { error: legacyErr } = await supabaseAdmin
             .from('org_phone_numbers')
             .insert({ org_id: orgId, phone_number: numberStr });
           
           if (!legacyErr) {
-            console.log('[assign_phone_numbers] ✓ successfully assigned via legacy schema:', numberStr);
+            console.log('[assign_phone_numbers] Ã¢Å“â€œ successfully assigned via legacy schema:', numberStr);
             successCount++;
             assigned = true;
           } else {
@@ -3951,7 +3885,7 @@ app.delete('/api/admin/orgs/:orgId/phone-numbers/:phoneNumberId', async (req, re
             .delete()
             .eq('id', row.id);
           if (!delErr) {
-            console.log('[unassign_phone] ✓ successfully deleted row:', row.id);
+            console.log('[unassign_phone] Ã¢Å“â€œ successfully deleted row:', row.id);
             deletedCount += 1;
           } else {
             console.warn('[unassign_phone] delete failed for row:', row.id, 'error:', fmtErr(delErr));
@@ -5290,7 +5224,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-			      live_status_version: 'mightycall-live-call-by-extension-v13'
+			      live_status_version: 'restored-live-call-resolver-v14'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
@@ -5520,7 +5454,7 @@ app.get('/api/admin/orgs/:orgId', async (req, res) => {
 });
 
 // Temporary diagnostic endpoint for debugging org issues in production.
-// Protected by DIAG_TOKEN environment variable — set DIAG_TOKEN to a secret value before using.
+// Protected by DIAG_TOKEN environment variable Ã¢â‚¬â€ set DIAG_TOKEN to a secret value before using.
 app.get('/api/admin/orgs/:orgId/diag', async (req, res) => {
   const token = req.query.diag_token as string | undefined;
   if (!process.env.DIAG_TOKEN || token !== process.env.DIAG_TOKEN) return res.status(401).json({ error: 'unauthorized' });
@@ -12346,7 +12280,7 @@ app.get('/api/recordings', async (req, res) => {
       // Create a unique identifier for this recording
       const rawRecordingDate = callData.started_at || rec.recording_date || rec.recorded_at || '';
       const recordingDate = rawRecordingDate ? new Date(rawRecordingDate).toISOString().split('T')[0] : 'Unknown date';
-      const identifier = `${fromNumber || 'Unknown'} → ${toNumber || 'Unknown'} (${durationSeconds}s, ${recordingDate})`;
+      const identifier = `${fromNumber || 'Unknown'} Ã¢â€ â€™ ${toNumber || 'Unknown'} (${durationSeconds}s, ${recordingDate})`;
       
       return {
         ...rec,
@@ -12361,7 +12295,7 @@ app.get('/api/recordings', async (req, res) => {
         direction: metadata.direction || 'Unknown',
         // Add readable identifier for admins
         identifier: identifier,
-        display_name: `${fromNumber || 'Unknown'} → ${toNumber || 'Unknown'}` 
+        display_name: `${fromNumber || 'Unknown'} Ã¢â€ â€™ ${toNumber || 'Unknown'}`
       };
     });
 
@@ -12488,7 +12422,7 @@ app.use('/api/admin', usersRouter);
 // `SKIP_FATAL_SIGNAL_EXIT` env var is set to "true". In normal operation the
 // original graceful shutdown behavior remains.
 if (process.env.SKIP_FATAL_SIGNAL_EXIT === 'true') {
-  console.log('[startup] SKIP_FATAL_SIGNAL_EXIT=true — SIGINT/SIGTERM will be logged but not exit the process');
+  console.log('[startup] SKIP_FATAL_SIGNAL_EXIT=true Ã¢â‚¬â€ SIGINT/SIGTERM will be logged but not exit the process');
   process.on('SIGTERM', () => {
     console.log('[shutdown-debug] SIGTERM received (ignored for debug)');
   });
