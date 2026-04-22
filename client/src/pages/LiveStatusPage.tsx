@@ -60,7 +60,7 @@ const LiveStatusPage: FC = () => {
 
   useEffect(() => {
     load();
-    const intervalId = window.setInterval(load, 2000);
+    const intervalId = window.setInterval(load, 1000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') load();
     };
