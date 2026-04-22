@@ -1740,16 +1740,16 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   }
 
   const userIds = Array.from(new Set(memberRows.map((row: any) => String(row.user_id || '')).filter(Boolean)));
-  const authUsers = await Promise.all(userIds.map(async (userId) => {
-    try {
-      const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
-      if (error) return { userId, email: null };
-      return { userId, email: data.user?.email || null };
-    } catch {
-      return { userId, email: null };
+  const emailByUserId = new Map<string, string | null>();
+  try {
+    const { data: profileRows } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email')
+      .in('id', userIds);
+    for (const row of profileRows || []) {
+      emailByUserId.set(String((row as any).id), (row as any).email || null);
     }
-  }));
-  const emailByUserId = new Map(authUsers.map((row) => [row.userId, row.email]));
+  } catch {}
 
   let overrideCreds: any = undefined;
   try {
@@ -5363,7 +5363,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-			      live_status_version: 'one-second-live-status-v18'
+			      live_status_version: 'fast-profile-live-status-v19'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
