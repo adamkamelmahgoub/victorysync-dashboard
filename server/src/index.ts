@@ -1921,10 +1921,13 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
     const endedAt = call?.ended_at || call?.endedAt || call?.endTime || call?.ended || null;
     const startedAt = call?.started_at || call?.dateTimeUtc || call?.start_time || call?.created || null;
+    const metadata = call?.metadata && typeof call.metadata === 'object' ? call.metadata : {};
+    const maxAgeMs = metadata?.source === 'mightycall_webhook'
+      ? ACTIVE_CALL_MAX_AGE_MS
+      : JOURNAL_LIVE_SIGNAL_MAX_AGE_MS;
     if (String(endedAt || '').trim()) return false;
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
-    if (isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, JOURNAL_LIVE_SIGNAL_MAX_AGE_MS)) return true;
-    const metadata = call?.metadata && typeof call.metadata === 'object' ? call.metadata : {};
+    if (isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, maxAgeMs)) return true;
     return hasFreshStatusCallSignal({
       ...metadata,
       status: status || metadata?.status || metadata?.state || null,
@@ -1933,7 +1936,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       ended_at: endedAt,
       endedAt: endedAt,
       currentCall: metadata?.currentCall || metadata?.current_call || null,
-    }, JOURNAL_LIVE_SIGNAL_MAX_AGE_MS);
+    }, maxAgeMs);
   });
 
   return memberRows.map((member: any) => {
@@ -5373,7 +5376,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-				      live_status_version: 'profile-status-primary-v21'
+				      live_status_version: 'webhook-backed-profile-status-v22'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
