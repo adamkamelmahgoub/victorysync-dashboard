@@ -1575,14 +1575,18 @@ function extractLiveStatusLabel(raw: any): string | null {
 
 function extractCounterpartyLabel(value: any, orgPhoneDigits: Set<string>, extension?: string | null): string | null {
   const extDigits = normalizeExtension(extension || '');
+  const callerExt = normalizeExtension(value?.caller?.extension || value?.caller?.ext || '');
+  const primaryCalledName = String(value?.called?.[0]?.name || '').trim();
+  const primaryCalledPhone = String(value?.called?.[0]?.phone || value?.called?.[0]?.number || '').trim();
   const candidates = [
     value?.contact?.name,
     value?.customer?.name,
     value?.client?.name,
-    value?.caller?.name,
     value?.party?.name,
     value?.currentCall?.contact?.name,
     value?.current_call?.contact?.name,
+    primaryCalledPhone,
+    primaryCalledName,
     value?.contact?.phone,
     value?.customer?.phone,
     value?.customer?.number,
@@ -1601,8 +1605,6 @@ function extractCounterpartyLabel(value: any, orgPhoneDigits: Set<string>, exten
     value?.to,
     value?.to_number,
     value?.destination?.number,
-    value?.called?.[0]?.phone,
-    value?.called?.[0]?.number,
     value?.businessNumber?.number,
     value?.currentCall?.from,
     value?.currentCall?.to,
@@ -1615,6 +1617,7 @@ function extractCounterpartyLabel(value: any, orgPhoneDigits: Set<string>, exten
   for (const candidate of candidates) {
     const raw = String(candidate || '').trim();
     if (!raw) continue;
+    if (callerExt && extDigits && callerExt === extDigits && raw === String(value?.caller?.name || '').trim()) continue;
     const digits = normalizePhoneDigits(raw);
     if (digits) {
       if (extDigits && digits === extDigits) continue;

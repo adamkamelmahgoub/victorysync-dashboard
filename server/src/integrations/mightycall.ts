@@ -724,7 +724,9 @@ function parseMightyCallDurationSeconds(value: any): number | null {
   if (!raw) return null;
   if (/^\d+(\.\d+)?$/.test(raw)) {
     const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
+    if (!Number.isFinite(parsed)) return null;
+    if (parsed >= 10000) return parsed / 1000;
+    return parsed;
   }
   const parts = raw.split(':').map((part) => Number(part));
   if (parts.length >= 2 && parts.every((part) => Number.isFinite(part))) {
@@ -838,12 +840,16 @@ function isMightyCallLiveCallForExtension(call: any, normalizedExtension: string
   const ageMs = startedMs == null ? null : nowMs - startedMs;
   if (ageMs != null && (ageMs < -(5 * 60 * 1000) || ageMs > (6 * 60 * 60 * 1000))) return false;
 
+  const durationSeconds = extractMightyCallDurationSeconds(call);
+  if (durationSeconds != null && startedMs != null) {
+    const endedByDurationMs = startedMs + (durationSeconds * 1000);
+    if (endedByDurationMs < (nowMs - 15000)) return false;
+  }
+
   if (callHasConnectedParticipantForExtension(call, normalizedExtension)) return true;
 
   const hasActiveStatus = statuses.some((status) => isMightyCallActiveStatus(status));
   if (!hasActiveStatus) return false;
-
-  const durationSeconds = extractMightyCallDurationSeconds(call);
   if (durationSeconds != null && durationSeconds > 0 && ageMs != null && ageMs > (15 * 60 * 1000)) {
     return false;
   }
