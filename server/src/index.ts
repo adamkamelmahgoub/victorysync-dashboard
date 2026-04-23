@@ -1463,6 +1463,32 @@ function mapLivePresenceRow(row: any) {
   };
 }
 
+function getLivePresenceRowAgeMs(row: any): number {
+  const refreshedAt = String(row?.refreshed_at || '').trim();
+  if (!refreshedAt) return Number.POSITIVE_INFINITY;
+  const refreshedAtMs = Date.parse(refreshedAt);
+  if (Number.isNaN(refreshedAtMs)) return Number.POSITIVE_INFINITY;
+  return Math.max(Date.now() - refreshedAtMs, 0);
+}
+
+function getOrgIdsNeedingPresenceRefresh(orgIds: string[], rows: any[], freshnessMs = LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS): string[] {
+  if (orgIds.length === 0) return [];
+  const rowsByOrg = new Map<string, any[]>();
+  for (const row of rows || []) {
+    const rowOrgId = String(row?.org_id || '').trim();
+    if (!rowOrgId) continue;
+    const bucket = rowsByOrg.get(rowOrgId) || [];
+    bucket.push(row);
+    rowsByOrg.set(rowOrgId, bucket);
+  }
+
+  return orgIds.filter((orgId) => {
+    const orgRows = rowsByOrg.get(orgId) || [];
+    if (orgRows.length === 0) return true;
+    return orgRows.some((row) => getLivePresenceRowAgeMs(row) > freshnessMs);
+  });
+}
+
 function payloadMatchesAgent(payload: any, normalizedExt: string | null, agentIdentities: Set<string>): boolean {
   if (normalizedExt) {
     const extCandidates = collectExtensionCandidates(payload);
@@ -1654,7 +1680,9 @@ const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
 const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v27';
+const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
+const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 4500;
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v28';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2291,6 +2319,7 @@ async function refreshLiveAgentPresenceForOrg(orgId: string) {
 }
 
 let livePresenceRefreshInFlight = false;
+const livePresenceOrgRefreshLocks = new Map<string, Promise<any>>();
 
 async function refreshLiveAgentPresence(orgId?: string | null) {
   const targetOrgIds = orgId ? [orgId] : await getLivePresenceOrgIds();
@@ -2342,6 +2371,54 @@ async function runLiveAgentPresenceRefreshCycle() {
   } finally {
     livePresenceRefreshInFlight = false;
   }
+}
+
+async function refreshLiveAgentPresenceForOrgWithLock(orgId: string) {
+  const existing = livePresenceOrgRefreshLocks.get(orgId);
+  if (existing) return existing;
+
+  const job = (async () => refreshLiveAgentPresenceForOrg(orgId))();
+  livePresenceOrgRefreshLocks.set(orgId, job);
+  try {
+    return await job;
+  } finally {
+    if (livePresenceOrgRefreshLocks.get(orgId) === job) {
+      livePresenceOrgRefreshLocks.delete(orgId);
+    }
+  }
+}
+
+async function ensureLiveAgentPresenceFresh(orgIds: string[]) {
+  if (orgIds.length === 0) {
+    return {
+      rows: [] as any[],
+      refreshed: false,
+      liveStatusVersion: LIVE_AGENT_PRESENCE_SYNC_VERSION,
+    };
+  }
+
+  let rows = await getLivePresenceRowsForOrgIds(orgIds);
+  const orgIdsNeedingRefresh = getOrgIdsNeedingPresenceRefresh(orgIds, rows);
+  if (orgIdsNeedingRefresh.length === 0) {
+    return {
+      rows,
+      refreshed: false,
+      liveStatusVersion: LIVE_AGENT_PRESENCE_SYNC_VERSION,
+    };
+  }
+
+  await withDeadline(
+    Promise.all(orgIdsNeedingRefresh.map((orgId) => refreshLiveAgentPresenceForOrgWithLock(orgId))),
+    LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS,
+    [] as any[]
+  );
+
+  rows = await getLivePresenceRowsForOrgIds(orgIds);
+  return {
+    rows,
+    refreshed: true,
+    liveStatusVersion: `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-request`,
+  };
 }
 
 function reportVisibleToAssignedPhones(
@@ -5624,7 +5701,9 @@ app.get('/api/agents/live-status', async (req, res) => {
     let refreshedAt: string | null = null;
     let liveStatusVersion = LIVE_AGENT_PRESENCE_SYNC_VERSION;
     try {
-      const rows = await getLivePresenceRowsForOrgIds(orgIds);
+      const result = await ensureLiveAgentPresenceFresh(orgIds);
+      const rows = result.rows;
+      liveStatusVersion = result.liveStatusVersion;
       items = rows.map(mapLivePresenceRow);
       refreshedAt = items
         .map((item: any) => item.refreshed_at || null)
@@ -5671,7 +5750,9 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
     let refreshedAt: string | null = null;
     let liveStatusVersion = LIVE_AGENT_PRESENCE_SYNC_VERSION;
     try {
-      const rows = await getLivePresenceRowsForOrgIds([orgId]);
+      const result = await ensureLiveAgentPresenceFresh([orgId]);
+      const rows = result.rows;
+      liveStatusVersion = result.liveStatusVersion;
       items = rows.map(mapLivePresenceRow);
       refreshedAt = items
         .map((item: any) => item.refreshed_at || null)
