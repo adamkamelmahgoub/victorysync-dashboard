@@ -202,12 +202,16 @@ async function resolveUserEmailsById(userIds: string[]) {
     }
   } catch {}
 
-  try {
-    const { data } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 500 });
-    for (const user of data?.users || []) {
-      if (ids.includes(user.id) && user.email) map[user.id] = user.email;
-    }
-  } catch {}
+  const missingIds = ids.filter((id) => !map[id]);
+  if (missingIds.length > 0) {
+    await Promise.all(missingIds.map(async (id) => {
+      try {
+        const { data } = await supabaseAdmin.auth.admin.getUserById(id);
+        const email = data?.user?.email || null;
+        if (email) map[id] = email;
+      } catch {}
+    }));
+  }
 
   return map;
 }
@@ -1325,6 +1329,26 @@ function buildAgentIdentityCandidates(member: any, extMeta: any, email: string |
   return found;
 }
 
+function extractAgentEmailFromMeta(extMeta: any): string | null {
+  const payload = extMeta?.metadata || extMeta || {};
+  const candidates = [
+    extMeta?.email,
+    payload?.email,
+    payload?.login,
+    payload?.user?.email,
+    payload?.member?.email,
+    payload?.agent?.email,
+    payload?.profile?.email,
+    payload?.currentStatus?.email,
+    payload?.liveStatus?.email,
+  ];
+  for (const value of candidates) {
+    const text = String(value || '').trim();
+    if (text && text.includes('@')) return text;
+  }
+  return null;
+}
+
 function payloadMatchesAgent(payload: any, normalizedExt: string | null, agentIdentities: Set<string>): boolean {
   if (normalizedExt) {
     const extCandidates = collectExtensionCandidates(payload);
@@ -1700,8 +1724,6 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   const [
     { data: membersData, error: membersError },
     { data: extData, error: extError },
-    { data: cachedExtensions },
-    { data: recentCallRows, error: recentCallsError },
   ] = await Promise.all([
     supabaseAdmin
       .from('org_users')
@@ -1711,22 +1733,11 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       .from('agent_extensions')
       .select('user_id, extension, display_name')
       .eq('org_id', orgId),
-    supabaseAdmin
-      .from('mightycall_extensions')
-      .select('extension, display_name, metadata, external_id'),
-    supabaseAdmin
-      .from('calls')
-      .select('id, external_id, from_number, to_number, status, started_at, answered_at, ended_at, duration_seconds, agent_extension, metadata')
-      .eq('org_id', orgId)
-      .gte('started_at', liveCallsWindowStart)
-      .order('started_at', { ascending: false })
-      .limit(50),
   ]);
   if (membersError) throw membersError;
   if (extError) throw extError;
-  if (recentCallsError) throw recentCallsError;
 
-  const memberRows = (membersData || []).filter((row: any) => ['agent', 'org_manager'].includes(String(row?.role || '')));
+  const memberRows = (membersData || []).filter((row: any) => String(row?.role || '').toLowerCase() === 'agent');
   const extensionByUserId = new Map<string, string>();
   for (const row of extData || []) {
     const ext = String((row as any)?.extension || '').trim();
@@ -1737,17 +1748,41 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     if (ext) extensionByUserId.set(String((row as any).user_id), ext);
   }
 
-  const userIds = Array.from(new Set(memberRows.map((row: any) => String(row.user_id || '')).filter(Boolean)));
+  const activeMemberRows = memberRows.filter((row: any) => {
+    const userId = String(row?.user_id || '');
+    const extension = extensionByUserId.get(userId) || String(row?.mightycall_extension || '').trim();
+    return !!normalizeExtension(extension);
+  });
+  if (activeMemberRows.length === 0) return [];
+
+  const userIds = Array.from(new Set(activeMemberRows.map((row: any) => String(row.user_id || '')).filter(Boolean)));
+  const uniqueExtensions = Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]));
+  const cachedExtensionsPromise = uniqueExtensions.length > 0
+    ? supabaseAdmin
+        .from('mightycall_extensions')
+        .select('extension, display_name, metadata, external_id')
+        .in('extension', uniqueExtensions)
+    : Promise.resolve({ data: [] as any[] });
+  const [
+    { data: cachedExtensions },
+    { data: recentCallRows, error: recentCallsError },
+    resolvedEmails,
+  ] = await Promise.all([
+    cachedExtensionsPromise,
+    supabaseAdmin
+      .from('calls')
+      .select('id, external_id, from_number, to_number, status, started_at, answered_at, ended_at, duration_seconds, agent_extension, metadata')
+      .eq('org_id', orgId)
+      .gte('started_at', liveCallsWindowStart)
+      .order('started_at', { ascending: false })
+      .limit(30),
+    withDeadline(resolveUserEmailsById(userIds), 1200, {} as Record<string, string>),
+  ]);
+  if (recentCallsError) throw recentCallsError;
   const emailByUserId = new Map<string, string | null>();
-  try {
-    const { data: profileRows } = await supabaseAdmin
-      .from('profiles')
-      .select('id, email')
-      .in('id', userIds);
-    for (const row of profileRows || []) {
-      emailByUserId.set(String((row as any).id), (row as any).email || null);
-    }
-  } catch {}
+  for (const [id, email] of Object.entries(resolvedEmails || {})) {
+    emailByUserId.set(String(id), email || null);
+  }
 
   let overrideCreds: any = undefined;
   try {
@@ -1761,7 +1796,6 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     }
   } catch {}
 
-  const uniqueExtensions = Array.from(new Set(Array.from(extensionByUserId.values()).map((value) => normalizeExtension(value)).filter(Boolean) as string[]));
   const mightyCallFallback = {
     liveCalls: [] as any[],
     liveJournal: [] as any[],
@@ -1939,13 +1973,13 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     }, maxAgeMs);
   });
 
-  return memberRows.map((member: any) => {
+  return activeMemberRows.map((member: any) => {
     const userId = String(member.user_id || '');
     const extension = extensionByUserId.get(userId) || String(member?.mightycall_extension || '').trim() || null;
     const normalizedExt = normalizeExtension(extension);
     const extMeta = normalizedExt ? extensionMetaByExt.get(normalizedExt) : null;
-    const shouldUseSingleAgentFallback = memberRows.length === 1;
-    const email = emailByUserId.get(userId) || null;
+    const shouldUseSingleAgentFallback = activeMemberRows.length === 1;
+    const email = emailByUserId.get(userId) || extractAgentEmailFromMeta(extMeta) || null;
     const agentIdentities = buildAgentIdentityCandidates(member, extMeta, email);
     const ownStatusMatchesMember = !!ownStatus && payloadMatchesAgent(ownStatus, normalizedExt, agentIdentities);
 
@@ -5347,11 +5381,14 @@ app.get('/api/agents/live-status', async (req, res) => {
         orgIds = [orgId];
       } else {
         const { data: orgRows, error: orgError } = await supabaseAdmin
-          .from('organizations')
-          .select('id')
-          .order('created_at', { ascending: true });
+          .from('org_users')
+          .select('org_id, role, mightycall_extension')
+          .eq('role', 'agent')
+          .not('mightycall_extension', 'is', null);
         if (orgError) throw orgError;
-        orgIds = (orgRows || []).map((row: any) => String(row.id || '')).filter(Boolean);
+        orgIds = Array.from(new Set((orgRows || [])
+          .map((row: any) => String(row.org_id || ''))
+          .filter(Boolean)));
       }
     } else {
       const userOrgIds = await getUserOrgIds(actorId);
@@ -5376,7 +5413,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-				      live_status_version: 'bounded-webhook-status-v23'
+				      live_status_version: 'agent-only-fast-email-v24'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
