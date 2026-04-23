@@ -40,6 +40,7 @@ import {
   fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
+  fetchMightyCallLiveCallByExtension,
   fetchMightyCallJournalRequests,
   fetchMightyCallContactCenterCommunications,
   fetchMightyCallContacts,
@@ -1955,8 +1956,16 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       if (!token) return mightyCallFallback;
 
       const apiKeyOverride = overrideCreds?.clientId || undefined;
+      const liveWindowStart = new Date(Date.now() - (20 * 60 * 1000)).toISOString();
+      const liveWindowEnd = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
       const extensionsPromise = withDeadline(fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []), 450, [] as any[]);
-      const ownStatusPromise = withDeadline(fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null), 450, null as any);
+      const journalPromise = withDeadline(fetchMightyCallJournalRequests(token, {
+        from: liveWindowStart,
+        to: liveWindowEnd,
+        type: 'Call',
+        pageSize: '50',
+        page: '1',
+      }, apiKeyOverride).catch(() => []), 650, [] as any[]);
       const profileRowsPromise = withDeadline(Promise.all(
         uniqueExtensions.map(async (extension) => {
           try {
@@ -1977,14 +1986,43 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           }
         })
       ), 900, [] as any[]);
+      const liveCallRowsPromise = withDeadline(Promise.all(
+        uniqueExtensions.map(async (extension) => {
+          try {
+            const liveCall = await fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride);
+            if (!liveCall?.currentCall) return null;
+            return {
+              extension,
+              call: {
+                ...liveCall.currentCall,
+                extension,
+                agent_extension: extension,
+                onCall: true,
+                status: liveCall.status || liveCall.currentCall?.status || 'Connected',
+                sourceEndpoint: liveCall.sourceEndpoint || null,
+              }
+            };
+          } catch {
+            return null;
+          }
+        })
+      ), 1200, [] as any[]);
 
-      const [liveExtensions, ownStatus, profileRows, statusRows] = await Promise.all([
+      const [liveExtensions, liveJournal, profileRows, statusRows, liveCallRows] = await Promise.all([
         extensionsPromise,
-        ownStatusPromise,
+        journalPromise,
         profileRowsPromise,
         statusRowsPromise,
+        liveCallRowsPromise,
       ]);
-      return { liveCalls: [] as any[], liveJournal: [] as any[], liveExtensions, ownStatus, profileRows, statusRows };
+      return {
+        liveCalls: (liveCallRows || []).map((row: any) => row?.call).filter(Boolean),
+        liveJournal: Array.isArray(liveJournal) ? liveJournal : [],
+        liveExtensions,
+        ownStatus: null,
+        profileRows,
+        statusRows
+      };
     } catch (err) {
       console.warn('[agents/live-status] MightyCall snapshot failed', orgId, fmtErr(err));
       return mightyCallFallback;
