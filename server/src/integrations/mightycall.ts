@@ -640,6 +640,10 @@ function collectExtensionCandidatesFromPayload(input: any, depth = 0): string[] 
       lower.includes('extension') ||
       lower.includes('internal') ||
       lower.includes('short') ||
+      lower === 'caller' ||
+      lower === 'called' ||
+      lower === 'participants' ||
+      lower === 'users' ||
       lower === 'user' ||
       lower === 'member' ||
       lower === 'agent'
