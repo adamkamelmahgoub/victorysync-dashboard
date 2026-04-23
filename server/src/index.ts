@@ -1953,12 +1953,19 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     profileRows: [] as any[],
     statusRows: [] as any[],
   };
-  const mightyCallSnapshot = await (async () => {
+  const snapshotHasLiveSignal = (snapshot: any) => {
+    if (!snapshot) return false;
+    if (Array.isArray(snapshot.liveCalls) && snapshot.liveCalls.length > 0) return true;
+    if (Array.isArray(snapshot.liveJournal) && snapshot.liveJournal.some((row: any) => isLikelyLiveJournalRequest(row))) return true;
+    if (Array.isArray(snapshot.statusRows) && snapshot.statusRows.some((row: any) => hasFreshStatusCallSignal(row?.status))) return true;
+    return false;
+  };
+  const fetchMightyCallSnapshot = async (creds?: any) => {
     try {
-      const token = await withDeadline(getMightyCallAccessToken(overrideCreds), 350, null as any);
+      const token = await withDeadline(getMightyCallAccessToken(creds), 350, null as any);
       if (!token) return mightyCallFallback;
 
-      const apiKeyOverride = overrideCreds?.clientId || undefined;
+      const apiKeyOverride = creds?.clientId || undefined;
       const liveWindowStart = new Date(Date.now() - (20 * 60 * 1000)).toISOString();
       const liveWindowEnd = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
       const extensionsPromise = withDeadline(fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []), 450, [] as any[]);
@@ -2030,7 +2037,15 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       console.warn('[agents/live-status] MightyCall snapshot failed', orgId, fmtErr(err));
       return mightyCallFallback;
     }
-  })();
+  };
+  let mightyCallSnapshot = await fetchMightyCallSnapshot(overrideCreds);
+  if (overrideCreds?.clientId && overrideCreds?.clientSecret && !snapshotHasLiveSignal(mightyCallSnapshot)) {
+    const globalSnapshot = await fetchMightyCallSnapshot(undefined);
+    if (snapshotHasLiveSignal(globalSnapshot)) {
+      console.warn('[agents/live-status] using global MightyCall snapshot fallback for live signal', { orgId });
+      mightyCallSnapshot = globalSnapshot;
+    }
+  }
   const { liveCalls, liveJournal, liveExtensions, ownStatus, profileRows, statusRows } = mightyCallSnapshot;
 
   const orgPhoneDigits = new Set<string>();
