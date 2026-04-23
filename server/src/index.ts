@@ -975,6 +975,34 @@ async function resolveMightyCallWebhookOrgId(call: ReturnType<typeof normalizeMi
   );
   if (explicitOrgId) return explicitOrgId;
 
+  const normalizedExtension = normalizeExtension(call.agent_extension);
+  if (normalizedExtension) {
+    try {
+      const { data: orgUserMatch } = await supabaseAdmin
+        .from('org_users')
+        .select('org_id, role, mightycall_extension')
+        .eq('role', 'agent')
+        .eq('mightycall_extension', normalizedExtension)
+        .limit(1)
+        .maybeSingle();
+      if (orgUserMatch?.org_id) return String(orgUserMatch.org_id);
+    } catch (error) {
+      console.warn('[mightycall webhook] org_users extension lookup failed:', fmtErr(error));
+    }
+
+    try {
+      const { data: agentExtensionMatch } = await supabaseAdmin
+        .from('agent_extensions')
+        .select('org_id, extension')
+        .eq('extension', normalizedExtension)
+        .limit(1)
+        .maybeSingle();
+      if (agentExtensionMatch?.org_id) return String(agentExtensionMatch.org_id);
+    } catch (error) {
+      console.warn('[mightycall webhook] agent_extensions lookup failed:', fmtErr(error));
+    }
+  }
+
   const digitsToMatch = [normalizePhoneDigits(call.to_number), normalizePhoneDigits(call.from_number)].filter(Boolean);
   if (digitsToMatch.length === 0) return null;
 
@@ -992,7 +1020,7 @@ async function resolveMightyCallWebhookOrgId(call: ReturnType<typeof normalizeMi
 }
 
 async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMightyCallWebhookCall>) {
-  const orgId = await resolveMightyCallWebhookOrgId(call);
+  let orgId = await resolveMightyCallWebhookOrgId(call);
   let existing: any = null;
   if (orgId) {
     const { data } = await supabaseAdmin
@@ -1002,6 +1030,22 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
       .eq('external_id', call.external_id)
       .maybeSingle();
     existing = data || null;
+  }
+
+  if (!existing) {
+    try {
+      const { data } = await supabaseAdmin
+        .from('calls')
+        .select('id, org_id, started_at, agent_extension, metadata')
+        .eq('external_id', call.external_id)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      existing = data || null;
+      if (!orgId && existing?.org_id) orgId = String(existing.org_id);
+    } catch (error) {
+      console.warn('[mightycall webhook] existing call lookup failed:', fmtErr(error));
+    }
   }
 
   const metadata = existing?.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
@@ -1024,9 +1068,16 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
     },
   };
 
-  const query = orgId
-    ? supabaseAdmin.from('calls').upsert(row, { onConflict: 'org_id,external_id' })
-    : supabaseAdmin.from('calls').insert(row);
+  if (!orgId) {
+    console.warn('[mightycall webhook] dropping event without resolved org', {
+      external_id: call.external_id,
+      agent_extension: call.agent_extension || null,
+      event_type: call.payload?.EventType ?? call.payload?.eventType ?? null,
+    });
+    return { org_id: null, external_id: call.external_id, status: call.status };
+  }
+
+  const query = supabaseAdmin.from('calls').upsert(row, { onConflict: 'org_id,external_id' });
   const { error } = await query;
   if (error) throw error;
   return { org_id: orgId, external_id: call.external_id, status: call.status };
@@ -5395,7 +5446,7 @@ app.get('/api/agents/live-status', async (req, res) => {
 	    res.json({
 	      items: chunks.flat(),
 	      refreshed_at: new Date().toISOString(),
-				      live_status_version: 'agent-only-low-latency-v25'
+				      live_status_version: 'webhook-extension-resolution-v26'
 	    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
