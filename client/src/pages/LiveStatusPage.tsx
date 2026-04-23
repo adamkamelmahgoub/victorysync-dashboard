@@ -1,6 +1,6 @@
 import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { getLiveAgentStatus } from '../lib/apiClient';
+import { getLiveAgentStatus, refreshLiveAgentStatus } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
@@ -16,6 +16,10 @@ type LiveAgentStatus = {
   started_at?: string | null;
   source?: string | null;
   raw_status?: string | null;
+  last_seen_at?: string | null;
+  refreshed_at?: string | null;
+  stale_after?: string | null;
+  stale?: boolean;
 };
 
 function fmtDateTime(value?: string | null) {
@@ -30,6 +34,7 @@ const LiveStatusPage: FC = () => {
   const isAdmin = globalRole === 'platform_admin';
   const [items, setItems] = useState<LiveAgentStatus[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const liveRequestSeq = useRef(0);
@@ -60,7 +65,7 @@ const LiveStatusPage: FC = () => {
 
   useEffect(() => {
     load();
-    const intervalId = window.setInterval(load, 1000);
+    const intervalId = window.setInterval(load, 3000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') load();
     };
@@ -76,6 +81,20 @@ const LiveStatusPage: FC = () => {
   const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));
   const onCall = items.filter((agent) => agent.on_call).length;
   const idle = Math.max(items.length - onCall, 0);
+  const staleItems = items.filter((agent) => agent.stale);
+
+  const forceSync = async () => {
+    if (!user?.id || !isAdmin) return;
+    try {
+      setSyncing(true);
+      await refreshLiveAgentStatus(activeOrgId, user.id);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Failed to force live refresh');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const actions = useMemo(() => (
     <div className="flex flex-wrap items-center gap-2">
@@ -94,8 +113,13 @@ const LiveStatusPage: FC = () => {
       <button onClick={load} disabled={loading} className="vs-button-secondary">
         {loading ? 'Refreshing live...' : 'Refresh Live'}
       </button>
+      {isAdmin && (
+        <button onClick={forceSync} disabled={syncing} className="vs-button-secondary">
+          {syncing ? 'Syncing now...' : 'Force Sync'}
+        </button>
+      )}
     </div>
-  ), [isAdmin, loading, orgs, selectedOrgId, setSelectedOrgId]);
+  ), [forceSync, isAdmin, loading, orgs, selectedOrgId, setSelectedOrgId, syncing]);
 
   const meta = (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -124,6 +148,11 @@ const LiveStatusPage: FC = () => {
             {error}
           </div>
         )}
+        {staleItems.length > 0 && (
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            Live status cache is stale for {staleItems.length} agent{staleItems.length === 1 ? '' : 's'}. The page is showing the last known state, not confirmed current presence.
+          </div>
+        )}
 
         <SectionCard title="Real-time roster" description="Live agent presence from MightyCall, grouped for quick operational scanning.">
           {loading && items.length === 0 ? (
@@ -150,21 +179,23 @@ const LiveStatusPage: FC = () => {
                         {isAdmin && agent.org_id ? ` · ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
                       </div>
                     </div>
-                    <StatusBadge tone={agent.on_call ? 'success' : 'neutral'}>
-                      {agent.on_call ? 'On Call' : (agent.status || 'Idle')}
-                    </StatusBadge>
+	                    <StatusBadge tone={agent.stale ? 'warning' : agent.on_call ? 'success' : 'neutral'}>
+	                      {agent.stale ? 'Stale' : agent.on_call ? 'On Call' : (agent.status || 'Idle')}
+	                    </StatusBadge>
                   </div>
 
-                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="vs-surface-muted p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
-                        <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
-                      </div>
-                    <div className="vs-surface-muted p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
-                        <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
-                        <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-                      </div>
+	                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+	                      <div className="vs-surface-muted p-4">
+	                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
+	                        <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
+                          <div className="mt-2 text-xs text-slate-500">Last seen {fmtDateTime(agent.last_seen_at)}</div>
+	                      </div>
+	                    <div className="vs-surface-muted p-4">
+	                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
+	                        <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
+	                        <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+                          <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
+	                      </div>
                     </div>
                   </div>
                 ))}

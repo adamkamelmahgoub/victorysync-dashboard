@@ -1400,6 +1400,69 @@ function extractAgentEmailFromMeta(extMeta: any): string | null {
   return null;
 }
 
+async function getLivePresenceOrgIds(): Promise<string[]> {
+  const [{ data: orgUserRows, error: orgUserError }, { data: extensionRows, error: extensionError }] = await Promise.all([
+    supabaseAdmin
+      .from('org_users')
+      .select('org_id, role, mightycall_extension')
+      .eq('role', 'agent')
+      .not('mightycall_extension', 'is', null),
+    supabaseAdmin
+      .from('agent_extensions')
+      .select('org_id, extension')
+      .not('extension', 'is', null),
+  ]);
+  if (orgUserError) throw orgUserError;
+  if (extensionError) throw extensionError;
+  return Array.from(new Set([
+    ...(orgUserRows || []).map((row: any) => String(row.org_id || '')).filter(Boolean),
+    ...(extensionRows || []).map((row: any) => String(row.org_id || '')).filter(Boolean),
+  ]));
+}
+
+async function getLivePresenceRowsForOrgIds(orgIds: string[]) {
+  if (orgIds.length === 0) return [] as any[];
+  const { data, error } = await supabaseAdmin
+    .from('live_agent_presence')
+    .select('org_id, user_id, extension, email, display_name, on_call, status, counterpart, started_at, source, raw_status, last_seen_at, refreshed_at, stale_after, sync_version')
+    .in('org_id', orgIds)
+    .order('display_name', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+function isLiveAgentPresenceMissingError(err: any): boolean {
+  const code = String(err?.code || '').trim();
+  const message = String(err?.message || err?.details || '').toLowerCase();
+  return code === '42P01'
+    || code === 'PGRST205'
+    || message.includes('live_agent_presence')
+    || message.includes('relation') && message.includes('does not exist');
+}
+
+function mapLivePresenceRow(row: any) {
+  const staleAfter = row?.stale_after || null;
+  const stale = !staleAfter || Number.isNaN(Date.parse(String(staleAfter))) ? true : Date.now() > Date.parse(String(staleAfter));
+  return {
+    user_id: String(row?.user_id || ''),
+    org_id: row?.org_id || null,
+    email: row?.email || null,
+    role: 'agent',
+    extension: row?.extension || null,
+    display_name: row?.display_name || null,
+    on_call: !!row?.on_call,
+    counterpart: row?.counterpart || null,
+    status: row?.status || null,
+    started_at: row?.started_at || null,
+    source: row?.source || null,
+    raw_status: row?.raw_status || null,
+    last_seen_at: row?.last_seen_at || null,
+    refreshed_at: row?.refreshed_at || null,
+    stale_after: staleAfter,
+    stale,
+  };
+}
+
 function payloadMatchesAgent(payload: any, normalizedExt: string | null, agentIdentities: Set<string>): boolean {
   if (normalizedExt) {
     const extCandidates = collectExtensionCandidates(payload);
@@ -1589,6 +1652,9 @@ const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
+const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
+const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v27';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2158,6 +2224,124 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	      raw_status: callStatus || explicitOwnStatusLabel || authoritativeStatusLabel || extStatus || null
 	    };
   });
+}
+
+async function refreshLiveAgentPresenceForOrg(orgId: string) {
+  const items = await getAgentLiveStatusItemsForOrg(orgId);
+  const now = new Date();
+  const refreshedAt = now.toISOString();
+  const staleAfter = new Date(now.getTime() + LIVE_AGENT_PRESENCE_STALE_MS).toISOString();
+  const userIds = items.map((item: any) => String(item.user_id || '')).filter(Boolean);
+
+  if (userIds.length === 0) {
+    const { error: deleteError } = await supabaseAdmin.from('live_agent_presence').delete().eq('org_id', orgId);
+    if (deleteError) throw deleteError;
+    return { org_id: orgId, agents_processed: 0, rows_updated: 0, stale_rows_deleted: 0 };
+  }
+
+  const rows = items.map((item: any) => ({
+    org_id: orgId,
+    user_id: item.user_id,
+    extension: item.extension || '',
+    email: item.email || null,
+    display_name: item.display_name || null,
+    on_call: !!item.on_call,
+    status: item.status || null,
+    counterpart: item.counterpart || null,
+    started_at: item.started_at || null,
+    source: item.source || null,
+    raw_status: item.raw_status || null,
+    last_seen_at: refreshedAt,
+    refreshed_at: refreshedAt,
+    stale_after: staleAfter,
+    sync_version: LIVE_AGENT_PRESENCE_SYNC_VERSION,
+    updated_at: refreshedAt,
+  }));
+
+  const { error: upsertError } = await supabaseAdmin
+    .from('live_agent_presence')
+    .upsert(rows, { onConflict: 'org_id,user_id' });
+  if (upsertError) throw upsertError;
+
+  const { data: existingRows, error: existingLookupError } = await supabaseAdmin
+    .from('live_agent_presence')
+    .select('user_id')
+    .eq('org_id', orgId);
+  if (existingLookupError) throw existingLookupError;
+
+  const staleUserIds = (existingRows || [])
+    .map((row: any) => String(row.user_id || ''))
+    .filter((userId) => !!userId && !userIds.includes(userId));
+  if (staleUserIds.length > 0) {
+    const { error: deleteStaleError } = await supabaseAdmin
+      .from('live_agent_presence')
+      .delete()
+      .eq('org_id', orgId)
+      .in('user_id', staleUserIds);
+    if (deleteStaleError) throw deleteStaleError;
+  }
+
+  return {
+    org_id: orgId,
+    agents_processed: items.length,
+    rows_updated: rows.length,
+    stale_rows_deleted: staleUserIds.length,
+    refreshed_at: refreshedAt,
+  };
+}
+
+let livePresenceRefreshInFlight = false;
+
+async function refreshLiveAgentPresence(orgId?: string | null) {
+  const targetOrgIds = orgId ? [orgId] : await getLivePresenceOrgIds();
+  if (!orgId) {
+    const { data: existingRows, error: existingError } = await supabaseAdmin
+      .from('live_agent_presence')
+      .select('org_id');
+    if (existingError) throw existingError;
+    const existingOrgIds = Array.from(new Set((existingRows || []).map((row: any) => String(row.org_id || '')).filter(Boolean)));
+    const missingOrgIds = existingOrgIds.filter((id) => !targetOrgIds.includes(id));
+    if (missingOrgIds.length > 0) {
+      const { error: cleanupError } = await supabaseAdmin.from('live_agent_presence').delete().in('org_id', missingOrgIds);
+      if (cleanupError) throw cleanupError;
+    }
+  }
+
+  const results = [];
+  const errors: Array<{ org_id: string; error: string }> = [];
+  for (const targetOrgId of targetOrgIds) {
+    try {
+      results.push(await refreshLiveAgentPresenceForOrg(targetOrgId));
+    } catch (err: any) {
+      errors.push({ org_id: targetOrgId, error: fmtErr(err) ?? 'unknown_error' });
+      console.warn('[live-agent-presence] refresh failed', targetOrgId, fmtErr(err));
+    }
+  }
+
+  return {
+    orgs_processed: targetOrgIds.length,
+    agents_processed: results.reduce((sum, row: any) => sum + Number(row.agents_processed || 0), 0),
+    rows_updated: results.reduce((sum, row: any) => sum + Number(row.rows_updated || 0), 0),
+    stale_rows_deleted: results.reduce((sum, row: any) => sum + Number(row.stale_rows_deleted || 0), 0),
+    refreshed_at: new Date().toISOString(),
+    errors,
+  };
+}
+
+async function runLiveAgentPresenceRefreshCycle() {
+  if (livePresenceRefreshInFlight) return;
+  livePresenceRefreshInFlight = true;
+  try {
+    await refreshLiveAgentPresence(null);
+  } catch (err: any) {
+    if (isLiveAgentPresenceMissingError(err)) {
+      console.warn('[live-agent-presence] table not ready yet; background refresh is waiting for migration');
+    } else {
+      console.warn('[live-agent-presence] background refresh failed:', fmtErr(err));
+    }
+  } finally {
+    livePresenceRefreshInFlight = false;
+  }
 }
 
 function reportVisibleToAssignedPhones(
@@ -3244,6 +3428,11 @@ app.post("/api/admin/org_users", async (req, res) => {
       entity_id: `${org_id}:${user_id}`,
       metadata: { role, mightycall_extension: normalizedExtension },
     });
+    try {
+      await refreshLiveAgentPresence(org_id);
+    } catch (refreshErr) {
+      console.warn('[admin_org_users] live presence refresh failed', org_id, fmtErr(refreshErr));
+    }
     res.json({
       org_user: data,
       mightycall_lookup_ok: mightyCallLookupOk,
@@ -3281,6 +3470,11 @@ app.delete("/api/admin/org_users", async (req, res) => {
       entity_id: `${org_id}:${user_id}`,
       metadata: {},
     });
+    try {
+      await refreshLiveAgentPresence(org_id);
+    } catch (refreshErr) {
+      console.warn('[admin_delete_org_user] live presence refresh failed', org_id, fmtErr(refreshErr));
+    }
     res.json({ success: true });
   } catch (err: any) {
     console.error("admin_delete_org_user_failed:", fmtErr(err));
@@ -5413,15 +5607,7 @@ app.get('/api/agents/live-status', async (req, res) => {
       if (orgId) {
         orgIds = [orgId];
       } else {
-        const { data: orgRows, error: orgError } = await supabaseAdmin
-          .from('org_users')
-          .select('org_id, role, mightycall_extension')
-          .eq('role', 'agent')
-          .not('mightycall_extension', 'is', null);
-        if (orgError) throw orgError;
-        orgIds = Array.from(new Set((orgRows || [])
-          .map((row: any) => String(row.org_id || ''))
-          .filter(Boolean)));
+        orgIds = await getLivePresenceOrgIds();
       }
     } else {
       const userOrgIds = await getUserOrgIds(actorId);
@@ -5434,20 +5620,30 @@ app.get('/api/agents/live-status', async (req, res) => {
       }
     }
 
-    const chunks = await Promise.all(orgIds.map(async (targetOrgId) => {
-      try {
-        return await getAgentLiveStatusItemsForOrg(targetOrgId);
-      } catch (e) {
-        console.warn('[agents/live-status] org fetch failed', targetOrgId, fmtErr(e));
-        return [];
-      }
-    }));
+    let items: any[] = [];
+    let refreshedAt: string | null = null;
+    let liveStatusVersion = LIVE_AGENT_PRESENCE_SYNC_VERSION;
+    try {
+      const rows = await getLivePresenceRowsForOrgIds(orgIds);
+      items = rows.map(mapLivePresenceRow);
+      refreshedAt = items
+        .map((item: any) => item.refreshed_at || null)
+        .filter(Boolean)
+        .sort()
+        .slice(-1)[0] || null;
+    } catch (err: any) {
+      if (!isLiveAgentPresenceMissingError(err)) throw err;
+      const fallbackGroups = await Promise.all(orgIds.map((targetOrgId) => getAgentLiveStatusItemsForOrg(targetOrgId)));
+      items = fallbackGroups.flat();
+      refreshedAt = new Date().toISOString();
+      liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-fallback`;
+    }
 
-	    res.json({
-	      items: chunks.flat(),
-	      refreshed_at: new Date().toISOString(),
-				      live_status_version: 'webhook-extension-resolution-v26'
-	    });
+    res.json({
+      items,
+      refreshed_at: refreshedAt,
+      live_status_version: liveStatusVersion,
+    });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
     res.status(500).json({ error: 'agents_live_status_failed', detail: fmtErr(err) ?? 'unknown_error' });
@@ -5471,11 +5667,52 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
     const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
-    const items = await getAgentLiveStatusItemsForOrg(orgId);
-    res.json({ items, refreshed_at: new Date().toISOString() });
+    let items: any[] = [];
+    let refreshedAt: string | null = null;
+    let liveStatusVersion = LIVE_AGENT_PRESENCE_SYNC_VERSION;
+    try {
+      const rows = await getLivePresenceRowsForOrgIds([orgId]);
+      items = rows.map(mapLivePresenceRow);
+      refreshedAt = items
+        .map((item: any) => item.refreshed_at || null)
+        .filter(Boolean)
+        .sort()
+        .slice(-1)[0] || null;
+    } catch (err: any) {
+      if (!isLiveAgentPresenceMissingError(err)) throw err;
+      items = await getAgentLiveStatusItemsForOrg(orgId);
+      refreshedAt = new Date().toISOString();
+      liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-fallback`;
+    }
+    res.json({ items, refreshed_at: refreshedAt, live_status_version: liveStatusVersion });
   } catch (err: any) {
     console.error('agent_live_status_failed:', fmtErr(err));
     res.status(500).json({ error: 'agent_live_status_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.post('/api/admin/live-status/refresh', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const orgId = String(req.body?.orgId || req.query.orgId || '').trim() || null;
+    let result;
+    try {
+      result = await refreshLiveAgentPresence(orgId);
+    } catch (err: any) {
+      if (!isLiveAgentPresenceMissingError(err)) throw err;
+      return res.status(503).json({
+        error: 'live_agent_presence_table_missing',
+        detail: 'Run supabase/migrations/016_live_agent_presence.sql before forcing a cache refresh.',
+      });
+    }
+    res.json(result);
+  } catch (err: any) {
+    console.error('admin_live_status_refresh_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_live_status_refresh_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
@@ -5562,6 +5799,12 @@ app.post('/api/orgs/:orgId/agents/:userId/extension', async (req, res) => {
       .update({ mightycall_extension: normalizedExtension })
       .eq('org_id', orgId)
       .eq('user_id', userId);
+
+    try {
+      await refreshLiveAgentPresence(orgId);
+    } catch (refreshErr) {
+      console.warn('[set_agent_extension] live presence refresh failed', orgId, fmtErr(refreshErr));
+    }
 
     res.json({
       extension: data,
@@ -11563,6 +11806,12 @@ const keepAliveInterval = setInterval(() => {
   // This keeps the event loop alive
 }, 30000);
 // Don't call unref() - we want to keep the process alive
+
+void runLiveAgentPresenceRefreshCycle();
+const livePresenceInterval = setInterval(() => {
+  void runLiveAgentPresenceRefreshCycle();
+}, LIVE_AGENT_PRESENCE_REFRESH_MS);
+// Keep the refresh loop attached to the event loop on purpose.
 
 // ============================================
 // BILLING & INVOICING ENDPOINTS

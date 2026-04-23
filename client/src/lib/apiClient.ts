@@ -214,6 +214,15 @@ export async function getLiveAgentStatus(params?: { orgId?: string | null }, use
   });
 }
 
+export async function refreshLiveAgentStatus(orgId?: string | null, userId?: string) {
+  return await fetchJson(`/api/admin/live-status/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ orgId: orgId || null }),
+    timeoutMs: 10000,
+  });
+}
+
 // MightyCall sync helpers
 export async function triggerMightyCallPhoneNumberSync(userId?: string) {
   return await fetchJson(`/api/mightycall/sync/phone-numbers`, { method: 'POST', headers: { 'x-user-id': userId || '' } });
