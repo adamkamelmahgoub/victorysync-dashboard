@@ -210,7 +210,7 @@ export async function getLiveAgentStatus(params?: { orgId?: string | null }, use
   const suffix = q.toString() ? `?${q.toString()}` : '';
   return await fetchJson(`/api/agents/live-status${suffix}`, {
     headers: { 'x-user-id': userId || '' },
-    timeoutMs: 5000,
+    timeoutMs: 7000,
   });
 }
 
