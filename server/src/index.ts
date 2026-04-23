@@ -2108,8 +2108,6 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const shouldUseSingleAgentFallback = activeMemberRows.length === 1;
     const email = emailByUserId.get(userId) || extractAgentEmailFromMeta(extMeta) || null;
     const agentIdentities = buildAgentIdentityCandidates(member, extMeta, email);
-    const ownStatusMatchesMember = !!ownStatus && payloadMatchesAgent(ownStatus, normalizedExt, agentIdentities);
-
     const matchedLiveCall = normalizedExt
       ? activeCalls.find((call: any) => {
           const agentMatches = payloadMatchesAgent(call, normalizedExt, agentIdentities);
@@ -2156,15 +2154,12 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
     const statusPayload = extPayload?.liveStatus || extPayload?.currentStatus || extPayload;
-    const shouldUseOwnStatusFallback = !!ownStatus && (shouldUseSingleAgentFallback || ownStatusMatchesMember);
-    const ownStatusPayload = shouldUseOwnStatusFallback ? ownStatus : null;
-	    const effectiveStatusPayload = ownStatusPayload || statusPayload;
-	    const normalizedStatus = normalizeMightyCallStatusActivity(effectiveStatusPayload, normalizedExt);
-	    const explicitOwnStatusLabel = extractLiveStatusLabel(ownStatusPayload);
-	    const authoritativeStatusPayload = ownStatusPayload || (extPayload?.liveStatus || extPayload?.currentStatus ? effectiveStatusPayload : null);
-	    const authoritativeStatusLabel = extractLiveStatusLabel(authoritativeStatusPayload);
-	    const authoritativeOnCallValue = authoritativeStatusPayload
-	      ? authoritativeStatusPayload?.onCall ?? authoritativeStatusPayload?.inCall ?? authoritativeStatusPayload?.isOnCall ?? null
+		    const effectiveStatusPayload = statusPayload;
+		    const normalizedStatus = normalizeMightyCallStatusActivity(effectiveStatusPayload, normalizedExt);
+		    const authoritativeStatusPayload = extPayload?.liveStatus || extPayload?.currentStatus ? effectiveStatusPayload : null;
+		    const authoritativeStatusLabel = extractLiveStatusLabel(authoritativeStatusPayload);
+		    const authoritativeOnCallValue = authoritativeStatusPayload
+		      ? authoritativeStatusPayload?.onCall ?? authoritativeStatusPayload?.inCall ?? authoritativeStatusPayload?.isOnCall ?? null
 	      : null;
 	    const authoritativeStatusSaysOnCall = !!authoritativeStatusPayload && (
 	      authoritativeOnCallValue === true ||
@@ -2175,16 +2170,22 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	      authoritativeOnCallValue === false ||
 	      (!!authoritativeStatusLabel && isLikelyTerminalOrIdleCallStatus(authoritativeStatusLabel))
 	    );
-	    const fallbackSaysOnCall = !!(
-	      matchedLiveCall ||
-	      inferredLiveCall ||
-	      matchedStoredCall ||
-	      inferredStoredCall ||
-	      matchedJournalCall ||
-	      inferredJournalCall
-	    );
-	    const onCall = authoritativeStatusSaysIdle ? false : !!(authoritativeStatusSaysOnCall || fallbackSaysOnCall);
-    const counterpart = matchedLiveCall
+		    const fallbackSaysOnCall = !!(
+		      matchedLiveCall ||
+		      inferredLiveCall ||
+		      matchedStoredCall ||
+		      inferredStoredCall ||
+		      matchedJournalCall ||
+		      inferredJournalCall
+		    );
+		    const onCall = fallbackSaysOnCall
+          ? true
+          : authoritativeStatusSaysOnCall
+            ? true
+            : authoritativeStatusSaysIdle
+              ? false
+              : false;
+	    const counterpart = matchedLiveCall
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : inferredLiveCall
         ? extractCounterpartyLabel(inferredLiveCall, orgPhoneDigits, normalizedExt)
@@ -2208,10 +2209,24 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	      : authoritativeStatusSaysOnCall
           ? normalizedStatus?.started_at || effectiveStatusPayload?.currentCall?.startedAt || effectiveStatusPayload?.currentCall?.started_at || effectiveStatusPayload?.current_call?.startedAt || effectiveStatusPayload?.current_call?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
           : null;
-	    const source = authoritativeStatusSaysOnCall || authoritativeStatusSaysIdle
-	      ? (ownStatusPayload ? 'mightycall_own_status' : 'mightycall_status')
-	      : matchedLiveCall
-	      ? 'mightycall_calls'
+		    const source = fallbackSaysOnCall
+          ? matchedLiveCall
+            ? 'mightycall_calls'
+            : inferredLiveCall
+              ? 'mightycall_calls_inferred'
+              : matchedStoredCall
+                ? 'stored_calls'
+                : inferredStoredCall
+                  ? 'stored_calls_inferred'
+                  : matchedJournalCall
+                    ? 'mightycall_journal'
+                    : inferredJournalCall
+                      ? 'mightycall_journal_inferred'
+                      : 'matched_call_fallback'
+          : authoritativeStatusSaysOnCall || authoritativeStatusSaysIdle
+		      ? 'mightycall_status'
+		      : matchedLiveCall
+		      ? 'mightycall_calls'
       : inferredLiveCall
         ? 'mightycall_calls_inferred'
         : matchedStoredCall
@@ -2249,7 +2264,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	      status: onCall ? (callStatus || authoritativeStatusLabel || 'On Call') : (authoritativeStatusLabel || 'Available'),
 	      started_at: onCall ? startedAt : null,
 	      source,
-	      raw_status: callStatus || explicitOwnStatusLabel || authoritativeStatusLabel || extStatus || null
+	      raw_status: callStatus || authoritativeStatusLabel || extStatus || null
 	    };
   });
 }
