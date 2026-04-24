@@ -864,7 +864,16 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
   const now = Date.now();
   const startUtc = new Date(now - (20 * 60 * 1000)).toISOString();
   const endUtc = new Date(now + (5 * 60 * 1000)).toISOString();
-  const rows = await fetchMightyCallCalls(accessToken, {
+  let token = accessToken;
+  if (apiKeyOverride) {
+    try {
+      token = await getMightyCallAccessToken({
+        clientId: apiKeyOverride,
+        clientSecret: normalized,
+      });
+    } catch {}
+  }
+  const rows = await fetchMightyCallCalls(token, {
     extension: normalized,
     startUtc,
     endUtc,
