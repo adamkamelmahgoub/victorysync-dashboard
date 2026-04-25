@@ -1687,7 +1687,7 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 }
 
 const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
-const ACTIVE_CALL_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+const ACTIVE_CALL_MAX_AGE_MS = 45 * 1000;
 const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
 const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
@@ -2147,17 +2147,28 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const endedAt = call?.ended_at || call?.endedAt || call?.endTime || call?.ended || null;
     const startedAt = call?.started_at || call?.dateTimeUtc || call?.start_time || call?.created || null;
     const metadata = call?.metadata && typeof call.metadata === 'object' ? call.metadata : {};
+    const activityAt =
+      call?.updated_at ||
+      metadata?.updated_at ||
+      metadata?.updatedAt ||
+      metadata?.last_event_at ||
+      metadata?.lastEventAt ||
+      metadata?.eventTime ||
+      metadata?.event_time ||
+      metadata?.signalAt ||
+      metadata?.signal_at ||
+      startedAt;
     const maxAgeMs = metadata?.source === 'mightycall_webhook'
       ? ACTIVE_CALL_MAX_AGE_MS
       : JOURNAL_LIVE_SIGNAL_MAX_AGE_MS;
     if (String(endedAt || '').trim()) return false;
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
-    if (isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, maxAgeMs)) return true;
+    if (isLikelyActiveCallStatus(status) && isFreshActivity(activityAt, maxAgeMs)) return true;
     return hasFreshStatusCallSignal({
       ...metadata,
       status: status || metadata?.status || metadata?.state || null,
-      started_at: startedAt,
-      startedAt: startedAt,
+      started_at: activityAt,
+      startedAt: activityAt,
       ended_at: endedAt,
       endedAt: endedAt,
       currentCall: metadata?.currentCall || metadata?.current_call || null,
