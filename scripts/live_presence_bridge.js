@@ -56,6 +56,32 @@ function normalizeStatusLabel(value) {
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
+function isActiveStatus(value) {
+  const normalized = String(value || '').toLowerCase().trim();
+  if (!normalized) return false;
+  if ([
+    'available',
+    'idle',
+    'offline',
+    'disconnected',
+    'completed',
+    'ended',
+    'end',
+    'missed',
+    'failed',
+    'canceled',
+    'cancelled',
+    'done',
+    'closed',
+    'wrapup',
+    'wrap_up',
+    'after_call',
+  ].some((token) => normalized.includes(token))) {
+    return false;
+  }
+  return ['ring', 'talk', 'active', 'progress', 'connect', 'answer', 'hold', 'queue', 'call', 'busy'].some((token) => normalized.includes(token));
+}
+
 function pickCounterpart(liveCall, extension) {
   if (!liveCall || !liveCall.currentCall) return null;
   const call = liveCall.currentCall;
@@ -182,14 +208,18 @@ async function buildPresenceRows(assignments) {
 
   const rows = [];
   for (const agent of assignments) {
-    const liveCall = await mightycall.fetchMightyCallLiveCallByExtension(token, agent.extension).catch(() => null);
+    const [liveCall, profileStatus] = await Promise.all([
+      mightycall.fetchMightyCallLiveCallByExtension(agent.extension, token).catch(() => null),
+      mightycall.fetchMightyCallProfileStatusByExtension(agent.extension, token).catch(() => null),
+    ]);
 
-    const onCall = !!liveCall?.onCall;
+    const statusSignal = profileStatus?.status || profileStatus?.label || null;
+    const onCall = !!liveCall?.onCall || isActiveStatus(statusSignal);
     const startedAt = onCall
       ? liveCall?.startedAt || liveCall?.currentCall?.dateTimeUtc || refreshedAt
       : null;
     const rawStatus = onCall
-      ? (liveCall?.status || liveCall?.currentCall?.callStatus || 'Connected')
+      ? (liveCall?.status || liveCall?.currentCall?.callStatus || statusSignal || 'Connected')
       : 'available';
 
     rows.push({
@@ -202,7 +232,9 @@ async function buildPresenceRows(assignments) {
       status: onCall ? 'Connected' : normalizeStatusLabel(rawStatus),
       counterpart: onCall ? pickCounterpart(liveCall, agent.extension) : null,
       started_at: startedAt,
-      source: onCall ? 'local_presence_bridge_live_call' : 'local_presence_bridge_status',
+      source: onCall
+        ? (liveCall?.onCall ? 'local_presence_bridge_live_call' : 'local_presence_bridge_profile_status')
+        : 'local_presence_bridge_status',
       raw_status: rawStatus || null,
       last_seen_at: refreshedAt,
       refreshed_at: refreshedAt,
