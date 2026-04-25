@@ -1486,6 +1486,14 @@ function getOrgIdsNeedingPresenceRefresh(orgIds: string[], rows: any[], freshnes
   return orgIds.filter((orgId) => {
     const orgRows = rowsByOrg.get(orgId) || [];
     if (orgRows.length === 0) return true;
+    // When an external writer (local bridge) owns this org's cache rows and keeps
+    // them fresh, avoid request-time recompute to prevent clobbering the faster feed.
+    const bridgeOwnedRows = orgRows.filter((row) => String(row?.sync_version || '').startsWith('local-presence-bridge'));
+    if (bridgeOwnedRows.length > 0) {
+      const bridgeFreshnessMs = Math.max(LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS, 6000);
+      const bridgeRowsAreFresh = bridgeOwnedRows.every((row) => getLivePresenceRowAgeMs(row) <= bridgeFreshnessMs);
+      if (bridgeRowsAreFresh) return false;
+    }
     return orgRows.some((row) => getLivePresenceRowAgeMs(row) > freshnessMs);
   });
 }
