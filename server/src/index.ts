@@ -1956,6 +1956,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   const mightyCallFallback = {
     liveCalls: [] as any[],
     liveJournal: [] as any[],
+    liveCommunications: [] as any[],
     liveExtensions: [] as any[],
     ownStatus: null as any,
     profileRows: [] as any[],
@@ -1965,6 +1966,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     if (!snapshot) return false;
     if (Array.isArray(snapshot.liveCalls) && snapshot.liveCalls.length > 0) return true;
     if (Array.isArray(snapshot.liveJournal) && snapshot.liveJournal.some((row: any) => isLikelyLiveJournalRequest(row))) return true;
+    if (Array.isArray(snapshot.liveCommunications) && snapshot.liveCommunications.some((row: any) => isLikelyLiveContactCenterCommunication(row))) return true;
     if (Array.isArray(snapshot.statusRows) && snapshot.statusRows.some((row: any) => hasFreshStatusCallSignal(row?.status))) return true;
     return false;
   };
@@ -1976,6 +1978,8 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       const apiKeyOverride = creds?.clientId || undefined;
       const liveWindowStart = new Date(Date.now() - (20 * 60 * 1000)).toISOString();
       const liveWindowEnd = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
+      const commsWindowStart = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
+      const commsWindowEnd = new Date(Date.now() + (1 * 60 * 1000)).toISOString();
       const extensionsPromise = withDeadline(fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []), 450, [] as any[]);
       const journalPromise = withDeadline(fetchMightyCallJournalRequests(token, {
         from: liveWindowStart,
@@ -1984,6 +1988,15 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         pageSize: '50',
         page: '1',
       }, apiKeyOverride).catch(() => []), 650, [] as any[]);
+      const communicationsPromise = withDeadline(fetchMightyCallContactCenterCommunications(token, {
+        from: commsWindowStart,
+        to: commsWindowEnd,
+        type: 'Call',
+        pageSize: '50',
+        page: '1',
+        showUsers: 'true',
+        resolveContacts: 'false',
+      }, apiKeyOverride).catch(() => []), 800, [] as any[]);
       const profileRowsPromise = withDeadline(Promise.all(
         uniqueExtensions.map(async (extension) => {
           try {
@@ -2026,9 +2039,10 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         })
       ), 1200, [] as any[]);
 
-      const [liveExtensions, liveJournal, profileRows, statusRows, liveCallRows] = await Promise.all([
+      const [liveExtensions, liveJournal, liveCommunications, profileRows, statusRows, liveCallRows] = await Promise.all([
         extensionsPromise,
         journalPromise,
+        communicationsPromise,
         profileRowsPromise,
         statusRowsPromise,
         liveCallRowsPromise,
@@ -2036,6 +2050,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       return {
         liveCalls: (liveCallRows || []).map((row: any) => row?.call).filter(Boolean),
         liveJournal: Array.isArray(liveJournal) ? liveJournal : [],
+        liveCommunications: Array.isArray(liveCommunications) ? liveCommunications : [],
         liveExtensions,
         ownStatus: null,
         profileRows,
@@ -2054,7 +2069,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       mightyCallSnapshot = globalSnapshot;
     }
   }
-  const { liveCalls, liveJournal, liveExtensions, ownStatus, profileRows, statusRows } = mightyCallSnapshot;
+  const { liveCalls, liveJournal, liveCommunications, liveExtensions, ownStatus, profileRows, statusRows } = mightyCallSnapshot;
 
   const orgPhoneDigits = new Set<string>();
   const extensionMetaByExt = new Map<string, any>();
@@ -2142,6 +2157,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
   });
   const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
+  const activeContactCenterCalls = (liveCommunications || []).filter((call: any) => isLikelyLiveContactCenterCommunication(call));
   const activeStoredCalls = (recentCallRows || []).filter((call: any) => {
     const status = String(call?.status || call?.state || call?.callStatus || '').trim();
     const endedAt = call?.ended_at || call?.endedAt || call?.endTime || call?.ended || null;
@@ -2207,12 +2223,19 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const inferredStoredCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && shouldUseSingleAgentFallback && activeStoredCalls.length === 1
       ? activeStoredCalls[0]
       : null;
-    const matchedJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && normalizedExt
+    const matchedContactCenterCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && normalizedExt
+      ? activeContactCenterCalls.find((call: any) => payloadMatchesAgent(call, normalizedExt, agentIdentities)) || null
+      : null;
+    const inferredContactCenterCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && !matchedContactCenterCall && shouldUseSingleAgentFallback && activeContactCenterCalls.length === 1
+      ? activeContactCenterCalls[0]
+      : null;
+    const matchedJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && !matchedContactCenterCall && !inferredContactCenterCall && normalizedExt
       ? activeJournalCalls.find((call: any) => payloadMatchesAgent(call, normalizedExt, agentIdentities)) || null
       : null;
-    const inferredJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && !matchedJournalCall && shouldUseSingleAgentFallback && activeJournalCalls.length === 1
+    const inferredJournalCall = !matchedLiveCall && !inferredLiveCall && !matchedStoredCall && !inferredStoredCall && !matchedContactCenterCall && !inferredContactCenterCall && !matchedJournalCall && shouldUseSingleAgentFallback && activeJournalCalls.length === 1
       ? activeJournalCalls[0]
       : null;
+    const normalizedContactCenter = matchedContactCenterCall || inferredContactCenterCall ? normalizeMightyCallJournalActivity(matchedContactCenterCall || inferredContactCenterCall) : null;
     const normalizedJournal = matchedJournalCall || inferredJournalCall ? normalizeMightyCallJournalActivity(matchedJournalCall || inferredJournalCall) : null;
 
     const extStatus = extractLiveStatusLabel((extMeta as any)?.metadata || extMeta);
@@ -2224,7 +2247,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           ? String((matchedStoredCall as any)?.status || (matchedStoredCall as any)?.state || (matchedStoredCall as any)?.callStatus || '').trim() || extStatus
         : inferredStoredCall
             ? String((inferredStoredCall as any)?.status || (inferredStoredCall as any)?.state || (inferredStoredCall as any)?.callStatus || '').trim() || extStatus
-      : matchedJournalCall || inferredJournalCall
+      : matchedContactCenterCall || inferredContactCenterCall
+          ? String(normalizedContactCenter?.status || (matchedContactCenterCall || inferredContactCenterCall)?.state || (matchedContactCenterCall || inferredContactCenterCall)?.wfstate?.state || (matchedContactCenterCall || inferredContactCenterCall)?.availability || '').trim() || extStatus
+        : matchedJournalCall || inferredJournalCall
           ? String(normalizedJournal?.status || (matchedJournalCall || inferredJournalCall)?.state || (matchedJournalCall || inferredJournalCall)?.wfstate?.state || (matchedJournalCall || inferredJournalCall)?.availability || '').trim() || extStatus
         : extStatus;
     const extPayload = (extMeta as any)?.metadata || extMeta;
@@ -2248,11 +2273,13 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 		    const fallbackSaysOnCall = !!(
 		      matchedLiveCall ||
 		      inferredLiveCall ||
-		      matchedStoredCall ||
-		      inferredStoredCall ||
-		      matchedJournalCall ||
-		      inferredJournalCall
-		    );
+      matchedStoredCall ||
+      inferredStoredCall ||
+      matchedContactCenterCall ||
+      inferredContactCenterCall ||
+      matchedJournalCall ||
+      inferredJournalCall
+    );
 		    const onCall = fallbackSaysOnCall
           ? true
           : authoritativeStatusSaysOnCall
@@ -2268,7 +2295,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           ? extractCounterpartyLabel(matchedStoredCall?.metadata || matchedStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(matchedStoredCall, orgPhoneDigits, normalizedExt)
         : inferredStoredCall
             ? extractCounterpartyLabel(inferredStoredCall?.metadata || inferredStoredCall, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(inferredStoredCall, orgPhoneDigits, normalizedExt)
-      : matchedJournalCall || inferredJournalCall
+      : matchedContactCenterCall || inferredContactCenterCall
+          ? normalizedContactCenter?.counterpart || extractCounterpartyLabel(matchedContactCenterCall || inferredContactCenterCall, orgPhoneDigits, normalizedExt)
+        : matchedJournalCall || inferredJournalCall
           ? normalizedJournal?.counterpart || extractCounterpartyLabel(matchedJournalCall || inferredJournalCall, orgPhoneDigits, normalizedExt)
         : normalizedStatus?.counterpart || extractCounterpartyLabel(effectiveStatusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(statusPayload, orgPhoneDigits, normalizedExt) || extractCounterpartyLabel(extPayload, orgPhoneDigits, normalizedExt);
     const startedAt = matchedLiveCall
@@ -2279,9 +2308,11 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           ? (matchedStoredCall as any)?.started_at || (matchedStoredCall as any)?.dateTimeUtc || (matchedStoredCall as any)?.start_time || (matchedStoredCall as any)?.created || null
         : inferredStoredCall
             ? (inferredStoredCall as any)?.started_at || (inferredStoredCall as any)?.dateTimeUtc || (inferredStoredCall as any)?.start_time || (inferredStoredCall as any)?.created || null
-      : matchedJournalCall || inferredJournalCall
+      : matchedContactCenterCall || inferredContactCenterCall
+          ? normalizedContactCenter?.started_at || (matchedContactCenterCall || inferredContactCenterCall)?.created || (matchedContactCenterCall || inferredContactCenterCall)?.createdAt || null
+        : matchedJournalCall || inferredJournalCall
           ? normalizedJournal?.started_at || (matchedJournalCall || inferredJournalCall)?.created || (matchedJournalCall || inferredJournalCall)?.createdAt || null
-	      : authoritativeStatusSaysOnCall
+      : authoritativeStatusSaysOnCall
           ? normalizedStatus?.started_at || effectiveStatusPayload?.currentCall?.startedAt || effectiveStatusPayload?.currentCall?.started_at || effectiveStatusPayload?.current_call?.startedAt || effectiveStatusPayload?.current_call?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
           : null;
 		    const source = fallbackSaysOnCall
@@ -2293,7 +2324,11 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
                 ? 'stored_calls'
                 : inferredStoredCall
                   ? 'stored_calls_inferred'
-                  : matchedJournalCall
+                  : matchedContactCenterCall
+                    ? 'mightycall_contact_center'
+                    : inferredContactCenterCall
+                      ? 'mightycall_contact_center_inferred'
+                      : matchedJournalCall
                     ? 'mightycall_journal'
                     : inferredJournalCall
                       ? 'mightycall_journal_inferred'
