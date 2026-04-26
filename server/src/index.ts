@@ -1693,8 +1693,8 @@ const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 15 * 1000;
 const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
-const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 5000;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v36';
+const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 1200;
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v37';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2570,7 +2570,6 @@ async function ensureLiveAgentPresenceFresh(orgIds: string[]) {
   let rows = await getLivePresenceRowsForOrgIds(orgIds);
   const orgIdsNeedingRefresh = getOrgIdsNeedingPresenceRefresh(orgIds, rows);
   if (orgIdsNeedingRefresh.length === 0) {
-    rows = await revalidatePresenceRowsWithDirectProbe(rows);
     return {
       rows,
       refreshed: false,
@@ -2578,90 +2577,30 @@ async function ensureLiveAgentPresenceFresh(orgIds: string[]) {
     };
   }
 
-  await withDeadline(
-    Promise.all(orgIdsNeedingRefresh.map((orgId) => refreshLiveAgentPresenceForOrgWithLock(orgId))),
-    LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS,
-    [] as any[]
-  );
-
-  rows = await getLivePresenceRowsForOrgIds(orgIds);
-  rows = await revalidatePresenceRowsWithDirectProbe(rows);
-  return {
-    rows,
-    refreshed: true,
-    liveStatusVersion: `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-request`,
-  };
-}
-
-async function revalidatePresenceRowsWithDirectProbe(rows: any[]) {
-  const candidates = (rows || []).filter((row: any) => normalizeExtension(row?.extension));
-  if (candidates.length === 0) return rows;
-  if (candidates.length > 20) return rows;
-
-  const token = await withDeadline(getMightyCallAccessToken(undefined), 1200, null as any);
-  if (!token) return rows;
-
-  const nowIso = new Date().toISOString();
-  const staleAfterIso = new Date(Date.now() + LIVE_AGENT_PRESENCE_STALE_MS).toISOString();
-  const updates: any[] = [];
-
-  for (const row of candidates) {
-    const ext = normalizeExtension(row?.extension);
-    if (!ext) continue;
-
-    const probe = await withDeadline(
-      fetchMightyCallLiveCallByExtension(ext, token)
-        .then((value) => ({ ok: true, value }))
-        .catch(() => ({ ok: false, value: null as any })),
-      1800,
-      { ok: false, value: null as any }
-    );
-
-    if (!probe.ok) continue;
-    const live = probe.value;
-    const liveCall = live?.currentCall || null;
-    const onCall = !!(live && live.onCall && liveCall);
-    const startedAt = onCall
-      ? liveCall?.dateTimeUtc || liveCall?.started_at || liveCall?.start_time || liveCall?.created || row?.started_at || null
-      : null;
-    const counterpart = onCall
-      ? extractCounterpartyLabel(liveCall, new Set<string>(), ext) || row?.counterpart || null
-      : null;
-    const status = onCall
-      ? (String(live?.status || liveCall?.status || liveCall?.state || 'Connected').trim() || 'Connected')
-      : 'Available';
-
-    updates.push({
-      org_id: row.org_id,
-      user_id: row.user_id,
-      extension: row.extension || ext,
-      email: row.email || null,
-      display_name: row.display_name || null,
-      on_call: onCall,
-      status,
-      counterpart,
-      started_at: startedAt,
-      source: onCall ? 'mightycall_calls_direct_probe' : 'mightycall_calls_direct_probe_clear',
-      raw_status: status,
-      last_seen_at: nowIso,
-      refreshed_at: nowIso,
-      stale_after: staleAfterIso,
-      sync_version: LIVE_AGENT_PRESENCE_SYNC_VERSION,
-      updated_at: nowIso,
+  // Kick refresh in the background so read path remains fast and does not time out.
+  for (const targetOrgId of orgIdsNeedingRefresh) {
+    void refreshLiveAgentPresenceForOrgWithLock(targetOrgId).catch((err: any) => {
+      console.warn('[live-agent-presence] async request refresh failed', targetOrgId, fmtErr(err));
     });
   }
 
-  if (updates.length === 0) return rows;
-  const { error } = await supabaseAdmin
-    .from('live_agent_presence')
-    .upsert(updates, { onConflict: 'org_id,user_id' });
-  if (error) return rows;
-
-  const updatedByKey = new Map<string, any>();
-  for (const row of updates) {
-    updatedByKey.set(`${row.org_id}:${row.user_id}`, row);
+  // If there is no cached row at all, wait briefly for first paint.
+  if (rows.length === 0) {
+    await withDeadline(
+      Promise.all(orgIdsNeedingRefresh.map((orgId) => refreshLiveAgentPresenceForOrgWithLock(orgId))),
+      LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS,
+      [] as any[]
+    );
+    rows = await getLivePresenceRowsForOrgIds(orgIds);
   }
-  return rows.map((row: any) => updatedByKey.get(`${row.org_id}:${row.user_id}`) || row);
+
+  return {
+    rows,
+    refreshed: rows.length === 0 ? true : false,
+    liveStatusVersion: rows.length === 0
+      ? `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-request`
+      : LIVE_AGENT_PRESENCE_SYNC_VERSION,
+  };
 }
 
 function reportVisibleToAssignedPhones(
