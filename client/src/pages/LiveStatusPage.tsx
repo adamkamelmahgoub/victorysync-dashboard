@@ -21,6 +21,7 @@ type LiveAgentStatus = {
   started_at?: string | null;
   source?: string | null;
   raw_status?: string | null;
+  api_source?: string | null;
   last_seen_at?: string | null;
   refreshed_at?: string | null;
   stale_after?: string | null;
@@ -84,7 +85,7 @@ const LiveStatusPage: FC = () => {
 
   useEffect(() => {
     load();
-    const intervalId = window.setInterval(load, 3000);
+    const intervalId = window.setInterval(load, 2000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') load();
     };
@@ -108,7 +109,7 @@ const LiveStatusPage: FC = () => {
   const staleItems = items.filter((agent) => agent.stale);
 
   const forceSync = async () => {
-    if (!user?.id || !isAdmin) return;
+    if (!user?.id) return;
     try {
       setSyncing(true);
       await refreshLiveAgentStatus(activeOrgId, user.id);
@@ -137,11 +138,9 @@ const LiveStatusPage: FC = () => {
       <button onClick={load} disabled={loading} className="vs-button-secondary">
         {loading ? 'Refreshing live...' : 'Refresh Live'}
       </button>
-      {isAdmin && (
-        <button onClick={forceSync} disabled={syncing} className="vs-button-secondary">
-          {syncing ? 'Syncing now...' : 'Force Sync'}
-        </button>
-      )}
+      <button onClick={forceSync} disabled={syncing} className="vs-button-secondary">
+        {syncing ? 'Syncing now...' : 'Force Sync'}
+      </button>
     </div>
   ), [forceSync, isAdmin, loading, orgs, selectedOrgId, setSelectedOrgId, syncing]);
 
@@ -199,37 +198,39 @@ const LiveStatusPage: FC = () => {
                       <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
                       <div className="mt-1 text-sm text-slate-400">
                         {agent.email || 'No email'}
-                        {agent.extension ? ` · Ext ${agent.extension}` : ''}
-                        {isAdmin && agent.org_id ? ` · ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
+                        {agent.extension ? ` - Ext ${agent.extension}` : ''}
+                        {isAdmin && agent.org_id ? ` - ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
                       </div>
                     </div>
-	                    <StatusBadge tone={agent.stale ? 'warning' : agent.on_call ? 'success' : 'neutral'}>
-	                      {agent.stale ? 'Stale' : agent.on_call ? 'On Call' : (agent.status || 'Idle')}
-	                    </StatusBadge>
+                    <StatusBadge tone={agent.stale ? 'warning' : agent.on_call ? 'success' : 'neutral'}>
+                      {agent.stale ? 'Stale' : agent.on_call ? 'On Call' : (agent.status || 'Idle')}
+                    </StatusBadge>
                   </div>
 
-		                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-		                      <div className="vs-surface-muted p-4">
-		                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
-		                        <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
-                          <div className="mt-2 text-xs text-slate-500">
-                            {agent.direction ? `${agent.direction === 'outbound' ? 'Outbound' : 'Incoming'}${agent.from_number || agent.to_number ? ' · ' : ''}` : ''}
-                            {agent.direction === 'outbound' ? (agent.to_number || '') : (agent.from_number || '')}
-                          </div>
-	                          <div className="mt-2 text-xs text-slate-500">Last seen {fmtDateTime(agent.last_seen_at)}</div>
-		                      </div>
-		                    <div className="vs-surface-muted p-4">
-		                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
-		                        <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
-                            {agent.on_call && (
-                              <div className="mt-2 text-xs font-semibold text-emerald-300">Live duration {fmtDurationFrom(agent.answered_at || agent.started_at, nowMs)}</div>
-                            )}
-		                        <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-	                          <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
-		                      </div>
-	                    </div>
+                  <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="vs-surface-muted p-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
+                      <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
+                      <div className="mt-2 text-xs text-slate-500">
+                        {agent.direction ? `${agent.direction === 'outbound' ? 'Outbound' : 'Incoming'}${agent.from_number || agent.to_number ? ' - ' : ''}` : ''}
+                        {agent.direction === 'outbound' ? (agent.to_number || '') : (agent.from_number || '')}
+                      </div>
+                      <div className="mt-2 text-xs text-slate-500">Raw status: {agent.raw_status || '-'}</div>
+                      <div className="mt-1 text-xs text-slate-500">API source: {agent.api_source || agent.source || '-'}</div>
+                      <div className="mt-2 text-xs text-slate-500">Last seen {fmtDateTime(agent.last_seen_at)}</div>
+                    </div>
+                    <div className="vs-surface-muted p-4">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
+                      <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
+                      {agent.on_call && (
+                        <div className="mt-2 text-xs font-semibold text-emerald-300">Live duration {fmtDurationFrom(agent.answered_at || agent.started_at, nowMs)}</div>
+                      )}
+                      <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+                      <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
+                    </div>
                   </div>
-                ))}
+                </div>
+              ))}
             </div>
           )}
         </SectionCard>
@@ -239,3 +240,4 @@ const LiveStatusPage: FC = () => {
 };
 
 export default LiveStatusPage;
+

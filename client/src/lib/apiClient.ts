@@ -208,14 +208,14 @@ export async function getLiveAgentStatus(params?: { orgId?: string | null }, use
   const q = new URLSearchParams();
   if (params?.orgId) q.set('org_id', params.orgId);
   const suffix = q.toString() ? `?${q.toString()}` : '';
-  return await fetchJson(`/api/agents/live-status${suffix}`, {
+  return await fetchJson(`/api/live-status${suffix}`, {
     headers: { 'x-user-id': userId || '' },
     timeoutMs: 7000,
   });
 }
 
 export async function refreshLiveAgentStatus(orgId?: string | null, userId?: string) {
-  return await fetchJson(`/api/admin/live-status/refresh`, {
+  return await fetchJson(`/api/live-status/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify({ orgId: orgId || null }),
