@@ -1688,13 +1688,13 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 
 const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 45 * 1000;
-const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
-const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
+const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 30 * 1000;
+const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 20 * 1000;
 const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 5000;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v31';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v32';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -1878,6 +1878,19 @@ function isLikelyLiveContactCenterCommunication(request: any): boolean {
     request?.respondedAt ||
     request?.responded_at ||
     startedAt;
+  const durationSecondsRaw =
+    request?.duration ??
+    request?.durationSeconds ??
+    request?.duration_seconds ??
+    request?.callDuration ??
+    request?.call_duration ??
+    null;
+  const durationSeconds = Number(durationSecondsRaw);
+  const startedMs = parseTimestampMs(startedAt);
+  if (Number.isFinite(durationSeconds) && durationSeconds > 0 && startedMs != null) {
+    const endedByDurationMs = startedMs + (durationSeconds * 1000);
+    if (endedByDurationMs < (Date.now() - 3000)) return false;
+  }
 
   // Contact Center communications are historical records. A "connected" state
   // means the call connected at some point, not necessarily that it is live now.
