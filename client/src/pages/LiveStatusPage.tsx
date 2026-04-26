@@ -13,6 +13,11 @@ type LiveAgentStatus = {
   on_call: boolean;
   counterpart?: string | null;
   status?: string | null;
+  direction?: string | null;
+  from_number?: string | null;
+  to_number?: string | null;
+  answered_at?: string | null;
+  ended_at?: string | null;
   started_at?: string | null;
   source?: string | null;
   raw_status?: string | null;
@@ -21,6 +26,19 @@ type LiveAgentStatus = {
   stale_after?: string | null;
   stale?: boolean;
 };
+
+function fmtDurationFrom(startAt?: string | null, nowMs = Date.now()) {
+  if (!startAt) return '00:00';
+  const startMs = Date.parse(startAt);
+  if (Number.isNaN(startMs)) return '00:00';
+  const total = Math.max(Math.floor((nowMs - startMs) / 1000), 0);
+  const hh = Math.floor(total / 3600);
+  const mm = Math.floor((total % 3600) / 60);
+  const ss = total % 60;
+  return hh > 0
+    ? `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+    : `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
 
 function fmtDateTime(value?: string | null) {
   if (!value) return '-';
@@ -37,6 +55,7 @@ const LiveStatusPage: FC = () => {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState<number>(Date.now());
   const liveRequestSeq = useRef(0);
   const liveRequestInFlight = useRef(false);
 
@@ -77,6 +96,11 @@ const LiveStatusPage: FC = () => {
       window.removeEventListener('visibilitychange', onFocus);
     };
   }, [user?.id, activeOrgId]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));
   const onCall = items.filter((agent) => agent.on_call).length;
@@ -184,19 +208,26 @@ const LiveStatusPage: FC = () => {
 	                    </StatusBadge>
                   </div>
 
-	                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-	                      <div className="vs-surface-muted p-4">
-	                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
-	                        <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
-                          <div className="mt-2 text-xs text-slate-500">Last seen {fmtDateTime(agent.last_seen_at)}</div>
-	                      </div>
-	                    <div className="vs-surface-muted p-4">
-	                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
-	                        <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
-	                        <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-                          <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
-	                      </div>
-                    </div>
+		                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+		                      <div className="vs-surface-muted p-4">
+		                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
+		                        <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
+                          <div className="mt-2 text-xs text-slate-500">
+                            {agent.direction ? `${agent.direction === 'outbound' ? 'Outbound' : 'Incoming'}${agent.from_number || agent.to_number ? ' · ' : ''}` : ''}
+                            {agent.direction === 'outbound' ? (agent.to_number || '') : (agent.from_number || '')}
+                          </div>
+	                          <div className="mt-2 text-xs text-slate-500">Last seen {fmtDateTime(agent.last_seen_at)}</div>
+		                      </div>
+		                    <div className="vs-surface-muted p-4">
+		                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
+		                        <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
+                            {agent.on_call && (
+                              <div className="mt-2 text-xs font-semibold text-emerald-300">Live duration {fmtDurationFrom(agent.answered_at || agent.started_at, nowMs)}</div>
+                            )}
+		                        <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+	                          <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
+		                      </div>
+	                    </div>
                   </div>
                 ))}
             </div>

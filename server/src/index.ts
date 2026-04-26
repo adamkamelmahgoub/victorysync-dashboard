@@ -1084,6 +1084,120 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
   return { org_id: orgId, external_id: call.external_id, status: call.status };
 }
 
+function normalizeAgentLiveEventStatus(value: any): 'ringing' | 'dialing' | 'answered' | 'in_progress' | 'completed' | 'missed' | 'failed' | 'available' {
+  const text = String(value || '').toLowerCase().trim();
+  if (!text) return 'available';
+  if (text.includes('miss')) return 'missed';
+  if (text.includes('fail') || text.includes('error') || text.includes('busy')) return 'failed';
+  if (text.includes('complete') || text.includes('end') || text.includes('hang') || text.includes('stopring')) return 'completed';
+  if (text.includes('dial') || text.includes('outbound') || text.includes('calling')) return 'dialing';
+  if (text.includes('ring')) return 'ringing';
+  if (text.includes('answer')) return 'answered';
+  if (text.includes('connect') || text.includes('talk') || text.includes('progress') || text.includes('active') || text.includes('call')) return 'in_progress';
+  if (text.includes('available') || text.includes('idle') || text.includes('ready')) return 'available';
+  return 'available';
+}
+
+function isAgentLiveTerminalStatus(status: string): boolean {
+  return status === 'completed' || status === 'missed' || status === 'failed' || status === 'available';
+}
+
+function mapAgentLiveStatusToPresence(status: string): { on_call: boolean; label: string } {
+  switch (status) {
+    case 'ringing':
+      return { on_call: true, label: 'Ringing' };
+    case 'dialing':
+      return { on_call: true, label: 'Dialing' };
+    case 'answered':
+      return { on_call: true, label: 'Answered' };
+    case 'in_progress':
+      return { on_call: true, label: 'On Call' };
+    case 'missed':
+      return { on_call: false, label: 'Missed' };
+    case 'failed':
+      return { on_call: false, label: 'Failed' };
+    case 'completed':
+      return { on_call: false, label: 'Available' };
+    default:
+      return { on_call: false, label: 'Available' };
+  }
+}
+
+async function resolveOrgAgentUserIdByExtension(orgId: string, extension: string): Promise<string | null> {
+  const normalizedExtension = normalizeExtension(extension);
+  if (!normalizedExtension) return null;
+
+  try {
+    const { data: fromOrgUsers } = await supabaseAdmin
+      .from('org_users')
+      .select('user_id, role, mightycall_extension')
+      .eq('org_id', orgId)
+      .eq('role', 'agent')
+      .eq('mightycall_extension', normalizedExtension)
+      .limit(1)
+      .maybeSingle();
+    if (fromOrgUsers?.user_id) return String(fromOrgUsers.user_id);
+  } catch {}
+
+  try {
+    const { data: fromAgentExtensions } = await supabaseAdmin
+      .from('agent_extensions')
+      .select('user_id, extension')
+      .eq('org_id', orgId)
+      .eq('extension', normalizedExtension)
+      .limit(1)
+      .maybeSingle();
+    if (fromAgentExtensions?.user_id) return String(fromAgentExtensions.user_id);
+  } catch {}
+
+  return null;
+}
+
+async function upsertAgentLiveStatusRow(params: {
+  orgId: string;
+  extension: string;
+  status: string;
+  externalCallId?: string | null;
+  direction?: string | null;
+  fromNumber?: string | null;
+  toNumber?: string | null;
+  startedAt?: string | null;
+  answeredAt?: string | null;
+  endedAt?: string | null;
+  rawEvent?: any;
+  lastEventAt?: string | null;
+}) {
+  const normalizedExtension = normalizeExtension(params.extension);
+  if (!params.orgId || !normalizedExtension) return;
+  const normalizedStatus = normalizeAgentLiveEventStatus(params.status);
+  const eventAt = webhookIso(params.lastEventAt || params.endedAt || params.answeredAt || params.startedAt || new Date().toISOString()) || new Date().toISOString();
+  const userId = await resolveOrgAgentUserIdByExtension(params.orgId, normalizedExtension);
+
+  const isTerminal = isAgentLiveTerminalStatus(normalizedStatus);
+  const row = {
+    org_id: params.orgId,
+    extension: normalizedExtension,
+    user_id: userId,
+    external_call_id: isTerminal ? null : (params.externalCallId || null),
+    direction: params.direction || null,
+    from_number: isTerminal ? null : (params.fromNumber || null),
+    to_number: isTerminal ? null : (params.toNumber || null),
+    status: isTerminal ? 'available' : normalizedStatus,
+    started_at: isTerminal ? null : (params.startedAt || null),
+    answered_at: isTerminal ? null : (params.answeredAt || null),
+    ended_at: params.endedAt || null,
+    last_event_at: eventAt,
+    raw_event: params.rawEvent || null,
+    stale: false,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabaseAdmin
+    .from('agent_live_status')
+    .upsert(row, { onConflict: 'org_id,extension' });
+  if (error) throw error;
+}
+
 type SyncJobRef = { id: string; table: 'integration_sync_jobs' | 'mightycall_sync_runs' } | null;
 
 function normalizeSyncJobRow(row: any, table: 'integration_sync_jobs' | 'mightycall_sync_runs') {
@@ -1464,6 +1578,51 @@ function mapLivePresenceRow(row: any) {
   };
 }
 
+async function getAgentLiveStatusRowsForOrgIds(orgIds: string[]) {
+  if (orgIds.length === 0) return [] as any[];
+  const { data, error } = await supabaseAdmin
+    .from('agent_live_status')
+    .select('org_id, extension, user_id, external_call_id, direction, from_number, to_number, status, started_at, answered_at, ended_at, last_event_at, raw_event, stale, updated_at')
+    .in('org_id', orgIds)
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_id: string | null; email: string | null; display_name: string | null }>) {
+  const key = `${row?.org_id || ''}:${normalizeExtension(row?.extension) || ''}`;
+  const identity = identityByKey.get(key);
+  const statusNorm = normalizeAgentLiveEventStatus(row?.status || 'available');
+  const presence = mapAgentLiveStatusToPresence(statusNorm);
+  const counterpart = row?.direction === 'outbound'
+    ? (row?.to_number || null)
+    : (row?.from_number || row?.to_number || null);
+  const startedAt = row?.answered_at || row?.started_at || null;
+  return {
+    user_id: identity?.user_id || String(row?.user_id || ''),
+    org_id: row?.org_id || null,
+    email: identity?.email || null,
+    role: 'agent',
+    extension: row?.extension || null,
+    display_name: identity?.display_name || null,
+    on_call: presence.on_call,
+    direction: row?.direction || null,
+    from_number: row?.from_number || null,
+    to_number: row?.to_number || null,
+    counterpart: presence.on_call ? counterpart : null,
+    status: presence.label,
+    started_at: presence.on_call ? startedAt : null,
+    answered_at: row?.answered_at || null,
+    ended_at: row?.ended_at || null,
+    source: 'agent_live_status',
+    raw_status: row?.status || null,
+    last_seen_at: row?.last_event_at || row?.updated_at || null,
+    refreshed_at: row?.updated_at || null,
+    stale_after: null,
+    stale: !!row?.stale,
+  };
+}
+
 function getLivePresenceRowAgeMs(row: any): number {
   const refreshedAt = String(row?.refreshed_at || '').trim();
   if (!refreshedAt) return Number.POSITIVE_INFINITY;
@@ -1694,7 +1853,7 @@ const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 1200;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v40';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v41';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2527,11 +2686,95 @@ async function refreshLiveAgentPresence(orgId?: string | null) {
   };
 }
 
+async function refreshAgentLiveStatusForOrg(orgId: string) {
+  const [{ data: memberRows }, { data: extRows }] = await Promise.all([
+    supabaseAdmin
+      .from('org_users')
+      .select('user_id, role, mightycall_extension')
+      .eq('org_id', orgId)
+      .eq('role', 'agent'),
+    supabaseAdmin
+      .from('agent_extensions')
+      .select('user_id, extension')
+      .eq('org_id', orgId),
+  ]);
+
+  const extensionSet = new Set<string>();
+  for (const row of memberRows || []) {
+    const ext = normalizeExtension((row as any)?.mightycall_extension);
+    if (ext) extensionSet.add(ext);
+  }
+  for (const row of extRows || []) {
+    const ext = normalizeExtension((row as any)?.extension);
+    if (ext) extensionSet.add(ext);
+  }
+  const extensions = Array.from(extensionSet.values());
+  if (extensions.length === 0) return;
+
+  let overrideCreds: any = undefined;
+  try {
+    const { getOrgIntegration } = await import('./lib/integrationsStore');
+    const integ = await getOrgIntegration(orgId, 'mightycall');
+    if (integ?.credentials) {
+      overrideCreds = {
+        clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+        clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+      };
+    }
+  } catch {}
+
+  const token = await withDeadline(getMightyCallAccessToken(overrideCreds), 1200, null as any);
+  if (!token) return;
+  const apiKeyOverride = overrideCreds?.clientId || undefined;
+
+  await Promise.all(extensions.map(async (extension) => {
+    try {
+      const [liveCall, statusPayload] = await Promise.all([
+        withDeadline(fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride), 1200, null as any),
+        withDeadline(fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride), 900, null as any),
+      ]);
+
+      const hasLive = !!(liveCall?.onCall && liveCall?.currentCall);
+      const rawStatus = hasLive
+        ? (liveCall?.status || liveCall?.currentCall?.status || liveCall?.currentCall?.state || 'in_progress')
+        : (statusPayload?.status || statusPayload?.state || statusPayload?.availability || 'available');
+      const directionRaw =
+        liveCall?.currentCall?.direction ||
+        liveCall?.currentCall?.callDirection ||
+        statusPayload?.direction ||
+        null;
+      const direction = String(directionRaw || '').toLowerCase().includes('out') ? 'outbound' : String(directionRaw || '').toLowerCase().includes('in') ? 'inbound' : null;
+      await upsertAgentLiveStatusRow({
+        orgId,
+        extension,
+        status: hasLive ? rawStatus : 'available',
+        externalCallId: liveCall?.currentCall?.id || liveCall?.currentCall?.callId || null,
+        direction,
+        fromNumber: liveCall?.currentCall?.from_number || liveCall?.currentCall?.from || liveCall?.currentCall?.caller?.number || null,
+        toNumber: liveCall?.currentCall?.to_number || liveCall?.currentCall?.to || liveCall?.currentCall?.called?.number || liveCall?.currentCall?.client?.address || null,
+        startedAt: liveCall?.currentCall?.dateTimeUtc || liveCall?.currentCall?.started_at || liveCall?.currentCall?.start_time || null,
+        answeredAt: liveCall?.currentCall?.answered_at || liveCall?.currentCall?.answeredAt || null,
+        endedAt: hasLive ? null : new Date().toISOString(),
+        rawEvent: hasLive ? liveCall?.currentCall : statusPayload,
+        lastEventAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('[agent-live-status] refresh extension failed', { orgId, extension, err: fmtErr(err) });
+    }
+  }));
+}
+
 async function runLiveAgentPresenceRefreshCycle() {
   if (livePresenceRefreshInFlight) return;
   livePresenceRefreshInFlight = true;
   try {
     await refreshLiveAgentPresence(null);
+    try {
+      const orgIds = await getLivePresenceOrgIds();
+      await Promise.all(orgIds.map((orgId) => refreshAgentLiveStatusForOrg(orgId)));
+    } catch (err: any) {
+      console.warn('[agent-live-status] background refresh failed:', fmtErr(err));
+    }
   } catch (err: any) {
     if (isLiveAgentPresenceMissingError(err)) {
       console.warn('[live-agent-presence] table not ready yet; background refresh is waiting for migration');
@@ -3035,7 +3278,25 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
       const call = normalizeMightyCallWebhookCall(event);
       if (!call.external_id || (!call.from_number && !call.to_number)) continue;
       try {
-        results.push(await upsertMightyCallWebhookCall(call));
+        const writeResult = await upsertMightyCallWebhookCall(call);
+        results.push(writeResult);
+        if (writeResult.org_id && call.agent_extension) {
+          const eventType = String(call.payload?.EventType || call.payload?.eventType || call.status || '').toLowerCase();
+          await upsertAgentLiveStatusRow({
+            orgId: String(writeResult.org_id),
+            extension: call.agent_extension,
+            status: eventType || call.status,
+            externalCallId: call.external_id,
+            direction: call.direction,
+            fromNumber: call.from_number,
+            toNumber: call.to_number,
+            startedAt: call.started_at,
+            answeredAt: call.answered_at,
+            endedAt: call.ended_at,
+            rawEvent: call.payload,
+            lastEventAt: webhookIso(call.payload?.Timestamp || call.payload?.timestamp || call.payload?.createdAt || call.payload?.created || null),
+          });
+        }
       } catch (error) {
         console.error('[mightycall webhook] call upsert failed:', fmtErr(error), {
           external_id: call.external_id,
@@ -5970,17 +6231,68 @@ app.get('/api/agents/live-status', async (req, res) => {
 
     let items: any[] = [];
     let refreshedAt: string | null = null;
-    let liveStatusVersion = LIVE_AGENT_PRESENCE_SYNC_VERSION;
+    let liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-live-table`;
     try {
-      const result = await ensureLiveAgentPresenceFresh(orgIds);
-      const rows = result.rows;
-      liveStatusVersion = result.liveStatusVersion;
-      items = rows.map(mapLivePresenceRow);
-      refreshedAt = items
-        .map((item: any) => item.refreshed_at || null)
-        .filter(Boolean)
-        .sort()
-        .slice(-1)[0] || null;
+      const [liveRows, memberRows, extRows] = await Promise.all([
+        getAgentLiveStatusRowsForOrgIds(orgIds),
+        supabaseAdmin
+          .from('org_users')
+          .select('org_id, user_id, role, mightycall_extension')
+          .in('org_id', orgIds)
+          .eq('role', 'agent'),
+        supabaseAdmin
+          .from('agent_extensions')
+          .select('org_id, user_id, extension')
+          .in('org_id', orgIds),
+      ]);
+      const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
+      const allUserIds = new Set<string>();
+      const pushIdentity = (orgId: string, ext: any, userId: any) => {
+        const normalizedExt = normalizeExtension(ext);
+        if (!orgId || !normalizedExt) return;
+        const userIdText = String(userId || '').trim() || null;
+        identityByKey.set(`${orgId}:${normalizedExt}`, { user_id: userIdText, email: null, display_name: null });
+        if (userIdText) allUserIds.add(userIdText);
+      };
+      for (const row of (memberRows.data || [])) pushIdentity(String((row as any).org_id || ''), (row as any).mightycall_extension, (row as any).user_id);
+      for (const row of (extRows.data || [])) pushIdentity(String((row as any).org_id || ''), (row as any).extension, (row as any).user_id);
+
+      const emailByUser = await resolveUserEmailsById(Array.from(allUserIds.values()));
+      const profileRows = Array.from(allUserIds.values()).length > 0
+        ? await supabaseAdmin.from('profiles').select('id, full_name').in('id', Array.from(allUserIds.values()))
+        : { data: [] as any[] };
+      const fullNameByUser = new Map<string, string>();
+      for (const row of (profileRows.data || [])) {
+        const fullName = String((row as any)?.full_name || '').trim();
+        if (fullName) fullNameByUser.set(String((row as any).id), fullName);
+      }
+      for (const [key, value] of identityByKey.entries()) {
+        const userId = value.user_id || '';
+        identityByKey.set(key, {
+          user_id: value.user_id,
+          email: userId ? (emailByUser[userId] || null) : null,
+          display_name: userId ? (fullNameByUser.get(userId) || null) : null,
+        });
+      }
+
+      if ((liveRows || []).length > 0) {
+        items = (liveRows || []).map((row: any) => mapAgentLiveStatusToApiRow(row, identityByKey));
+        refreshedAt = items
+          .map((item: any) => item.refreshed_at || null)
+          .filter(Boolean)
+          .sort()
+          .slice(-1)[0] || null;
+      } else {
+        const result = await ensureLiveAgentPresenceFresh(orgIds);
+        const rows = result.rows;
+        liveStatusVersion = result.liveStatusVersion;
+        items = rows.map(mapLivePresenceRow);
+        refreshedAt = items
+          .map((item: any) => item.refreshed_at || null)
+          .filter(Boolean)
+          .sort()
+          .slice(-1)[0] || null;
+      }
     } catch (err: any) {
       if (!isLiveAgentPresenceMissingError(err)) throw err;
       const fallbackGroups = await Promise.all(orgIds.map((targetOrgId) => getAgentLiveStatusItemsForOrg(targetOrgId)));
@@ -6019,17 +6331,61 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
 
     let items: any[] = [];
     let refreshedAt: string | null = null;
-    let liveStatusVersion = LIVE_AGENT_PRESENCE_SYNC_VERSION;
+    let liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-live-table`;
     try {
-      const result = await ensureLiveAgentPresenceFresh([orgId]);
-      const rows = result.rows;
-      liveStatusVersion = result.liveStatusVersion;
-      items = rows.map(mapLivePresenceRow);
-      refreshedAt = items
-        .map((item: any) => item.refreshed_at || null)
-        .filter(Boolean)
-        .sort()
-        .slice(-1)[0] || null;
+      const [liveRows, membersRes, extRes] = await Promise.all([
+        getAgentLiveStatusRowsForOrgIds([orgId]),
+        supabaseAdmin.from('org_users').select('org_id, user_id, role, mightycall_extension').eq('org_id', orgId).eq('role', 'agent'),
+        supabaseAdmin.from('agent_extensions').select('org_id, user_id, extension').eq('org_id', orgId),
+      ]);
+      const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
+      const userIds = new Set<string>();
+      const setIdentity = (ext: any, userId: any) => {
+        const normalizedExt = normalizeExtension(ext);
+        if (!normalizedExt) return;
+        const uid = String(userId || '').trim() || null;
+        identityByKey.set(`${orgId}:${normalizedExt}`, { user_id: uid, email: null, display_name: null });
+        if (uid) userIds.add(uid);
+      };
+      for (const row of (membersRes.data || [])) setIdentity((row as any).mightycall_extension, (row as any).user_id);
+      for (const row of (extRes.data || [])) setIdentity((row as any).extension, (row as any).user_id);
+
+      const emailByUser = await resolveUserEmailsById(Array.from(userIds.values()));
+      const profiles = Array.from(userIds.values()).length > 0
+        ? await supabaseAdmin.from('profiles').select('id, full_name').in('id', Array.from(userIds.values()))
+        : { data: [] as any[] };
+      const nameByUser = new Map<string, string>();
+      for (const row of (profiles.data || [])) {
+        const name = String((row as any)?.full_name || '').trim();
+        if (name) nameByUser.set(String((row as any).id), name);
+      }
+      for (const [key, base] of identityByKey.entries()) {
+        const uid = base.user_id || '';
+        identityByKey.set(key, {
+          user_id: base.user_id,
+          email: uid ? (emailByUser[uid] || null) : null,
+          display_name: uid ? (nameByUser.get(uid) || null) : null,
+        });
+      }
+
+      if ((liveRows || []).length > 0) {
+        items = (liveRows || []).map((row: any) => mapAgentLiveStatusToApiRow(row, identityByKey));
+        refreshedAt = items
+          .map((item: any) => item.refreshed_at || null)
+          .filter(Boolean)
+          .sort()
+          .slice(-1)[0] || null;
+      } else {
+        const result = await ensureLiveAgentPresenceFresh([orgId]);
+        const rows = result.rows;
+        liveStatusVersion = result.liveStatusVersion;
+        items = rows.map(mapLivePresenceRow);
+        refreshedAt = items
+          .map((item: any) => item.refreshed_at || null)
+          .filter(Boolean)
+          .sort()
+          .slice(-1)[0] || null;
+      }
     } catch (err: any) {
       if (!isLiveAgentPresenceMissingError(err)) throw err;
       items = await getAgentLiveStatusItemsForOrg(orgId);
@@ -6065,6 +6421,45 @@ app.post('/api/admin/live-status/refresh', async (req, res) => {
   } catch (err: any) {
     console.error('admin_live_status_refresh_failed:', fmtErr(err));
     res.status(500).json({ error: 'admin_live_status_refresh_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.post('/api/admin/live-status/simulate', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const orgId = String(req.body?.orgId || '').trim();
+    const extension = normalizeExtension(req.body?.extension);
+    const event = String(req.body?.event || '').trim().toLowerCase();
+    if (!orgId || !extension || !event) {
+      return res.status(400).json({ error: 'orgId, extension, event are required' });
+    }
+    const nowIso = new Date().toISOString();
+    const callId = String(req.body?.callId || `${extension}:${Date.now()}`);
+    const fromNumber = String(req.body?.from_number || req.body?.fromNumber || '+15550001111');
+    const toNumber = String(req.body?.to_number || req.body?.toNumber || '+15550002222');
+
+    await upsertAgentLiveStatusRow({
+      orgId,
+      extension,
+      status: event,
+      externalCallId: callId,
+      direction: String(req.body?.direction || 'inbound').toLowerCase().includes('out') ? 'outbound' : 'inbound',
+      fromNumber,
+      toNumber,
+      startedAt: req.body?.started_at || nowIso,
+      answeredAt: event === 'answered' || event === 'in_progress' ? (req.body?.answered_at || nowIso) : null,
+      endedAt: event === 'completed' || event === 'missed' || event === 'failed' ? (req.body?.ended_at || nowIso) : null,
+      rawEvent: { simulated: true, event, nowIso, body: req.body || {} },
+      lastEventAt: nowIso,
+    });
+
+    res.json({ ok: true, org_id: orgId, extension, event, call_id: callId });
+  } catch (err: any) {
+    console.error('admin_live_status_simulate_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_live_status_simulate_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
