@@ -1123,6 +1123,42 @@ function mapAgentLiveStatusToPresence(status: string): { on_call: boolean; label
   }
 }
 
+function inferAgentLiveStatusFromPayload(payload: any): 'ringing' | 'dialing' | 'answered' | 'in_progress' | 'available' {
+  if (!payload || typeof payload !== 'object') return 'available';
+  if (!hasFreshStatusCallSignal(payload, 20 * 60 * 1000)) return 'available';
+
+  const currentCall =
+    payload?.currentCall ||
+    payload?.current_call ||
+    payload?.call ||
+    payload?.status?.currentCall ||
+    payload?.status?.current_call ||
+    null;
+
+  const label = String(
+    extractLiveStatusLabel(currentCall) ||
+    extractLiveStatusLabel(payload) ||
+    ''
+  ).toLowerCase();
+
+  if (label.includes('ring')) return 'ringing';
+  if (label.includes('dial') || label.includes('calling')) return 'dialing';
+  if (label.includes('answer')) return 'answered';
+  if (label.includes('connect') || label.includes('talk') || label.includes('progress') || label.includes('active') || label.includes('call')) {
+    return 'in_progress';
+  }
+
+  const directionText = String(
+    currentCall?.direction ||
+    currentCall?.callDirection ||
+    payload?.direction ||
+    payload?.callDirection ||
+    ''
+  ).toLowerCase();
+  if (directionText.includes('out')) return 'dialing';
+  return 'ringing';
+}
+
 async function resolveOrgAgentUserIdByExtension(orgId: string, extension: string): Promise<string | null> {
   const normalizedExtension = normalizeExtension(extension);
   if (!normalizedExtension) return null;
@@ -1593,6 +1629,9 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
   const key = `${row?.org_id || ''}:${normalizeExtension(row?.extension) || ''}`;
   const identity = identityByKey.get(key);
   const statusNorm = normalizeAgentLiveEventStatus(row?.status || 'available');
+  const rowUpdatedAtMs = Date.parse(String(row?.updated_at || row?.last_event_at || ''));
+  const staleByAge = Number.isFinite(rowUpdatedAtMs) ? (Date.now() - rowUpdatedAtMs) > LIVE_AGENT_PRESENCE_STALE_MS : true;
+  const stale = !!row?.stale || staleByAge;
   const presence = mapAgentLiveStatusToPresence(statusNorm);
   const counterpart = row?.direction === 'outbound'
     ? (row?.to_number || null)
@@ -1619,7 +1658,7 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     last_seen_at: row?.last_event_at || row?.updated_at || null,
     refreshed_at: row?.updated_at || null,
     stale_after: null,
-    stale: !!row?.stale,
+    stale,
   };
 }
 
@@ -1853,7 +1892,7 @@ const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 1200;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v41';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v42';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2734,28 +2773,47 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
         withDeadline(fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride), 900, null as any),
       ]);
 
+      // Never force-clear an extension if both probes failed for this cycle.
+      if (!liveCall && !statusPayload) return;
+
+      const statusCurrentCall =
+        statusPayload?.currentCall ||
+        statusPayload?.current_call ||
+        statusPayload?.call ||
+        statusPayload?.status?.currentCall ||
+        statusPayload?.status?.current_call ||
+        null;
+
       const hasLive = !!(liveCall?.onCall && liveCall?.currentCall);
+      const fallbackStatusFromPayload = inferAgentLiveStatusFromPayload(statusPayload);
       const rawStatus = hasLive
         ? (liveCall?.status || liveCall?.currentCall?.status || liveCall?.currentCall?.state || 'in_progress')
-        : (statusPayload?.status || statusPayload?.state || statusPayload?.availability || 'available');
+        : (fallbackStatusFromPayload !== 'available'
+          ? fallbackStatusFromPayload
+          : (statusPayload?.status || statusPayload?.state || statusPayload?.availability || 'available'));
+      const normalizedStatus = normalizeAgentLiveEventStatus(rawStatus);
+      const isActive = !isAgentLiveTerminalStatus(normalizedStatus);
+
+      const callShape = liveCall?.currentCall || statusCurrentCall || null;
       const directionRaw =
-        liveCall?.currentCall?.direction ||
-        liveCall?.currentCall?.callDirection ||
+        callShape?.direction ||
+        callShape?.callDirection ||
         statusPayload?.direction ||
+        statusPayload?.callDirection ||
         null;
       const direction = String(directionRaw || '').toLowerCase().includes('out') ? 'outbound' : String(directionRaw || '').toLowerCase().includes('in') ? 'inbound' : null;
       await upsertAgentLiveStatusRow({
         orgId,
         extension,
-        status: hasLive ? rawStatus : 'available',
-        externalCallId: liveCall?.currentCall?.id || liveCall?.currentCall?.callId || null,
+        status: normalizedStatus,
+        externalCallId: callShape?.id || callShape?.callId || null,
         direction,
-        fromNumber: liveCall?.currentCall?.from_number || liveCall?.currentCall?.from || liveCall?.currentCall?.caller?.number || null,
-        toNumber: liveCall?.currentCall?.to_number || liveCall?.currentCall?.to || liveCall?.currentCall?.called?.number || liveCall?.currentCall?.client?.address || null,
-        startedAt: liveCall?.currentCall?.dateTimeUtc || liveCall?.currentCall?.started_at || liveCall?.currentCall?.start_time || null,
-        answeredAt: liveCall?.currentCall?.answered_at || liveCall?.currentCall?.answeredAt || null,
-        endedAt: hasLive ? null : new Date().toISOString(),
-        rawEvent: hasLive ? liveCall?.currentCall : statusPayload,
+        fromNumber: callShape?.from_number || callShape?.from || callShape?.caller?.number || null,
+        toNumber: callShape?.to_number || callShape?.to || callShape?.called?.number || callShape?.client?.address || null,
+        startedAt: callShape?.dateTimeUtc || callShape?.started_at || callShape?.start_time || statusPayload?.started_at || statusPayload?.startedAt || null,
+        answeredAt: callShape?.answered_at || callShape?.answeredAt || statusPayload?.answered_at || statusPayload?.answeredAt || null,
+        endedAt: isActive ? null : new Date().toISOString(),
+        rawEvent: hasLive ? (liveCall?.currentCall || liveCall) : statusPayload,
         lastEventAt: new Date().toISOString(),
       });
     } catch (err) {
@@ -6283,15 +6341,9 @@ app.get('/api/agents/live-status', async (req, res) => {
           .sort()
           .slice(-1)[0] || null;
       } else {
-        const result = await ensureLiveAgentPresenceFresh(orgIds);
-        const rows = result.rows;
-        liveStatusVersion = result.liveStatusVersion;
-        items = rows.map(mapLivePresenceRow);
-        refreshedAt = items
-          .map((item: any) => item.refreshed_at || null)
-          .filter(Boolean)
-          .sort()
-          .slice(-1)[0] || null;
+        items = [];
+        refreshedAt = new Date().toISOString();
+        liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-live-table-empty`;
       }
     } catch (err: any) {
       if (!isLiveAgentPresenceMissingError(err)) throw err;
@@ -6376,15 +6428,9 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
           .sort()
           .slice(-1)[0] || null;
       } else {
-        const result = await ensureLiveAgentPresenceFresh([orgId]);
-        const rows = result.rows;
-        liveStatusVersion = result.liveStatusVersion;
-        items = rows.map(mapLivePresenceRow);
-        refreshedAt = items
-          .map((item: any) => item.refreshed_at || null)
-          .filter(Boolean)
-          .sort()
-          .slice(-1)[0] || null;
+        items = [];
+        refreshedAt = new Date().toISOString();
+        liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-live-table-empty`;
       }
     } catch (err: any) {
       if (!isLiveAgentPresenceMissingError(err)) throw err;
@@ -6460,6 +6506,68 @@ app.post('/api/admin/live-status/simulate', async (req, res) => {
   } catch (err: any) {
     console.error('admin_live_status_simulate_failed:', fmtErr(err));
     res.status(500).json({ error: 'admin_live_status_simulate_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+app.get('/api/admin/live-status/debug', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const orgId = String(req.query.orgId || '').trim();
+    const extension = normalizeExtension(req.query.extension);
+    if (!orgId || !extension) {
+      return res.status(400).json({ error: 'orgId and extension are required' });
+    }
+
+    const { data: liveRow, error: liveRowError } = await supabaseAdmin
+      .from('agent_live_status')
+      .select('*')
+      .eq('org_id', orgId)
+      .eq('extension', extension)
+      .maybeSingle();
+    if (liveRowError) throw liveRowError;
+
+    let overrideCreds: any = undefined;
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      if (integ?.credentials) {
+        overrideCreds = {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+        };
+      }
+    } catch {}
+
+    const token = await withDeadline(getMightyCallAccessToken(overrideCreds), 1500, null as any);
+    const apiKeyOverride = overrideCreds?.clientId || undefined;
+
+    const [liveCall, profileStatus] = token
+      ? await Promise.all([
+          withDeadline(fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride), 1500, null as any),
+          withDeadline(fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride), 1500, null as any),
+        ])
+      : [null, null];
+
+    res.json({
+      ok: true,
+      org_id: orgId,
+      extension,
+      token_ok: !!token,
+      db_row: liveRow || null,
+      probe: {
+        live_call: liveCall || null,
+        profile_status: profileStatus || null,
+        inferred_from_profile: inferAgentLiveStatusFromPayload(profileStatus),
+      },
+      now: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('admin_live_status_debug_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_live_status_debug_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
