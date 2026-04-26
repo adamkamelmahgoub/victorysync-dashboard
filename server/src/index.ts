@@ -1694,7 +1694,7 @@ const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 1200;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v38';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v39';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2624,10 +2624,19 @@ async function overlayPresenceRowsWithFastDirectProbe(rows: any[]) {
     Promise.all(candidates.map(async (row: any) => {
       const ext = normalizeExtension(row?.extension);
       if (!ext) return;
-      const probe = await withDeadline(fetchMightyCallLiveCallByExtension(ext, token), 900, null as any);
+      const probeResult = await withDeadline(
+        fetchMightyCallLiveCallByExtension(ext, token)
+          .then((live) => ({ ok: true, live }))
+          .catch(() => ({ ok: false, live: null as any })),
+        900,
+        { ok: false, live: null as any }
+      );
+      if (!probeResult.ok) return;
+
+      const probe = probeResult.live;
       if (!probe?.onCall || !probe?.currentCall) {
-        // Keep cached value unless it is stale or already not-on-call.
-        if (row?.on_call && new Date(String(row?.stale_after || 0)).getTime() < Date.now()) {
+        // A successful negative probe should clear immediately after hangup.
+        if (row?.on_call) {
           byKey.set(`${row.org_id}:${row.user_id}`, {
             ...row,
             on_call: false,
