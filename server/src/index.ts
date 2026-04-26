@@ -1693,8 +1693,8 @@ const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
-const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 4500;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v30';
+const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 5000;
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v31';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -1982,7 +1982,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
   };
   const fetchMightyCallSnapshot = async (creds?: any) => {
     try {
-      const token = await withDeadline(getMightyCallAccessToken(creds), 350, null as any);
+      const token = await withDeadline(getMightyCallAccessToken(creds), 1200, null as any);
       if (!token) return mightyCallFallback;
 
       const apiKeyOverride = creds?.clientId || undefined;
@@ -1990,14 +1990,14 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       const liveWindowEnd = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
       const commsWindowStart = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
       const commsWindowEnd = new Date(Date.now() + (1 * 60 * 1000)).toISOString();
-      const extensionsPromise = withDeadline(fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []), 450, [] as any[]);
+      const extensionsPromise = withDeadline(fetchMightyCallExtensions(token, apiKeyOverride).catch(() => []), 1200, [] as any[]);
       const journalPromise = withDeadline(fetchMightyCallJournalRequests(token, {
         from: liveWindowStart,
         to: liveWindowEnd,
         type: 'Call',
         pageSize: '50',
         page: '1',
-      }, apiKeyOverride).catch(() => []), 650, [] as any[]);
+      }, apiKeyOverride).catch(() => []), 1600, [] as any[]);
       const communicationsPromise = withDeadline(fetchMightyCallContactCenterCommunications(token, {
         from: commsWindowStart,
         to: commsWindowEnd,
@@ -2006,7 +2006,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
         page: '1',
         showUsers: 'true',
         resolveContacts: 'false',
-      }, apiKeyOverride).catch(() => []), 800, [] as any[]);
+      }, apiKeyOverride).catch(() => []), 2200, [] as any[]);
       const profileRowsPromise = withDeadline(Promise.all(
         uniqueExtensions.map(async (extension) => {
           try {
@@ -2016,7 +2016,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
             return null;
           }
         })
-      ), 900, [] as any[]);
+      ), 2200, [] as any[]);
       const statusRowsPromise = withDeadline(Promise.all(
         uniqueExtensions.map(async (extension) => {
           try {
@@ -2026,7 +2026,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
             return null;
           }
         })
-      ), 900, [] as any[]);
+      ), 2200, [] as any[]);
       const liveCallRowsPromise = withDeadline(Promise.all(
         uniqueExtensions.map(async (extension) => {
           try {
@@ -2047,7 +2047,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
             return null;
           }
         })
-      ), 1200, [] as any[]);
+      ), 2800, [] as any[]);
 
       const [liveExtensions, liveJournal, liveCommunications, profileRows, statusRows, liveCallRows] = await Promise.all([
         extensionsPromise,
@@ -2284,23 +2284,28 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	      authoritativeOnCallValue === false ||
 	      (!!authoritativeStatusLabel && isLikelyTerminalOrIdleCallStatus(authoritativeStatusLabel))
 	    );
-		    const fallbackSaysOnCall = !!(
-		      matchedLiveCall ||
-		      inferredLiveCall ||
-      matchedStoredCall ||
-      inferredStoredCall ||
+    const realtimeFallbackSaysOnCall = !!(
+      matchedLiveCall ||
+      inferredLiveCall ||
       matchedContactCenterCall ||
       inferredContactCenterCall ||
       matchedJournalCall ||
       inferredJournalCall
     );
-    const onCall = authoritativeStatusSaysIdle
-          ? false
-          : fallbackSaysOnCall
-            ? true
-            : authoritativeStatusSaysOnCall
+    const storedFallbackSaysOnCall = !!(
+      matchedStoredCall ||
+      inferredStoredCall
+    );
+    const fallbackSaysOnCall = realtimeFallbackSaysOnCall || storedFallbackSaysOnCall;
+    const onCall = realtimeFallbackSaysOnCall
+          ? true
+          : authoritativeStatusSaysIdle
+            ? false
+            : storedFallbackSaysOnCall
               ? true
-              : false;
+              : authoritativeStatusSaysOnCall
+                ? true
+                : false;
 	    const counterpart = matchedLiveCall
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : inferredLiveCall
