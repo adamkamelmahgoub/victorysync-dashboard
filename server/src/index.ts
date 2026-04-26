@@ -1694,7 +1694,7 @@ const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 1200;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v39';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v40';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2611,19 +2611,39 @@ async function overlayPresenceRowsWithFastDirectProbe(rows: any[]) {
   // Keep request-time probe cheap to avoid browser timeout.
   if (candidates.length > 3) return rows;
 
-  const token = await withDeadline(getMightyCallAccessToken(undefined), 500, null as any);
-  if (!token) return rows;
-
   const nowIso = new Date().toISOString();
   const byKey = new Map<string, any>();
   for (const row of rows || []) {
     byKey.set(`${row.org_id}:${row.user_id}`, row);
   }
 
+  const tokenByOrgId = new Map<string, string | null>();
+  const uniqueOrgIds = Array.from(new Set(candidates.map((row: any) => String(row?.org_id || '')).filter(Boolean)));
+  for (const orgId of uniqueOrgIds) {
+    let overrideCreds: any = undefined;
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      if (integ?.credentials) {
+        overrideCreds = {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+        };
+      }
+    } catch {}
+
+    const orgToken = await withDeadline(getMightyCallAccessToken(overrideCreds), 500, null as any);
+    const fallbackToken = orgToken ? null : await withDeadline(getMightyCallAccessToken(undefined), 500, null as any);
+    tokenByOrgId.set(orgId, orgToken || fallbackToken || null);
+  }
+
   await withDeadline(
     Promise.all(candidates.map(async (row: any) => {
       const ext = normalizeExtension(row?.extension);
       if (!ext) return;
+      const orgId = String(row?.org_id || '');
+      const token = tokenByOrgId.get(orgId) || null;
+      if (!token) return;
       const probeResult = await withDeadline(
         fetchMightyCallLiveCallByExtension(ext, token)
           .then((live) => ({ ok: true, live }))
