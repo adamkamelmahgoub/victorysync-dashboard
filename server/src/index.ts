@@ -1228,6 +1228,8 @@ async function upsertAgentLiveStatusRow(params: {
 }) {
   const normalizedExtension = normalizeExtension(params.extension);
   if (!params.orgId || !normalizedExtension) return;
+  const available = await checkAgentLiveStatusTableAvailability();
+  if (!available) return;
   const normalizedStatus = normalizeAgentLiveEventStatus(params.normalizedStatus || params.status);
   const eventAt = webhookIso(params.lastEventAt || params.endedAt || params.answeredAt || params.startedAt || new Date().toISOString()) || new Date().toISOString();
   const userId = await resolveOrgAgentUserIdByExtension(params.orgId, normalizedExtension);
@@ -1253,6 +1255,7 @@ async function upsertAgentLiveStatusRow(params: {
     : (params.statusStartedAt || params.startedAt || (isActiveCallLike ? eventAt : null));
   const row = {
     org_id: params.orgId,
+    mightycall_extension: normalizedExtension,
     extension: normalizedExtension,
     user_id: userId,
     mightycall_user_id: params.mightycallUserId || null,
@@ -1280,9 +1283,14 @@ async function upsertAgentLiveStatusRow(params: {
     updated_at: new Date().toISOString(),
   };
 
+  console.log(`[live-status] Upserting live status for extension ${normalizedExtension}`, {
+    orgId: params.orgId,
+    normalizedStatus,
+    source: params.source || 'mightycall_user_status_by_extension',
+  });
   let { error } = await supabaseAdmin
     .from('agent_live_status')
-    .upsert(row, { onConflict: 'org_id,extension' });
+    .upsert(row, { onConflict: 'org_id,mightycall_extension' });
   if (error && String(error?.message || '').toLowerCase().includes('column')) {
     const legacyRow = {
       org_id: params.orgId,
@@ -1305,6 +1313,12 @@ async function upsertAgentLiveStatusRow(params: {
       .from('agent_live_status')
       .upsert(legacyRow, { onConflict: 'org_id,extension' }));
   }
+  console.log('[live-status] Supabase agent_live_status upsert result', {
+    orgId: params.orgId,
+    extension: normalizedExtension,
+    ok: !error,
+    error: error ? fmtErr(error) : null,
+  });
   if (error) throw error;
 }
 
@@ -1665,6 +1679,55 @@ function isLiveAgentPresenceMissingError(err: any): boolean {
     || message.includes('relation') && message.includes('does not exist');
 }
 
+function isAgentLiveStatusMissingError(err: any): boolean {
+  const code = String(err?.code || '').trim();
+  const message = String(err?.message || err?.details || '').toLowerCase();
+  return code === '42P01'
+    || code === 'PGRST205'
+    || message.includes('agent_live_status')
+    || (message.includes('relation') && message.includes('does not exist'));
+}
+
+let agentLiveStatusTableAvailableCache: boolean | null = null;
+let agentLiveStatusTableCacheAtMs = 0;
+const AGENT_LIVE_STATUS_TABLE_CACHE_MS = 30_000;
+
+async function checkAgentLiveStatusTableAvailability(force = false): Promise<boolean> {
+  const nowMs = Date.now();
+  if (!force && agentLiveStatusTableAvailableCache != null && (nowMs - agentLiveStatusTableCacheAtMs) < AGENT_LIVE_STATUS_TABLE_CACHE_MS) {
+    return agentLiveStatusTableAvailableCache;
+  }
+
+  console.log('[live-status] Checking agent_live_status table availability');
+  try {
+    const { error } = await supabaseAdmin
+      .from('agent_live_status')
+      .select('*')
+      .limit(1);
+    if (error) {
+      if (isAgentLiveStatusMissingError(error)) {
+        agentLiveStatusTableAvailableCache = false;
+        agentLiveStatusTableCacheAtMs = nowMs;
+        return false;
+      }
+      throw error;
+    }
+    agentLiveStatusTableAvailableCache = true;
+    agentLiveStatusTableCacheAtMs = nowMs;
+    return true;
+  } catch (err: any) {
+    if (isAgentLiveStatusMissingError(err)) {
+      agentLiveStatusTableAvailableCache = false;
+      agentLiveStatusTableCacheAtMs = nowMs;
+      return false;
+    }
+    console.warn('[live-status] table availability check failed:', fmtErr(err));
+    agentLiveStatusTableAvailableCache = false;
+    agentLiveStatusTableCacheAtMs = nowMs;
+    return false;
+  }
+}
+
 function mapLivePresenceRow(row: any) {
   const staleAfter = row?.stale_after || null;
   const stale = !staleAfter || Number.isNaN(Date.parse(String(staleAfter))) ? true : Date.now() > Date.parse(String(staleAfter));
@@ -1690,12 +1753,20 @@ function mapLivePresenceRow(row: any) {
 
 async function getAgentLiveStatusRowsForOrgIds(orgIds: string[]) {
   if (orgIds.length === 0) return [] as any[];
+  const available = await checkAgentLiveStatusTableAvailability();
+  if (!available) return [] as any[];
   const { data, error } = await supabaseAdmin
     .from('agent_live_status')
     .select('*')
     .in('org_id', orgIds)
     .order('updated_at', { ascending: false });
-  if (error) throw error;
+  if (error) {
+    if (isAgentLiveStatusMissingError(error)) {
+      await checkAgentLiveStatusTableAvailability(true);
+      return [] as any[];
+    }
+    throw error;
+  }
   return data || [];
 }
 
@@ -6586,6 +6657,12 @@ app.get('/api/live-status', async (req, res) => {
       org_ids: orgIds,
       item_count: items.length,
     });
+    console.log('[live-status] Returning live status payload to frontend', {
+      org_ids: orgIds,
+      item_count: items.length,
+      on_call: items.filter((item: any) => !!item.on_call).length,
+      available: items.filter((item: any) => !item.on_call).length,
+    });
     res.json({
       items,
       refreshed_at: refreshedAt,
@@ -6660,6 +6737,12 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
       org_id: orgId,
       item_count: items.length,
     });
+    console.log('[live-status] Returning live status payload to frontend', {
+      org_id: orgId,
+      item_count: items.length,
+      on_call: items.filter((item: any) => !!item.on_call).length,
+      available: items.filter((item: any) => !item.on_call).length,
+    });
     res.json({
       items,
       refreshed_at: refreshedAt,
@@ -6684,12 +6767,19 @@ app.post('/api/admin/live-status/refresh', async (req, res) => {
     const startedAt = Date.now();
     const errors: Array<{ org_id: string; error: string }> = [];
     let agentsProcessed = 0;
+    const tableAvailable = await checkAgentLiveStatusTableAvailability();
+    if (!tableAvailable) {
+      return res.status(503).json({
+        error: 'agent_live_status_table_missing',
+        detail: 'agent_live_status table is not available in this Supabase project. Apply migration and reload schema cache.',
+      });
+    }
     for (const targetOrgId of orgIds) {
       try {
         await refreshAgentLiveStatusForOrg(targetOrgId);
         const { count } = await supabaseAdmin
           .from('agent_live_status')
-          .select('extension', { count: 'exact', head: true })
+          .select('mightycall_extension', { count: 'exact', head: true })
           .eq('org_id', targetOrgId);
         agentsProcessed += Number(count || 0);
       } catch (err: any) {
@@ -6773,6 +6863,13 @@ app.post('/api/live-status/sync', async (req, res) => {
 
     const startedAt = Date.now();
     const errors: Array<{ org_id: string; error: string }> = [];
+    const tableAvailable = await checkAgentLiveStatusTableAvailability();
+    if (!tableAvailable) {
+      return res.status(503).json({
+        error: 'agent_live_status_table_missing',
+        detail: 'agent_live_status table is not available in this Supabase project. Apply migration and reload schema cache.',
+      });
+    }
     for (const orgId of orgIds) {
       try {
         await refreshAgentLiveStatusForOrg(orgId);
@@ -6805,6 +6902,13 @@ app.get('/api/admin/live-status/debug', async (req, res) => {
     const extension = normalizeExtension(req.query.extension);
     if (!orgId || !extension) {
       return res.status(400).json({ error: 'orgId and extension are required' });
+    }
+    const tableAvailable = await checkAgentLiveStatusTableAvailability();
+    if (!tableAvailable) {
+      return res.status(503).json({
+        error: 'agent_live_status_table_missing',
+        detail: 'agent_live_status table is not available in this Supabase project. Apply migration and reload schema cache.',
+      });
     }
 
     const { data: liveRow, error: liveRowError } = await supabaseAdmin
