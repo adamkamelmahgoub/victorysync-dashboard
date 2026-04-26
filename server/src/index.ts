@@ -1689,12 +1689,12 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 45 * 1000;
 const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
-const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 90 * 1000;
+const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 4500;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v29';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v30';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -1870,10 +1870,20 @@ function isLikelyLiveContactCenterCommunication(request: any): boolean {
     request?.dateTimeUtc ||
     request?.date_time_utc ||
     null;
+  const signalAt =
+    request?.updatedAt ||
+    request?.updated_at ||
+    request?.modifiedAt ||
+    request?.modified_at ||
+    request?.respondedAt ||
+    request?.responded_at ||
+    startedAt;
 
   // Contact Center communications are historical records. A "connected" state
   // means the call connected at some point, not necessarily that it is live now.
-  return isFreshActivity(startedAt, CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS);
+  // Use the freshest available activity signal (updated/responded/started) to
+  // avoid dropping legitimate long-running calls while still expiring stale rows.
+  return isFreshActivity(signalAt, CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS);
 }
 
 async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
@@ -2284,12 +2294,12 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       matchedJournalCall ||
       inferredJournalCall
     );
-		    const onCall = fallbackSaysOnCall
-          ? true
-          : authoritativeStatusSaysOnCall
+    const onCall = authoritativeStatusSaysIdle
+          ? false
+          : fallbackSaysOnCall
             ? true
-            : authoritativeStatusSaysIdle
-              ? false
+            : authoritativeStatusSaysOnCall
+              ? true
               : false;
 	    const counterpart = matchedLiveCall
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
