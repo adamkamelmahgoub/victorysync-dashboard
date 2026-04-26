@@ -1694,7 +1694,7 @@ const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 5000;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v34';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v35';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2172,7 +2172,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     return isFreshActivity(startedAt, LIVE_CALL_LOOKBACK_MS);
   });
   let directFallbackActiveCalls: any[] = [];
-  if (activeCalls.length === 0 && uniqueExtensions.length > 0) {
+  if (uniqueExtensions.length > 0) {
     try {
       const globalToken = await withDeadline(getMightyCallAccessToken(undefined), 1200, null as any);
       if (globalToken) {
@@ -2210,7 +2210,17 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       }
     } catch {}
   }
-  const effectiveActiveCalls = activeCalls.length > 0 ? activeCalls : directFallbackActiveCalls;
+  const activeCallByKey = new Map<string, any>();
+  for (const call of [...activeCalls, ...directFallbackActiveCalls]) {
+    const key = String(
+      call?.id ||
+      call?.callId ||
+      call?.requestGuid ||
+      `${normalizeExtension(call?.agent_extension || call?.extension || null) || ''}:${call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || ''}`
+    );
+    if (!activeCallByKey.has(key)) activeCallByKey.set(key, call);
+  }
+  const effectiveActiveCalls = Array.from(activeCallByKey.values());
   const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
   const activeContactCenterCalls = (liveCommunications || []).filter((call: any) => isLikelyLiveContactCenterCommunication(call));
   const activeStoredCalls = (recentCallRows || []).filter((call: any) => {
@@ -2331,20 +2341,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       matchedLiveCall ||
       inferredLiveCall
     );
-    const storedFallbackSaysOnCall = !!(
-      matchedStoredCall ||
-      inferredStoredCall
-    );
-    const fallbackSaysOnCall = realtimeFallbackSaysOnCall || storedFallbackSaysOnCall;
-    const onCall = realtimeFallbackSaysOnCall
-          ? true
-          : authoritativeStatusSaysIdle
-            ? false
-            : storedFallbackSaysOnCall
-              ? true
-              : authoritativeStatusSaysOnCall
-                ? true
-                : false;
+    // Strong truth source: extension-scoped live call endpoint only.
+    // Stored/journal/contact-center data can lag and should not hold agents on-call.
+    const onCall = realtimeFallbackSaysOnCall;
 	    const counterpart = matchedLiveCall
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : inferredLiveCall
@@ -2373,28 +2372,16 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       : authoritativeStatusSaysOnCall
           ? normalizedStatus?.started_at || effectiveStatusPayload?.currentCall?.startedAt || effectiveStatusPayload?.currentCall?.started_at || effectiveStatusPayload?.current_call?.startedAt || effectiveStatusPayload?.current_call?.started_at || statusPayload?.currentCall?.startedAt || statusPayload?.currentCall?.started_at || statusPayload?.current_call?.startedAt || statusPayload?.current_call?.started_at || extPayload?.currentCall?.startedAt || extPayload?.currentCall?.started_at || extPayload?.current_call?.startedAt || extPayload?.current_call?.started_at || null
           : null;
-		    const source = fallbackSaysOnCall
+    const source = onCall
           ? matchedLiveCall
             ? 'mightycall_calls'
             : inferredLiveCall
               ? 'mightycall_calls_inferred'
-              : matchedStoredCall
-                ? 'stored_calls'
-                : inferredStoredCall
-                  ? 'stored_calls_inferred'
-                  : matchedContactCenterCall
-                    ? 'mightycall_contact_center'
-                    : inferredContactCenterCall
-                      ? 'mightycall_contact_center_inferred'
-                      : matchedJournalCall
-                    ? 'mightycall_journal'
-                    : inferredJournalCall
-                      ? 'mightycall_journal_inferred'
-                      : 'matched_call_fallback'
+              : 'mightycall_calls'
           : authoritativeStatusSaysOnCall || authoritativeStatusSaysIdle
-		      ? 'mightycall_status'
-		      : matchedLiveCall
-		      ? 'mightycall_calls'
+			      ? 'mightycall_status'
+			      : matchedLiveCall
+			      ? 'mightycall_calls'
       : inferredLiveCall
         ? 'mightycall_calls_inferred'
         : matchedStoredCall
