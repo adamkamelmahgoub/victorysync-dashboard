@@ -1688,13 +1688,13 @@ function isFreshActivity(startedAt: any, maxAgeMs: number): boolean {
 
 const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 45 * 1000;
-const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 30 * 1000;
-const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 20 * 1000;
+const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 15 * 1000;
+const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 15 * 1000;
 const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 5000;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v32';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v33';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -1870,14 +1870,6 @@ function isLikelyLiveContactCenterCommunication(request: any): boolean {
     request?.dateTimeUtc ||
     request?.date_time_utc ||
     null;
-  const signalAt =
-    request?.updatedAt ||
-    request?.updated_at ||
-    request?.modifiedAt ||
-    request?.modified_at ||
-    request?.respondedAt ||
-    request?.responded_at ||
-    startedAt;
   const durationSecondsRaw =
     request?.duration ??
     request?.durationSeconds ??
@@ -1892,11 +1884,9 @@ function isLikelyLiveContactCenterCommunication(request: any): boolean {
     if (endedByDurationMs < (Date.now() - 3000)) return false;
   }
 
-  // Contact Center communications are historical records. A "connected" state
-  // means the call connected at some point, not necessarily that it is live now.
-  // Use the freshest available activity signal (updated/responded/started) to
-  // avoid dropping legitimate long-running calls while still expiring stale rows.
-  return isFreshActivity(signalAt, CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS);
+  // Contact Center communications are historical records and can remain "connected"
+  // after hangup. Only trust them as short-lived bootstrap evidence.
+  return isFreshActivity(startedAt, CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS);
 }
 
 async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
@@ -2299,11 +2289,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
 	    );
     const realtimeFallbackSaysOnCall = !!(
       matchedLiveCall ||
-      inferredLiveCall ||
-      matchedContactCenterCall ||
-      inferredContactCenterCall ||
-      matchedJournalCall ||
-      inferredJournalCall
+      inferredLiveCall
     );
     const storedFallbackSaysOnCall = !!(
       matchedStoredCall ||
