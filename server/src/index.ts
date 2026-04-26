@@ -1694,7 +1694,7 @@ const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 4500;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v28';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v29';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
