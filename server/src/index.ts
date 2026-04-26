@@ -1694,7 +1694,7 @@ const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 1200;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v37';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v38';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2570,6 +2570,7 @@ async function ensureLiveAgentPresenceFresh(orgIds: string[]) {
   let rows = await getLivePresenceRowsForOrgIds(orgIds);
   const orgIdsNeedingRefresh = getOrgIdsNeedingPresenceRefresh(orgIds, rows);
   if (orgIdsNeedingRefresh.length === 0) {
+    rows = await overlayPresenceRowsWithFastDirectProbe(rows);
     return {
       rows,
       refreshed: false,
@@ -2593,6 +2594,7 @@ async function ensureLiveAgentPresenceFresh(orgIds: string[]) {
     );
     rows = await getLivePresenceRowsForOrgIds(orgIds);
   }
+  rows = await overlayPresenceRowsWithFastDirectProbe(rows);
 
   return {
     rows,
@@ -2601,6 +2603,64 @@ async function ensureLiveAgentPresenceFresh(orgIds: string[]) {
       ? `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-request`
       : LIVE_AGENT_PRESENCE_SYNC_VERSION,
   };
+}
+
+async function overlayPresenceRowsWithFastDirectProbe(rows: any[]) {
+  const candidates = (rows || []).filter((row: any) => !!normalizeExtension(row?.extension));
+  if (candidates.length === 0) return rows;
+  // Keep request-time probe cheap to avoid browser timeout.
+  if (candidates.length > 3) return rows;
+
+  const token = await withDeadline(getMightyCallAccessToken(undefined), 500, null as any);
+  if (!token) return rows;
+
+  const nowIso = new Date().toISOString();
+  const byKey = new Map<string, any>();
+  for (const row of rows || []) {
+    byKey.set(`${row.org_id}:${row.user_id}`, row);
+  }
+
+  await withDeadline(
+    Promise.all(candidates.map(async (row: any) => {
+      const ext = normalizeExtension(row?.extension);
+      if (!ext) return;
+      const probe = await withDeadline(fetchMightyCallLiveCallByExtension(ext, token), 900, null as any);
+      if (!probe?.onCall || !probe?.currentCall) {
+        // Keep cached value unless it is stale or already not-on-call.
+        if (row?.on_call && new Date(String(row?.stale_after || 0)).getTime() < Date.now()) {
+          byKey.set(`${row.org_id}:${row.user_id}`, {
+            ...row,
+            on_call: false,
+            status: 'Available',
+            counterpart: null,
+            started_at: null,
+            source: 'mightycall_calls_direct_probe_clear',
+            raw_status: 'available',
+            refreshed_at: nowIso,
+            last_seen_at: nowIso,
+          });
+        }
+        return;
+      }
+
+      const liveCall = probe.currentCall;
+      byKey.set(`${row.org_id}:${row.user_id}`, {
+        ...row,
+        on_call: true,
+        status: String(probe.status || liveCall?.status || liveCall?.state || 'Connected'),
+        counterpart: extractCounterpartyLabel(liveCall, new Set<string>(), ext) || row?.counterpart || null,
+        started_at: liveCall?.dateTimeUtc || liveCall?.started_at || liveCall?.start_time || liveCall?.created || row?.started_at || null,
+        source: 'mightycall_calls_direct_probe',
+        raw_status: String(probe.status || liveCall?.status || liveCall?.state || 'Connected'),
+        refreshed_at: nowIso,
+        last_seen_at: nowIso,
+      });
+    })),
+    1600,
+    [] as any[]
+  );
+
+  return (rows || []).map((row: any) => byKey.get(`${row.org_id}:${row.user_id}`) || row);
 }
 
 function reportVisibleToAssignedPhones(
