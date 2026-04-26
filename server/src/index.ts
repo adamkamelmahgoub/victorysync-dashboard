@@ -2154,7 +2154,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
     if (String(endedAt || '').trim()) return false;
     if (isLikelyTerminalOrIdleCallStatus(status)) return false;
-    return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
+    if (!isLikelyActiveCallStatus(status)) return false;
+    if (!startedAt) return true;
+    return isFreshActivity(startedAt, LIVE_CALL_LOOKBACK_MS);
   });
   const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
   const activeContactCenterCalls = (liveCommunications || []).filter((call: any) => isLikelyLiveContactCenterCommunication(call));
@@ -2207,7 +2209,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           if (String(call?.endedAt || call?.ended_at || '').trim()) return false;
           if (isLikelyTerminalOrIdleCallStatus(status)) return false;
           const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
-          return isLikelyActiveCallStatus(status) && isFreshActivity(startedAt, 2 * 60 * 60 * 1000);
+          if (!isLikelyActiveCallStatus(status)) return false;
+          if (!startedAt) return true;
+          return isFreshActivity(startedAt, LIVE_CALL_LOOKBACK_MS);
         }) || null
       : null;
     const inferredLiveCall = !matchedLiveCall && shouldUseSingleAgentFallback && activeCalls.length === 1

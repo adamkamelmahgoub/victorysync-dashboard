@@ -829,7 +829,16 @@ function callHasConnectedParticipantForExtension(call: any, normalizedExtension:
 
 function isMightyCallLiveCallForExtension(call: any, normalizedExtension: string, nowMs = Date.now()): boolean {
   if (!call || typeof call !== 'object') return false;
-  if (!collectExtensionCandidatesFromPayload(call).includes(normalizedExtension)) return false;
+  const extensionCandidates = collectExtensionCandidatesFromPayload(call);
+  const queryScopedExtension = normalizeExtensionValue(
+    call?.queryExtension ||
+    call?.query_extension ||
+    call?.extension ||
+    call?.agent_extension ||
+    null
+  );
+  const hasExtensionEvidence = extensionCandidates.includes(normalizedExtension) || queryScopedExtension === normalizedExtension;
+  if (!hasExtensionEvidence && extensionCandidates.length > 0) return false;
 
   const statuses = extractMightyCallStatusCandidates(call);
   if (statuses.some((status) => isMightyCallTerminalStatus(status))) return false;
@@ -838,7 +847,7 @@ function isMightyCallLiveCallForExtension(call: any, normalizedExtension: string
   const startedAt = extractMightyCallStartedAt(call);
   const startedMs = parseMightyCallTimestampMs(startedAt);
   const ageMs = startedMs == null ? null : nowMs - startedMs;
-  if (ageMs != null && (ageMs < -(5 * 60 * 1000) || ageMs > (6 * 60 * 60 * 1000))) return false;
+  if (ageMs != null && (ageMs < -(5 * 60 * 1000) || ageMs > (48 * 60 * 60 * 1000))) return false;
 
   const durationSeconds = extractMightyCallDurationSeconds(call);
   if (durationSeconds != null && startedMs != null) {
@@ -850,9 +859,6 @@ function isMightyCallLiveCallForExtension(call: any, normalizedExtension: string
 
   const hasActiveStatus = statuses.some((status) => isMightyCallActiveStatus(status));
   if (!hasActiveStatus) return false;
-  if (durationSeconds != null && durationSeconds > 0 && ageMs != null && ageMs > (15 * 60 * 1000)) {
-    return false;
-  }
 
   return true;
 }
@@ -886,10 +892,17 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
 
   const seen = new Set<string>();
   const candidates = (Array.isArray(rows) ? rows : []).filter((call) => {
+    const scopedCall = {
+      ...(call || {}),
+      queryExtension: normalized,
+      query_extension: normalized,
+      extension: normalizeExtensionValue((call as any)?.extension || normalized),
+      agent_extension: normalizeExtensionValue((call as any)?.agent_extension || normalized),
+    };
     const key = String(call?.id || call?.callId || call?.requestGuid || `${extractMightyCallStartedAt(call) || ''}:${JSON.stringify(call?.called || '')}`);
     if (seen.has(key)) return false;
     seen.add(key);
-    return isMightyCallLiveCallForExtension(call, normalized, now);
+    return isMightyCallLiveCallForExtension(scopedCall, normalized, now);
   });
 
   candidates.sort((a, b) => {
