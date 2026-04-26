@@ -1694,7 +1694,7 @@ const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 5000;
-const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v33';
+const LIVE_AGENT_PRESENCE_SYNC_VERSION = 'db-presence-cache-v34';
 const LIVE_STATUS_MIGHTYCALL_DEADLINE_MS = 3000;
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -2171,6 +2171,46 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     if (!startedAt) return true;
     return isFreshActivity(startedAt, LIVE_CALL_LOOKBACK_MS);
   });
+  let directFallbackActiveCalls: any[] = [];
+  if (activeCalls.length === 0 && uniqueExtensions.length > 0) {
+    try {
+      const globalToken = await withDeadline(getMightyCallAccessToken(undefined), 1200, null as any);
+      if (globalToken) {
+        const directRows = await withDeadline(
+          Promise.all(
+            uniqueExtensions.map(async (extension) => {
+              try {
+                const row = await fetchMightyCallLiveCallByExtension(extension, globalToken);
+                return row?.currentCall
+                  ? {
+                      ...row.currentCall,
+                      extension,
+                      agent_extension: extension,
+                      onCall: true,
+                      status: row.status || row.currentCall?.status || 'Connected',
+                      sourceEndpoint: row.sourceEndpoint || 'direct_extension_probe',
+                    }
+                  : null;
+              } catch {
+                return null;
+              }
+            })
+          ),
+          2200,
+          [] as any[]
+        );
+        directFallbackActiveCalls = (directRows || []).filter(Boolean).filter((call: any) => {
+          const status = String(call?.status || call?.state || call?.callStatus || '').trim();
+          if (String(call?.endedAt || call?.ended_at || call?.endTime || '').trim()) return false;
+          if (!isLikelyActiveCallStatus(status) || isLikelyTerminalOrIdleCallStatus(status)) return false;
+          const startedAt = call?.dateTimeUtc || call?.started_at || call?.start_time || call?.created || null;
+          if (!startedAt) return true;
+          return isFreshActivity(startedAt, LIVE_CALL_LOOKBACK_MS);
+        });
+      }
+    } catch {}
+  }
+  const effectiveActiveCalls = activeCalls.length > 0 ? activeCalls : directFallbackActiveCalls;
   const activeJournalCalls = (liveJournal || []).filter((call: any) => isLikelyLiveJournalRequest(call));
   const activeContactCenterCalls = (liveCommunications || []).filter((call: any) => isLikelyLiveContactCenterCommunication(call));
   const activeStoredCalls = (recentCallRows || []).filter((call: any) => {
@@ -2215,7 +2255,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
     const email = emailByUserId.get(userId) || extractAgentEmailFromMeta(extMeta) || null;
     const agentIdentities = buildAgentIdentityCandidates(member, extMeta, email);
     const matchedLiveCall = normalizedExt
-      ? activeCalls.find((call: any) => {
+      ? effectiveActiveCalls.find((call: any) => {
           const agentMatches = payloadMatchesAgent(call, normalizedExt, agentIdentities);
           const status = String(call?.status || call?.state || call?.callStatus || '').trim();
           if (!agentMatches) return false;
@@ -2227,8 +2267,8 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
           return isFreshActivity(startedAt, LIVE_CALL_LOOKBACK_MS);
         }) || null
       : null;
-    const inferredLiveCall = !matchedLiveCall && shouldUseSingleAgentFallback && activeCalls.length === 1
-      ? activeCalls[0]
+    const inferredLiveCall = !matchedLiveCall && shouldUseSingleAgentFallback && effectiveActiveCalls.length === 1
+      ? effectiveActiveCalls[0]
       : null;
     const matchedStoredCall = !matchedLiveCall && !inferredLiveCall && normalizedExt
       ? activeStoredCalls.find((call: any) => {
