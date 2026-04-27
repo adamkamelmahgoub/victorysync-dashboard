@@ -3013,10 +3013,27 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
       console.log(`[live-status] Fetching MightyCall live status for extension ${extension}`, { orgId });
       const status = await withDeadline(
         getMightyCallStatusByExtension({ orgId, extension }),
-        2200,
+        5000,
         null as any
       );
-      if (!status) return;
+      if (!status) {
+        console.warn('[live-status] MightyCall status fetch timed out or returned empty payload', {
+          orgId,
+          extension,
+        });
+        await upsertAgentLiveStatusRow({
+          orgId,
+          extension,
+          status: 'unknown',
+          rawStatus: 'timeout_or_empty',
+          normalizedStatus: 'unknown',
+          source: 'mightycall_user_status_by_extension',
+          syncError: 'timeout_or_empty_status_response',
+          lastSyncedAt: new Date().toISOString(),
+          lastEventAt: new Date().toISOString(),
+        });
+        return;
+      }
       console.log('[live-status] Raw MightyCall status response', {
         orgId,
         extension,
