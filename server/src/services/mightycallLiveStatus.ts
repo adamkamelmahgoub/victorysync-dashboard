@@ -373,6 +373,11 @@ export async function getMightyCallStatusByExtension(input: {
 
   const rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';
   let normalizedStatus = normalizeFromRawStatus(rawStatus);
+  const profileLooksIdle =
+    normalizedStatus === 'available' ||
+    normalizedStatus === 'wrap_up' ||
+    normalizedStatus === 'dnd' ||
+    normalizedStatus === 'offline';
 
   const onCallBoolean = payloadHasOnCallBoolean(profile) || payloadHasOnCallBoolean(currentCall);
   if (onCallBoolean && (normalizedStatus === 'available' || normalizedStatus === 'unknown')) {
@@ -386,9 +391,31 @@ export async function getMightyCallStatusByExtension(input: {
     else normalizedStatus = 'on_call';
   }
 
-  if (activeCallEvidence && (normalizedStatus === 'available' || normalizedStatus === 'unknown')) {
-    const byEvidence = normalizeFromRawStatus(String(activeCallEvidence?.status || activeCallEvidence?.state || activeCallEvidence?.callStatus || ''));
-    normalizedStatus = byEvidence === 'unknown' ? 'on_call' : byEvidence;
+  const activeEvidenceStatusText = String(
+    activeCallEvidence?.status ||
+    activeCallEvidence?.state ||
+    activeCallEvidence?.callStatus ||
+    ''
+  );
+  const activeEvidenceNorm = normalizeFromRawStatus(activeEvidenceStatusText);
+  const activeEvidenceHasConnectedFlag = Boolean(
+    activeCallEvidence?.isConnected === true ||
+    activeCallEvidence?.connected === true ||
+    activeCallEvidence?.is_connected === true ||
+    activeCallEvidence?.onCall === true ||
+    activeCallEvidence?.inCall === true
+  );
+  const canUseEvidenceToForceActive = !profileLooksIdle || !!currentCall || onCallBoolean;
+  if (
+    activeCallEvidence &&
+    canUseEvidenceToForceActive &&
+    (normalizedStatus === 'available' || normalizedStatus === 'unknown')
+  ) {
+    if (activeEvidenceNorm === 'ringing' || activeEvidenceNorm === 'dialing' || activeEvidenceNorm === 'on_call') {
+      normalizedStatus = activeEvidenceNorm;
+    } else if (activeEvidenceHasConnectedFlag) {
+      normalizedStatus = 'on_call';
+    }
   }
 
   const effectiveDirection = deriveDirection(
