@@ -1277,6 +1277,7 @@ async function upsertAgentLiveStatusRow(params: {
   const normalizedStatus = normalizeAgentLiveEventStatus(params.normalizedStatus || params.status);
   const dbNormalizedStatus = toDbAgentNormalizedStatus(normalizedStatus);
   const dbStatusColumn = dbNormalizedStatus === 'unknown' ? 'available' : dbNormalizedStatus;
+  const terminalStatusToPersist = dbNormalizedStatus === 'unknown' ? 'available' : dbNormalizedStatus;
   const eventAt = webhookIso(params.lastEventAt || params.endedAt || params.answeredAt || params.startedAt || new Date().toISOString()) || new Date().toISOString();
   const userId = await resolveOrgAgentUserIdByExtension(params.orgId, normalizedExtension);
 
@@ -1312,9 +1313,9 @@ async function upsertAgentLiveStatusRow(params: {
     from_number: isTerminal ? null : (params.fromNumber || null),
     to_number: isTerminal ? null : (params.toNumber || null),
     current_counterpart_number: isTerminal ? null : (params.currentCounterpartNumber || null),
-    status: isTerminal ? 'available' : dbStatusColumn,
+    status: isTerminal ? terminalStatusToPersist : dbStatusColumn,
     raw_status: params.rawStatus || params.status || null,
-    normalized_status: isTerminal ? 'available' : dbNormalizedStatus,
+    normalized_status: isTerminal ? terminalStatusToPersist : dbNormalizedStatus,
     started_at: isTerminal ? null : (params.startedAt || null),
     status_started_at: derivedStatusStartedAt,
     answered_at: isTerminal ? null : (params.answeredAt || null),
@@ -1347,7 +1348,7 @@ async function upsertAgentLiveStatusRow(params: {
       direction: params.direction || null,
       from_number: isTerminal ? null : (params.fromNumber || null),
       to_number: isTerminal ? null : (params.toNumber || null),
-      status: isTerminal ? 'available' : dbStatusColumn,
+      status: isTerminal ? terminalStatusToPersist : dbStatusColumn,
       started_at: isTerminal ? null : (params.startedAt || null),
       answered_at: isTerminal ? null : (params.answeredAt || null),
       ended_at: params.endedAt || null,
