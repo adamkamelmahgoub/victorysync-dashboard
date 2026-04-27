@@ -75,7 +75,9 @@ import fetch from 'node-fetch';
 import { MIGHTYCALL_API_KEY, MIGHTYCALL_USER_KEY, MIGHTYCALL_BASE_URL } from '../config/env';
 
 async function delay(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
-const MIGHTYCALL_HTTP_TIMEOUT_MS = 2000;
+const MIGHTYCALL_HTTP_TIMEOUT_MS = 3500;
+const MIGHTYCALL_TOKEN_TTL_MS = 45 * 60 * 1000;
+const mightyCallTokenCache = new Map<string, { token: string; expiresAt: number }>();
 
 async function requestWithRetry(url: string, opts: any, retries = 2, backoff = 250, timeoutMs = MIGHTYCALL_HTTP_TIMEOUT_MS) {
   let attempt = 0;
@@ -114,6 +116,11 @@ export async function getMightyCallAccessToken(override?: { clientId?: string; c
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const clientId = override?.clientId || MIGHTYCALL_API_KEY || '';
   const clientSecret = override?.clientSecret || MIGHTYCALL_USER_KEY || '';
+  const cacheKey = getTokenCacheKey(clientId, clientSecret);
+  const cached = mightyCallTokenCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.token;
+  }
   const authEndpoints = ['/auth/token', '/oauth/token', '/auth/access_token', '/token'];
   const candidates = authEndpoints.flatMap((ep) => buildUrlVariants(base, ep));
 
@@ -147,13 +154,29 @@ export async function getMightyCallAccessToken(override?: { clientId?: string; c
   for (const url of candidates) {
     for (const opts of requestOptions) {
       try {
-        const res = await requestWithRetry(url, opts, 2, 300);
+        const res = await requestWithRetry(url, opts, 1, 250);
         const text = await res.text().catch(() => '');
         if (!res.ok) continue;
         let parsed: any = null;
         try { parsed = JSON.parse(text || 'null'); } catch { parsed = text; }
         const token = pickTokenFromAuthResponse(parsed);
-        if (token) return token;
+        if (token) {
+          const expiresInSec = Number(
+            parsed?.expires_in ??
+            parsed?.expiresIn ??
+            parsed?.data?.expires_in ??
+            parsed?.result?.expires_in ??
+            0
+          );
+          const ttlMs = Number.isFinite(expiresInSec) && expiresInSec > 60
+            ? (expiresInSec * 1000) - 60_000
+            : MIGHTYCALL_TOKEN_TTL_MS;
+          mightyCallTokenCache.set(cacheKey, {
+            token,
+            expiresAt: Date.now() + Math.max(ttlMs, 60_000),
+          });
+          return token;
+        }
       } catch {
         continue;
       }
@@ -182,6 +205,10 @@ function pickTokenFromAuthResponse(body: any): string | null {
     body?.result?.token ||
     null
   );
+}
+
+function getTokenCacheKey(clientId: string, clientSecret: string): string {
+  return `${clientId}::${clientSecret}`;
 }
 
 export async function fetchMightyCallPhoneNumbers(accessToken: string) {

@@ -166,27 +166,25 @@ export async function getMightyCallStatusByExtension(input: {
   const token = await getMightyCallAccessToken(overrideCreds);
   const apiKeyOverride = overrideCreds?.clientId || undefined;
 
-  // Official endpoint first: GET /profile/status?extension={ext}
-  // Reference: MightyCall API docs and support documentation for profile status.
-  let profile = await withTimeout(
-    fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
-    2000,
-    null
-  );
-  if (!profile) {
-    profile = await withTimeout(
+  // Fetch status sources in parallel to keep within request deadline budget.
+  const [officialProfile, fallbackProfile, liveCall] = await Promise.all([
+    withTimeout(
+      fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
+      2500,
+      null
+    ),
+    withTimeout(
       fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
+      2500,
+      null
+    ),
+    withTimeout(
+      fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride).catch(() => null),
       2200,
       null
-    );
-  }
-
-  // Optional active-call overlay for ringing/dialing detail while status endpoint is between transitions.
-  const liveCall = await withTimeout(
-    fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride).catch(() => null),
-    1800,
-    null
-  );
+    ),
+  ]);
+  const profile = officialProfile || fallbackProfile;
   const currentCall = liveCall?.currentCall || profile?.currentCall || profile?.current_call || null;
 
   const rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';

@@ -1953,6 +1953,7 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     stale_after: null,
     stale,
     api_source: row?.source || 'mightycall_user_status_by_extension',
+    sync_error: row?.sync_error || null,
   };
 }
 
@@ -2004,8 +2005,35 @@ async function probeLiveStatusesForAgents(agents: RealAgentMember[]): Promise<Ma
         refreshed_at: nowIso,
         stale_after: null,
         stale: false,
+        sync_error: null,
       });
-    } catch {}
+    } catch (err: any) {
+      out.set(key, {
+        user_id: agent.user_id || '',
+        org_id: agent.org_id,
+        email: agent.email || null,
+        role: agent.role || 'agent',
+        extension: agent.mightycall_extension,
+        display_name: agent.full_name || inferDisplayNameFromEmail(agent.email || null) || null,
+        on_call: false,
+        direction: null,
+        from_number: null,
+        to_number: null,
+        counterpart: null,
+        status: 'Unknown',
+        started_at: null,
+        answered_at: null,
+        ended_at: null,
+        source: 'mightycall_user_status_by_extension',
+        raw_status: null,
+        api_source: 'mightycall_user_status_by_extension',
+        last_seen_at: null,
+        refreshed_at: null,
+        stale_after: null,
+        stale: true,
+        sync_error: fmtErr(err) || 'probe_failed',
+      });
+    }
   }));
 
   return out;
