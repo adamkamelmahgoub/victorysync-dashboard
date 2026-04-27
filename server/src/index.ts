@@ -1806,6 +1806,18 @@ type RealAgentMember = {
   organization_name: string | null;
 };
 
+function inferDisplayNameFromEmail(email: string | null): string | null {
+  const value = String(email || '').trim().toLowerCase();
+  if (!value || !value.includes('@')) return null;
+  const local = value.split('@')[0] || '';
+  const cleaned = local.replace(/[._-]+/g, ' ').trim();
+  if (!cleaned) return null;
+  return cleaned
+    .split(/\s+/)
+    .map((part) => part ? (part[0].toUpperCase() + part.slice(1)) : part)
+    .join(' ');
+}
+
 async function loadRealAgentsFromOrgMembers(orgIds: string[]): Promise<RealAgentMember[]> {
   if (orgIds.length === 0) return [];
 
@@ -1872,13 +1884,17 @@ async function loadRealAgentsFromOrgMembers(orgIds: string[]): Promise<RealAgent
   }
 
   const agents: RealAgentMember[] = normalizedRows.map((row: any) => ({
+    // Keep this in one place so all live-status endpoints render a human label.
+    // If full_name is missing in profiles, derive a readable fallback from email.
+    email: row.user_id ? (emailByUser[row.user_id] || null) : null,
+    full_name: row.user_id
+      ? ((fullNameByUser.get(row.user_id) || null) || inferDisplayNameFromEmail(emailByUser[row.user_id] || null))
+      : null,
     org_member_id: row.org_member_id,
     org_id: row.org_id,
     user_id: row.user_id,
     role: row.role,
     mightycall_extension: row.mightycall_extension,
-    email: row.user_id ? (emailByUser[row.user_id] || null) : null,
-    full_name: row.user_id ? (fullNameByUser.get(row.user_id) || null) : null,
     organization_name: orgNameById.get(row.org_id) || null,
   }));
 
@@ -6556,10 +6572,18 @@ app.get('/api/agents/live-status', async (req, res) => {
       }
     }
 
-    const [liveRows, agents] = await Promise.all([
+    let [liveRows, agents] = await Promise.all([
       getAgentLiveStatusRowsForOrgIds(orgIds),
       loadRealAgentsFromOrgMembers(orgIds),
     ]);
+    const hasFreshRows = (liveRows || []).some((row: any) => {
+      const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
+      return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
+    });
+    if ((agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+      await withDeadline(Promise.all(orgIds.map((id) => refreshAgentLiveStatusForOrg(id))), 5200, null as any);
+      liveRows = await getAgentLiveStatusRowsForOrgIds(orgIds);
+    }
     const statusByKey = new Map<string, any>();
     for (const row of liveRows || []) {
       const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
@@ -6641,10 +6665,18 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
     const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
-    const [liveRows, agents] = await Promise.all([
+    let [liveRows, agents] = await Promise.all([
       getAgentLiveStatusRowsForOrgIds([orgId]),
       loadRealAgentsFromOrgMembers([orgId]),
     ]);
+    const hasFreshRows = (liveRows || []).some((row: any) => {
+      const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
+      return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
+    });
+    if ((agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+      await withDeadline(refreshAgentLiveStatusForOrg(orgId), 5200, null as any);
+      liveRows = await getAgentLiveStatusRowsForOrgIds([orgId]);
+    }
     const statusByKey = new Map<string, any>();
     for (const row of liveRows || []) {
       const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
@@ -6725,10 +6757,18 @@ app.get('/api/live-status', async (req, res) => {
       orgIds = orgId ? [orgId] : [userOrgIds[0]];
     }
 
-    const [liveRows, agents] = await Promise.all([
+    let [liveRows, agents] = await Promise.all([
       getAgentLiveStatusRowsForOrgIds(orgIds),
       loadRealAgentsFromOrgMembers(orgIds),
     ]);
+    const hasFreshRows = (liveRows || []).some((row: any) => {
+      const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
+      return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
+    });
+    if ((agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+      await withDeadline(Promise.all(orgIds.map((id) => refreshAgentLiveStatusForOrg(id))), 5200, null as any);
+      liveRows = await getAgentLiveStatusRowsForOrgIds(orgIds);
+    }
     const statusByKey = new Map<string, any>();
     for (const row of liveRows || []) {
       const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
@@ -6819,10 +6859,18 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
     const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
-    const [liveRows, agents] = await Promise.all([
+    let [liveRows, agents] = await Promise.all([
       getAgentLiveStatusRowsForOrgIds([orgId]),
       loadRealAgentsFromOrgMembers([orgId]),
     ]);
+    const hasFreshRows = (liveRows || []).some((row: any) => {
+      const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
+      return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
+    });
+    if ((agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+      await withDeadline(refreshAgentLiveStatusForOrg(orgId), 5200, null as any);
+      liveRows = await getAgentLiveStatusRowsForOrgIds([orgId]);
+    }
     const statusByKey = new Map<string, any>();
     for (const row of liveRows || []) {
       const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
