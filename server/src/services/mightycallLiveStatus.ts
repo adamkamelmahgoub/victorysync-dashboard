@@ -49,6 +49,13 @@ function firstText(...values: any[]): string {
   return '';
 }
 
+function firstObject(...values: any[]): any | null {
+  for (const value of values) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  }
+  return null;
+}
+
 function firstIso(...values: any[]): string | undefined {
   for (const value of values) {
     const text = String(value || '').trim();
@@ -285,8 +292,32 @@ export async function getMightyCallStatusByExtension(input: {
     ),
   ]);
   const profile = officialProfile || fallbackProfile;
-  const currentCall = liveCall?.currentCall || profile?.currentCall || profile?.current_call || null;
-  const activeCallEvidence = pickActiveCallEvidence(recentCalls as any[], extension);
+  const currentCall = firstObject(
+    liveCall?.currentCall,
+    profile?.currentCall,
+    profile?.current_call,
+    profile?.call,
+    profile?.activeCall,
+    profile?.active_call,
+    profile?.status?.currentCall,
+    profile?.status?.current_call
+  );
+  const profileCurrentCallId = firstText(
+    currentCall?.id,
+    currentCall?.callId,
+    profile?.currentCallId,
+    profile?.current_call_id,
+    profile?.activeCallId,
+    profile?.active_call_id,
+    profile?.callId
+  ) || null;
+  const callsRows = Array.isArray(recentCalls) ? recentCalls : [];
+  const callByProfileId = profileCurrentCallId
+    ? callsRows.find((row: any) => (
+        String(row?.id || row?.callId || row?.requestGuid || '').trim() === profileCurrentCallId
+      )) || null
+    : null;
+  const activeCallEvidence = pickActiveCallEvidence(callsRows as any[], extension) || callByProfileId;
 
   const rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';
   let normalizedStatus = normalizeFromRawStatus(rawStatus);
@@ -324,6 +355,17 @@ export async function getMightyCallStatusByExtension(input: {
     currentCall?.to,
     currentCall?.called?.number,
     currentCall?.client?.address,
+    currentCall?.client?.number,
+    profile?.counterpart,
+    profile?.counterpartNumber,
+    profile?.counterpart_number,
+    profile?.from_number,
+    profile?.from,
+    profile?.to_number,
+    profile?.to,
+    profile?.phone,
+    profile?.client?.address,
+    profile?.client?.number,
     activeCallEvidence?.from_number,
     activeCallEvidence?.from,
     activeCallEvidence?.to_number,
@@ -333,6 +375,7 @@ export async function getMightyCallStatusByExtension(input: {
   const effectiveCurrentCallId = String(
     currentCall?.id ||
     currentCall?.callId ||
+    profileCurrentCallId ||
     activeCallEvidence?.id ||
     activeCallEvidence?.callId ||
     ''
@@ -362,6 +405,15 @@ export async function getMightyCallStatusByExtension(input: {
       currentCall?.startedAt,
       currentCall?.started_at,
       currentCall?.dateTimeUtc,
+      profile?.statusStartedAt,
+      profile?.status_started_at,
+      profile?.currentCallStartedAt,
+      profile?.current_call_started_at,
+      profile?.callStartedAt,
+      profile?.call_started_at,
+      activeCallEvidence?.started_at,
+      activeCallEvidence?.startedAt,
+      activeCallEvidence?.dateTimeUtc,
       profile?.statusStartedAt,
       profile?.status_started_at,
       profile?.updatedAt,
