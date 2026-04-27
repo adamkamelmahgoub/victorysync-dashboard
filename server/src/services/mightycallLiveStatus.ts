@@ -161,6 +161,12 @@ function parseMs(value: any): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function parseDurationSeconds(value: any): number | null {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return Math.floor(num);
+}
+
 function isActiveCallStatusText(value: any): boolean {
   const text = String(value || '').toLowerCase().trim();
   if (!text) return false;
@@ -231,6 +237,16 @@ function normalizeDirection(value: any): 'inbound' | 'outbound' | null {
   return null;
 }
 
+function callRowId(row: any): string {
+  return String(
+    row?.id ||
+    row?.callId ||
+    row?.requestGuid ||
+    row?.external_id ||
+    ''
+  ).trim();
+}
+
 function pickActiveCallEvidence(rows: any[], extension: string): any | null {
   const now = Date.now();
   const normalizedExt = String(extension || '').trim();
@@ -262,6 +278,15 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
         row?.inCall === true
       );
       const startedMs = parseMs(row?.started_at || row?.startedAt || row?.dateTimeUtc);
+      const durationSeconds = parseDurationSeconds(
+        row?.duration_seconds ??
+        row?.durationSeconds ??
+        row?.duration
+      );
+      if (startedMs != null && durationSeconds != null) {
+        const endedByDurationMs = startedMs + (durationSeconds * 1000);
+        if (endedByDurationMs < (now - 15_000)) return false;
+      }
       if (!startedMs) return hasActiveStatus || hasConnectedFlag;
       const ageMs = now - startedMs;
       if (!(ageMs >= 0 && ageMs <= (2 * 60 * 60 * 1000))) return false;
@@ -367,9 +392,9 @@ export async function getMightyCallStatusByExtension(input: {
       )) || null
     : null;
   const activeCallEvidence =
+    callByProfileId ||
     pickActiveCallEvidence(callsRows as any[], extension) ||
-    pickActiveCallEvidence(broadRows as any[], extension) ||
-    callByProfileId;
+    pickActiveCallEvidence(broadRows as any[], extension);
 
   const rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';
   let normalizedStatus = normalizeFromRawStatus(rawStatus);
@@ -387,8 +412,15 @@ export async function getMightyCallStatusByExtension(input: {
   if (liveCall?.onCall && currentCall) {
     const callStatusText = extractStatusText(currentCall);
     const byCall = normalizeFromRawStatus(callStatusText);
+    const currentCallStartedMs = parseMs(
+      currentCall?.startedAt ||
+      currentCall?.started_at ||
+      currentCall?.dateTimeUtc
+    );
+    const currentCallFresh = currentCallStartedMs != null && (Date.now() - currentCallStartedMs) <= 180_000;
     if (byCall === 'ringing' || byCall === 'dialing') normalizedStatus = byCall;
-    else normalizedStatus = 'on_call';
+    else if (byCall === 'on_call') normalizedStatus = 'on_call';
+    else if (onCallBoolean || currentCallFresh) normalizedStatus = 'on_call';
   }
 
   const activeEvidenceStatusText = String(
@@ -405,9 +437,28 @@ export async function getMightyCallStatusByExtension(input: {
     activeCallEvidence?.onCall === true ||
     activeCallEvidence?.inCall === true
   );
-  const canUseEvidenceToForceActive = !profileLooksIdle || !!currentCall || onCallBoolean;
+  const activeEvidenceStartedMs = parseMs(
+    activeCallEvidence?.started_at ||
+    activeCallEvidence?.startedAt ||
+    activeCallEvidence?.dateTimeUtc
+  );
+  const activeEvidenceId = callRowId(activeCallEvidence);
+  const profileCallId = String(profileCurrentCallId || '').trim();
+  const activeEvidenceMatchesProfileId =
+    !profileCallId ||
+    !activeEvidenceId ||
+    activeEvidenceId === profileCallId;
+  const activeEvidenceFreshForUnknownFallback =
+    activeEvidenceStartedMs != null &&
+    (Date.now() - activeEvidenceStartedMs) <= 180_000;
+  const canUseEvidenceToForceActive =
+    !profileLooksIdle ||
+    !!currentCall ||
+    onCallBoolean ||
+    (normalizedStatus === 'unknown' && activeEvidenceFreshForUnknownFallback);
   if (
     activeCallEvidence &&
+    activeEvidenceMatchesProfileId &&
     canUseEvidenceToForceActive &&
     (normalizedStatus === 'available' || normalizedStatus === 'unknown')
   ) {
@@ -444,6 +495,20 @@ export async function getMightyCallStatusByExtension(input: {
     currentCall?.called?.number,
     currentCall?.client?.address,
     currentCall?.client?.number,
+    currentCall?.counterpart,
+    currentCall?.counterpartNumber,
+    currentCall?.counterpart_number,
+    currentCall?.destination?.number,
+    currentCall?.destination?.phone,
+    currentCall?.destinationNumber,
+    currentCall?.destination_number,
+    currentCall?.callee,
+    currentCall?.calleeNumber,
+    currentCall?.callee_number,
+    currentCall?.called_number,
+    currentCall?.calledNumber,
+    currentCall?.toNumber,
+    currentCall?.fromNumber,
     profile?.counterpart,
     profile?.counterpartNumber,
     profile?.counterpart_number,
@@ -454,10 +519,28 @@ export async function getMightyCallStatusByExtension(input: {
     profile?.phone,
     profile?.client?.address,
     profile?.client?.number,
+    profile?.destination?.number,
+    profile?.destinationNumber,
+    profile?.destination_number,
+    profile?.called_number,
+    profile?.calledNumber,
+    profile?.toNumber,
+    profile?.fromNumber,
     activeCallEvidence?.from_number,
     activeCallEvidence?.from,
     activeCallEvidence?.to_number,
-    activeCallEvidence?.to
+    activeCallEvidence?.to,
+    activeCallEvidence?.client?.address,
+    activeCallEvidence?.client?.number,
+    activeCallEvidence?.destination?.number,
+    activeCallEvidence?.destinationNumber,
+    activeCallEvidence?.destination_number,
+    activeCallEvidence?.called_number,
+    activeCallEvidence?.calledNumber,
+    activeCallEvidence?.toNumber,
+    activeCallEvidence?.fromNumber,
+    activeCallEvidence?.phone,
+    activeCallEvidence?.counterpart
   ) || null;
 
   const effectiveCurrentCallId = String(
