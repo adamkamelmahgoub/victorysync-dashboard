@@ -254,11 +254,18 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
       if (endedAt) return false;
       if (isTerminalCallStatusText(status)) return false;
       const hasActiveStatus = isActiveCallStatusText(status);
+      const hasConnectedFlag = Boolean(
+        row?.isConnected === true ||
+        row?.connected === true ||
+        row?.is_connected === true ||
+        row?.onCall === true ||
+        row?.inCall === true
+      );
       const startedMs = parseMs(row?.started_at || row?.startedAt || row?.dateTimeUtc);
-      if (!startedMs) return hasActiveStatus || !!(row?.id || row?.callId || row?.requestGuid);
+      if (!startedMs) return hasActiveStatus || hasConnectedFlag;
       const ageMs = now - startedMs;
       if (!(ageMs >= 0 && ageMs <= (2 * 60 * 60 * 1000))) return false;
-      return hasActiveStatus || true;
+      return hasActiveStatus || hasConnectedFlag;
     });
 
   if (normalizedRows.length === 0) return null;
