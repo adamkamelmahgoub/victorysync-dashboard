@@ -1085,7 +1085,7 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
   return { org_id: orgId, external_id: call.external_id, status: call.status };
 }
 
-function normalizeAgentLiveEventStatus(value: any): 'ringing' | 'dialing' | 'answered' | 'in_progress' | 'completed' | 'missed' | 'failed' | 'available' | 'wrap_up' | 'dnd' | 'offline' | 'unknown' {
+function normalizeAgentLiveEventStatus(value: any): 'ringing' | 'dialing' | 'answered' | 'in_progress' | 'on_call' | 'completed' | 'missed' | 'failed' | 'available' | 'wrap_up' | 'dnd' | 'offline' | 'unknown' {
   const text = String(value || '').toLowerCase().trim();
   if (!text) return 'unknown';
   if (text.includes('miss')) return 'missed';
@@ -1096,6 +1096,7 @@ function normalizeAgentLiveEventStatus(value: any): 'ringing' | 'dialing' | 'ans
   if (text.includes('offline')) return 'offline';
   if (text.includes('dial') || text.includes('outbound') || text.includes('calling')) return 'dialing';
   if (text.includes('ring')) return 'ringing';
+  if (text === 'on_call' || text === 'on call' || text.includes('on a call')) return 'on_call';
   if (text.includes('answer')) return 'answered';
   if (text.includes('connect') || text.includes('talk') || text.includes('progress') || text.includes('active') || text.includes('call')) return 'in_progress';
   if (text.includes('available') || text.includes('idle') || text.includes('ready')) return 'available';
@@ -1106,12 +1107,44 @@ function isAgentLiveTerminalStatus(status: string): boolean {
   return status === 'completed' || status === 'missed' || status === 'failed' || status === 'available' || status === 'wrap_up' || status === 'dnd' || status === 'offline';
 }
 
+function toDbAgentNormalizedStatus(
+  status: string
+): 'available' | 'ringing' | 'dialing' | 'on_call' | 'wrap_up' | 'dnd' | 'offline' | 'unknown' {
+  switch (status) {
+    case 'ringing':
+      return 'ringing';
+    case 'dialing':
+      return 'dialing';
+    case 'on_call':
+      return 'on_call';
+    case 'answered':
+    case 'in_progress':
+      return 'on_call';
+    case 'completed':
+    case 'missed':
+    case 'failed':
+      return 'available';
+    case 'available':
+      return 'available';
+    case 'wrap_up':
+      return 'wrap_up';
+    case 'dnd':
+      return 'dnd';
+    case 'offline':
+      return 'offline';
+    default:
+      return 'unknown';
+  }
+}
+
 function mapAgentLiveStatusToPresence(status: string): { on_call: boolean; label: string } {
   switch (status) {
     case 'ringing':
       return { on_call: true, label: 'Ringing' };
     case 'dialing':
       return { on_call: true, label: 'Dialing' };
+    case 'on_call':
+      return { on_call: true, label: 'On Call' };
     case 'answered':
       return { on_call: true, label: 'Answered' };
     case 'in_progress':
@@ -1242,6 +1275,8 @@ async function upsertAgentLiveStatusRow(params: {
   const available = await checkAgentLiveStatusTableAvailability();
   if (!available) return;
   const normalizedStatus = normalizeAgentLiveEventStatus(params.normalizedStatus || params.status);
+  const dbNormalizedStatus = toDbAgentNormalizedStatus(normalizedStatus);
+  const dbStatusColumn = dbNormalizedStatus === 'unknown' ? 'available' : dbNormalizedStatus;
   const eventAt = webhookIso(params.lastEventAt || params.endedAt || params.answeredAt || params.startedAt || new Date().toISOString()) || new Date().toISOString();
   const userId = await resolveOrgAgentUserIdByExtension(params.orgId, normalizedExtension);
 
@@ -1277,9 +1312,9 @@ async function upsertAgentLiveStatusRow(params: {
     from_number: isTerminal ? null : (params.fromNumber || null),
     to_number: isTerminal ? null : (params.toNumber || null),
     current_counterpart_number: isTerminal ? null : (params.currentCounterpartNumber || null),
-    status: isTerminal ? 'available' : normalizedStatus,
+    status: isTerminal ? 'available' : dbStatusColumn,
     raw_status: params.rawStatus || params.status || null,
-    normalized_status: isTerminal ? 'available' : normalizedStatus,
+    normalized_status: isTerminal ? 'available' : dbNormalizedStatus,
     started_at: isTerminal ? null : (params.startedAt || null),
     status_started_at: derivedStatusStartedAt,
     answered_at: isTerminal ? null : (params.answeredAt || null),
@@ -1297,6 +1332,7 @@ async function upsertAgentLiveStatusRow(params: {
   console.log(`[live-status] Upserting live status for extension ${normalizedExtension}`, {
     orgId: params.orgId,
     normalizedStatus,
+    dbNormalizedStatus,
     source: params.source || 'mightycall_user_status_by_extension',
   });
   let { error } = await supabaseAdmin
@@ -1311,7 +1347,7 @@ async function upsertAgentLiveStatusRow(params: {
       direction: params.direction || null,
       from_number: isTerminal ? null : (params.fromNumber || null),
       to_number: isTerminal ? null : (params.toNumber || null),
-      status: isTerminal ? 'available' : normalizedStatus,
+      status: isTerminal ? 'available' : dbStatusColumn,
       started_at: isTerminal ? null : (params.startedAt || null),
       answered_at: isTerminal ? null : (params.answeredAt || null),
       ended_at: params.endedAt || null,
