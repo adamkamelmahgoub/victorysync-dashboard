@@ -73,6 +73,11 @@ function normalizeFromRawStatus(rawStatus: string): NormalizedLiveStatus {
   return 'unknown';
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  const timeout = new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs));
+  return Promise.race([promise, timeout]);
+}
+
 function pickProfileStatusPayload(body: any, extension: string): any {
   const data = body?.data ?? body;
   if (!data) return null;
@@ -95,14 +100,22 @@ async function fetchOfficialProfileStatusByExtension(
   const params = new URLSearchParams({ extension });
   const url = `${base}${endpoint}?${params.toString()}`;
 
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-      'x-api-key': apiKeyOverride || MIGHTYCALL_API_KEY || '',
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 1800);
+  let res: any;
+  try {
+    res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        'x-api-key': apiKeyOverride || MIGHTYCALL_API_KEY || '',
+      },
+      signal: controller.signal as any,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!res.ok) return null;
   const body = await res.json().catch(() => null);
   return pickProfileStatusPayload(body, extension);
@@ -155,13 +168,25 @@ export async function getMightyCallStatusByExtension(input: {
 
   // Official endpoint first: GET /profile/status?extension={ext}
   // Reference: MightyCall API docs and support documentation for profile status.
-  let profile = await fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride);
+  let profile = await withTimeout(
+    fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
+    2000,
+    null
+  );
   if (!profile) {
-    profile = await fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null);
+    profile = await withTimeout(
+      fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
+      2200,
+      null
+    );
   }
 
   // Optional active-call overlay for ringing/dialing detail while status endpoint is between transitions.
-  const liveCall = await fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride).catch(() => null);
+  const liveCall = await withTimeout(
+    fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride).catch(() => null),
+    1800,
+    null
+  );
   const currentCall = liveCall?.currentCall || profile?.currentCall || profile?.current_call || null;
 
   const rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';
@@ -222,4 +247,3 @@ export async function getMightyCallStatusByExtension(input: {
     currentCallId: String(currentCall?.id || currentCall?.callId || '').trim() || null,
   };
 }
-

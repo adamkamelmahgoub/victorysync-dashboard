@@ -75,13 +75,21 @@ import fetch from 'node-fetch';
 import { MIGHTYCALL_API_KEY, MIGHTYCALL_USER_KEY, MIGHTYCALL_BASE_URL } from '../config/env';
 
 async function delay(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
-async function requestWithRetry(url: string, opts: any, retries = 2, backoff = 250) {
+const MIGHTYCALL_HTTP_TIMEOUT_MS = 2000;
+
+async function requestWithRetry(url: string, opts: any, retries = 2, backoff = 250, timeoutMs = MIGHTYCALL_HTTP_TIMEOUT_MS) {
   let attempt = 0;
   while (true) {
     attempt += 1;
-    try { return await fetch(url, opts); } catch (e: any) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...(opts || {}), signal: controller.signal });
+    } catch (e: any) {
       if (attempt > retries) throw e;
       await delay(backoff * attempt);
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 }
@@ -870,15 +878,7 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
   const now = Date.now();
   const startUtc = new Date(now - (20 * 60 * 1000)).toISOString();
   const endUtc = new Date(now + (5 * 60 * 1000)).toISOString();
-  let token = accessToken;
-  if (apiKeyOverride) {
-    try {
-      token = await getMightyCallAccessToken({
-        clientId: apiKeyOverride,
-        clientSecret: normalized,
-      });
-    } catch {}
-  }
+  const token = accessToken;
   const rows = await fetchMightyCallCalls(token, {
     extension: normalized,
     startUtc,
@@ -927,34 +927,7 @@ export async function fetchMightyCallProfileByExtension(extension: string, acces
   const normalized = normalizeExtensionValue(extension);
   if (!normalized) return null;
   const token = accessToken || await getMightyCallAccessToken();
-  if (apiKeyOverride) {
-    try {
-      const extensionToken = await getMightyCallAccessToken({
-        clientId: apiKeyOverride,
-        clientSecret: normalized,
-      });
-      const profile = await fetchMightyCallOwnProfile(extensionToken, apiKeyOverride);
-      const resolvedExtension = normalizeExtensionValue(
-        profile?.extension ||
-        profile?.ext ||
-        profile?.extensionNumber ||
-        profile?.extension_number ||
-        profile?.internalNumber ||
-        profile?.shortNumber ||
-        normalized
-      );
-      if (profile && (!resolvedExtension || resolvedExtension === normalized)) {
-        return {
-          id: profile?.id || profile?.userId || profile?.memberId || null,
-          extension: resolvedExtension || normalized,
-          display_name: pickDisplayName(profile) || profile?.email || profile?.login || null,
-          email: profile?.email || profile?.login || null,
-          role: profile?.role || null,
-          metadata: profile
-        };
-      }
-    } catch {}
-  }
+  // Do not attempt "extension as secret" token flows; they are invalid and add latency.
 
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const endpoints = [`/profile/${encodeURIComponent(normalized)}`, `/v4/profile/${encodeURIComponent(normalized)}`];
@@ -1061,16 +1034,7 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
     }
     return typeof data === 'object' ? data : null;
   };
-  if (apiKeyOverride) {
-    try {
-      const extensionToken = await getMightyCallAccessToken({
-        clientId: apiKeyOverride,
-        clientSecret: normalized,
-      });
-      const status = await fetchMightyCallOwnStatus(extensionToken, apiKeyOverride);
-      if (status) return { ...status, extension: normalized, sourceEndpoint: '/profile/status as extension' };
-    } catch {}
-  }
+  // Do not attempt "extension as secret" token flows; they are invalid and add latency.
 
   const queryEndpoints = [
     '/profile/status',

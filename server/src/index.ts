@@ -1103,7 +1103,7 @@ function normalizeAgentLiveEventStatus(value: any): 'ringing' | 'dialing' | 'ans
 }
 
 function isAgentLiveTerminalStatus(status: string): boolean {
-  return status === 'completed' || status === 'missed' || status === 'failed' || status === 'available' || status === 'wrap_up' || status === 'dnd' || status === 'offline' || status === 'unknown';
+  return status === 'completed' || status === 'missed' || status === 'failed' || status === 'available' || status === 'wrap_up' || status === 'dnd' || status === 'offline';
 }
 
 function mapAgentLiveStatusToPresence(status: string): { on_call: boolean; label: string } {
@@ -1967,7 +1967,7 @@ async function probeLiveStatusesForAgents(agents: RealAgentMember[]): Promise<Ma
   ).values());
 
   // Keep request latency bounded on wide scopes.
-  if (uniqueAgents.length > 25) return out;
+  if (uniqueAgents.length > 10) return out;
 
   await Promise.all(uniqueAgents.map(async (agent) => {
     const key = `${agent.org_id}:${agent.mightycall_extension}`;
@@ -6635,7 +6635,8 @@ app.get('/api/agents/live-status', async (req, res) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
       return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
     });
-    if ((agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+    const canInlineRefresh = orgIds.length <= 2 && agents.length <= 10;
+    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
       await withDeadline(Promise.all(orgIds.map((id) => refreshAgentLiveStatusForOrg(id))), 5200, null as any);
       liveRows = await getAgentLiveStatusRowsForOrgIds(orgIds);
     }
@@ -6689,7 +6690,7 @@ app.get('/api/agents/live-status', async (req, res) => {
       .sort()
       .slice(-1)[0] || new Date().toISOString();
     const liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-mightycall-user-status`;
-    const needsProbe = items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
+    const needsProbe = agents.length <= 10 && items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
     if (needsProbe) {
       const probe = await probeLiveStatusesForAgents(agents);
       for (let i = 0; i < items.length; i += 1) {
@@ -6738,7 +6739,8 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
       return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
     });
-    if ((agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+    const canInlineRefresh = agents.length <= 10;
+    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
       await withDeadline(refreshAgentLiveStatusForOrg(orgId), 5200, null as any);
       liveRows = await getAgentLiveStatusRowsForOrgIds([orgId]);
     }
@@ -6792,7 +6794,7 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
       .sort()
       .slice(-1)[0] || new Date().toISOString();
     const liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-mightycall-user-status`;
-    const needsProbe = items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
+    const needsProbe = agents.length <= 10 && items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
     if (needsProbe) {
       const probe = await probeLiveStatusesForAgents(agents);
       for (let i = 0; i < items.length; i += 1) {
@@ -6840,7 +6842,8 @@ app.get('/api/live-status', async (req, res) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
       return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
     });
-    if ((agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+    const canInlineRefresh = orgIds.length <= 2 && agents.length <= 10;
+    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
       await withDeadline(Promise.all(orgIds.map((id) => refreshAgentLiveStatusForOrg(id))), 5200, null as any);
       liveRows = await getAgentLiveStatusRowsForOrgIds(orgIds);
     }
@@ -6894,7 +6897,7 @@ app.get('/api/live-status', async (req, res) => {
       .filter(Boolean)
       .sort()
       .slice(-1)[0] || new Date().toISOString();
-    const needsProbe = items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
+    const needsProbe = agents.length <= 10 && items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
     if (needsProbe) {
       const probe = await probeLiveStatusesForAgents(agents);
       for (let i = 0; i < items.length; i += 1) {
@@ -6952,7 +6955,8 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
       return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
     });
-    if ((agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+    const canInlineRefresh = agents.length <= 10;
+    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
       await withDeadline(refreshAgentLiveStatusForOrg(orgId), 5200, null as any);
       liveRows = await getAgentLiveStatusRowsForOrgIds([orgId]);
     }
@@ -7005,7 +7009,7 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
       .filter(Boolean)
       .sort()
       .slice(-1)[0] || new Date().toISOString();
-    const needsProbe = items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
+    const needsProbe = agents.length <= 10 && items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
     if (needsProbe) {
       const probe = await probeLiveStatusesForAgents(agents);
       for (let i = 0; i < items.length; i += 1) {
