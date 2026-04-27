@@ -418,6 +418,15 @@ export async function getMightyCallStatusByExtension(input: {
     }
   }
 
+  const hasStrongActiveSignal = Boolean(
+    onCallBoolean ||
+    liveCall?.onCall ||
+    activeEvidenceHasConnectedFlag ||
+    activeEvidenceNorm === 'ringing' ||
+    activeEvidenceNorm === 'dialing' ||
+    activeEvidenceNorm === 'on_call'
+  );
+
   const effectiveDirection = deriveDirection(
     currentCall?.direction ||
     currentCall?.callDirection ||
@@ -460,6 +469,8 @@ export async function getMightyCallStatusByExtension(input: {
     ''
   ).trim() || null;
 
+  const shouldClearWeakUnknownCallContext = normalizedStatus === 'unknown' && !hasStrongActiveSignal;
+
   return {
     extension,
     mightycallUserId: String(
@@ -480,7 +491,7 @@ export async function getMightyCallStatusByExtension(input: {
     email: firstText(profile?.email, profile?.login, profile?.user?.email, profile?.member?.email) || undefined,
     rawStatus,
     normalizedStatus,
-    statusStartedAt: firstIso(
+    statusStartedAt: shouldClearWeakUnknownCallContext ? undefined : firstIso(
       currentCall?.startedAt,
       currentCall?.started_at,
       currentCall?.dateTimeUtc,
@@ -505,8 +516,8 @@ export async function getMightyCallStatusByExtension(input: {
       activeCallEvidence: activeCallEvidence || null,
     },
     source: 'mightycall_user_status_by_extension',
-    direction: effectiveDirection,
-    counterpartNumber: effectiveCounterpart,
-    currentCallId: effectiveCurrentCallId,
+    direction: shouldClearWeakUnknownCallContext ? null : effectiveDirection,
+    counterpartNumber: shouldClearWeakUnknownCallContext ? null : effectiveCounterpart,
+    currentCallId: shouldClearWeakUnknownCallContext ? null : effectiveCurrentCallId,
   };
 }

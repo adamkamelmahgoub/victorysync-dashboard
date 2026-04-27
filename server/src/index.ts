@@ -1967,7 +1967,21 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
       : (row?.from_number || row?.to_number || null)
   );
   const startedAt = row?.status_started_at || row?.answered_at || row?.started_at || null;
+  const rawNorm = normalizeAgentLiveEventStatus(row?.raw_status || '');
+  const hasActiveStatusSignal = (
+    statusNorm === 'ringing' ||
+    statusNorm === 'dialing' ||
+    statusNorm === 'answered' ||
+    statusNorm === 'in_progress' ||
+    statusNorm === 'on_call' ||
+    rawNorm === 'ringing' ||
+    rawNorm === 'dialing' ||
+    rawNorm === 'answered' ||
+    rawNorm === 'in_progress' ||
+    rawNorm === 'on_call'
+  );
   const activeCallHint = !!(
+    hasActiveStatusSignal &&
     (row?.current_call_id || row?.external_call_id || row?.current_counterpart_number || row?.from_number || row?.to_number) &&
     !row?.ended_at
   );
