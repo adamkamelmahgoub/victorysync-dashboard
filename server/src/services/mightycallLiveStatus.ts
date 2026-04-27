@@ -199,6 +199,31 @@ function payloadHasOnCallBoolean(payload: any): boolean {
   return false;
 }
 
+function collectExtensionCandidates(payload: any): string[] {
+  const out = new Set<string>();
+  const queue: any[] = [payload];
+  const seen = new Set<any>();
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next || typeof next !== 'object' || seen.has(next)) continue;
+    seen.add(next);
+    for (const [key, value] of Object.entries(next)) {
+      const keyNorm = String(key || '').toLowerCase();
+      if (
+        keyNorm.includes('extension') ||
+        keyNorm === 'ext' ||
+        keyNorm.includes('agent_extension') ||
+        keyNorm.includes('operator_extension')
+      ) {
+        const ext = normalizeExtension(value);
+        if (ext) out.add(ext);
+      }
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+  return Array.from(out);
+}
+
 function normalizeDirection(value: any): 'inbound' | 'outbound' | null {
   const text = String(value || '').toLowerCase();
   if (text.includes('out')) return 'outbound';
@@ -218,18 +243,22 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
         row?.operatorExtension ||
         ''
       ).replace(/\D/g, '');
-      return !rowExt || rowExt === normalizedExt;
+      const deepExts = collectExtensionCandidates(row);
+      if (rowExt && rowExt === normalizedExt) return true;
+      if (deepExts.length > 0) return deepExts.includes(normalizedExt);
+      return !rowExt;
     })
     .filter((row) => {
       const status = String(row?.status || row?.state || row?.callStatus || '').trim();
       const endedAt = row?.ended_at || row?.endedAt || null;
       if (endedAt) return false;
       if (isTerminalCallStatusText(status)) return false;
-      if (!isActiveCallStatusText(status)) return false;
+      const hasActiveStatus = isActiveCallStatusText(status);
       const startedMs = parseMs(row?.started_at || row?.startedAt || row?.dateTimeUtc);
-      if (!startedMs) return true;
+      if (!startedMs) return hasActiveStatus || !!(row?.id || row?.callId || row?.requestGuid);
       const ageMs = now - startedMs;
-      return ageMs >= 0 && ageMs <= (2 * 60 * 60 * 1000);
+      if (!(ageMs >= 0 && ageMs <= (2 * 60 * 60 * 1000))) return false;
+      return hasActiveStatus || true;
     });
 
   if (normalizedRows.length === 0) return null;
@@ -261,7 +290,7 @@ export async function getMightyCallStatusByExtension(input: {
   const callsWindowEnd = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
 
   // Fetch status sources in parallel to keep within request deadline budget.
-  const [officialProfile, fallbackProfile, liveCall, recentCalls] = await Promise.all([
+  const [officialProfile, fallbackProfile, liveCall, recentCalls, recentCallsBroad] = await Promise.all([
     withTimeout(
       fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
       2500,
@@ -290,6 +319,18 @@ export async function getMightyCallStatusByExtension(input: {
       2300,
       [] as any[]
     ),
+    withTimeout(
+      fetchMightyCallCalls(token, {
+        startUtc: callsWindowStart,
+        endUtc: callsWindowEnd,
+        pageSize: '50',
+        maxPages: '1',
+        fast: true,
+        returnOnFirstSuccess: true,
+      }, apiKeyOverride).catch(() => []),
+      2200,
+      [] as any[]
+    ),
   ]);
   const profile = officialProfile || fallbackProfile;
   const currentCall = firstObject(
@@ -312,12 +353,16 @@ export async function getMightyCallStatusByExtension(input: {
     profile?.callId
   ) || null;
   const callsRows = Array.isArray(recentCalls) ? recentCalls : [];
+  const broadRows = Array.isArray(recentCallsBroad) ? recentCallsBroad : [];
   const callByProfileId = profileCurrentCallId
     ? callsRows.find((row: any) => (
         String(row?.id || row?.callId || row?.requestGuid || '').trim() === profileCurrentCallId
       )) || null
     : null;
-  const activeCallEvidence = pickActiveCallEvidence(callsRows as any[], extension) || callByProfileId;
+  const activeCallEvidence =
+    pickActiveCallEvidence(callsRows as any[], extension) ||
+    pickActiveCallEvidence(broadRows as any[], extension) ||
+    callByProfileId;
 
   const rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';
   let normalizedStatus = normalizeFromRawStatus(rawStatus);
