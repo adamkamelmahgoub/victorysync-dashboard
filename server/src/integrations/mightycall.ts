@@ -1057,7 +1057,7 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
         item &&
         typeof item === 'object' &&
         normalizeExtensionValue(item?.extension || item?.ext || item?.extensionNumber || item?.extension_number) === normalized
-      )) || rows.find((item: any) => item && typeof item === 'object') || null;
+      )) || null;
     }
     return typeof data === 'object' ? data : null;
   };

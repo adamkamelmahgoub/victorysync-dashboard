@@ -86,7 +86,7 @@ function pickProfileStatusPayload(body: any, extension: string): any {
   if (rows) {
     return rows.find((item: any) => (
       normalizeExtension(item?.extension || item?.ext || item?.extensionNumber || item?.extension_number) === extension
-    )) || rows.find((item: any) => item && typeof item === 'object') || null;
+    )) || null;
   }
   return typeof data === 'object' ? data : null;
 }
