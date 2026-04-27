@@ -1956,6 +1956,61 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
   };
 }
 
+async function probeLiveStatusesForAgents(agents: RealAgentMember[]): Promise<Map<string, any>> {
+  const out = new Map<string, any>();
+  if (!Array.isArray(agents) || agents.length === 0) return out;
+
+  const uniqueAgents = Array.from(new Map(
+    agents
+      .filter((agent) => !!agent.org_id && !!agent.mightycall_extension)
+      .map((agent) => [`${agent.org_id}:${agent.mightycall_extension}`, agent])
+  ).values());
+
+  // Keep request latency bounded on wide scopes.
+  if (uniqueAgents.length > 25) return out;
+
+  await Promise.all(uniqueAgents.map(async (agent) => {
+    const key = `${agent.org_id}:${agent.mightycall_extension}`;
+    try {
+      const status = await withDeadline(
+        getMightyCallStatusByExtension({ orgId: agent.org_id, extension: agent.mightycall_extension }),
+        5000,
+        null as any
+      );
+      if (!status) return;
+      const normalized = normalizeAgentLiveEventStatus(status.normalizedStatus || status.rawStatus || 'unknown');
+      const presence = mapAgentLiveStatusToPresence(normalized);
+      const nowIso = status.lastSyncedAt || new Date().toISOString();
+      out.set(key, {
+        user_id: agent.user_id || '',
+        org_id: agent.org_id,
+        email: agent.email || status.email || null,
+        role: agent.role || 'agent',
+        extension: agent.mightycall_extension,
+        display_name: agent.full_name || status.name || inferDisplayNameFromEmail(agent.email || status.email || null) || null,
+        on_call: presence.on_call,
+        direction: status.direction || null,
+        from_number: status.direction === 'inbound' ? (status.counterpartNumber || null) : null,
+        to_number: status.direction === 'outbound' ? (status.counterpartNumber || null) : null,
+        counterpart: presence.on_call ? (status.counterpartNumber || null) : null,
+        status: presence.label,
+        started_at: presence.on_call ? (status.statusStartedAt || null) : null,
+        answered_at: presence.on_call ? (status.statusStartedAt || null) : null,
+        ended_at: null,
+        source: 'mightycall_user_status_by_extension',
+        raw_status: status.rawStatus || null,
+        api_source: 'mightycall_user_status_by_extension',
+        last_seen_at: nowIso,
+        refreshed_at: nowIso,
+        stale_after: null,
+        stale: false,
+      });
+    } catch {}
+  }));
+
+  return out;
+}
+
 function getLivePresenceRowAgeMs(row: any): number {
   const refreshedAt = String(row?.refreshed_at || '').trim();
   if (!refreshedAt) return Number.POSITIVE_INFINITY;
@@ -6634,6 +6689,16 @@ app.get('/api/agents/live-status', async (req, res) => {
       .sort()
       .slice(-1)[0] || new Date().toISOString();
     const liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-mightycall-user-status`;
+    const needsProbe = items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
+    if (needsProbe) {
+      const probe = await probeLiveStatusesForAgents(agents);
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        const key = `${item.org_id || ''}:${normalizeExtension(item.extension) || ''}`;
+        const next = probe.get(key);
+        if (next) items[i] = next;
+      }
+    }
 
     res.json({
       items,
@@ -6727,6 +6792,16 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
       .sort()
       .slice(-1)[0] || new Date().toISOString();
     const liveStatusVersion = `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-mightycall-user-status`;
+    const needsProbe = items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
+    if (needsProbe) {
+      const probe = await probeLiveStatusesForAgents(agents);
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        const key = `${item.org_id || ''}:${normalizeExtension(item.extension) || ''}`;
+        const next = probe.get(key);
+        if (next) items[i] = next;
+      }
+    }
     res.json({
       items,
       refreshed_at: refreshedAt,
@@ -6819,6 +6894,16 @@ app.get('/api/live-status', async (req, res) => {
       .filter(Boolean)
       .sort()
       .slice(-1)[0] || new Date().toISOString();
+    const needsProbe = items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
+    if (needsProbe) {
+      const probe = await probeLiveStatusesForAgents(agents);
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        const key = `${item.org_id || ''}:${normalizeExtension(item.extension) || ''}`;
+        const next = probe.get(key);
+        if (next) items[i] = next;
+      }
+    }
     console.log('[live-status] UI payload source', {
       source: 'mightycall_user_status_by_extension',
       org_ids: orgIds,
@@ -6920,6 +7005,16 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
       .filter(Boolean)
       .sort()
       .slice(-1)[0] || new Date().toISOString();
+    const needsProbe = items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
+    if (needsProbe) {
+      const probe = await probeLiveStatusesForAgents(agents);
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        const key = `${item.org_id || ''}:${normalizeExtension(item.extension) || ''}`;
+        const next = probe.get(key);
+        if (next) items[i] = next;
+      }
+    }
     console.log('[live-status] UI payload source', {
       source: 'mightycall_user_status_by_extension',
       org_id: orgId,
