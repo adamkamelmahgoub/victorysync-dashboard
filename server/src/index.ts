@@ -1966,6 +1966,14 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
       : (row?.from_number || row?.to_number || null)
   );
   const startedAt = row?.status_started_at || row?.answered_at || row?.started_at || null;
+  const activeCallHint = !!(
+    (row?.current_call_id || row?.external_call_id || row?.current_counterpart_number || row?.from_number || row?.to_number) &&
+    !row?.ended_at
+  );
+  const effectiveOnCall = presence.on_call || activeCallHint;
+  const effectiveStatus = effectiveOnCall
+    ? (statusNorm === 'unknown' || statusNorm === 'available' ? 'On Call' : presence.label)
+    : presence.label;
   return {
     user_id: identity?.user_id || String(row?.user_id || ''),
     org_id: row?.org_id || null,
@@ -1973,13 +1981,13 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     role: 'agent',
     extension: resolvedExtension || null,
     display_name: identity?.display_name || null,
-    on_call: presence.on_call,
+    on_call: effectiveOnCall,
     direction: row?.direction || null,
     from_number: row?.from_number || null,
     to_number: row?.to_number || null,
-    counterpart: presence.on_call ? counterpart : null,
-    status: presence.label,
-    started_at: presence.on_call ? startedAt : null,
+    counterpart: effectiveOnCall ? counterpart : null,
+    status: effectiveStatus,
+    started_at: effectiveOnCall ? startedAt : null,
     answered_at: row?.answered_at || null,
     ended_at: row?.ended_at || null,
     source: row?.source || 'agent_live_status',
