@@ -1176,6 +1176,17 @@ async function resolveOrgAgentUserIdByExtension(orgId: string, extension: string
   if (!normalizedExtension) return null;
 
   try {
+    const { data: fromOrgMembers } = await supabaseAdmin
+      .from('org_members')
+      .select('user_id, mightycall_extension')
+      .eq('org_id', orgId)
+      .eq('mightycall_extension', normalizedExtension)
+      .limit(1)
+      .maybeSingle();
+    if (fromOrgMembers?.user_id) return String(fromOrgMembers.user_id);
+  } catch {}
+
+  try {
     const { data: fromOrgUsers } = await supabaseAdmin
       .from('org_users')
       .select('user_id, role, mightycall_extension')
@@ -1640,23 +1651,18 @@ function extractAgentEmailFromMeta(extMeta: any): string | null {
 }
 
 async function getLivePresenceOrgIds(): Promise<string[]> {
-  const [{ data: orgUserRows, error: orgUserError }, { data: extensionRows, error: extensionError }] = await Promise.all([
-    supabaseAdmin
-      .from('org_users')
-      .select('org_id, role, mightycall_extension')
-      .eq('role', 'agent')
-      .not('mightycall_extension', 'is', null),
-    supabaseAdmin
-      .from('agent_extensions')
-      .select('org_id, extension')
-      .not('extension', 'is', null),
-  ]);
-  if (orgUserError) throw orgUserError;
-  if (extensionError) throw extensionError;
-  return Array.from(new Set([
-    ...(orgUserRows || []).map((row: any) => String(row.org_id || '')).filter(Boolean),
-    ...(extensionRows || []).map((row: any) => String(row.org_id || '')).filter(Boolean),
-  ]));
+  // Source of truth for live roster scope is org_members with real mightycall_extension.
+  const { data: memberRows, error: memberError } = await supabaseAdmin
+    .from('org_members')
+    .select('org_id, mightycall_extension')
+    .not('mightycall_extension', 'is', null);
+  if (memberError) throw memberError;
+  return Array.from(new Set(
+    (memberRows || [])
+      .filter((row: any) => String(row?.mightycall_extension || '').trim() !== '')
+      .map((row: any) => String(row.org_id || '').trim())
+      .filter(Boolean)
+  ));
 }
 
 async function getLivePresenceRowsForOrgIds(orgIds: string[]) {
@@ -1770,8 +1776,89 @@ async function getAgentLiveStatusRowsForOrgIds(orgIds: string[]) {
   return data || [];
 }
 
+type RealAgentMember = {
+  org_member_id: string;
+  org_id: string;
+  user_id: string | null;
+  role: string | null;
+  mightycall_extension: string;
+  email: string | null;
+  full_name: string | null;
+  organization_name: string | null;
+};
+
+async function loadRealAgentsFromOrgMembers(orgIds: string[]): Promise<RealAgentMember[]> {
+  if (orgIds.length === 0) return [];
+
+  const { data: memberRows, error: memberError } = await supabaseAdmin
+    .from('org_members')
+    .select('id, org_id, user_id, role, mightycall_extension')
+    .in('org_id', orgIds)
+    .not('mightycall_extension', 'is', null);
+  if (memberError) throw memberError;
+
+  const normalizedRows = (memberRows || [])
+    .map((row: any) => ({
+      org_member_id: String(row?.id || '').trim(),
+      org_id: String(row?.org_id || '').trim(),
+      user_id: String(row?.user_id || '').trim() || null,
+      role: String(row?.role || '').trim() || null,
+      mightycall_extension: normalizeExtension(row?.mightycall_extension),
+    }))
+    .filter((row: any) => !!row.org_id && !!row.org_member_id && !!row.mightycall_extension);
+
+  const userIds = Array.from(new Set(normalizedRows.map((row: any) => row.user_id).filter(Boolean) as string[]));
+  const orgIdList = Array.from(new Set(normalizedRows.map((row: any) => row.org_id)));
+
+  const emailByUser = await resolveUserEmailsById(userIds);
+  const { data: profileRows } = userIds.length > 0
+    ? await supabaseAdmin.from('profiles').select('id, full_name').in('id', userIds)
+    : { data: [] as any[] };
+  const fullNameByUser = new Map<string, string>();
+  for (const row of (profileRows || [])) {
+    const fullName = String((row as any)?.full_name || '').trim();
+    if (fullName) fullNameByUser.set(String((row as any).id), fullName);
+  }
+
+  const { data: orgRows } = orgIdList.length > 0
+    ? await supabaseAdmin.from('organizations').select('id, name').in('id', orgIdList)
+    : { data: [] as any[] };
+  const orgNameById = new Map<string, string>();
+  for (const row of (orgRows || [])) {
+    const name = String((row as any)?.name || '').trim();
+    if (name) orgNameById.set(String((row as any).id), name);
+  }
+
+  const agents: RealAgentMember[] = normalizedRows.map((row: any) => ({
+    org_member_id: row.org_member_id,
+    org_id: row.org_id,
+    user_id: row.user_id,
+    role: row.role,
+    mightycall_extension: row.mightycall_extension,
+    email: row.user_id ? (emailByUser[row.user_id] || null) : null,
+    full_name: row.user_id ? (fullNameByUser.get(row.user_id) || null) : null,
+    organization_name: orgNameById.get(row.org_id) || null,
+  }));
+
+  console.log('[live-status] Loaded real agents from org_members', {
+    org_ids: orgIds,
+    agent_count: agents.length,
+  });
+  for (const agent of agents) {
+    console.log(`[live-status] Found agent extension from database: ${agent.mightycall_extension}`, {
+      org_id: agent.org_id,
+      org_member_id: agent.org_member_id,
+      user_id: agent.user_id,
+    });
+  }
+  console.log('[live-status] No seed data used');
+
+  return agents;
+}
+
 function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_id: string | null; email: string | null; display_name: string | null }>) {
-  const key = `${row?.org_id || ''}:${normalizeExtension(row?.extension) || ''}`;
+  const resolvedExtension = normalizeExtension(row?.mightycall_extension || row?.extension);
+  const key = `${row?.org_id || ''}:${resolvedExtension || ''}`;
   const identity = identityByKey.get(key);
   const statusNorm = normalizeAgentLiveEventStatus(row?.normalized_status || row?.status || 'available');
   const rowUpdatedAtMs = Date.parse(String(row?.updated_at || row?.last_event_at || ''));
@@ -1790,7 +1877,7 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     org_id: row?.org_id || null,
     email: identity?.email || null,
     role: 'agent',
-    extension: row?.extension || null,
+    extension: resolvedExtension || null,
     display_name: identity?.display_name || null,
     on_call: presence.on_call,
     direction: row?.direction || null,
@@ -2875,28 +2962,8 @@ async function refreshLiveAgentPresence(orgId?: string | null) {
 }
 
 async function refreshAgentLiveStatusForOrg(orgId: string) {
-  const [{ data: memberRows }, { data: extRows }] = await Promise.all([
-    supabaseAdmin
-      .from('org_users')
-      .select('user_id, role, mightycall_extension')
-      .eq('org_id', orgId)
-      .eq('role', 'agent'),
-    supabaseAdmin
-      .from('agent_extensions')
-      .select('user_id, extension')
-      .eq('org_id', orgId),
-  ]);
-
-  const extensionSet = new Set<string>();
-  for (const row of memberRows || []) {
-    const ext = normalizeExtension((row as any)?.mightycall_extension);
-    if (ext) extensionSet.add(ext);
-  }
-  for (const row of extRows || []) {
-    const ext = normalizeExtension((row as any)?.extension);
-    if (ext) extensionSet.add(ext);
-  }
-  const extensions = Array.from(extensionSet.values());
+  const agents = await loadRealAgentsFromOrgMembers([orgId]);
+  const extensions = Array.from(new Set(agents.map((agent) => agent.mightycall_extension).filter(Boolean)));
   if (extensions.length === 0) return;
 
   await Promise.all(extensions.map(async (extension) => {
@@ -2929,6 +2996,7 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
         extension,
         normalizedStatus,
       });
+      console.log('[live-status] Upserting live MightyCall status only', { orgId, extension });
 
       await upsertAgentLiveStatusRow({
         orgId,
@@ -6604,49 +6672,55 @@ app.get('/api/live-status', async (req, res) => {
       orgIds = orgId ? [orgId] : [userOrgIds[0]];
     }
 
-    const [liveRows, memberRows, extRows] = await Promise.all([
+    const [liveRows, agents] = await Promise.all([
       getAgentLiveStatusRowsForOrgIds(orgIds),
-      supabaseAdmin
-        .from('org_users')
-        .select('org_id, user_id, role, mightycall_extension')
-        .in('org_id', orgIds)
-        .eq('role', 'agent'),
-      supabaseAdmin
-        .from('agent_extensions')
-        .select('org_id, user_id, extension')
-        .in('org_id', orgIds),
+      loadRealAgentsFromOrgMembers(orgIds),
     ]);
-    const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
-    const allUserIds = new Set<string>();
-    const pushIdentity = (targetOrgId: string, ext: any, userId: any) => {
-      const normalizedExt = normalizeExtension(ext);
-      if (!targetOrgId || !normalizedExt) return;
-      const userIdText = String(userId || '').trim() || null;
-      identityByKey.set(`${targetOrgId}:${normalizedExt}`, { user_id: userIdText, email: null, display_name: null });
-      if (userIdText) allUserIds.add(userIdText);
-    };
-    for (const row of (memberRows.data || [])) pushIdentity(String((row as any).org_id || ''), (row as any).mightycall_extension, (row as any).user_id);
-    for (const row of (extRows.data || [])) pushIdentity(String((row as any).org_id || ''), (row as any).extension, (row as any).user_id);
-
-    const emailByUser = await resolveUserEmailsById(Array.from(allUserIds.values()));
-    const profileRows = Array.from(allUserIds.values()).length > 0
-      ? await supabaseAdmin.from('profiles').select('id, full_name').in('id', Array.from(allUserIds.values()))
-      : { data: [] as any[] };
-    const fullNameByUser = new Map<string, string>();
-    for (const row of (profileRows.data || [])) {
-      const fullName = String((row as any)?.full_name || '').trim();
-      if (fullName) fullNameByUser.set(String((row as any).id), fullName);
+    const statusByKey = new Map<string, any>();
+    for (const row of liveRows || []) {
+      const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
+      if (!ext) continue;
+      statusByKey.set(`${row?.org_id || ''}:${ext}`, row);
     }
-    for (const [key, value] of identityByKey.entries()) {
-      const userId = value.user_id || '';
-      identityByKey.set(key, {
-        user_id: value.user_id,
-        email: userId ? (emailByUser[userId] || null) : null,
-        display_name: userId ? (fullNameByUser.get(userId) || null) : null,
+
+    const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
+    for (const agent of agents) {
+      identityByKey.set(`${agent.org_id}:${agent.mightycall_extension}`, {
+        user_id: agent.user_id || null,
+        email: agent.email || null,
+        display_name: agent.full_name || null,
       });
     }
 
-    const items = (liveRows || []).map((row: any) => mapAgentLiveStatusToApiRow(row, identityByKey));
+    const items = agents.map((agent) => {
+      const key = `${agent.org_id}:${agent.mightycall_extension}`;
+      const liveRow = statusByKey.get(key);
+      if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
+      return {
+        user_id: agent.user_id || '',
+        org_id: agent.org_id,
+        email: agent.email || null,
+        role: agent.role || 'agent',
+        extension: agent.mightycall_extension,
+        display_name: agent.full_name || null,
+        on_call: false,
+        direction: null,
+        from_number: null,
+        to_number: null,
+        counterpart: null,
+        status: 'Unknown',
+        started_at: null,
+        answered_at: null,
+        ended_at: null,
+        source: 'mightycall_user_status_by_extension',
+        raw_status: null,
+        api_source: 'mightycall_user_status_by_extension',
+        last_seen_at: null,
+        refreshed_at: null,
+        stale_after: null,
+        stale: true,
+      };
+    });
     const refreshedAt = items
       .map((item: any) => item.refreshed_at || null)
       .filter(Boolean)
@@ -6668,6 +6742,7 @@ app.get('/api/live-status', async (req, res) => {
       refreshed_at: refreshedAt,
       live_status_version: `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-mightycall-user-status`,
       source: 'mightycall_user_status_by_extension',
+      setup_warning: agents.length === 0 ? 'No real org_members with mightycall_extension found.' : null,
     });
   } catch (err: any) {
     console.error('live_status_failed:', fmtErr(err));
@@ -6691,42 +6766,54 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
     const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isPlatformManagerWith(actorId, 'can_manage_agents')) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
     if (!allowed) return res.status(403).json({ error: 'forbidden' });
 
-    const [liveRows, membersRes, extRes] = await Promise.all([
+    const [liveRows, agents] = await Promise.all([
       getAgentLiveStatusRowsForOrgIds([orgId]),
-      supabaseAdmin.from('org_users').select('org_id, user_id, role, mightycall_extension').eq('org_id', orgId).eq('role', 'agent'),
-      supabaseAdmin.from('agent_extensions').select('org_id, user_id, extension').eq('org_id', orgId),
+      loadRealAgentsFromOrgMembers([orgId]),
     ]);
-    const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
-    const userIds = new Set<string>();
-    const setIdentity = (ext: any, userId: any) => {
-      const normalizedExt = normalizeExtension(ext);
-      if (!normalizedExt) return;
-      const uid = String(userId || '').trim() || null;
-      identityByKey.set(`${orgId}:${normalizedExt}`, { user_id: uid, email: null, display_name: null });
-      if (uid) userIds.add(uid);
-    };
-    for (const row of (membersRes.data || [])) setIdentity((row as any).mightycall_extension, (row as any).user_id);
-    for (const row of (extRes.data || [])) setIdentity((row as any).extension, (row as any).user_id);
-
-    const emailByUser = await resolveUserEmailsById(Array.from(userIds.values()));
-    const profiles = Array.from(userIds.values()).length > 0
-      ? await supabaseAdmin.from('profiles').select('id, full_name').in('id', Array.from(userIds.values()))
-      : { data: [] as any[] };
-    const nameByUser = new Map<string, string>();
-    for (const row of (profiles.data || [])) {
-      const name = String((row as any)?.full_name || '').trim();
-      if (name) nameByUser.set(String((row as any).id), name);
+    const statusByKey = new Map<string, any>();
+    for (const row of liveRows || []) {
+      const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
+      if (!ext) continue;
+      statusByKey.set(`${row?.org_id || ''}:${ext}`, row);
     }
-    for (const [key, base] of identityByKey.entries()) {
-      const uid = base.user_id || '';
-      identityByKey.set(key, {
-        user_id: base.user_id,
-        email: uid ? (emailByUser[uid] || null) : null,
-        display_name: uid ? (nameByUser.get(uid) || null) : null,
+    const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
+    for (const agent of agents) {
+      identityByKey.set(`${agent.org_id}:${agent.mightycall_extension}`, {
+        user_id: agent.user_id || null,
+        email: agent.email || null,
+        display_name: agent.full_name || null,
       });
     }
 
-    const items = (liveRows || []).map((row: any) => mapAgentLiveStatusToApiRow(row, identityByKey));
+    const items = agents.map((agent) => {
+      const key = `${agent.org_id}:${agent.mightycall_extension}`;
+      const liveRow = statusByKey.get(key);
+      if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
+      return {
+        user_id: agent.user_id || '',
+        org_id: agent.org_id,
+        email: agent.email || null,
+        role: agent.role || 'agent',
+        extension: agent.mightycall_extension,
+        display_name: agent.full_name || null,
+        on_call: false,
+        direction: null,
+        from_number: null,
+        to_number: null,
+        counterpart: null,
+        status: 'Unknown',
+        started_at: null,
+        answered_at: null,
+        ended_at: null,
+        source: 'mightycall_user_status_by_extension',
+        raw_status: null,
+        api_source: 'mightycall_user_status_by_extension',
+        last_seen_at: null,
+        refreshed_at: null,
+        stale_after: null,
+        stale: true,
+      };
+    });
     const refreshedAt = items
       .map((item: any) => item.refreshed_at || null)
       .filter(Boolean)
@@ -6748,6 +6835,7 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
       refreshed_at: refreshedAt,
       live_status_version: `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-mightycall-user-status`,
       source: 'mightycall_user_status_by_extension',
+      setup_warning: agents.length === 0 ? 'No real org_members with mightycall_extension found.' : null,
     });
   } catch (err: any) {
     console.error('org_live_status_failed:', fmtErr(err));
