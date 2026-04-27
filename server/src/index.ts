@@ -1652,17 +1652,36 @@ function extractAgentEmailFromMeta(extMeta: any): string | null {
 
 async function getLivePresenceOrgIds(): Promise<string[]> {
   // Source of truth for live roster scope is org_members with real mightycall_extension.
+  // Fallback to org_users when legacy org_member rows are not populated yet.
   const { data: memberRows, error: memberError } = await supabaseAdmin
     .from('org_members')
     .select('org_id, mightycall_extension')
     .not('mightycall_extension', 'is', null);
   if (memberError) throw memberError;
-  return Array.from(new Set(
+  const memberOrgIds = Array.from(new Set(
     (memberRows || [])
       .filter((row: any) => String(row?.mightycall_extension || '').trim() !== '')
       .map((row: any) => String(row.org_id || '').trim())
       .filter(Boolean)
   ));
+  if (memberOrgIds.length > 0) return memberOrgIds;
+
+  const { data: orgUserRows, error: orgUserError } = await supabaseAdmin
+    .from('org_users')
+    .select('org_id, role, mightycall_extension')
+    .eq('role', 'agent')
+    .not('mightycall_extension', 'is', null);
+  if (orgUserError) throw orgUserError;
+  const orgUserOrgIds = Array.from(new Set(
+    (orgUserRows || [])
+      .filter((row: any) => String(row?.mightycall_extension || '').trim() !== '')
+      .map((row: any) => String(row.org_id || '').trim())
+      .filter(Boolean)
+  ));
+  if (orgUserOrgIds.length > 0) {
+    console.log('[live-status] org scope fallback: using org_users extensions because org_members had no mapped extensions');
+  }
+  return orgUserOrgIds;
 }
 
 async function getLivePresenceRowsForOrgIds(orgIds: string[]) {
@@ -1797,7 +1816,7 @@ async function loadRealAgentsFromOrgMembers(orgIds: string[]): Promise<RealAgent
     .not('mightycall_extension', 'is', null);
   if (memberError) throw memberError;
 
-  const normalizedRows = (memberRows || [])
+  let normalizedRows = (memberRows || [])
     .map((row: any) => ({
       org_member_id: String(row?.id || '').trim(),
       org_id: String(row?.org_id || '').trim(),
@@ -1806,6 +1825,29 @@ async function loadRealAgentsFromOrgMembers(orgIds: string[]): Promise<RealAgent
       mightycall_extension: normalizeExtension(row?.mightycall_extension),
     }))
     .filter((row: any) => !!row.org_id && !!row.org_member_id && !!row.mightycall_extension);
+
+  // Real-data fallback for orgs still using org_users mightycall_extension mapping.
+  if (normalizedRows.length === 0) {
+    const { data: orgUserRows, error: orgUserError } = await supabaseAdmin
+      .from('org_users')
+      .select('id, org_id, user_id, role, mightycall_extension')
+      .in('org_id', orgIds)
+      .eq('role', 'agent')
+      .not('mightycall_extension', 'is', null);
+    if (orgUserError) throw orgUserError;
+    normalizedRows = (orgUserRows || [])
+      .map((row: any) => ({
+        org_member_id: `org_user:${String(row?.id || '').trim()}`,
+        org_id: String(row?.org_id || '').trim(),
+        user_id: String(row?.user_id || '').trim() || null,
+        role: String(row?.role || '').trim() || null,
+        mightycall_extension: normalizeExtension(row?.mightycall_extension),
+      }))
+      .filter((row: any) => !!row.org_id && !!row.org_member_id && !!row.mightycall_extension);
+    if (normalizedRows.length > 0) {
+      console.log('[live-status] roster fallback: using real org_users agent extensions (org_members had none)');
+    }
+  }
 
   const userIds = Array.from(new Set(normalizedRows.map((row: any) => row.user_id).filter(Boolean) as string[]));
   const orgIdList = Array.from(new Set(normalizedRows.map((row: any) => row.org_id)));
