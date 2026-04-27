@@ -469,7 +469,22 @@ export async function getMightyCallStatusByExtension(input: {
     ''
   ).trim() || null;
 
-  const shouldClearWeakUnknownCallContext = normalizedStatus === 'unknown' && !hasStrongActiveSignal;
+  const hasConcreteLiveContext = Boolean(
+    currentCall ||
+    effectiveCurrentCallId ||
+    effectiveCounterpart ||
+    activeCallEvidence?.id ||
+    activeCallEvidence?.callId ||
+    activeCallEvidence?.requestGuid
+  );
+  const canSafelyKeepOnCall = hasStrongActiveSignal && hasConcreteLiveContext;
+  if (normalizedStatus === 'on_call' && !canSafelyKeepOnCall) {
+    normalizedStatus = 'available';
+  }
+
+  const shouldClearWeakUnknownCallContext =
+    (normalizedStatus === 'unknown' && !hasStrongActiveSignal) ||
+    (normalizedStatus === 'available' && !hasConcreteLiveContext);
 
   return {
     extension,
