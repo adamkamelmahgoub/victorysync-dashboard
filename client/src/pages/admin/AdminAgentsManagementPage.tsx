@@ -329,6 +329,20 @@ const AdminAgentsManagementPage: FC = () => {
       setLiveStatuses(json.items || []);
       setRefreshedAt(json.refreshed_at || new Date().toISOString());
     } catch (e: any) {
+      const detail = String(e?.message || '');
+      const isTimeout = detail.toLowerCase().includes('timeout');
+      const fallbackOrgId = !activeOrgId
+        ? (assignments.find((row) => !!row.org_id)?.org_id || createOrgId || orgs[0]?.id || null)
+        : null;
+      if (isTimeout && fallbackOrgId) {
+        try {
+          const retry = await getLiveAgentStatus({ orgId: fallbackOrgId }, userId);
+          setLiveStatuses(retry.items || []);
+          setRefreshedAt(retry.refreshed_at || new Date().toISOString());
+          setLiveError(`Global live lookup timed out. Showing ${orgNameById.get(fallbackOrgId) || fallbackOrgId} instead.`);
+          return;
+        } catch {}
+      }
       setLiveError(e?.message || 'Failed to load live agent status');
     } finally {
       setLiveLoading(false);
