@@ -1,6 +1,7 @@
 import fetch from 'node-fetch';
 import { MIGHTYCALL_API_KEY, MIGHTYCALL_BASE_URL } from '../config/env';
 import {
+  fetchMightyCallCalls,
   fetchMightyCallLiveCallByExtension,
   fetchMightyCallProfileStatusByExtension,
   getMightyCallAccessToken,
@@ -146,6 +147,89 @@ function extractStatusText(payload: any): string {
   );
 }
 
+function parseMs(value: any): number | null {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function isActiveCallStatusText(value: any): boolean {
+  const text = String(value || '').toLowerCase().trim();
+  if (!text) return false;
+  if (text.includes('ring')) return true;
+  if (text.includes('dial') || text.includes('calling')) return true;
+  if (text.includes('answer')) return true;
+  if (text.includes('connect') || text.includes('talk') || text.includes('progress') || text.includes('active')) return true;
+  if (text.includes('on call') || text.includes('on a call') || text.includes('in call')) return true;
+  return false;
+}
+
+function isTerminalCallStatusText(value: any): boolean {
+  const text = String(value || '').toLowerCase().trim();
+  if (!text) return false;
+  if (text.includes('complete') || text.includes('ended') || text.includes('hang')) return true;
+  if (text.includes('miss')) return true;
+  if (text.includes('fail') || text.includes('busy') || text.includes('cancel')) return true;
+  if (text.includes('offline')) return true;
+  if (text.includes('available') || text.includes('idle') || text.includes('ready')) return true;
+  return false;
+}
+
+function payloadHasOnCallBoolean(payload: any): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const queue: any[] = [payload];
+  const keys = new Set(['oncall', 'isoncall', 'incall', 'on_a_call', 'activecall', 'isactivecall']);
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next || typeof next !== 'object') continue;
+    for (const [key, value] of Object.entries(next)) {
+      const k = String(key || '').replace(/[^a-zA-Z_]/g, '').toLowerCase();
+      if (keys.has(k) && value === true) return true;
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+  return false;
+}
+
+function normalizeDirection(value: any): 'inbound' | 'outbound' | null {
+  const text = String(value || '').toLowerCase();
+  if (text.includes('out')) return 'outbound';
+  if (text.includes('in')) return 'inbound';
+  return null;
+}
+
+function pickActiveCallEvidence(rows: any[], extension: string): any | null {
+  const now = Date.now();
+  const normalizedExt = String(extension || '').trim();
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .filter((row) => {
+      const rowExt = String(
+        row?.extension ||
+        row?.agent_extension ||
+        row?.agentExtension ||
+        row?.operatorExtension ||
+        ''
+      ).replace(/\D/g, '');
+      return !rowExt || rowExt === normalizedExt;
+    })
+    .filter((row) => {
+      const status = String(row?.status || row?.state || row?.callStatus || '').trim();
+      const endedAt = row?.ended_at || row?.endedAt || null;
+      if (endedAt) return false;
+      if (isTerminalCallStatusText(status)) return false;
+      if (!isActiveCallStatusText(status)) return false;
+      const startedMs = parseMs(row?.started_at || row?.startedAt || row?.dateTimeUtc);
+      if (!startedMs) return true;
+      const ageMs = now - startedMs;
+      return ageMs >= 0 && ageMs <= (2 * 60 * 60 * 1000);
+    });
+
+  if (normalizedRows.length === 0) return null;
+  normalizedRows.sort((a, b) => (parseMs(b?.started_at || b?.startedAt || b?.dateTimeUtc) || 0) - (parseMs(a?.started_at || a?.startedAt || a?.dateTimeUtc) || 0));
+  return normalizedRows[0];
+}
+
 export async function getMightyCallStatusByExtension(input: {
   extension: string;
   orgId?: string | null;
@@ -166,8 +250,11 @@ export async function getMightyCallStatusByExtension(input: {
   const token = await getMightyCallAccessToken(overrideCreds);
   const apiKeyOverride = overrideCreds?.clientId || undefined;
 
+  const callsWindowStart = new Date(Date.now() - (20 * 60 * 1000)).toISOString();
+  const callsWindowEnd = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
+
   // Fetch status sources in parallel to keep within request deadline budget.
-  const [officialProfile, fallbackProfile, liveCall] = await Promise.all([
+  const [officialProfile, fallbackProfile, liveCall, recentCalls] = await Promise.all([
     withTimeout(
       fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
       2500,
@@ -183,12 +270,31 @@ export async function getMightyCallStatusByExtension(input: {
       2200,
       null
     ),
+    withTimeout(
+      fetchMightyCallCalls(token, {
+        extension,
+        startUtc: callsWindowStart,
+        endUtc: callsWindowEnd,
+        pageSize: '25',
+        maxPages: '1',
+        fast: true,
+        returnOnFirstSuccess: true,
+      }, apiKeyOverride).catch(() => []),
+      2300,
+      [] as any[]
+    ),
   ]);
   const profile = officialProfile || fallbackProfile;
   const currentCall = liveCall?.currentCall || profile?.currentCall || profile?.current_call || null;
+  const activeCallEvidence = pickActiveCallEvidence(recentCalls as any[], extension);
 
   const rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';
   let normalizedStatus = normalizeFromRawStatus(rawStatus);
+
+  const onCallBoolean = payloadHasOnCallBoolean(profile) || payloadHasOnCallBoolean(currentCall);
+  if (onCallBoolean && (normalizedStatus === 'available' || normalizedStatus === 'unknown')) {
+    normalizedStatus = 'on_call';
+  }
 
   if (liveCall?.onCall && currentCall) {
     const callStatusText = extractStatusText(currentCall);
@@ -196,6 +302,41 @@ export async function getMightyCallStatusByExtension(input: {
     if (byCall === 'ringing' || byCall === 'dialing') normalizedStatus = byCall;
     else normalizedStatus = 'on_call';
   }
+
+  if (activeCallEvidence && (normalizedStatus === 'available' || normalizedStatus === 'unknown')) {
+    const byEvidence = normalizeFromRawStatus(String(activeCallEvidence?.status || activeCallEvidence?.state || activeCallEvidence?.callStatus || ''));
+    normalizedStatus = byEvidence === 'unknown' ? 'on_call' : byEvidence;
+  }
+
+  const effectiveDirection = deriveDirection(
+    currentCall?.direction ||
+    currentCall?.callDirection ||
+    profile?.direction ||
+    activeCallEvidence?.direction ||
+    activeCallEvidence?.callDirection
+  ) || normalizeDirection(activeCallEvidence?.direction || activeCallEvidence?.callDirection);
+
+  const effectiveCounterpart = firstText(
+    currentCall?.from_number,
+    currentCall?.from,
+    currentCall?.caller?.number,
+    currentCall?.to_number,
+    currentCall?.to,
+    currentCall?.called?.number,
+    currentCall?.client?.address,
+    activeCallEvidence?.from_number,
+    activeCallEvidence?.from,
+    activeCallEvidence?.to_number,
+    activeCallEvidence?.to
+  ) || null;
+
+  const effectiveCurrentCallId = String(
+    currentCall?.id ||
+    currentCall?.callId ||
+    activeCallEvidence?.id ||
+    activeCallEvidence?.callId ||
+    ''
+  ).trim() || null;
 
   return {
     extension,
@@ -230,18 +371,11 @@ export async function getMightyCallStatusByExtension(input: {
     raw: {
       profileStatus: profile || null,
       liveCall: liveCall || null,
+      activeCallEvidence: activeCallEvidence || null,
     },
     source: 'mightycall_user_status_by_extension',
-    direction: deriveDirection(currentCall?.direction || currentCall?.callDirection || profile?.direction),
-    counterpartNumber: firstText(
-      currentCall?.from_number,
-      currentCall?.from,
-      currentCall?.caller?.number,
-      currentCall?.to_number,
-      currentCall?.to,
-      currentCall?.called?.number,
-      currentCall?.client?.address
-    ) || null,
-    currentCallId: String(currentCall?.id || currentCall?.callId || '').trim() || null,
+    direction: effectiveDirection,
+    counterpartNumber: effectiveCounterpart,
+    currentCallId: effectiveCurrentCallId,
   };
 }
