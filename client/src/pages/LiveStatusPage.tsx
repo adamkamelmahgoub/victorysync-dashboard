@@ -212,8 +212,9 @@ const LiveStatusPage: FC = () => {
                       <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
                       <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
                       <div className="mt-2 text-xs text-slate-500">
-                        {agent.direction ? `${agent.direction === 'outbound' ? 'Outbound' : 'Incoming'}${agent.from_number || agent.to_number ? ' - ' : ''}` : ''}
-                        {agent.direction === 'outbound' ? (agent.to_number || '') : (agent.from_number || '')}
+                        {agent.on_call
+                          ? `${agent.direction ? `${agent.direction === 'outbound' ? 'Outbound' : 'Incoming'}${agent.from_number || agent.to_number ? ' - ' : ''}` : ''}${agent.direction === 'outbound' ? (agent.to_number || '') : (agent.from_number || '')}`
+                          : ''}
                       </div>
                       <div className="mt-2 text-xs text-slate-500">Raw status: {agent.raw_status || '-'}</div>
                       <div className="mt-1 text-xs text-slate-500">API source: {agent.api_source || agent.source || '-'}</div>
@@ -240,4 +241,3 @@ const LiveStatusPage: FC = () => {
 };
 
 export default LiveStatusPage;
-

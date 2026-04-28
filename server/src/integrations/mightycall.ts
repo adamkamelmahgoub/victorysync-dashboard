@@ -906,21 +906,70 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
   const startUtc = new Date(now - (20 * 60 * 1000)).toISOString();
   const endUtc = new Date(now + (5 * 60 * 1000)).toISOString();
   const token = accessToken;
-  const rows = await fetchMightyCallCalls(token, {
-    extension: normalized,
-    callFilter: 'Connected',
-    customFilter: 'Open',
-    startUtc,
-    endUtc,
-    pageSize: '25',
-    maxPages: '1',
-    skip: '0',
-    fast: true,
-    returnOnFirstSuccess: true,
-  }, apiKeyOverride).catch(() => []);
+  const strategies: Array<{ label: string; filters: any }> = [
+    {
+      label: 'strict_connected_open',
+      filters: {
+        extension: normalized,
+        callFilter: 'Connected',
+        customFilter: 'Open',
+        startUtc,
+        endUtc,
+        pageSize: '25',
+        maxPages: '1',
+        skip: '0',
+        fast: true,
+        returnOnFirstSuccess: true,
+      },
+    },
+    {
+      label: 'extension_scoped_relaxed',
+      filters: {
+        extension: normalized,
+        startUtc,
+        endUtc,
+        pageSize: '50',
+        maxPages: '2',
+        skip: '0',
+        fast: true,
+        returnOnFirstSuccess: true,
+      },
+    },
+    {
+      label: 'window_relaxed',
+      filters: {
+        startUtc,
+        endUtc,
+        pageSize: '75',
+        maxPages: '2',
+        skip: '0',
+        fast: true,
+        returnOnFirstSuccess: true,
+      },
+    },
+  ];
+
+  const allRows: any[] = [];
+  const seenRows = new Set<string>();
+  const strategyStats: Array<{ label: string; rows: number }> = [];
+  for (const strategy of strategies) {
+    const rows = await fetchMightyCallCalls(token, strategy.filters, apiKeyOverride).catch(() => []);
+    strategyStats.push({ label: strategy.label, rows: Array.isArray(rows) ? rows.length : 0 });
+    for (const call of (Array.isArray(rows) ? rows : [])) {
+      const key = String(
+        call?.id ||
+        call?.callId ||
+        call?.requestGuid ||
+        `${extractMightyCallStartedAt(call) || ''}:${JSON.stringify(call?.called || '')}:${JSON.stringify(call?.caller || '')}`
+      );
+      if (seenRows.has(key)) continue;
+      seenRows.add(key);
+      allRows.push(call);
+    }
+  }
 
   const seen = new Set<string>();
-  const candidates = (Array.isArray(rows) ? rows : []).filter((call) => {
+  const candidates = allRows.filter((call) => {
     const scopedCall = {
       ...(call || {}),
       queryExtension: normalized,
@@ -947,7 +996,11 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
         status: extractMightyCallStatusCandidates(currentCall).find((status) => isMightyCallActiveStatus(status)) || 'Connected',
         onCall: true,
         currentCall,
-        sourceEndpoint: '/calls?extension&callFilter=Connected',
+        sourceEndpoint: '/calls?multi_strategy_live_probe',
+        debug: {
+          strategyStats,
+          candidateCount: candidates.length,
+        },
       }
     : null;
 }
