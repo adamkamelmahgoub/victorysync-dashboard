@@ -26,6 +26,7 @@ type LiveAgentStatus = {
   refreshed_at?: string | null;
   stale_after?: string | null;
   stale?: boolean;
+  evidence_age_ms?: number | null;
 };
 
 function fmtDurationFrom(startAt?: string | null, nowMs = Date.now()) {
@@ -46,6 +47,25 @@ function fmtDateTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString();
+}
+
+function fmtDurationFromSeconds(totalSeconds: number) {
+  const total = Math.max(Math.floor(totalSeconds), 0);
+  const hh = Math.floor(total / 3600);
+  const mm = Math.floor((total % 3600) / 60);
+  const ss = total % 60;
+  return hh > 0
+    ? `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+    : `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+function getLiveDuration(agent: LiveAgentStatus, nowMs: number) {
+  const byStartTime = fmtDurationFrom(agent.answered_at || agent.started_at, nowMs);
+  if (byStartTime !== '00:00') return byStartTime;
+  if (typeof agent.evidence_age_ms === 'number' && Number.isFinite(agent.evidence_age_ms) && agent.evidence_age_ms > 0) {
+    return fmtDurationFromSeconds(agent.evidence_age_ms / 1000);
+  }
+  return byStartTime;
 }
 
 const LiveStatusPage: FC = () => {
@@ -224,7 +244,7 @@ const LiveStatusPage: FC = () => {
                       <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
                       <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
                       {agent.on_call && (
-                        <div className="mt-2 text-xs font-semibold text-emerald-300">Live duration {fmtDurationFrom(agent.answered_at || agent.started_at, nowMs)}</div>
+                        <div className="mt-2 text-xs font-semibold text-emerald-300">Live duration {getLiveDuration(agent, nowMs)}</div>
                       )}
                       <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
                       <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
