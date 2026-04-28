@@ -380,7 +380,16 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
         row?.onCall === true ||
         row?.inCall === true
       );
-      const startedMs = parseMs(row?.started_at || row?.startedAt || row?.dateTimeUtc);
+      const startedMs = parseMs(
+        row?.started_at ||
+        row?.startedAt ||
+        row?.dateTimeUtc ||
+        row?.datetimeUtc ||
+        row?.createdAt ||
+        row?.created_at ||
+        row?.updatedAt ||
+        row?.updated_at
+      );
       const durationSeconds = parseDurationSeconds(
         row?.duration_seconds ??
         row?.durationSeconds ??
@@ -397,7 +406,29 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
     });
 
   if (normalizedRows.length === 0) return null;
-  normalizedRows.sort((a, b) => (parseMs(b?.started_at || b?.startedAt || b?.dateTimeUtc) || 0) - (parseMs(a?.started_at || a?.startedAt || a?.dateTimeUtc) || 0));
+  normalizedRows.sort((a, b) => (
+    parseMs(
+      b?.started_at ||
+      b?.startedAt ||
+      b?.dateTimeUtc ||
+      b?.datetimeUtc ||
+      b?.createdAt ||
+      b?.created_at ||
+      b?.updatedAt ||
+      b?.updated_at
+    ) || 0
+  ) - (
+    parseMs(
+      a?.started_at ||
+      a?.startedAt ||
+      a?.dateTimeUtc ||
+      a?.datetimeUtc ||
+      a?.createdAt ||
+      a?.created_at ||
+      a?.updatedAt ||
+      a?.updated_at
+    ) || 0
+  ));
   return normalizedRows[0];
 }
 
@@ -546,7 +577,12 @@ export async function getMightyCallStatusByExtension(input: {
   const activeEvidenceStartedMs = parseMs(
     activeCallEvidence?.started_at ||
     activeCallEvidence?.startedAt ||
-    activeCallEvidence?.dateTimeUtc
+    activeCallEvidence?.dateTimeUtc ||
+    activeCallEvidence?.datetimeUtc ||
+    activeCallEvidence?.createdAt ||
+    activeCallEvidence?.created_at ||
+    activeCallEvidence?.updatedAt ||
+    activeCallEvidence?.updated_at
   );
   const activeEvidenceId = callRowId(activeCallEvidence);
   const profileCallId = String(profileCurrentCallId || '').trim();
