@@ -45,6 +45,65 @@ export type MightyCallStatusByExtension = {
 
 const LIVE_STATUS_RESOLVER_VERSION = 'deterministic_v1';
 const LIVE_EVIDENCE_FRESH_MS = 60_000;
+const LIVE_DURATION_PROGRESS_WINDOW_MS = 25_000;
+const LIVE_DURATION_MAP_TTL_MS = 10 * 60 * 1000;
+const liveDurationProgressByCallId = new Map<string, {
+  lastDurationSec: number | null;
+  lastSeenAtMs: number;
+  lastProgressAtMs: number;
+}>();
+
+function pruneLiveDurationProgress(nowMs: number) {
+  for (const [callId, row] of liveDurationProgressByCallId.entries()) {
+    if ((nowMs - row.lastSeenAtMs) > LIVE_DURATION_MAP_TTL_MS) {
+      liveDurationProgressByCallId.delete(callId);
+    }
+  }
+}
+
+function trackDurationProgress(callId: string | null, durationSec: number | null, nowMs: number): {
+  hasRecentProgress: boolean;
+  firstSeen: boolean;
+} {
+  pruneLiveDurationProgress(nowMs);
+  if (!callId) return { hasRecentProgress: false, firstSeen: false };
+  const prev = liveDurationProgressByCallId.get(callId);
+  if (!prev) {
+    liveDurationProgressByCallId.set(callId, {
+      lastDurationSec: durationSec,
+      lastSeenAtMs: nowMs,
+      lastProgressAtMs: nowMs,
+    });
+    return { hasRecentProgress: true, firstSeen: true };
+  }
+
+  let lastProgressAtMs = prev.lastProgressAtMs;
+  if (
+    durationSec != null &&
+    prev.lastDurationSec != null &&
+    durationSec > prev.lastDurationSec
+  ) {
+    lastProgressAtMs = nowMs;
+  }
+
+  if (
+    durationSec != null &&
+    prev.lastDurationSec == null
+  ) {
+    lastProgressAtMs = nowMs;
+  }
+
+  liveDurationProgressByCallId.set(callId, {
+    lastDurationSec: durationSec ?? prev.lastDurationSec,
+    lastSeenAtMs: nowMs,
+    lastProgressAtMs,
+  });
+
+  return {
+    hasRecentProgress: (nowMs - lastProgressAtMs) <= LIVE_DURATION_PROGRESS_WINDOW_MS,
+    firstSeen: false,
+  };
+}
 
 function normalizeExtension(value: any): string {
   const digits = String(value || '').replace(/\D/g, '');
@@ -726,6 +785,8 @@ export async function getMightyCallStatusByExtension(input: {
     currentCall?.durationSeconds ??
     currentCall?.duration
   );
+  const directCallId = callRowId(currentCall) || callRowId(activeCallEvidence) || profileCurrentCallId || null;
+  const durationProgress = trackDurationProgress(directCallId, directCallDurationSeconds, Date.now());
   const directCallExpiredByDuration = Boolean(
     directCallStartedMs != null &&
     directCallDurationSeconds != null &&
@@ -755,6 +816,10 @@ export async function getMightyCallStatusByExtension(input: {
   const directLiveSignalTrusted = !(
     profileExplicitIdle &&
     relaxedHistoryOnlyLiveSignal
+  ) && (
+    !profileExplicitIdle ||
+    durationProgress.hasRecentProgress ||
+    Boolean(directCallAgeMs != null && directCallAgeMs >= 0 && directCallAgeMs <= 20_000)
   );
   const activeEvidenceAllowed = Boolean(
     activeCallEvidence &&
@@ -953,6 +1018,7 @@ export async function getMightyCallStatusByExtension(input: {
       strictConnectedOpenRows,
       relaxedHistoryOnlyLiveSignal,
       directLiveSignalTrusted,
+      durationProgress,
       profileStatus: profile || null,
       liveCall: liveCall || null,
       activeCallEvidence: activeCallEvidence || null,
