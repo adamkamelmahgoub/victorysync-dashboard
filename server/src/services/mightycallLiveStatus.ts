@@ -560,6 +560,9 @@ export async function getMightyCallStatusByExtension(input: {
   const activeEvidenceFresh =
     activeEvidenceStartedMs != null &&
     (Date.now() - activeEvidenceStartedMs) <= (20 * 60 * 1000);
+  const activeEvidenceVeryFresh =
+    activeEvidenceStartedMs != null &&
+    (Date.now() - activeEvidenceStartedMs) <= 45_000;
   const activeEvidenceStrong =
     activeEvidenceHasConnectedFlag ||
     activeEvidenceNorm === 'ringing' ||
@@ -582,6 +585,23 @@ export async function getMightyCallStatusByExtension(input: {
     } else if (activeEvidenceHasConnectedFlag) {
       normalizedStatus = 'on_call';
     }
+  }
+
+  // Hard guard against ghost "on call":
+  // if profile clearly says idle and we do not have a very-fresh active signal,
+  // do not keep on_call latched from older evidence.
+  const profileIdleNorm = normalizeFromRawStatus(rawStatus);
+  const profileExplicitIdle =
+    profileIdleNorm === 'available' ||
+    profileIdleNorm === 'dnd' ||
+    profileIdleNorm === 'offline' ||
+    profileIdleNorm === 'wrap_up';
+  const hasAuthoritativeLiveActiveSignal =
+    onCallBoolean ||
+    !!liveCall?.onCall ||
+    (activeEvidenceStrong && activeEvidenceVeryFresh && activeEvidenceMatchesProfileId);
+  if (profileExplicitIdle && !hasAuthoritativeLiveActiveSignal) {
+    normalizedStatus = profileIdleNorm;
   }
 
   const hasStrongActiveSignal = Boolean(
