@@ -247,6 +247,47 @@ function callRowId(row: any): string {
   ).trim();
 }
 
+function extractLikelyPhoneCandidates(payload: any): string[] {
+  const out = new Set<string>();
+  const queue: any[] = [payload];
+  const seen = new Set<any>();
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next || typeof next !== 'object' || seen.has(next)) continue;
+    seen.add(next);
+    for (const [key, value] of Object.entries(next)) {
+      const keyNorm = String(key || '').toLowerCase();
+      const looksLikePhoneField = (
+        keyNorm.includes('phone') ||
+        keyNorm.includes('number') ||
+        keyNorm.includes('address') ||
+        keyNorm.includes('caller') ||
+        keyNorm.includes('callee') ||
+        keyNorm.includes('destination') ||
+        keyNorm === 'from' ||
+        keyNorm === 'to'
+      );
+      if (looksLikePhoneField && (typeof value === 'string' || typeof value === 'number')) {
+        const text = String(value).trim();
+        if (text) out.add(text);
+      }
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+  return Array.from(out);
+}
+
+function pickCounterpartFromPayload(payload: any, extension: string): string | null {
+  const candidates = extractLikelyPhoneCandidates(payload);
+  for (const candidate of candidates) {
+    const digits = candidate.replace(/\D/g, '');
+    if (!digits) continue;
+    if (digits === extension) continue;
+    if (digits.length >= 7) return candidate;
+  }
+  return null;
+}
+
 function pickActiveCallEvidence(rows: any[], extension: string): any | null {
   const now = Date.now();
   const normalizedExt = String(extension || '').trim();
@@ -396,7 +437,7 @@ export async function getMightyCallStatusByExtension(input: {
     pickActiveCallEvidence(callsRows as any[], extension) ||
     pickActiveCallEvidence(broadRows as any[], extension);
 
-  const rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';
+  let rawStatus = extractStatusText(profile) || extractStatusText(currentCall) || 'Unknown';
   let normalizedStatus = normalizeFromRawStatus(rawStatus);
   const profileLooksIdle =
     normalizedStatus === 'available' ||
@@ -421,6 +462,9 @@ export async function getMightyCallStatusByExtension(input: {
     if (byCall === 'ringing' || byCall === 'dialing') normalizedStatus = byCall;
     else if (byCall === 'on_call') normalizedStatus = 'on_call';
     else if (onCallBoolean || currentCallFresh) normalizedStatus = 'on_call';
+    if (normalizedStatus === 'on_call' && normalizeFromRawStatus(rawStatus) === 'available' && callStatusText) {
+      rawStatus = callStatusText;
+    }
   }
 
   const activeEvidenceStatusText = String(
@@ -540,7 +584,10 @@ export async function getMightyCallStatusByExtension(input: {
     activeCallEvidence?.toNumber,
     activeCallEvidence?.fromNumber,
     activeCallEvidence?.phone,
-    activeCallEvidence?.counterpart
+    activeCallEvidence?.counterpart,
+    pickCounterpartFromPayload(currentCall, extension),
+    pickCounterpartFromPayload(profile, extension),
+    pickCounterpartFromPayload(activeCallEvidence, extension)
   ) || null;
 
   const effectiveCurrentCallId = String(

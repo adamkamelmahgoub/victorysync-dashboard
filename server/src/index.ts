@@ -1790,6 +1790,22 @@ async function checkAgentLiveStatusTableAvailability(force = false): Promise<boo
   }
 }
 
+function rowLooksAmbiguousLive(row: any): boolean {
+  const normalized = normalizeAgentLiveEventStatus(row?.normalized_status || row?.status || 'unknown');
+  if (!(normalized === 'on_call' || normalized === 'ringing' || normalized === 'dialing')) return false;
+  const raw = normalizeAgentLiveEventStatus(row?.raw_status || '');
+  const rawLooksIdle = raw === 'available' || raw === 'dnd' || raw === 'offline' || raw === 'wrap_up' || raw === 'unknown';
+  const missingCallContext = !(
+    row?.current_call_id ||
+    row?.external_call_id ||
+    row?.current_counterpart_number ||
+    row?.from_number ||
+    row?.to_number
+  );
+  const missingStart = !row?.status_started_at && !row?.started_at && !row?.answered_at;
+  return rawLooksIdle || missingCallContext || missingStart;
+}
+
 function mapLivePresenceRow(row: any) {
   const staleAfter = row?.stale_after || null;
   const stale = !staleAfter || Number.isNaN(Date.parse(String(staleAfter))) ? true : Date.now() > Date.parse(String(staleAfter));
@@ -6722,8 +6738,9 @@ app.get('/api/agents/live-status', async (req, res) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
       return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
     });
+    const hasAmbiguousRows = (liveRows || []).some((row: any) => rowLooksAmbiguousLive(row));
     const canInlineRefresh = orgIds.length <= 2 && agents.length <= 10;
-    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows || hasAmbiguousRows)) {
       await withDeadline(Promise.all(orgIds.map((id) => refreshAgentLiveStatusForOrg(id))), 5200, null as any);
       liveRows = await getAgentLiveStatusRowsForOrgIds(orgIds);
     }
@@ -6831,8 +6848,9 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
       return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
     });
+    const hasAmbiguousRows = (liveRows || []).some((row: any) => rowLooksAmbiguousLive(row));
     const canInlineRefresh = agents.length <= 10;
-    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows || hasAmbiguousRows)) {
       await withDeadline(refreshAgentLiveStatusForOrg(orgId), 5200, null as any);
       liveRows = await getAgentLiveStatusRowsForOrgIds([orgId]);
     }
@@ -6939,8 +6957,9 @@ app.get('/api/live-status', async (req, res) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
       return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
     });
+    const hasAmbiguousRows = (liveRows || []).some((row: any) => rowLooksAmbiguousLive(row));
     const canInlineRefresh = orgIds.length <= 2 && agents.length <= 10;
-    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows || hasAmbiguousRows)) {
       await withDeadline(Promise.all(orgIds.map((id) => refreshAgentLiveStatusForOrg(id))), 5200, null as any);
       liveRows = await getAgentLiveStatusRowsForOrgIds(orgIds);
     }
@@ -7052,8 +7071,9 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
       return Number.isFinite(updatedMs) && (Date.now() - updatedMs) <= LIVE_AGENT_PRESENCE_STALE_MS;
     });
+    const hasAmbiguousRows = (liveRows || []).some((row: any) => rowLooksAmbiguousLive(row));
     const canInlineRefresh = agents.length <= 10;
-    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows)) {
+    if (canInlineRefresh && (agents.length > 0) && ((liveRows || []).length === 0 || !hasFreshRows || hasAmbiguousRows)) {
       await withDeadline(refreshAgentLiveStatusForOrg(orgId), 5200, null as any);
       liveRows = await getAgentLiveStatusRowsForOrgIds([orgId]);
     }

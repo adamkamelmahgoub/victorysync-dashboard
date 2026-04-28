@@ -908,6 +908,8 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
   const token = accessToken;
   const rows = await fetchMightyCallCalls(token, {
     extension: normalized,
+    callFilter: 'Connected',
+    customFilter: 'Open',
     startUtc,
     endUtc,
     pageSize: '25',
