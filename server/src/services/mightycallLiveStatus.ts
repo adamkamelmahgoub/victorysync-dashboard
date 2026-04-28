@@ -604,6 +604,20 @@ export async function getMightyCallStatusByExtension(input: {
     normalizedStatus = profileIdleNorm;
   }
 
+  // Final hard-stop for sticky ghost calls:
+  // if upstream status is explicitly available and there is no direct live call object,
+  // never keep on_call from historical inference.
+  const profileExplicitAvailable = profileIdleNorm === 'available';
+  const hasDirectLiveCallObject = Boolean(
+    currentCall ||
+    liveCall?.currentCall ||
+    profile?.currentCall ||
+    profile?.current_call
+  );
+  if (profileExplicitAvailable && !hasDirectLiveCallObject && !onCallBoolean && !liveCall?.onCall) {
+    normalizedStatus = 'available';
+  }
+
   const hasStrongActiveSignal = Boolean(
     onCallBoolean ||
     liveCall?.onCall ||
