@@ -330,7 +330,7 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
       }
       if (!startedMs) return hasActiveStatus || hasConnectedFlag;
       const ageMs = now - startedMs;
-      if (!(ageMs >= 0 && ageMs <= (2 * 60 * 60 * 1000))) return false;
+      if (!(ageMs >= 0 && ageMs <= (20 * 60 * 1000))) return false;
       return hasActiveStatus || hasConnectedFlag;
     });
 
@@ -366,17 +366,17 @@ export async function getMightyCallStatusByExtension(input: {
   const [officialProfile, fallbackProfile, liveCall, recentCalls, recentCallsBroad] = await Promise.all([
     withTimeout(
       fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
-      2500,
+      4200,
       null
     ),
     withTimeout(
       fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
-      2500,
+      4200,
       null
     ),
     withTimeout(
       fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride).catch(() => null),
-      2200,
+      4200,
       null
     ),
     withTimeout(
@@ -389,7 +389,7 @@ export async function getMightyCallStatusByExtension(input: {
         fast: true,
         returnOnFirstSuccess: true,
       }, apiKeyOverride).catch(() => []),
-      2300,
+      4200,
       [] as any[]
     ),
     withTimeout(
@@ -401,7 +401,7 @@ export async function getMightyCallStatusByExtension(input: {
         fast: true,
         returnOnFirstSuccess: true,
       }, apiKeyOverride).catch(() => []),
-      2200,
+      4200,
       [] as any[]
     ),
   ]);

@@ -1996,8 +1996,17 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     rawNorm === 'in_progress' ||
     rawNorm === 'on_call'
   );
+  const rawLooksTerminalOrIdle =
+    rawNorm === 'available' ||
+    rawNorm === 'dnd' ||
+    rawNorm === 'offline' ||
+    rawNorm === 'wrap_up' ||
+    rawNorm === 'completed' ||
+    rawNorm === 'missed' ||
+    rawNorm === 'failed';
   const activeCallHint = !!(
     hasActiveStatusSignal &&
+    !rawLooksTerminalOrIdle &&
     (row?.current_call_id || row?.external_call_id || row?.current_counterpart_number || row?.from_number || row?.to_number) &&
     !row?.ended_at
   );
@@ -3187,7 +3196,7 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
       console.log(`[live-status] Fetching MightyCall live status for extension ${extension}`, { orgId });
       const status = await withDeadline(
         getMightyCallStatusByExtension({ orgId, extension }),
-        5000,
+        9000,
         null as any
       );
       if (!status) {
