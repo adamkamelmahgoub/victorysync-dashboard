@@ -288,6 +288,68 @@ function pickCounterpartFromPayload(payload: any, extension: string): string | n
   return null;
 }
 
+function pickDirectionalCounterpart(
+  direction: 'inbound' | 'outbound' | null,
+  currentCall: any,
+  profile: any,
+  activeCallEvidence: any,
+  extension: string
+): string | null {
+  if (direction === 'outbound') {
+    return firstText(
+      currentCall?.called?.[0]?.phone,
+      currentCall?.called?.[0]?.number,
+      currentCall?.called?.phone,
+      currentCall?.called?.number,
+      currentCall?.callee?.phone,
+      currentCall?.callee?.number,
+      currentCall?.destination?.number,
+      currentCall?.destination?.phone,
+      currentCall?.to_number,
+      currentCall?.to,
+      currentCall?.toNumber,
+      currentCall?.called_number,
+      currentCall?.calledNumber,
+      profile?.called?.[0]?.phone,
+      profile?.called?.[0]?.number,
+      profile?.destination?.number,
+      profile?.to_number,
+      profile?.to,
+      profile?.toNumber,
+      activeCallEvidence?.called?.[0]?.phone,
+      activeCallEvidence?.called?.[0]?.number,
+      activeCallEvidence?.called?.phone,
+      activeCallEvidence?.called?.number,
+      activeCallEvidence?.destination?.number,
+      activeCallEvidence?.to_number,
+      activeCallEvidence?.to,
+      activeCallEvidence?.toNumber
+    ) || pickCounterpartFromPayload(currentCall, extension) || pickCounterpartFromPayload(activeCallEvidence, extension);
+  }
+
+  if (direction === 'inbound') {
+    return firstText(
+      currentCall?.from_number,
+      currentCall?.from,
+      currentCall?.caller?.number,
+      currentCall?.client?.number,
+      currentCall?.client?.address,
+      profile?.from_number,
+      profile?.from,
+      profile?.caller?.number,
+      profile?.client?.number,
+      profile?.client?.address,
+      activeCallEvidence?.from_number,
+      activeCallEvidence?.from,
+      activeCallEvidence?.caller?.number,
+      activeCallEvidence?.client?.number,
+      activeCallEvidence?.client?.address
+    ) || pickCounterpartFromPayload(currentCall, extension) || pickCounterpartFromPayload(activeCallEvidence, extension);
+  }
+
+  return null;
+}
+
 function pickActiveCallEvidence(rows: any[], extension: string): any | null {
   const now = Date.now();
   const normalizedExt = String(extension || '').trim();
@@ -539,7 +601,15 @@ export async function getMightyCallStatusByExtension(input: {
     activeCallEvidence?.callDirection
   ) || normalizeDirection(activeCallEvidence?.direction || activeCallEvidence?.callDirection);
 
-  const effectiveCounterpart = firstText(
+  const directionalCounterpart = pickDirectionalCounterpart(
+    effectiveDirection,
+    currentCall,
+    profile,
+    activeCallEvidence,
+    extension
+  );
+
+  const effectiveCounterpart = directionalCounterpart || firstText(
     currentCall?.from_number,
     currentCall?.from,
     currentCall?.caller?.number,
