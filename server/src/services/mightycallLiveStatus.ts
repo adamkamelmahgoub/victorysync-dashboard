@@ -148,6 +148,17 @@ function deriveDirection(value: any): 'inbound' | 'outbound' | null {
   return null;
 }
 
+function liveCallHasConnectedPeer(call: any): boolean {
+  if (!call || typeof call !== 'object') return false;
+  const called = Array.isArray(call?.called) ? call.called : [];
+  if (called.some((p: any) => p && (p.isConnected === true || p.connected === true))) return true;
+  if (call?.callee && (call.callee.isConnected === true || call.callee.connected === true)) return true;
+  if (call?.destination && (call.destination.isConnected === true || call.destination.connected === true)) return true;
+  if (call?.client && (call.client.isConnected === true || call.client.connected === true)) return true;
+  if (call?.caller && (call.caller.isConnected === true || call.caller.connected === true)) return true;
+  return false;
+}
+
 function extractStatusText(payload: any): string {
   return firstText(
     payload?.status?.name,
@@ -623,6 +634,14 @@ export async function getMightyCallStatusByExtension(input: {
   if (liveCall?.onCall && currentCall) {
     const callStatusText = extractStatusText(currentCall);
     const byCall = normalizeFromRawStatus(callStatusText);
+    const callDirection = deriveDirection(
+      currentCall?.direction ||
+      currentCall?.callDirection ||
+      profile?.direction ||
+      activeCallEvidence?.direction ||
+      activeCallEvidence?.callDirection
+    );
+    const peerConnected = liveCallHasConnectedPeer(currentCall);
     const currentCallStartedMs = parseMs(
       currentCall?.startedAt ||
       currentCall?.started_at ||
@@ -630,7 +649,9 @@ export async function getMightyCallStatusByExtension(input: {
     );
     const currentCallAgeMs = currentCallStartedMs != null ? (Date.now() - currentCallStartedMs) : null;
     const currentCallFresh = currentCallAgeMs != null && currentCallAgeMs >= 0 && currentCallAgeMs <= 180_000;
-    if (byCall === 'ringing' || byCall === 'dialing') normalizedStatus = byCall;
+    if (!peerConnected) {
+      normalizedStatus = callDirection === 'outbound' ? 'dialing' : 'ringing';
+    } else if (byCall === 'ringing' || byCall === 'dialing') normalizedStatus = byCall;
     else if (byCall === 'on_call') normalizedStatus = 'on_call';
     else if (onCallBoolean || currentCallFresh) normalizedStatus = 'on_call';
     if (normalizedStatus === 'on_call' && normalizeFromRawStatus(rawStatus) === 'available' && callStatusText) {
@@ -723,6 +744,18 @@ export async function getMightyCallStatusByExtension(input: {
     profileIdleNorm === 'dnd' ||
     profileIdleNorm === 'offline' ||
     profileIdleNorm === 'wrap_up';
+  const strategyStats = Array.isArray(liveCall?.debug?.strategyStats) ? liveCall.debug.strategyStats : [];
+  const strictConnectedOpenRows = Number(
+    strategyStats.find((entry: any) => String(entry?.label || '') === 'strict_connected_open')?.rows ?? -1
+  );
+  const relaxedHistoryOnlyLiveSignal = Boolean(
+    String(liveCall?.sourceEndpoint || '').includes('multi_strategy_live_probe') &&
+    strictConnectedOpenRows === 0
+  );
+  const directLiveSignalTrusted = !(
+    profileExplicitIdle &&
+    relaxedHistoryOnlyLiveSignal
+  );
   const activeEvidenceAllowed = Boolean(
     activeCallEvidence &&
     activeEvidenceStrong &&
@@ -732,10 +765,10 @@ export async function getMightyCallStatusByExtension(input: {
   );
 
   let decisionReason = 'profile_status_default';
-  if (hasFreshDirectLiveCallObject) {
+  if (hasFreshDirectLiveCallObject && directLiveSignalTrusted) {
     if (normalizedStatus === 'ringing' || normalizedStatus === 'dialing' || normalizedStatus === 'on_call') {
       decisionReason = 'direct_live_call_status';
-    } else if (onCallBoolean || liveCall?.onCall) {
+    } else if (onCallBoolean || (liveCall?.onCall && directLiveSignalTrusted)) {
       normalizedStatus = 'on_call';
       decisionReason = 'direct_live_call_boolean';
     } else {
@@ -762,7 +795,7 @@ export async function getMightyCallStatusByExtension(input: {
 
   const hasStrongActiveSignal = Boolean(
     onCallBoolean ||
-    liveCall?.onCall ||
+    (liveCall?.onCall && directLiveSignalTrusted) ||
     activeEvidenceAllowed
   );
 
@@ -917,6 +950,9 @@ export async function getMightyCallStatusByExtension(input: {
       activeEvidenceMatched: activeEvidenceMatchesProfileId,
       activeEvidenceExpiredByDuration,
       activeEvidenceAgeMs,
+      strictConnectedOpenRows,
+      relaxedHistoryOnlyLiveSignal,
+      directLiveSignalTrusted,
       profileStatus: profile || null,
       liveCall: liveCall || null,
       activeCallEvidence: activeCallEvidence || null,
