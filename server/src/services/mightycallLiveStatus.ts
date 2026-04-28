@@ -495,10 +495,19 @@ export async function getMightyCallStatusByExtension(input: {
   const activeEvidenceFreshForUnknownFallback =
     activeEvidenceStartedMs != null &&
     (Date.now() - activeEvidenceStartedMs) <= 180_000;
+  const activeEvidenceFresh =
+    activeEvidenceStartedMs != null &&
+    (Date.now() - activeEvidenceStartedMs) <= (20 * 60 * 1000);
+  const activeEvidenceStrong =
+    activeEvidenceHasConnectedFlag ||
+    activeEvidenceNorm === 'ringing' ||
+    activeEvidenceNorm === 'dialing' ||
+    activeEvidenceNorm === 'on_call';
   const canUseEvidenceToForceActive =
     !profileLooksIdle ||
     !!currentCall ||
     onCallBoolean ||
+    (activeEvidenceStrong && activeEvidenceFresh) ||
     (normalizedStatus === 'unknown' && activeEvidenceFreshForUnknownFallback);
   if (
     activeCallEvidence &&
