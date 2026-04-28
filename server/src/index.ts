@@ -1265,6 +1265,9 @@ async function upsertAgentLiveStatusRow(params: {
   endedAt?: string | null;
   rawEvent?: any;
   rawPayload?: any;
+  decisionReason?: string | null;
+  evidenceAgeMs?: number | null;
+  resolverVersion?: string | null;
   source?: string | null;
   syncError?: string | null;
   lastSyncedAt?: string | null;
@@ -1308,8 +1311,8 @@ async function upsertAgentLiveStatusRow(params: {
     mightycall_user_id: params.mightycallUserId || null,
     external_call_id: isTerminal ? null : (params.externalCallId || null),
     current_call_id: isTerminal ? null : (params.currentCallId || params.externalCallId || null),
-    direction: params.direction || null,
-    current_call_direction: params.currentCallDirection || params.direction || null,
+    direction: isTerminal ? null : (params.direction || null),
+    current_call_direction: isTerminal ? null : (params.currentCallDirection || params.direction || null),
     from_number: isTerminal ? null : (params.fromNumber || null),
     to_number: isTerminal ? null : (params.toNumber || null),
     current_counterpart_number: isTerminal ? null : (params.currentCounterpartNumber || null),
@@ -1325,7 +1328,12 @@ async function upsertAgentLiveStatusRow(params: {
     source: params.source || 'mightycall_user_status_by_extension',
     sync_error: params.syncError || null,
     raw_event: params.rawEvent || null,
-    raw_payload: params.rawPayload || params.rawEvent || null,
+    raw_payload: {
+      ...(params.rawPayload && typeof params.rawPayload === 'object' ? params.rawPayload : {}),
+      resolverVersion: params.resolverVersion || null,
+      decisionReason: params.decisionReason || null,
+      evidenceAgeMs: params.evidenceAgeMs ?? null,
+    },
     stale: false,
     updated_at: new Date().toISOString(),
   };
@@ -1983,6 +1991,7 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
       : (row?.from_number || row?.to_number || null)
   );
   const startedAt = row?.status_started_at || row?.answered_at || row?.started_at || null;
+  const startedMs = Date.parse(String(startedAt || ''));
   const rawNorm = normalizeAgentLiveEventStatus(row?.raw_status || '');
   const hasActiveStatusSignal = (
     statusNorm === 'ringing' ||
@@ -2010,10 +2019,18 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     (row?.current_call_id || row?.external_call_id || row?.current_counterpart_number || row?.from_number || row?.to_number) &&
     !row?.ended_at
   );
-  const effectiveOnCall = presence.on_call || activeCallHint;
+  const payloadMeta = row?.raw_payload && typeof row.raw_payload === 'object' ? row.raw_payload : {};
+  const decisionReason = String((payloadMeta as any)?.decisionReason || '');
+  const evidenceAgeMs = Number((payloadMeta as any)?.evidenceAgeMs);
+  const resolverVersion = String((payloadMeta as any)?.resolverVersion || '');
+  const idleAndNoFreshStart =
+    (statusNorm === 'available' || statusNorm === 'dnd' || statusNorm === 'offline' || statusNorm === 'wrap_up') &&
+    (!Number.isFinite(startedMs) || ((Date.now() - startedMs) > 90_000));
+  const effectiveOnCall = idleAndNoFreshStart ? false : (presence.on_call || activeCallHint);
   const effectiveStatus = effectiveOnCall
     ? (statusNorm === 'unknown' || statusNorm === 'available' ? 'On Call' : presence.label)
     : presence.label;
+  const effectiveDirection = effectiveOnCall ? direction : null;
   return {
     user_id: identity?.user_id || String(row?.user_id || ''),
     org_id: row?.org_id || null,
@@ -2022,7 +2039,7 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     extension: resolvedExtension || null,
     display_name: identity?.display_name || null,
     on_call: effectiveOnCall,
-    direction,
+    direction: effectiveDirection,
     from_number: row?.from_number || null,
     to_number: row?.to_number || null,
     counterpart: effectiveOnCall ? counterpart : null,
@@ -2038,6 +2055,9 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     stale,
     api_source: row?.source || 'mightycall_user_status_by_extension',
     sync_error: row?.sync_error || null,
+    decision_reason: decisionReason || null,
+    evidence_age_ms: Number.isFinite(evidenceAgeMs) ? evidenceAgeMs : null,
+    resolver_version: resolverVersion || null,
   };
 }
 
@@ -2090,6 +2110,9 @@ async function probeLiveStatusesForAgents(agents: RealAgentMember[]): Promise<Ma
         stale_after: null,
         stale: false,
         sync_error: null,
+        decision_reason: status.decisionReason || null,
+        evidence_age_ms: typeof status.evidenceAgeMs === 'number' ? status.evidenceAgeMs : null,
+        resolver_version: status.resolverVersion || null,
       });
     } catch (err: any) {
       out.set(key, {
@@ -3260,6 +3283,9 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
         endedAt: isActive ? null : new Date().toISOString(),
         rawEvent: status.raw,
         rawPayload: status.raw,
+        decisionReason: status.decisionReason || null,
+        evidenceAgeMs: typeof status.evidenceAgeMs === 'number' ? status.evidenceAgeMs : null,
+        resolverVersion: status.resolverVersion || null,
         source: 'mightycall_user_status_by_extension',
         lastSyncedAt: status.lastSyncedAt,
         lastEventAt: status.lastSyncedAt,
@@ -3281,6 +3307,38 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
       } catch {}
     }
   }));
+
+  // Hard stale-eviction pass: clear any rows still marked active when evidence is old
+  // and raw status is already idle/terminal.
+  const staleCutoffIso = new Date(Date.now() - 90_000).toISOString();
+  const idleRawStatuses = ['available', 'dnd', 'offline', 'wrap_up', 'unknown'];
+  const { data: staleRows } = await supabaseAdmin
+    .from('agent_live_status')
+    .select('id')
+    .eq('org_id', orgId)
+    .in('status', ['on_call', 'ringing', 'dialing'])
+    .lt('last_event_at', staleCutoffIso)
+    .in('raw_status', idleRawStatuses);
+  const staleIds = Array.from(new Set((staleRows || []).map((r: any) => String(r?.id || '')).filter(Boolean)));
+  if (staleIds.length > 0) {
+    await supabaseAdmin
+      .from('agent_live_status')
+      .update({
+        status: 'available',
+        normalized_status: 'available',
+        current_call_id: null,
+        external_call_id: null,
+        from_number: null,
+        to_number: null,
+        current_counterpart_number: null,
+        started_at: null,
+        answered_at: null,
+        ended_at: new Date().toISOString(),
+        stale: false,
+        source: 'mightycall_user_status_by_extension',
+      })
+      .in('id', staleIds);
+  }
 }
 
 async function runLiveAgentPresenceRefreshCycle() {
@@ -7017,13 +7075,8 @@ app.get('/api/live-status', async (req, res) => {
         stale: true,
       };
     });
-    const refreshedAt = items
-      .map((item: any) => item.refreshed_at || null)
-      .filter(Boolean)
-      .sort()
-      .slice(-1)[0] || new Date().toISOString();
-    const needsProbe = agents.length <= 10 && items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
-    if (needsProbe) {
+    const shouldDirectProbe = agents.length <= 10 && items.length > 0;
+    if (shouldDirectProbe) {
       const probe = await probeLiveStatusesForAgents(agents);
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
@@ -7032,6 +7085,11 @@ app.get('/api/live-status', async (req, res) => {
         if (next) items[i] = next;
       }
     }
+    const refreshedAt = items
+      .map((item: any) => item.refreshed_at || null)
+      .filter(Boolean)
+      .sort()
+      .slice(-1)[0] || new Date().toISOString();
     console.log('[live-status] UI payload source', {
       source: 'mightycall_user_status_by_extension',
       org_ids: orgIds,
@@ -7130,13 +7188,8 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
         stale: true,
       };
     });
-    const refreshedAt = items
-      .map((item: any) => item.refreshed_at || null)
-      .filter(Boolean)
-      .sort()
-      .slice(-1)[0] || new Date().toISOString();
-    const needsProbe = agents.length <= 10 && items.length > 0 && items.every((item: any) => !!item.stale || !item.refreshed_at);
-    if (needsProbe) {
+    const shouldDirectProbe = agents.length <= 10 && items.length > 0;
+    if (shouldDirectProbe) {
       const probe = await probeLiveStatusesForAgents(agents);
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
@@ -7145,6 +7198,11 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
         if (next) items[i] = next;
       }
     }
+    const refreshedAt = items
+      .map((item: any) => item.refreshed_at || null)
+      .filter(Boolean)
+      .sort()
+      .slice(-1)[0] || new Date().toISOString();
     console.log('[live-status] UI payload source', {
       source: 'mightycall_user_status_by_extension',
       org_id: orgId,

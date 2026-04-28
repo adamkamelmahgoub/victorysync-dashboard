@@ -32,7 +32,18 @@ export type MightyCallStatusByExtension = {
   direction?: 'inbound' | 'outbound' | null;
   counterpartNumber?: string | null;
   currentCallId?: string | null;
+  decisionReason?: string;
+  evidenceAgeMs?: number | null;
+  resolverVersion?: string;
+  profileStatusNorm?: NormalizedLiveStatus;
+  hasDirectLiveCallObject?: boolean;
+  activeEvidenceFresh?: boolean;
+  activeEvidenceMatched?: boolean;
+  activeEvidenceExpiredByDuration?: boolean;
 };
+
+const LIVE_STATUS_RESOLVER_VERSION = 'deterministic_v1';
+const LIVE_EVIDENCE_FRESH_MS = 60_000;
 
 function normalizeExtension(value: any): string {
   const digits = String(value || '').replace(/\D/g, '');
@@ -167,6 +178,47 @@ function parseDurationSeconds(value: any): number | null {
   return Math.floor(num);
 }
 
+function normalizeDigits(value: any): string {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function collectBusinessLineDigits(...payloads: any[]): Set<string> {
+  const out = new Set<string>();
+  for (const payload of payloads) {
+    const candidates = [
+      payload?.businessNumber,
+      payload?.business_number,
+      payload?.caller?.phone,
+      payload?.caller?.number,
+      payload?.caller?.address,
+      payload?.from_number,
+      payload?.from,
+    ];
+    for (const value of candidates) {
+      const digits = normalizeDigits(value);
+      if (digits.length >= 7) out.add(digits);
+    }
+  }
+  return out;
+}
+
+function firstCounterpartCandidate(
+  candidates: any[],
+  extension: string,
+  blockedDigits: Set<string>
+): string | null {
+  for (const candidate of candidates) {
+    const text = String(candidate || '').trim();
+    if (!text) continue;
+    const digits = normalizeDigits(text);
+    if (!digits) continue;
+    if (digits === extension) continue;
+    if (blockedDigits.has(digits)) continue;
+    if (digits.length >= 7) return text;
+  }
+  return null;
+}
+
 function isActiveCallStatusText(value: any): boolean {
   const text = String(value || '').toLowerCase().trim();
   if (!text) return false;
@@ -295,8 +347,9 @@ function pickDirectionalCounterpart(
   activeCallEvidence: any,
   extension: string
 ): string | null {
+  const blockedBusinessDigits = collectBusinessLineDigits(currentCall, profile, activeCallEvidence);
   if (direction === 'outbound') {
-    return firstText(
+    const strictCandidate = firstCounterpartCandidate([
       currentCall?.called?.[0]?.phone,
       currentCall?.called?.[0]?.number,
       currentCall?.called?.phone,
@@ -324,11 +377,13 @@ function pickDirectionalCounterpart(
       activeCallEvidence?.to_number,
       activeCallEvidence?.to,
       activeCallEvidence?.toNumber
-    ) || pickCounterpartFromPayload(currentCall, extension) || pickCounterpartFromPayload(activeCallEvidence, extension);
+    ], extension, blockedBusinessDigits);
+    if (strictCandidate) return strictCandidate;
+    return pickCounterpartFromPayload(currentCall, extension) || pickCounterpartFromPayload(activeCallEvidence, extension);
   }
 
   if (direction === 'inbound') {
-    return firstText(
+    const strictCandidate = firstCounterpartCandidate([
       currentCall?.from_number,
       currentCall?.from,
       currentCall?.caller?.number,
@@ -344,7 +399,9 @@ function pickDirectionalCounterpart(
       activeCallEvidence?.caller?.number,
       activeCallEvidence?.client?.number,
       activeCallEvidence?.client?.address
-    ) || pickCounterpartFromPayload(currentCall, extension) || pickCounterpartFromPayload(activeCallEvidence, extension);
+    ], extension, blockedBusinessDigits);
+    if (strictCandidate) return strictCandidate;
+    return pickCounterpartFromPayload(currentCall, extension) || pickCounterpartFromPayload(activeCallEvidence, extension);
   }
 
   return null;
@@ -551,7 +608,8 @@ export async function getMightyCallStatusByExtension(input: {
       currentCall?.started_at ||
       currentCall?.dateTimeUtc
     );
-    const currentCallFresh = currentCallStartedMs != null && (Date.now() - currentCallStartedMs) <= 180_000;
+    const currentCallAgeMs = currentCallStartedMs != null ? (Date.now() - currentCallStartedMs) : null;
+    const currentCallFresh = currentCallAgeMs != null && currentCallAgeMs >= 0 && currentCallAgeMs <= 180_000;
     if (byCall === 'ringing' || byCall === 'dialing') normalizedStatus = byCall;
     else if (byCall === 'on_call') normalizedStatus = 'on_call';
     else if (onCallBoolean || currentCallFresh) normalizedStatus = 'on_call';
@@ -584,83 +642,108 @@ export async function getMightyCallStatusByExtension(input: {
     activeCallEvidence?.updatedAt ||
     activeCallEvidence?.updated_at
   );
+  const activeEvidenceDurationSeconds = parseDurationSeconds(
+    activeCallEvidence?.duration_seconds ??
+    activeCallEvidence?.durationSeconds ??
+    activeCallEvidence?.duration
+  );
+  const activeEvidenceExpiredByDuration = Boolean(
+    activeEvidenceStartedMs != null &&
+    activeEvidenceDurationSeconds != null &&
+    (activeEvidenceStartedMs + (activeEvidenceDurationSeconds * 1000)) < (Date.now() - 15_000)
+  );
+  const activeEvidenceAgeMs = activeEvidenceStartedMs != null ? (Date.now() - activeEvidenceStartedMs) : null;
   const activeEvidenceId = callRowId(activeCallEvidence);
   const profileCallId = String(profileCurrentCallId || '').trim();
   const activeEvidenceMatchesProfileId =
     !profileCallId ||
     !activeEvidenceId ||
     activeEvidenceId === profileCallId;
-  const activeEvidenceFreshForUnknownFallback =
-    activeEvidenceStartedMs != null &&
-    (Date.now() - activeEvidenceStartedMs) <= 180_000;
-  const activeEvidenceFresh =
-    activeEvidenceStartedMs != null &&
-    (Date.now() - activeEvidenceStartedMs) <= (20 * 60 * 1000);
-  const activeEvidenceVeryFresh =
-    activeEvidenceStartedMs != null &&
-    (Date.now() - activeEvidenceStartedMs) <= 45_000;
+  const activeEvidenceFresh = activeEvidenceAgeMs != null && activeEvidenceAgeMs >= 0 && activeEvidenceAgeMs <= LIVE_EVIDENCE_FRESH_MS;
   const activeEvidenceStrong =
     activeEvidenceHasConnectedFlag ||
     activeEvidenceNorm === 'ringing' ||
     activeEvidenceNorm === 'dialing' ||
     activeEvidenceNorm === 'on_call';
-  const canUseEvidenceToForceActive =
-    !profileLooksIdle ||
-    !!currentCall ||
-    onCallBoolean ||
-    (activeEvidenceStrong && activeEvidenceFresh) ||
-    (normalizedStatus === 'unknown' && activeEvidenceFreshForUnknownFallback);
-  if (
-    activeCallEvidence &&
-    activeEvidenceMatchesProfileId &&
-    canUseEvidenceToForceActive &&
-    (normalizedStatus === 'available' || normalizedStatus === 'unknown')
-  ) {
-    if (activeEvidenceNorm === 'ringing' || activeEvidenceNorm === 'dialing' || activeEvidenceNorm === 'on_call') {
-      normalizedStatus = activeEvidenceNorm;
-    } else if (activeEvidenceHasConnectedFlag) {
-      normalizedStatus = 'on_call';
-    }
-  }
-
-  // Hard guard against ghost "on call":
-  // if profile clearly says idle and we do not have a very-fresh active signal,
-  // do not keep on_call latched from older evidence.
   const profileIdleNorm = normalizeFromRawStatus(rawStatus);
-  const profileExplicitIdle =
-    profileIdleNorm === 'available' ||
-    profileIdleNorm === 'dnd' ||
-    profileIdleNorm === 'offline' ||
-    profileIdleNorm === 'wrap_up';
-  const hasAuthoritativeLiveActiveSignal =
-    onCallBoolean ||
-    !!liveCall?.onCall ||
-    (activeEvidenceStrong && activeEvidenceVeryFresh && activeEvidenceMatchesProfileId);
-  if (profileExplicitIdle && !hasAuthoritativeLiveActiveSignal) {
-    normalizedStatus = profileIdleNorm;
-  }
-
-  // Final hard-stop for sticky ghost calls:
-  // if upstream status is explicitly available and there is no direct live call object,
-  // never keep on_call from historical inference.
-  const profileExplicitAvailable = profileIdleNorm === 'available';
   const hasDirectLiveCallObject = Boolean(
     currentCall ||
     liveCall?.currentCall ||
     profile?.currentCall ||
     profile?.current_call
   );
-  if (profileExplicitAvailable && !hasDirectLiveCallObject && !onCallBoolean && !liveCall?.onCall) {
-    normalizedStatus = 'available';
+  const directCallStartedMs = parseMs(
+    currentCall?.startedAt ||
+    currentCall?.started_at ||
+    currentCall?.dateTimeUtc ||
+    currentCall?.datetimeUtc ||
+    currentCall?.updatedAt ||
+    currentCall?.updated_at
+  );
+  const directCallDurationSeconds = parseDurationSeconds(
+    currentCall?.duration_seconds ??
+    currentCall?.durationSeconds ??
+    currentCall?.duration
+  );
+  const directCallExpiredByDuration = Boolean(
+    directCallStartedMs != null &&
+    directCallDurationSeconds != null &&
+    (directCallStartedMs + (directCallDurationSeconds * 1000)) < (Date.now() - 15_000)
+  );
+  const directCallAgeMs = directCallStartedMs != null ? (Date.now() - directCallStartedMs) : null;
+  const hasFreshDirectLiveCallObject = Boolean(
+    hasDirectLiveCallObject &&
+    directCallAgeMs != null &&
+    directCallAgeMs >= 0 &&
+    directCallAgeMs <= LIVE_EVIDENCE_FRESH_MS &&
+    !directCallExpiredByDuration
+  );
+  const profileExplicitIdle =
+    profileIdleNorm === 'available' ||
+    profileIdleNorm === 'dnd' ||
+    profileIdleNorm === 'offline' ||
+    profileIdleNorm === 'wrap_up';
+  const activeEvidenceAllowed = Boolean(
+    activeCallEvidence &&
+    activeEvidenceStrong &&
+    !activeEvidenceExpiredByDuration &&
+    activeEvidenceFresh &&
+    activeEvidenceMatchesProfileId
+  );
+
+  let decisionReason = 'profile_status_default';
+  if (hasFreshDirectLiveCallObject) {
+    if (normalizedStatus === 'ringing' || normalizedStatus === 'dialing' || normalizedStatus === 'on_call') {
+      decisionReason = 'direct_live_call_status';
+    } else if (onCallBoolean || liveCall?.onCall) {
+      normalizedStatus = 'on_call';
+      decisionReason = 'direct_live_call_boolean';
+    } else {
+      normalizedStatus = profileIdleNorm;
+      decisionReason = 'direct_live_call_profile_fallback';
+    }
+  } else if (profileExplicitIdle) {
+    normalizedStatus = profileIdleNorm;
+    decisionReason = hasDirectLiveCallObject
+      ? 'profile_idle_overrides_stale_direct_live_call'
+      : 'profile_idle_without_direct_live_call';
+  } else if (activeEvidenceAllowed) {
+    if (activeEvidenceNorm === 'ringing' || activeEvidenceNorm === 'dialing' || activeEvidenceNorm === 'on_call') {
+      normalizedStatus = activeEvidenceNorm;
+      decisionReason = 'fresh_active_evidence_status';
+    } else if (activeEvidenceHasConnectedFlag) {
+      normalizedStatus = 'on_call';
+      decisionReason = 'fresh_active_evidence_connected_flag';
+    }
+  } else {
+    normalizedStatus = profileIdleNorm;
+    decisionReason = 'profile_fallback_without_fresh_evidence';
   }
 
   const hasStrongActiveSignal = Boolean(
     onCallBoolean ||
     liveCall?.onCall ||
-    activeEvidenceHasConnectedFlag ||
-    activeEvidenceNorm === 'ringing' ||
-    activeEvidenceNorm === 'dialing' ||
-    activeEvidenceNorm === 'on_call'
+    activeEvidenceAllowed
   );
 
   const effectiveDirection = deriveDirection(
@@ -759,6 +842,7 @@ export async function getMightyCallStatusByExtension(input: {
   const canSafelyKeepOnCall = hasStrongActiveSignal && hasConcreteLiveContext;
   if (normalizedStatus === 'on_call' && !canSafelyKeepOnCall) {
     normalizedStatus = 'available';
+    decisionReason = 'safety_clear_no_live_context';
   }
 
   const shouldClearWeakUnknownCallContext =
@@ -805,6 +889,14 @@ export async function getMightyCallStatusByExtension(input: {
     ),
     lastSyncedAt: new Date().toISOString(),
     raw: {
+      resolverVersion: LIVE_STATUS_RESOLVER_VERSION,
+      decisionReason,
+      profileStatusNorm: profileIdleNorm,
+      hasDirectLiveCallObject,
+      activeEvidenceFresh,
+      activeEvidenceMatched: activeEvidenceMatchesProfileId,
+      activeEvidenceExpiredByDuration,
+      activeEvidenceAgeMs,
       profileStatus: profile || null,
       liveCall: liveCall || null,
       activeCallEvidence: activeCallEvidence || null,
@@ -813,5 +905,13 @@ export async function getMightyCallStatusByExtension(input: {
     direction: shouldClearWeakUnknownCallContext ? null : effectiveDirection,
     counterpartNumber: shouldClearWeakUnknownCallContext ? null : effectiveCounterpart,
     currentCallId: shouldClearWeakUnknownCallContext ? null : effectiveCurrentCallId,
+    decisionReason,
+    evidenceAgeMs: activeEvidenceAgeMs,
+    resolverVersion: LIVE_STATUS_RESOLVER_VERSION,
+    profileStatusNorm: profileIdleNorm,
+    hasDirectLiveCallObject,
+    activeEvidenceFresh,
+    activeEvidenceMatched: activeEvidenceMatchesProfileId,
+    activeEvidenceExpiredByDuration,
   };
 }
