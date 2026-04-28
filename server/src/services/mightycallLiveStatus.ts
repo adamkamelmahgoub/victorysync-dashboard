@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 import { MIGHTYCALL_API_KEY, MIGHTYCALL_BASE_URL } from '../config/env';
 import {
   fetchMightyCallCalls,
+  fetchMightyCallContactCenterCommunications,
   fetchMightyCallLiveCallByExtension,
   fetchMightyCallProfileStatusByExtension,
   getMightyCallAccessToken,
@@ -517,7 +518,7 @@ export async function getMightyCallStatusByExtension(input: {
   const callsWindowEnd = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
 
   // Fetch status sources in parallel to keep within request deadline budget.
-  const [officialProfile, fallbackProfile, liveCall, recentCalls, recentCallsBroad] = await Promise.all([
+  const [officialProfile, fallbackProfile, liveCall, recentCalls, recentCallsBroad, recentComms] = await Promise.all([
     withTimeout(
       fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
       4200,
@@ -558,6 +559,19 @@ export async function getMightyCallStatusByExtension(input: {
       4200,
       [] as any[]
     ),
+    withTimeout(
+      fetchMightyCallContactCenterCommunications(token, {
+        from: new Date(Date.now() - (3 * 60 * 1000)).toISOString(),
+        to: new Date(Date.now() + (60 * 1000)).toISOString(),
+        type: 'Call',
+        pageSize: '50',
+        page: '1',
+        showUsers: 'true',
+        resolveContacts: 'false',
+      }, apiKeyOverride).catch(() => []),
+      4200,
+      [] as any[]
+    ),
   ]);
   const profile = officialProfile || fallbackProfile;
   const currentCall = firstObject(
@@ -581,6 +595,7 @@ export async function getMightyCallStatusByExtension(input: {
   ) || null;
   const callsRows = Array.isArray(recentCalls) ? recentCalls : [];
   const broadRows = Array.isArray(recentCallsBroad) ? recentCallsBroad : [];
+  const commRows = Array.isArray(recentComms) ? recentComms : [];
   const callByProfileId = profileCurrentCallId
     ? callsRows.find((row: any) => (
         String(row?.id || row?.callId || row?.requestGuid || '').trim() === profileCurrentCallId
@@ -588,6 +603,7 @@ export async function getMightyCallStatusByExtension(input: {
     : null;
   const activeCallEvidence =
     callByProfileId ||
+    pickActiveCallEvidence(commRows as any[], extension) ||
     pickActiveCallEvidence(callsRows as any[], extension) ||
     pickActiveCallEvidence(broadRows as any[], extension);
 
