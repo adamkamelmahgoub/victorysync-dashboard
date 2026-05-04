@@ -41,6 +41,7 @@ export function SMSPage() {
   const [sending, setSending] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [search, setSearch] = useState('');
+  const [emptyReason, setEmptyReason] = useState<string | null>(null);
 
   const loadMessages = async (reset = false) => {
     if (!user) return;
@@ -76,6 +77,7 @@ export function SMSPage() {
       const rows: SMSMessage[] = data.messages || [];
       setMessages((previous) => (reset ? rows : [...previous, ...rows]));
       setNextOffset(data.next_offset ?? null);
+      if (reset) setEmptyReason(data.empty_reason || null);
     } catch (err: any) {
       setError(err?.message || 'Error fetching messages');
       console.error('Error fetching messages:', err);
@@ -149,6 +151,26 @@ export function SMSPage() {
     return { inbound, outbound, unknown };
   }, [filteredMessages]);
 
+  const emptyCopy = search.trim()
+    ? {
+        title: 'No matching messages',
+        description: 'No SMS rows match the current search.',
+      }
+    : emptyReason === 'no_assigned_numbers'
+      ? {
+          title: 'No assigned numbers',
+          description: 'This account is not assigned to any SMS-capable phone numbers yet.',
+        }
+      : emptyReason === 'no_org_membership'
+        ? {
+            title: 'No organization access',
+            description: 'This account is not linked to an organization that can view SMS.',
+          }
+        : {
+            title: 'No synced SMS messages',
+            description: 'Once owned-number SMS is synced, messages will appear here.',
+          };
+
   if (!orgId && (!orgs || orgs.length === 0)) {
     return (
       <PageLayout title="SMS" description="No organization selected">
@@ -202,8 +224,8 @@ export function SMSPage() {
             <div className="text-sm text-slate-400">Loading messages...</div>
           ) : filteredMessages.length === 0 ? (
             <EmptyStatePanel
-              title="No SMS messages found"
-              description="Once messages are sent or received, they will appear here in a cleaner, searchable conversation view."
+              title={emptyCopy.title}
+              description={emptyCopy.description}
             />
           ) : (
             <div className="space-y-3">

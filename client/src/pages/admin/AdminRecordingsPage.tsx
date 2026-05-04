@@ -148,6 +148,26 @@ const AdminRecordingsPage: FC = () => {
     }
   };
 
+  const handlePlay = async (recording: Recording) => {
+    if (!userId) return;
+    try {
+      const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download`), {
+        headers: { 'x-user-id': userId, 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        setListError(err?.detail || err?.error || 'Failed to open recording');
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e: any) {
+      setListError(e?.message || 'Failed to open recording');
+    }
+  };
+
   useEffect(() => { fetchOrgs(); }, [userId]);
   useEffect(() => { loadRecordings(true, { syncFirst: true }); }, [filterOrgId, userId]);
 
@@ -223,7 +243,7 @@ const AdminRecordingsPage: FC = () => {
                       <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(r.recording_date || r.created_at)}</td>
                       <td className="px-4 py-3">
                         {r.recording_url ? (
-                          <a href={r.recording_url} target="_blank" rel="noopener noreferrer" className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</a>
+                          <button onClick={() => handlePlay(r)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</button>
                         ) : (
                           <span className="text-xs text-slate-500">N/A</span>
                         )}

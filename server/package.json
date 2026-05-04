@@ -9,7 +9,7 @@
     "repair:sms-ownership": "ts-node-dev --respawn --transpile-only src/scripts/repair_sms_ownership.ts",
     "production:check": "npm run build && node dist/scripts/production_readiness_check.js",
     "build": "tsc",
-    "test": "npm run build && node --test dist/tests/mightycall_normalization.test.js",
+    "test": "npm run build && node --test dist/tests/mightycall_normalization.test.js && node --test dist/tests/security_static.test.js",
     "start": "node dist/index.js"
   },
   "bin": {

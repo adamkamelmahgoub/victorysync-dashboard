@@ -9361,6 +9361,8 @@ app.get("/api/admin/agents", async (req, res) => {
 // GET /api/admin/orgs/:orgId/stats - Get call stats for a specific org today
 app.get("/api/admin/orgs/:orgId/stats", async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.org_stats');
+    if (!actorId) return;
     const { orgId } = req.params;
     const todayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
 
@@ -9410,8 +9412,29 @@ app.get("/api/admin/orgs/:orgId/stats", async (req, res) => {
 });
 
 // Compatibility endpoints used by shared data modules
+async function requirePlatformAdminRequest(req: express.Request, res: express.Response, action: string) {
+  const actorId = req.header('x-user-id') || null;
+  if (!actorId || !(await isPlatformAdmin(actorId))) {
+    await writeAuditLog({
+      actor_id: actorId,
+      action: `${action}.denied`,
+      entity_type: 'admin_endpoint',
+      metadata: {
+        method: req.method,
+        path: req.originalUrl,
+        request_id: req.requestId || null,
+      },
+    });
+    res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  return actorId;
+}
+
 app.get('/api/admin/recordings', async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.recordings.list');
+    if (!actorId) return;
     const orgId = req.query.org_id as string | undefined;
     const phoneNumberId = req.query.phone_number_id as string | undefined;
     const startDate = req.query.start_date as string | undefined;
@@ -9440,6 +9463,8 @@ app.get('/api/admin/recordings', async (req, res) => {
 
 app.post('/api/admin/recordings', async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.recordings.create');
+    if (!actorId) return;
     const payload = req.body || {};
     const { data, error } = await supabaseAdmin
       .from('mightycall_recordings')
@@ -9447,6 +9472,14 @@ app.post('/api/admin/recordings', async (req, res) => {
       .select()
       .maybeSingle();
     if (error) throw error;
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'admin.recordings.create',
+      org_id: payload.org_id || null,
+      entity_type: 'mightycall_recording',
+      entity_id: data?.id || null,
+      metadata: { request_id: req.requestId || null },
+    });
     res.json({ recording: data });
   } catch (err: any) {
     console.error('admin_recordings_create_failed:', fmtErr(err));
@@ -9456,6 +9489,8 @@ app.post('/api/admin/recordings', async (req, res) => {
 
 app.get('/api/admin/metrics/summary', async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.metrics.summary');
+    if (!actorId) return;
     const orgId = req.query.org_id as string | undefined;
     const startDate = req.query.start_date as string | undefined;
     const endDate = req.query.end_date as string | undefined;
@@ -9489,6 +9524,8 @@ app.get('/api/admin/metrics/summary', async (req, res) => {
 
 app.get('/api/admin/metrics/volume', async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.metrics.volume');
+    if (!actorId) return;
     const orgId = req.query.org_id as string | undefined;
     const startDate = req.query.start_date as string | undefined;
     const endDate = req.query.end_date as string | undefined;
@@ -9528,6 +9565,8 @@ app.get('/api/admin/metrics/volume', async (req, res) => {
 
 app.get('/api/admin/metrics/agents', async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.metrics.agents');
+    if (!actorId) return;
     const orgId = req.query.org_id as string | undefined;
     const startDate = req.query.start_date as string | undefined;
     const endDate = req.query.end_date as string | undefined;
@@ -9569,6 +9608,8 @@ app.get('/api/admin/metrics/agents', async (req, res) => {
 
 app.get('/api/admin/metrics/agents-today', async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.metrics.agents_today');
+    if (!actorId) return;
     const raw = (req.query.extensions as string) || '';
     const extensions = raw.split(',').map(s => s.trim()).filter(Boolean);
     if (extensions.length === 0) return res.json({ data: [] });
@@ -9601,6 +9642,8 @@ app.get('/api/admin/metrics/agents-today', async (req, res) => {
 
 app.get('/api/admin/metrics/phones', async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.metrics.phones');
+    if (!actorId) return;
     const orgId = req.query.org_id as string | undefined;
     const startDate = req.query.start_date as string | undefined;
     const endDate = req.query.end_date as string | undefined;
@@ -9640,8 +9683,10 @@ app.get('/api/admin/metrics/phones', async (req, res) => {
   }
 });
 
-app.get('/api/admin/stats', async (_req, res) => {
+app.get('/api/admin/stats', async (req, res) => {
   try {
+    const actorId = await requirePlatformAdminRequest(req, res, 'admin.stats');
+    if (!actorId) return;
     const [orgsRes, phonesRes, billingRes, ticketsRes, usersRes] = await Promise.all([
       supabaseAdmin.from('organizations').select('id', { count: 'exact', head: true }),
       supabaseAdmin.from('phone_numbers').select('id', { count: 'exact', head: true }),
@@ -11256,6 +11301,7 @@ app.get("/s/series", async (req, res) => {
         const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
         const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
+        let emptyReason: string | null = null;
 
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
@@ -11274,7 +11320,7 @@ app.get("/s/series", async (req, res) => {
           const userOrgIds = await getUserOrgIds(userId);
           if (userOrgIds.length === 0) {
             console.warn(`[mightycall/reports] No org membership found for user ${userId}`);
-            return res.json({ reports: [] });
+            return res.json({ reports: [], next_offset: null, empty_reason: 'no_org_membership' });
           }
           
           // If user specified an org_id, verify they have access to it
@@ -11394,11 +11440,13 @@ app.get("/s/series", async (req, res) => {
         let rows = data || [];
         if (!isAdmin && queryOrgIds.length > 0) {
           if (assignedIdSet.size === 0 && assignedNumberSet.size === 0 && assignedDigitSet.size === 0) {
+            emptyReason = 'no_assigned_numbers';
             rows = [];
           } else {
             rows = rows.filter((r: any) => reportVisibleToAssignedPhones(r, assignedIdSet, assignedNumberSet, assignedDigitSet));
           }
         }
+        if (!emptyReason && rows.length === 0) emptyReason = 'no_synced_data';
         const pageRows = isAdmin ? rows : rows.slice(offset, offset + limit);
         const enrichedRows = pageRows.map((r: any) => {
           const numbersCalled = extractCandidateNumbersFromReport(r);
@@ -11410,7 +11458,7 @@ app.get("/s/series", async (req, res) => {
         const nextOffset = isAdmin
           ? (pageRows.length === limit ? offset + pageRows.length : null)
           : ((offset + limit) < rows.length ? offset + limit : null);
-        res.json({ reports: enrichedRows, next_offset: nextOffset });
+        res.json({ reports: enrichedRows, next_offset: nextOffset, empty_reason: enrichedRows.length === 0 ? emptyReason : null });
       } catch (err: any) {
         console.error('[mightycall/reports] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_reports', detail: err?.message });
@@ -11980,6 +12028,7 @@ app.get("/s/series", async (req, res) => {
         const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
         const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
+        let emptyReason: string | null = null;
 
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
@@ -11996,7 +12045,7 @@ app.get("/s/series", async (req, res) => {
         } else if (!isAdmin) {
           const userOrgIds = await getUserOrgIds(userId);
           if (!userOrgIds || userOrgIds.length === 0) {
-            return res.json({ recordings: [] });
+            return res.json({ recordings: [], next_offset: null, empty_reason: 'no_org_membership' });
           }
           query = query.in('org_id', userOrgIds);
         }
@@ -12099,6 +12148,7 @@ app.get("/s/series", async (req, res) => {
               for (const d of digits || []) assignedDigits.add(String(d));
             }
             if (assignedIds.size === 0 && assignedNumbers.size === 0 && assignedDigits.size === 0) {
+              emptyReason = 'no_assigned_numbers';
               data = [];
             } else {
               data = (data || []).filter((r: any) => {
@@ -12122,7 +12172,8 @@ app.get("/s/series", async (req, res) => {
         }
 
         const rows = data || [];
-        res.json({ recordings: rows, next_offset: rows.length === limit ? offset + rows.length : null });
+        if (!emptyReason && rows.length === 0) emptyReason = 'no_synced_data';
+        res.json({ recordings: rows, next_offset: rows.length === limit ? offset + rows.length : null, empty_reason: rows.length === 0 ? emptyReason : null });
       } catch (err: any) {
         console.error('[mightycall/recordings] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_recordings', detail: err?.message });
@@ -12234,6 +12285,7 @@ app.get("/s/series", async (req, res) => {
         const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
         const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
         const orgId = req.query.org_id as string || null;
+        let emptyReason: string | null = null;
 
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
@@ -12246,7 +12298,7 @@ app.get("/s/series", async (req, res) => {
           // Non-admin: only show their orgs
           const orgIds = await getUserOrgIds(userId);
           if (orgIds.length === 0) {
-            return res.json({ messages: [] });
+            return res.json({ messages: [], next_offset: null, empty_reason: 'no_org_membership' });
           }
           targetOrgIds = orgIds;
         }
@@ -12271,7 +12323,7 @@ app.get("/s/series", async (req, res) => {
           }
           const hasAnyAssignedPhones = allPhoneIds.length > 0 || allowedPhoneNumbers.length > 0 || allowedPhoneDigits.length > 0;
           if (!hasAnyAssignedPhones) {
-            return res.json({ messages: [] });
+            return res.json({ messages: [], next_offset: null, empty_reason: 'no_assigned_numbers' });
           }
         }
 
@@ -12370,7 +12422,8 @@ app.get("/s/series", async (req, res) => {
 
         if (error) throw error;
         const rows = data || [];
-        res.json({ messages: rows, next_offset: rows.length === limit ? offset + rows.length : null });
+        if (rows.length === 0) emptyReason = 'no_synced_data';
+        res.json({ messages: rows, next_offset: rows.length === limit ? offset + rows.length : null, empty_reason: rows.length === 0 ? emptyReason : null });
       } catch (err: any) {
         console.error('[sms/messages] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_messages', detail: err?.message });

@@ -59,6 +59,7 @@ export function RecordingsPage() {
   const [search, setSearch] = useState('');
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [syncing, setSyncing] = useState(false);
+  const [emptyReason, setEmptyReason] = useState<string | null>(null);
 
   const filteredRows = useMemo(() => {
     const q = search.trim();
@@ -121,6 +122,7 @@ export function RecordingsPage() {
       const rows = data.recordings || [];
       setRecordings((prev) => (reset ? rows : [...prev, ...rows]));
       setNextOffset(data.next_offset ?? null);
+      if (reset) setEmptyReason(data.empty_reason || null);
     } catch (err: any) {
       setError(err?.message || 'Error fetching recordings');
     } finally {
@@ -174,6 +176,26 @@ export function RecordingsPage() {
     }
   };
 
+  const emptyCopy = search.trim()
+    ? {
+        title: 'No matching recordings',
+        description: 'No recording rows match the current number search.',
+      }
+    : emptyReason === 'no_assigned_numbers'
+      ? {
+          title: 'No assigned numbers',
+          description: 'This account is not assigned to any phone numbers with recording access yet.',
+        }
+      : emptyReason === 'no_org_membership'
+        ? {
+            title: 'No organization access',
+            description: 'This account is not linked to an organization that can view recordings.',
+          }
+        : {
+            title: 'No synced recordings',
+            description: 'Once owned-number recordings are synced, they will appear here.',
+          };
+
   if (!orgId && (!orgs || orgs.length === 0)) {
     return (
       <PageLayout eyebrow="Recordings" title="Recordings" description="No organization selected">
@@ -212,7 +234,7 @@ export function RecordingsPage() {
           {loading ? (
             <div className="px-5 py-10 text-sm text-slate-400">Loading recordings...</div>
           ) : filteredRows.length === 0 ? (
-            <div className="p-5"><EmptyStatePanel title="No recordings found" description="No recording rows matched the current organization and search criteria." /></div>
+            <div className="p-5"><EmptyStatePanel title={emptyCopy.title} description={emptyCopy.description} /></div>
           ) : (
             <div className="max-h-[72vh] overflow-auto">
               <table className="w-full text-sm">

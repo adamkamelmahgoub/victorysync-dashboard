@@ -77,6 +77,7 @@ export default function ReportPage() {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [emptyReason, setEmptyReason] = useState<string | null>(null);
   const [filterType, setFilterType] = useState('calls');
   const [nextOffset, setNextOffset] = useState<number | null>(0);
 
@@ -158,6 +159,7 @@ export default function ReportPage() {
       const rows: ReportRow[] = data.reports || [];
       setReports((prev) => (reset ? rows : [...prev, ...rows]));
       setNextOffset(data.next_offset ?? null);
+      if (reset) setEmptyReason(data.empty_reason || null);
       if (reset) {
         if (rows.length > 0) setSelectedReportId((prev) => prev || rows[0].id);
         else {
@@ -211,6 +213,21 @@ export default function ReportPage() {
     </button>
   );
 
+  const emptyCopy = emptyReason === 'no_assigned_numbers'
+    ? {
+        title: 'No assigned numbers',
+        description: 'This account is not assigned to any phone numbers for the selected workspace yet.',
+      }
+    : emptyReason === 'no_org_membership'
+      ? {
+          title: 'No organization access',
+          description: 'This account is not linked to an organization that can view reports.',
+        }
+      : {
+          title: 'No reports found',
+          description: 'No synced report rows matched the current workspace and filter selection.',
+        };
+
   return (
       <PageLayout
         eyebrow="Reporting"
@@ -258,7 +275,7 @@ export default function ReportPage() {
               <div className="px-5 py-10 text-sm text-slate-400">Loading reports...</div>
             ) : reports.length === 0 ? (
               <div className="p-5">
-                <EmptyStatePanel title="No reports found" description="No report rows matched the current workspace and filter selection." />
+                <EmptyStatePanel title={emptyCopy.title} description={emptyCopy.description} />
               </div>
             ) : (
               <div className="max-h-[72vh] overflow-auto">
