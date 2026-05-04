@@ -1268,6 +1268,70 @@ function normalizeSmsRowForOwnership(row: any, index: Map<string, SmsPhoneOwner[
   };
 }
 
+function normalizeRecordingRowForOwnership(row: any, index: Map<string, SmsPhoneOwner[]>, targetOrgIds: Set<string> | null) {
+  const metadata = parseJsonObject(row?.metadata || row?.raw_payload || row?.payload);
+  const businessNumber =
+    metadata?.businessNumber?.number ||
+    metadata?.businessNumber ||
+    metadata?.business_number ||
+    metadata?.phone_number ||
+    metadata?.phoneNumber ||
+    row?.business_number ||
+    row?.phone_number ||
+    null;
+  const fromNumber =
+    row?.from_number ||
+    metadata?.from_number ||
+    metadata?.from ||
+    metadata?.caller_number ||
+    metadata?.caller?.number ||
+    metadata?.client?.number ||
+    metadata?.client?.address ||
+    null;
+  const toNumber =
+    row?.to_number ||
+    metadata?.to_number ||
+    metadata?.to ||
+    metadata?.recipient ||
+    metadata?.destination_number ||
+    metadata?.destination?.number ||
+    metadata?.called?.[0]?.phone ||
+    metadata?.called?.[0]?.number ||
+    null;
+  const owner = findSmsOwner(index, targetOrgIds, businessNumber, toNumber, fromNumber);
+  if (!owner) return null;
+
+  const direction = normalizePhoneDigits(fromNumber) === owner.digits
+    ? 'outbound'
+    : normalizePhoneDigits(toNumber) === owner.digits
+      ? 'inbound'
+      : null;
+
+  return {
+    ...row,
+    org_id: owner.org_id,
+    phone_number_id: row?.phone_number_id || owner.id,
+    phone_number: row?.phone_number || owner.number,
+    from_number: fromNumber,
+    to_number: toNumber,
+    direction: row?.direction || direction,
+    duration_seconds: row?.duration_seconds || row?.duration || null,
+    recording_date: row?.recording_date || row?.recorded_at || row?.created_at || row?.started_at,
+    organizations: {
+      ...(row?.organizations || {}),
+      id: owner.org_id,
+      name: owner.org_name || row?.organizations?.name || owner.org_id,
+    },
+    metadata: {
+      ...metadata,
+      response_ownership_org_id: owner.org_id,
+      response_ownership_phone_id: owner.id,
+      response_ownership_digits: owner.digits,
+      response_direction: direction,
+    },
+  };
+}
+
 function mapAgentLiveStatusToPresence(status: string): { on_call: boolean; label: string } {
   switch (status) {
     case 'ringing':
@@ -12172,25 +12236,29 @@ app.get("/s/series", async (req, res) => {
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
 
-        let query = supabaseAdmin
-          .from('mightycall_recordings')
-          .select('*, organizations(name, id)')
-          .order('recording_date', { ascending: false, nullsFirst: false })
-          .range(offset, offset + limit - 1);
-
-        // If org_id is provided in query, use it (admin filtering)
+        let targetOrgIds: string[] = [];
         if (orgId) {
-          query = query.eq('org_id', orgId);
+          if (!isAdmin) {
+            const userOrgIds = await getUserOrgIds(userId);
+            if (!userOrgIds.includes(orgId)) return res.status(403).json({ error: 'forbidden' });
+          }
+          targetOrgIds = [orgId];
         } else if (!isAdmin) {
           const userOrgIds = await getUserOrgIds(userId);
           if (!userOrgIds || userOrgIds.length === 0) {
             return res.json({ recordings: [], next_offset: null, empty_reason: 'no_org_membership' });
           }
-          query = query.in('org_id', userOrgIds);
+          targetOrgIds = userOrgIds;
         }
-        // If isAdmin and no orgId filter, show all
+        const ownershipIndex = await loadSmsPhoneOwnershipIndex();
+        const targetOrgSet = targetOrgIds.length > 0 ? new Set(targetOrgIds) : null;
+        const fetchLimit = Math.min(Math.max(offset + limit + 1000, 2000), 10000);
 
-        let { data, error } = await query;
+        let { data, error } = await supabaseAdmin
+          .from('mightycall_recordings')
+          .select('*, organizations(name, id)')
+          .order('recording_date', { ascending: false, nullsFirst: false })
+          .limit(fetchLimit);
 
         // Fallback: if no recordings found or table error, pull from calls table
         if (error || !data || data.length === 0) {
@@ -12201,17 +12269,7 @@ app.get("/s/series", async (req, res) => {
             .from('calls')
             .select('id, org_id, from_number, to_number, status, started_at, ended_at, recording_url')
             .order('started_at', { ascending: false })
-            .range(offset, offset + limit - 1);
-
-          if (orgId) {
-            callsQuery = callsQuery.eq('org_id', orgId);
-          } else if (!isAdmin) {
-            const userOrgIds = await getUserOrgIds(userId);
-            if (!userOrgIds || userOrgIds.length === 0) {
-              return res.json({ recordings: [] });
-            }
-            callsQuery = callsQuery.in('org_id', userOrgIds);
-          }
+            .limit(fetchLimit);
 
           const { data: calls, error: callsError } = await callsQuery;
           
@@ -12273,10 +12331,14 @@ app.get("/s/series", async (req, res) => {
           });
         }
 
+        data = (data || [])
+          .map((row: any) => normalizeRecordingRowForOwnership(row, ownershipIndex, targetOrgSet))
+          .filter(Boolean);
+
         // Final assignment-based enforcement for non-admin users.
         if (!isAdmin) {
           try {
-            const orgIds = orgId ? [orgId] : await getUserOrgIds(userId);
+            const orgIds = targetOrgIds;
             let orgWideRecordingAccess = false;
             for (const o of orgIds) {
               if ((await isOrgAdmin(userId, o)) || (await isOrgManagerWith(userId, o, 'can_manage_agents'))) {
@@ -12285,9 +12347,10 @@ app.get("/s/series", async (req, res) => {
               }
             }
             if (orgWideRecordingAccess) {
-              const rows = data || [];
+              const normalizedRows = data || [];
+              const rows = normalizedRows.slice(offset, offset + limit);
               if (!emptyReason && rows.length === 0) emptyReason = 'no_synced_data';
-              return res.json({ recordings: rows, next_offset: rows.length === limit ? offset + rows.length : null, empty_reason: rows.length === 0 ? emptyReason : null });
+              return res.json({ recordings: rows, next_offset: offset + limit < normalizedRows.length ? offset + limit : null, empty_reason: rows.length === 0 ? emptyReason : null });
             }
             const assignedIds = new Set<string>();
             const assignedNumbers = new Set<string>();
@@ -12322,9 +12385,10 @@ app.get("/s/series", async (req, res) => {
           }
         }
 
-        const rows = data || [];
-        if (!emptyReason && rows.length === 0) emptyReason = 'no_synced_data';
-        res.json({ recordings: rows, next_offset: rows.length === limit ? offset + rows.length : null, empty_reason: rows.length === 0 ? emptyReason : null });
+        const normalizedRows = data || [];
+        const rows = normalizedRows.slice(offset, offset + limit);
+        if (!emptyReason && normalizedRows.length === 0) emptyReason = 'no_synced_data';
+        res.json({ recordings: rows, next_offset: offset + limit < normalizedRows.length ? offset + limit : null, empty_reason: rows.length === 0 ? emptyReason : null });
       } catch (err: any) {
         console.error('[mightycall/recordings] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_recordings', detail: err?.message });
