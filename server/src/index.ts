@@ -1145,14 +1145,20 @@ type SmsPhoneOwner = {
   org_name?: string | null;
 };
 
-async function loadSmsPhoneOwnershipIndex(): Promise<Map<string, SmsPhoneOwner[]>> {
+type PhoneOwnershipIndex = {
+  byDigits: Map<string, SmsPhoneOwner[]>;
+  byId: Map<string, SmsPhoneOwner>;
+};
+
+async function loadSmsPhoneOwnershipIndex(): Promise<PhoneOwnershipIndex> {
   const index = new Map<string, SmsPhoneOwner[]>();
+  const byId = new Map<string, SmsPhoneOwner>();
   const { data, error } = await supabaseAdmin
     .from('phone_numbers')
     .select('id, org_id, number, number_digits, e164, phone_number, organizations(name)');
   if (error) {
     console.warn('[sms/messages] phone ownership index failed:', fmtErr(error));
-    return index;
+    return { byDigits: index, byId };
   }
   for (const row of data || []) {
     const orgId = String((row as any).org_id || '').trim();
@@ -1176,9 +1182,10 @@ async function loadSmsPhoneOwnershipIndex(): Promise<Map<string, SmsPhoneOwner[]
       const list = index.get(digits) || [];
       if (!list.some((item) => item.org_id === owner.org_id && item.id === owner.id)) list.push(owner);
       index.set(digits, list);
+      if (owner.id && !byId.has(owner.id)) byId.set(owner.id, owner);
     }
   }
-  return index;
+  return { byDigits: index, byId };
 }
 
 function parseJsonObject(value: any): any {
@@ -1201,12 +1208,34 @@ function smsDirectionFromText(value: any): 'inbound' | 'outbound' | 'unknown' {
   return 'unknown';
 }
 
-function findSmsOwner(index: Map<string, SmsPhoneOwner[]>, targetOrgIds: Set<string> | null, ...values: any[]): SmsPhoneOwner | null {
-  const matches = new Map<string, SmsPhoneOwner>();
+function flattenPhoneValues(...values: any[]): any[] {
+  const out: any[] = [];
   for (const value of values) {
+    if (Array.isArray(value)) {
+      out.push(...flattenPhoneValues(...value));
+      continue;
+    }
+    if (value && typeof value === 'object') {
+      out.push(
+        (value as any).number,
+        (value as any).phone,
+        (value as any).address,
+        (value as any).value,
+        (value as any).e164
+      );
+      continue;
+    }
+    out.push(value);
+  }
+  return out;
+}
+
+function findSmsOwner(index: PhoneOwnershipIndex, targetOrgIds: Set<string> | null, ...values: any[]): SmsPhoneOwner | null {
+  const matches = new Map<string, SmsPhoneOwner>();
+  for (const value of flattenPhoneValues(...values)) {
     const digits = normalizePhoneDigits(value);
     if (!digits) continue;
-    for (const owner of index.get(digits) || []) {
+    for (const owner of index.byDigits.get(digits) || []) {
       if (targetOrgIds && !targetOrgIds.has(owner.org_id)) continue;
       matches.set(`${owner.org_id}:${owner.id || owner.digits}`, owner);
     }
@@ -1215,7 +1244,16 @@ function findSmsOwner(index: Map<string, SmsPhoneOwner[]>, targetOrgIds: Set<str
   return rows.length === 1 ? rows[0] : null;
 }
 
-function normalizeSmsRowForOwnership(row: any, index: Map<string, SmsPhoneOwner[]>, targetOrgIds: Set<string> | null) {
+function ownerFromPhoneId(index: PhoneOwnershipIndex, targetOrgIds: Set<string> | null, value: any): SmsPhoneOwner | null {
+  const phoneId = String(value || '').trim();
+  if (!phoneId) return null;
+  const owner = index.byId.get(phoneId) || null;
+  if (!owner) return null;
+  if (targetOrgIds && !targetOrgIds.has(owner.org_id)) return null;
+  return owner;
+}
+
+function normalizeSmsRowForOwnership(row: any, index: PhoneOwnershipIndex, targetOrgIds: Set<string> | null) {
   const metadata = parseJsonObject(row?.metadata || row?.raw_payload || row?.payload);
   const businessNumber =
     metadata?.businessNumber?.number ||
@@ -1223,12 +1261,18 @@ function normalizeSmsRowForOwnership(row: any, index: Map<string, SmsPhoneOwner[
     metadata?.business_number ||
     metadata?.phone_number ||
     metadata?.phoneNumber ||
+    metadata?.owned_phone_number ||
+    metadata?.business_number_digits ||
+    metadata?.owned_phone_digits ||
     row?.business_number ||
     row?.phone_number ||
+    row?.phone ||
+    row?.number ||
     null;
-  const fromNumber = row?.from_number || metadata?.from_number || metadata?.from || metadata?.sender || metadata?.source_number || null;
-  const toNumber = row?.to_number || row?.to_numbers || metadata?.to_number || metadata?.to || metadata?.recipient || metadata?.destination_number || null;
-  const owner = findSmsOwner(index, targetOrgIds, businessNumber, fromNumber, toNumber);
+  const fromNumber = row?.from_number || row?.sender || metadata?.from_number || metadata?.from || metadata?.sender || metadata?.source_number || metadata?.client?.address || metadata?.client?.number || null;
+  const toNumber = row?.to_number || row?.to_numbers || row?.recipient || metadata?.to_number || metadata?.to || metadata?.to_numbers || metadata?.recipient || metadata?.recipients || metadata?.destination_number || metadata?.called?.[0]?.phone || metadata?.called?.[0]?.number || null;
+  const owner = ownerFromPhoneId(index, targetOrgIds, row?.phone_id || metadata?.phone_id || metadata?.phoneNumberId)
+    || findSmsOwner(index, targetOrgIds, businessNumber, fromNumber, toNumber);
   if (!owner) return null;
 
   let direction = smsDirectionFromText(
@@ -1268,7 +1312,7 @@ function normalizeSmsRowForOwnership(row: any, index: Map<string, SmsPhoneOwner[
   };
 }
 
-function normalizeRecordingRowForOwnership(row: any, index: Map<string, SmsPhoneOwner[]>, targetOrgIds: Set<string> | null) {
+function normalizeRecordingRowForOwnership(row: any, index: PhoneOwnershipIndex, targetOrgIds: Set<string> | null) {
   const metadata = parseJsonObject(row?.metadata || row?.raw_payload || row?.payload);
   const businessNumber =
     metadata?.businessNumber?.number ||
@@ -1298,7 +1342,8 @@ function normalizeRecordingRowForOwnership(row: any, index: Map<string, SmsPhone
     metadata?.called?.[0]?.phone ||
     metadata?.called?.[0]?.number ||
     null;
-  const owner = findSmsOwner(index, targetOrgIds, businessNumber, toNumber, fromNumber);
+  const owner = ownerFromPhoneId(index, targetOrgIds, row?.phone_number_id || row?.phone_id || metadata?.phone_number_id || metadata?.phone_id)
+    || findSmsOwner(index, targetOrgIds, businessNumber, toNumber, fromNumber);
   if (!owner) return null;
 
   const direction = normalizePhoneDigits(fromNumber) === owner.digits
