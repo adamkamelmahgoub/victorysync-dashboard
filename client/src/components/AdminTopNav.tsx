@@ -18,7 +18,7 @@ export default function AdminTopNav() {
     { to: '/admin/number-change-requests', label: 'Phone Requests' },
     { to: '/admin/reports', label: 'Reports' },
     { to: '/admin/recordings', label: 'Recordings' },
-    { to: '/admin/sms', label: 'SMS' },
+    { to: '/sms', label: 'SMS' },
     { to: '/admin/billing', label: 'Billing' },
     { to: '/admin/mightycall', label: 'Integrations' },
     { to: '/admin/diagnostics', label: 'Diagnostics' },

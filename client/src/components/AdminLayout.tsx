@@ -70,7 +70,7 @@ export const AdminLayout: FC<AdminLayoutProps> = ({
             Recordings
           </button>
           <button
-            onClick={() => navigate('/admin/sms')}
+            onClick={() => navigate('/sms')}
             className="w-full text-left px-4 py-3 rounded-lg font-medium transition-all text-slate-300 hover:bg-slate-800 hover:text-cyan-400"
           >
             SMS

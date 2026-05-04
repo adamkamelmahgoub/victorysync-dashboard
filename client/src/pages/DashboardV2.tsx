@@ -33,7 +33,7 @@ const Sidebar: FC<{ isAdmin: boolean; navigate: any; currentPath: string }> = ({
     { label: 'Phone Numbers', icon: '☎️', path: '/numbers' },
     { label: 'Reports', icon: '📈', path: '/admin/reports' },
     { label: 'Recordings', icon: '🎙️', path: '/admin/recordings' },
-    { label: 'SMS Messages', icon: '💬', path: '/admin/sms' },
+    { label: 'SMS Messages', icon: '💬', path: '/sms' },
     { label: 'Support Tickets', icon: '🎟️', path: '/admin/support' },
     { label: 'Billing', icon: '💳', path: '/admin/billing' },
     { label: 'Admin Settings', icon: '⚙️', path: '/admin/operations' },

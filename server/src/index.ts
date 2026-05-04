@@ -1377,6 +1377,102 @@ function normalizeRecordingRowForOwnership(row: any, index: PhoneOwnershipIndex,
   };
 }
 
+function normalizeLegacySmsRowForVisibility(row: any, targetOrgIds: Set<string> | null) {
+  const orgId = String(row?.org_id || '').trim();
+  if (targetOrgIds && (!orgId || !targetOrgIds.has(orgId))) return null;
+
+  const metadata = parseJsonObject(row?.metadata || row?.raw_payload || row?.payload);
+  const fromNumber =
+    row?.from_number ||
+    row?.sender ||
+    metadata?.from_number ||
+    metadata?.from ||
+    metadata?.sender ||
+    metadata?.source_number ||
+    metadata?.client?.address ||
+    metadata?.client?.number ||
+    null;
+  const toNumber =
+    row?.to_number ||
+    row?.to_numbers ||
+    row?.recipient ||
+    metadata?.to_number ||
+    metadata?.to ||
+    metadata?.to_numbers ||
+    metadata?.recipient ||
+    metadata?.recipients ||
+    metadata?.destination_number ||
+    metadata?.called?.[0]?.phone ||
+    metadata?.called?.[0]?.number ||
+    null;
+  const metadataDirection = smsDirectionFromText(
+    metadata?.inferred_direction ||
+    metadata?.direction ||
+    metadata?.messageDirection ||
+    metadata?.message_direction ||
+    metadata?.type ||
+    metadata?.messageType
+  );
+  const storedDirection = smsDirectionFromText(row?.direction);
+  const direction = metadataDirection !== 'unknown'
+    ? metadataDirection
+    : storedDirection === 'outbound'
+      ? 'outbound'
+      : 'unknown';
+
+  return {
+    ...row,
+    from_number: Array.isArray(fromNumber) ? fromNumber[0] : fromNumber,
+    to_number: Array.isArray(toNumber) ? toNumber[0] : toNumber,
+    direction,
+    metadata: {
+      ...metadata,
+      response_ownership_unresolved: true,
+      response_visibility_source: 'legacy_stored_org',
+      response_direction: direction,
+    },
+  };
+}
+
+function normalizeLegacyRecordingRowForVisibility(row: any, targetOrgIds: Set<string> | null) {
+  const orgId = String(row?.org_id || '').trim();
+  if (targetOrgIds && (!orgId || !targetOrgIds.has(orgId))) return null;
+
+  const metadata = parseJsonObject(row?.metadata || row?.raw_payload || row?.payload);
+  const fromNumber =
+    row?.from_number ||
+    metadata?.from_number ||
+    metadata?.from ||
+    metadata?.caller_number ||
+    metadata?.caller?.number ||
+    metadata?.client?.number ||
+    metadata?.client?.address ||
+    null;
+  const toNumber =
+    row?.to_number ||
+    metadata?.to_number ||
+    metadata?.to ||
+    metadata?.recipient ||
+    metadata?.destination_number ||
+    metadata?.destination?.number ||
+    metadata?.called?.[0]?.phone ||
+    metadata?.called?.[0]?.number ||
+    null;
+
+  return {
+    ...row,
+    from_number: fromNumber,
+    to_number: toNumber,
+    duration_seconds: row?.duration_seconds || row?.duration || null,
+    recording_date: row?.recording_date || row?.recorded_at || row?.created_at || row?.started_at,
+    metadata: {
+      ...metadata,
+      response_ownership_unresolved: true,
+      response_visibility_source: 'legacy_stored_org',
+    },
+  };
+}
+
 function mapAgentLiveStatusToPresence(status: string): { on_call: boolean; label: string } {
   switch (status) {
     case 'ringing':
@@ -12376,9 +12472,47 @@ app.get("/s/series", async (req, res) => {
           });
         }
 
-        data = (data || [])
-          .map((row: any) => normalizeRecordingRowForOwnership(row, ownershipIndex, targetOrgSet))
+        let normalizedRecordingRows = (data || [])
+          .map((row: any) =>
+            normalizeRecordingRowForOwnership(row, ownershipIndex, targetOrgSet) ||
+            normalizeLegacyRecordingRowForVisibility(row, targetOrgSet)
+          )
           .filter(Boolean);
+
+        if (normalizedRecordingRows.length === 0) {
+          const { data: calls, error: callsError } = await supabaseAdmin
+            .from('calls')
+            .select('id, org_id, from_number, to_number, status, started_at, ended_at, recording_url')
+            .order('started_at', { ascending: false })
+            .limit(fetchLimit);
+
+          if (!callsError) {
+            normalizedRecordingRows = (calls || [])
+              .filter((call: any) => call?.recording_url)
+              .map((call: any) => ({
+                id: call.id,
+                org_id: call.org_id,
+                from_number: call.from_number,
+                to_number: call.to_number,
+                status: call.status,
+                started_at: call.started_at,
+                ended_at: call.ended_at,
+                duration: 0,
+                recording_url: call.recording_url || null,
+                created_at: call.started_at,
+                recording_date: call.started_at,
+                organizations: { name: 'Org', id: call.org_id },
+              }))
+              .map((row: any) =>
+                normalizeRecordingRowForOwnership(row, ownershipIndex, targetOrgSet) ||
+                normalizeLegacyRecordingRowForVisibility(row, targetOrgSet)
+              )
+              .filter(Boolean);
+          } else {
+            console.warn('[mightycall/recordings] calls fallback after ownership filter failed:', fmtErr(callsError));
+          }
+        }
+        data = normalizedRecordingRows;
 
         // Final assignment-based enforcement for non-admin users.
         if (!isAdmin) {
@@ -12646,8 +12780,11 @@ app.get("/s/series", async (req, res) => {
         if (error) throw error;
         const assignedDigitSet = new Set((allowedPhoneDigits || []).map((d) => String(d || '')).filter(Boolean));
         const assignedIdSet = new Set((allowedPhoneIds || []).map((id) => String(id || '')).filter(Boolean));
-        const normalizedRows = (data || [])
-          .map((row: any) => normalizeSmsRowForOwnership(row, ownershipIndex, targetOrgSet))
+        let normalizedRows = (data || [])
+          .map((row: any) =>
+            normalizeSmsRowForOwnership(row, ownershipIndex, targetOrgSet) ||
+            normalizeLegacySmsRowForVisibility(row, targetOrgSet)
+          )
           .filter((row: any) => {
             if (!row) return false;
             if (isAdmin || orgWideSmsAccess) return true;
@@ -12660,6 +12797,36 @@ app.get("/s/series", async (req, res) => {
               (toDigits && assignedDigitSet.has(toDigits))
             );
           });
+
+        if (normalizedRows.length === 0 && tableName !== 'sms_logs') {
+          const { data: fallbackSms, error: fallbackError } = await supabaseAdmin
+            .from('sms_logs')
+            .select('*')
+            .order('sent_at', { ascending: false })
+            .limit(fetchLimit);
+
+          if (!fallbackError) {
+            normalizedRows = (fallbackSms || [])
+              .map((row: any) =>
+                normalizeSmsRowForOwnership(row, ownershipIndex, targetOrgSet) ||
+                normalizeLegacySmsRowForVisibility(row, targetOrgSet)
+              )
+              .filter((row: any) => {
+                if (!row) return false;
+                if (isAdmin || orgWideSmsAccess) return true;
+                const rowPhoneId = String(row?.phone_id || '');
+                const fromDigits = normalizePhoneDigits(row?.from_number);
+                const toDigits = normalizePhoneDigits(row?.to_number);
+                return (
+                  (rowPhoneId && assignedIdSet.has(rowPhoneId)) ||
+                  (fromDigits && assignedDigitSet.has(fromDigits)) ||
+                  (toDigits && assignedDigitSet.has(toDigits))
+                );
+              });
+          } else if (fallbackError.code !== 'PGRST205') {
+            console.warn('[sms/messages] sms_logs fallback after ownership filter failed:', fmtErr(fallbackError));
+          }
+        }
         const rows = normalizedRows.slice(offset, offset + limit);
         if (normalizedRows.length === 0) emptyReason = 'no_synced_data';
         res.json({ messages: rows, next_offset: offset + limit < normalizedRows.length ? offset + limit : null, empty_reason: rows.length === 0 ? emptyReason : null });

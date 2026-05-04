@@ -70,7 +70,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Agent Management', path: '/admin/agents-management' },
             { label: 'Reports', path: '/admin/reports' },
             { label: 'Recordings', path: '/admin/recordings' },
-            { label: 'SMS', path: '/admin/sms' },
+            { label: 'SMS', path: '/sms' },
           ],
         },
         {
