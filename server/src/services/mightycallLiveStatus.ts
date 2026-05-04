@@ -43,7 +43,7 @@ export type MightyCallStatusByExtension = {
   activeEvidenceExpiredByDuration?: boolean;
 };
 
-const LIVE_STATUS_RESOLVER_VERSION = 'deterministic_v1';
+const LIVE_STATUS_RESOLVER_VERSION = 'deterministic_v2';
 const LIVE_EVIDENCE_FRESH_MS = 60_000;
 const LIVE_DURATION_PROGRESS_WINDOW_MS = 25_000;
 const LIVE_DURATION_MAP_TTL_MS = 10 * 60 * 1000;
@@ -766,6 +766,14 @@ export async function getMightyCallStatusByExtension(input: {
     activeEvidenceNorm === 'dialing' ||
     activeEvidenceNorm === 'on_call';
   const profileIdleNorm = normalizeFromRawStatus(rawStatus);
+  const profileActiveSignal = Boolean(
+    profile &&
+    (
+      profileIdleNorm === 'ringing' ||
+      profileIdleNorm === 'dialing' ||
+      profileIdleNorm === 'on_call'
+    )
+  );
   const hasDirectLiveCallObject = Boolean(
     currentCall ||
     liveCall?.currentCall ||
@@ -845,6 +853,9 @@ export async function getMightyCallStatusByExtension(input: {
     decisionReason = hasDirectLiveCallObject
       ? 'profile_idle_overrides_stale_direct_live_call'
       : 'profile_idle_without_direct_live_call';
+  } else if (profileActiveSignal) {
+    normalizedStatus = profileIdleNorm;
+    decisionReason = 'profile_active_status';
   } else if (activeEvidenceAllowed) {
     if (activeEvidenceNorm === 'ringing' || activeEvidenceNorm === 'dialing' || activeEvidenceNorm === 'on_call') {
       normalizedStatus = activeEvidenceNorm;
@@ -860,6 +871,7 @@ export async function getMightyCallStatusByExtension(input: {
 
   const hasStrongActiveSignal = Boolean(
     onCallBoolean ||
+    profileActiveSignal ||
     (liveCall?.onCall && directLiveSignalTrusted) ||
     activeEvidenceAllowed
   );
@@ -951,6 +963,7 @@ export async function getMightyCallStatusByExtension(input: {
 
   const hasConcreteLiveContext = Boolean(
     currentCall ||
+    profileActiveSignal ||
     effectiveCurrentCallId ||
     effectiveCounterpart ||
     activeCallEvidence?.id ||
