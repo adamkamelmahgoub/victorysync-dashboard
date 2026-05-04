@@ -78,7 +78,7 @@ export function RecordingsPage() {
     if (!user?.id || !orgId) return;
     setSyncing(true);
     try {
-      await triggerMightyCallRecordingsSync(orgId, isoDateDaysAgo(2), new Date().toISOString().slice(0, 10), user.id);
+      await triggerMightyCallRecordingsSync(orgId, isoDateDaysAgo(180), new Date().toISOString().slice(0, 10), user.id);
     } catch (e: any) {
       console.warn('[RecordingsPage] recent MightyCall sync failed:', e?.message || e);
     } finally {

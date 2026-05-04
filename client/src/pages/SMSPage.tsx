@@ -4,6 +4,8 @@ import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { getOrgPhoneNumbers, type PhoneNumber } from '../lib/phonesApi';
+import { triggerMightyCallSMSSync } from '../lib/apiClient';
 
 interface SMSMessage {
   id: string;
@@ -37,26 +39,43 @@ export function SMSPage() {
   const [error, setError] = useState<string | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const [recipientNumber, setRecipientNumber] = useState('');
+  const [fromNumber, setFromNumber] = useState('');
+  const [senderNumbers, setSenderNumbers] = useState<PhoneNumber[]>([]);
   const [showSendModal, setShowSendModal] = useState(false);
   const [sending, setSending] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [search, setSearch] = useState('');
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
   const [directionFilter, setDirectionFilter] = useState<'all' | 'inbound' | 'outbound' | 'unknown'>('all');
 
-  const loadMessages = async (reset = false) => {
+  const syncMessages = async () => {
+    if (!orgId || !user?.id) return;
+    setSyncing(true);
+    try {
+      await triggerMightyCallSMSSync(orgId, user.id);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const loadMessages = async (reset = false, options?: { syncFirst?: boolean }) => {
     if (!user) return;
     if (!reset && nextOffset == null) return;
 
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
-    if (reset) {
-      setLoading(true);
-      setError(null);
+      if (reset) {
+        setLoading(true);
+        setError(null);
     } else {
       setLoadingMore(true);
     }
 
     try {
+      if (reset && options?.syncFirst && orgId) {
+        await syncMessages();
+      }
+
       const q = new URLSearchParams();
       q.set('limit', String(PAGE_SIZE));
       q.set('offset', String(activeOffset));
@@ -89,11 +108,37 @@ export function SMSPage() {
   };
 
   useEffect(() => {
-    if (user) loadMessages(true);
+    if (user) loadMessages(true, { syncFirst: true });
+  }, [orgId, user?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSenderNumbers = async () => {
+      if (!orgId || !user?.id) {
+        setSenderNumbers([]);
+        setFromNumber('');
+        return;
+      }
+      try {
+        const rows = await getOrgPhoneNumbers(orgId, user.id);
+        if (cancelled) return;
+        const usable = (rows || []).filter((row) => row.number);
+        setSenderNumbers(usable);
+        setFromNumber((previous) => previous && usable.some((row) => row.number === previous) ? previous : usable[0]?.number || '');
+      } catch (err) {
+        if (cancelled) return;
+        setSenderNumbers([]);
+        setFromNumber('');
+      }
+    };
+    void loadSenderNumbers();
+    return () => {
+      cancelled = true;
+    };
   }, [orgId, user?.id]);
 
   const handleSendSMS = async () => {
-    if (!orgId || !user || !newMessage || !recipientNumber) {
+    if (!orgId || !user || !newMessage || !recipientNumber || !fromNumber) {
       setError('Please fill in all fields');
       return;
     }
@@ -108,7 +153,7 @@ export function SMSPage() {
           'x-user-id': user.id,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ to: recipientNumber, message: newMessage }),
+        body: JSON.stringify({ from: fromNumber, to: recipientNumber, message: newMessage }),
       });
 
       if (!response.ok) {
@@ -119,6 +164,7 @@ export function SMSPage() {
 
       setNewMessage('');
       setRecipientNumber('');
+      setFromNumber((previous) => previous || senderNumbers[0]?.number || '');
       setShowSendModal(false);
       await loadMessages(true);
     } catch (err: any) {
@@ -232,8 +278,8 @@ export function SMSPage() {
                 </button>
               ))}
             </div>
-            <button onClick={() => loadMessages(true)} className="vs-button-secondary">
-              Refresh
+            <button onClick={() => loadMessages(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">
+              {loading || syncing ? 'Syncing...' : 'Sync'}
             </button>
           </div>
 
@@ -295,6 +341,25 @@ export function SMSPage() {
 
             <div className="space-y-4">
               <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From</label>
+                <select
+                  value={fromNumber}
+                  onChange={(e) => setFromNumber(e.target.value)}
+                  className="vs-input w-full"
+                >
+                  {senderNumbers.length === 0 ? (
+                    <option value="">No assigned SMS numbers</option>
+                  ) : (
+                    senderNumbers.map((number) => (
+                      <option key={number.id || number.number} value={number.number}>
+                        {number.number}{number.label ? ` - ${number.label}` : ''}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recipient Number</label>
                 <input
                   type="tel"
@@ -319,7 +384,7 @@ export function SMSPage() {
                 <button onClick={() => setShowSendModal(false)} disabled={sending} className="vs-button-secondary flex-1">
                   Cancel
                 </button>
-                <button onClick={handleSendSMS} disabled={sending} className="vs-button-primary flex-1">
+                <button onClick={handleSendSMS} disabled={sending || !fromNumber} className="vs-button-primary flex-1">
                   {sending ? 'Sending...' : 'Send'}
                 </button>
               </div>

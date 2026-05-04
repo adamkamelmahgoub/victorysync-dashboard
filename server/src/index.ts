@@ -50,6 +50,7 @@ import {
   syncMightyCallCallHistory,
   syncMightyCallSMS,
   syncMightyCallContacts,
+  sendMightyCallSMS,
   syncSMSLog
 } from './integrations/mightycall';
 import { getMightyCallAccessToken } from './integrations/mightycall';
@@ -6315,13 +6316,32 @@ app.post('/api/admin/mightycall/send-sms', async (req, res) => {
     }
 
     try {
-      // Log the SMS
+      let overrideCreds: any = undefined;
+      try {
+        const { getOrgIntegration } = await import('./lib/integrationsStore');
+        const integ = await getOrgIntegration(orgId, 'mightycall');
+        if (integ && integ.credentials) {
+          overrideCreds = {
+            clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+            clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+          };
+        }
+      } catch (ie) {
+        console.warn('[admin_sms_send] failed to load org MightyCall integration:', ie);
+      }
+      const recipients = Array.isArray(to) ? to : [to];
+      const providerResult = await sendMightyCallSMS({ from, to: recipients, message }, overrideCreds);
+      const sentAt = providerResult?.sendTime || new Date().toISOString();
       const smsMessage = {
-        from,
-        to: Array.isArray(to) ? to : [to],
+        id: providerResult?.id || null,
+        from: providerResult?.sourcePhoneNumber || from,
+        to: providerResult?.destinationPhoneNumbers || recipients,
         text: message,
         direction: 'outbound',
-        status: 'sent'
+        status: 'sent',
+        sent_at: sentAt,
+        sendTime: sentAt,
+        provider_response: providerResult,
       };
 
       const logResult = await syncSMSLog(supabaseAdmin, orgId, smsMessage);
@@ -6329,7 +6349,7 @@ app.post('/api/admin/mightycall/send-sms', async (req, res) => {
         return res.status(500).json({ error: 'sms_log_failed' });
       }
 
-      res.json({ success: true, message: 'SMS sent and logged' });
+      res.json({ success: true, message: 'SMS sent and logged', provider: providerResult });
     } catch (mcErr: any) {
       console.error('sms_send_failed:', fmtErr(mcErr));
       res.status(500).json({ error: 'sms_send_failed', detail: fmtErr(mcErr) ?? 'unknown_error' });
@@ -6359,7 +6379,7 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
   try {
     const actorId = req.header('x-user-id') || null;
     const { orgId } = req.params;
-    const { to, message, from } = req.body || {};
+    const { to, message, from, attachments } = req.body || {};
 
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
     if (!to || !message) return res.status(400).json({ error: 'missing_required_fields' });
@@ -6368,18 +6388,66 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
     const isMember = await isOrgMember(actorId, orgId);
     if (!isAdminUser && !isMember) return res.status(403).json({ error: 'forbidden' });
 
+    const recipients = (Array.isArray(to) ? to : [to])
+      .map((value: any) => String(value || '').trim())
+      .filter(Boolean);
+    if (recipients.length === 0) return res.status(400).json({ error: 'missing_recipient' });
+
+    const assigned = await getAssignedPhoneNumbersForOrg(orgId);
+    const ownedNumbers = (assigned.phones || [])
+      .map((phone: any) => ({
+        id: String(phone?.id || '').trim() || null,
+        number: String(phone?.number || phone?.phone_number || '').trim(),
+        digits: normalizePhoneDigits(phone?.number || phone?.phone_number),
+      }))
+      .filter((phone: any) => phone.number);
+    const requestedFrom = String(from || '').trim();
+    const requestedFromDigits = normalizePhoneDigits(requestedFrom);
+    const selectedFrom = requestedFrom
+      ? ownedNumbers.find((phone: any) => phone.number === requestedFrom || phone.digits === requestedFromDigits)
+      : ownedNumbers[0];
+    if (!selectedFrom) {
+      return res.status(400).json({ error: 'missing_owned_sender_number', message: 'Select an SMS-capable number assigned to this organization.' });
+    }
+
+    let overrideCreds: any = undefined;
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      if (integ && integ.credentials) {
+        overrideCreds = {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+        };
+      }
+    } catch (ie) {
+      console.warn('[org_sms_send] failed to load org MightyCall integration:', ie);
+    }
+
+    const providerResult = await sendMightyCallSMS({
+      from: selectedFrom.number,
+      to: recipients,
+      message: String(message),
+      attachments: Array.isArray(attachments) ? attachments : undefined,
+    }, overrideCreds);
+    const sentAt = providerResult?.sendTime || providerResult?.sentAt || new Date().toISOString();
     const smsMessage = {
-      from: from || null,
-      to: Array.isArray(to) ? to : [to],
-      text: message,
+      id: providerResult?.id || null,
+      phone_id: selectedFrom.id,
+      from: providerResult?.sourcePhoneNumber || selectedFrom.number,
+      to: providerResult?.destinationPhoneNumbers || recipients,
+      text: String(message),
       direction: 'outbound',
-      status: 'sent'
+      status: 'sent',
+      sent_at: sentAt,
+      sendTime: sentAt,
+      provider_response: providerResult,
     };
 
     const logResult = await syncSMSLog(supabaseAdmin, orgId, smsMessage);
     if (!logResult.smsSynced) return res.status(500).json({ error: 'sms_log_failed' });
 
-    res.json({ success: true, message: 'SMS sent and logged' });
+    res.json({ success: true, message: 'SMS sent and logged', provider: providerResult });
   } catch (err: any) {
     console.error('org_sms_send_failed:', fmtErr(err));
     res.status(500).json({ error: 'org_sms_send_failed', detail: fmtErr(err) ?? 'unknown_error' });

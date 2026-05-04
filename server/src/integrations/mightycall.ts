@@ -332,6 +332,23 @@ async function tryFetchJson(url: string, token?: string, apiKeyOverride?: string
   try { return { ok: true, status: res.status, body: JSON.parse(text || 'null') }; } catch (e) { return { ok: true, status: res.status, body: text }; }
 }
 
+async function tryPostJson(url: string, body: any, token?: string, apiKeyOverride?: string) {
+  const res = await requestWithRetry(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'x-api-key': apiKeyOverride || MIGHTYCALL_API_KEY || '',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body || {}),
+  }, 1, 300, 10000);
+  const text = await res.text().catch(() => '');
+  let parsed: any = text;
+  try { parsed = JSON.parse(text || 'null'); } catch {}
+  return { ok: res.ok, status: res.status, body: parsed };
+}
+
 function pickTokenFromAuthResponse(body: any): string | null {
   if (!body) return null;
   if (typeof body === 'string') return body || null;
@@ -596,13 +613,29 @@ export async function fetchMightyCallRecordings(
   const recordings: any[] = [];
   const seen = new Set<string>();
   const addRecording = (row: any) => {
+    const metadata = row?.metadata || row;
+    const callRecord = metadata?.callRecord || metadata?.call_record || metadata?.recording || metadata?.recordingInfo || null;
+    const recordingUrl =
+      row?.recordingUrl ||
+      row?.recording_url ||
+      row?.uri ||
+      row?.link ||
+      row?.downloadUrl ||
+      row?.RecordingLink ||
+      row?.RecordingId ||
+      callRecord?.uri ||
+      callRecord?.link ||
+      callRecord?.downloadUrl ||
+      callRecord?.fileName ||
+      callRecord?.file_name ||
+      null;
     const normalized = {
       id: row?.id || row?.recordingId || row?.externalId || row?.callId || null,
       callId: row?.callId || row?.call_id || row?.id || row?.externalId || null,
-      recordingUrl: row?.recordingUrl || row?.recording_url || row?.uri || row?.link || row?.downloadUrl || row?.fileName || null,
-      duration: row?.duration ?? row?.durationSeconds ?? row?.lengthSeconds ?? null,
-      date: row?.recordingDate || row?.recordedAt || row?.date || row?.created || row?.createdAt || null,
-      metadata: row?.metadata || row
+      recordingUrl,
+      duration: row?.duration ?? row?.durationSeconds ?? row?.lengthSeconds ?? row?.CallDuration ?? null,
+      date: row?.recordingDate || row?.recordedAt || row?.date || row?.created || row?.createdAt || row?.dateTimeUtc || row?.Timestamp || null,
+      metadata
     };
     if (!normalized.recordingUrl && !normalized.callId && !normalized.id) return;
     const key = String(normalized.callId || normalized.id || normalized.recordingUrl || '');
@@ -611,40 +644,7 @@ export async function fetchMightyCallRecordings(
     recordings.push(normalized);
   };
 
-  const directEndpoints = ['/recordings', '/call-recordings', '/callrecordings', '/v4/recordings', '/v4/call-recordings'];
-  const pageSize = 200;
-  const maxPages = 50;
-  for (const ep of directEndpoints) {
-    for (const url of buildUrlVariants(base, ep)) {
-      let page = 1;
-      for (let i = 0; i < maxPages; i++) {
-        const qp = new URLSearchParams();
-        if (startDate) {
-          qp.set('from', `${startDate}T00:00:00Z`);
-          qp.set('startUtc', `${startDate}T00:00:00Z`);
-          qp.set('dateStart', startDate);
-        }
-        if (endDate) {
-          qp.set('to', `${endDate}T23:59:59Z`);
-          qp.set('endUtc', `${endDate}T23:59:59Z`);
-          qp.set('dateEnd', endDate);
-        }
-        qp.set('page', String(page));
-        qp.set('pageSize', String(pageSize));
-        qp.set('limit', String(pageSize));
-        const r = await tryFetchJson(`${url}?${qp.toString()}`, accessToken, apiKeyOverride);
-        if (!r.ok || !r.body) break;
-        const body: any = r.body;
-        const list = body?.data?.recordings ?? body?.recordings ?? body?.data?.items ?? body?.items ?? body?.data ?? [];
-        if (!Array.isArray(list) || list.length === 0) break;
-        for (const row of list) addRecording(row);
-        const hasMore = body?.hasMore === true || body?.data?.hasMore === true;
-        if (list.length < pageSize && !hasMore) break;
-        page += 1;
-      }
-    }
-  }
-
+  // MightyCall v4 docs expose recordings on call rows as `callRecord`.
   const calls = await fetchMightyCallCalls(accessToken, {
     startUtc: startDate ? `${startDate}T00:00:00Z` : undefined,
     endUtc: endDate ? `${endDate}T23:59:59Z` : undefined,
@@ -670,6 +670,7 @@ export async function fetchMightyCallRecordings(
     }
   }
 
+  // Journal webhooks and some journal request rows expose `RecordingLink` or `RecordingId`.
   const jr = await fetchMightyCallJournalRequests(accessToken, {
     from: `${startDate}T00:00:00Z`,
     to: `${endDate}T23:59:59Z`,
@@ -693,22 +694,57 @@ export async function fetchMightyCallRecordings(
   return recordings;
 }
 
-export async function fetchMightyCallSMS(accessToken?: string) {
+export async function fetchMightyCallSMS(accessToken?: string, startDate?: string, endDate?: string, apiKeyOverride?: string) {
   const token = accessToken || await getMightyCallAccessToken();
-  const messageTypes = ['Message', 'SMS', 'Sms'];
   const merged: any[] = [];
   const seen = new Set<string>();
-  for (const t of messageTypes) {
-    const list = await fetchMightyCallJournalRequests(token, { pageSize: '1000', page: '1', type: t }).catch(() => []);
-    for (const row of Array.isArray(list) ? list : []) {
-      const key = String(row?.id || row?.requestGuid || `${row?.created || ''}:${row?.textModel?.text || row?.text || ''}`);
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(row);
-      }
+  const list = await fetchMightyCallJournalRequests(token, {
+    pageSize: '1000',
+    page: '1',
+    type: 'Message',
+    origin: 'All',
+    state: 'All',
+    showUsers: 'true',
+    resolveContacts: 'false',
+    ...(startDate ? { from: `${startDate}T00:00:00Z` } : {}),
+    ...(endDate ? { to: `${endDate}T23:59:59Z` } : {}),
+  }, apiKeyOverride).catch(() => []);
+
+  for (const row of Array.isArray(list) ? list : []) {
+    const key = String(row?.id || row?.requestGuid || `${row?.created || ''}:${row?.textModel?.text || row?.messageInfo?.text || row?.text || ''}`);
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(row);
     }
   }
   return merged;
+}
+
+export async function sendMightyCallSMS(
+  request: { from: string; to: string[]; message: string; attachments?: Array<{ name: string; data: string }> },
+  overrideCreds?: any
+) {
+  const token = await getMightyCallAccessToken(overrideCreds);
+  const apiKeyOverride = overrideCreds?.clientId || undefined;
+  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  const body = {
+    from: request.from,
+    to: request.to,
+    message: request.message,
+    ...(request.attachments?.length ? { attachments: request.attachments } : {}),
+  };
+
+  for (const url of buildUrlVariants(base, '/contactcenter/messages/send')) {
+    const response = await tryPostJson(url, body, token, apiKeyOverride);
+    if (response.ok) return response.body;
+    if (![404, 405].includes(response.status)) {
+      const message = typeof response.body === 'string'
+        ? response.body
+        : response.body?.message || response.body?.error || JSON.stringify(response.body);
+      throw new Error(`MightyCall SMS send failed (${response.status}): ${message}`);
+    }
+  }
+  throw new Error('MightyCall SMS send endpoint was not found');
 }
 
 export async function fetchMightyCallContacts(accessToken?: string) {
@@ -1863,7 +1899,9 @@ export async function syncMightyCallSMS(
 ): Promise<{ smsSynced: number; skippedUnowned?: number; quarantined?: number }> {
   try {
     const token = await getMightyCallAccessToken(overrideCreds);
-    const messages = await fetchMightyCallSMS(token).catch(() => []);
+    const { start, end } = resolveSyncDateRange(undefined, undefined);
+    const apiKeyOverride = overrideCreds?.clientId || undefined;
+    const messages = await fetchMightyCallSMS(token, start, end, apiKeyOverride).catch(() => []);
     const ownershipIndex = await loadOwnershipIndex(supabaseAdminClient);
 
     let smsSynced = 0;
@@ -1875,6 +1913,7 @@ export async function syncMightyCallSMS(
         const businessNumber = pickPhoneText(
           m.businessNumber?.number,
           m.businessNumber,
+          m.messageInfo?.businessNumber,
           m.business_number,
           m.phone_number,
           m.phoneNumber
@@ -1882,6 +1921,7 @@ export async function syncMightyCallSMS(
         const fromNumber = pickPhoneText(
           m.from_number,
           m.from,
+          m.messageInfo?.origin === 'Outbound' ? m.messageInfo?.businessNumber : null,
           m.sender?.number,
           m.sender,
           m.client?.address,
@@ -1890,12 +1930,15 @@ export async function syncMightyCallSMS(
         const toNumber = pickPhoneText(
           m.to_number,
           m.to,
+          m.messageInfo?.origin === 'Inbound' ? m.messageInfo?.businessNumber : null,
           m.recipient?.number,
           m.recipient,
           m.destination?.number,
+          m.client?.address,
+          m.client?.number,
           businessNumber
         );
-        const externalId = String(m?.id || m?.requestGuid || m?.external_id || `${m?.created || ''}:${m?.textModel?.text || m?.text || ''}`);
+        const externalId = String(m?.id || m?.requestGuid || m?.external_id || `${m?.created || ''}:${m?.textModel?.text || m?.messageInfo?.text || m?.text || ''}`);
         const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, fromNumber, toNumber);
         const detectedNumbers = [businessNumber, fromNumber, toNumber].filter(Boolean);
         if (!ownedPhone) {
@@ -1914,7 +1957,7 @@ export async function syncMightyCallSMS(
           continue;
         }
 
-        let direction = directionFromText(m.direction || m.messageDirection || m.type);
+        let direction = directionFromText(m.direction || m.messageDirection || m.messageInfo?.origin || m.origin || m.type);
         if (direction === 'unknown') {
           if (numberMatchesOwnedPhone(fromNumber, ownedPhone) && !numberMatchesOwnedPhone(toNumber, ownedPhone)) {
             direction = 'outbound';
@@ -1931,9 +1974,9 @@ export async function syncMightyCallSMS(
           external_id: externalId,
           from_number: fromNumber,
           to_number: toNumber,
-          message_text: m.textModel?.text || m.text || null,
+          message_text: m.textModel?.text || m.messageInfo?.text || m.text || null,
           direction,
-          status: m.status || 'received',
+          status: m.messageDeliveryStatus || m.messageInfo?.deliveryStatus || m.status || 'received',
           sent_at: m.created || new Date().toISOString(),
           message_date: m.created || new Date().toISOString(),
           metadata: {
@@ -2063,6 +2106,8 @@ export async function syncMightyCallCallHistory(
            */
           export async function syncSMSLog(supabaseAdminClient: any, orgId: string, message: any): Promise<{ smsSynced: boolean }> {
             try {
+              const sentAt = message.sent_at || message.sendTime || new Date().toISOString();
+              const externalId = String(message.id || message.external_id || `${sentAt}:${message.from || ''}:${Array.isArray(message.to) ? message.to.join(',') : message.to || ''}`);
               const { error } = await supabaseAdminClient
                 .from('sms_logs')
                 .insert({
@@ -2072,13 +2117,32 @@ export async function syncMightyCallCallHistory(
                   message_text: message.text,
                   direction: message.direction ?? 'outbound',
                   status: message.status ?? 'sent',
-                  sent_at: new Date().toISOString(),
+                  sent_at: sentAt,
                   metadata: message
                 });
 
               if (error) {
                 console.warn('[SMS Log] error', error);
                 return { smsSynced: false };
+              }
+              try {
+                await supabaseAdminClient
+                  .from('mightycall_sms_messages')
+                  .upsert({
+                    org_id: orgId,
+                    phone_id: message.phone_id || null,
+                    external_id: externalId,
+                    from_number: message.from,
+                    to_number: Array.isArray(message.to) ? message.to[0] : message.to,
+                    message_text: message.text,
+                    direction: message.direction ?? 'outbound',
+                    status: message.status ?? 'sent',
+                    sent_at: sentAt,
+                    message_date: sentAt,
+                    metadata: message,
+                  }, { onConflict: 'org_id,external_id' });
+              } catch (mirrorErr) {
+                console.warn('[SMS Log] mightycall_sms_messages mirror skipped', mirrorErr);
               }
               return { smsSynced: true };
             } catch (err) {
