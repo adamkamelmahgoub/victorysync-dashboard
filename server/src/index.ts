@@ -1137,6 +1137,137 @@ function toDbAgentNormalizedStatus(
   }
 }
 
+type SmsPhoneOwner = {
+  id: string | null;
+  org_id: string;
+  number: string | null;
+  digits: string;
+  org_name?: string | null;
+};
+
+async function loadSmsPhoneOwnershipIndex(): Promise<Map<string, SmsPhoneOwner[]>> {
+  const index = new Map<string, SmsPhoneOwner[]>();
+  const { data, error } = await supabaseAdmin
+    .from('phone_numbers')
+    .select('id, org_id, number, number_digits, e164, phone_number, organizations(name)');
+  if (error) {
+    console.warn('[sms/messages] phone ownership index failed:', fmtErr(error));
+    return index;
+  }
+  for (const row of data || []) {
+    const orgId = String((row as any).org_id || '').trim();
+    if (!orgId) continue;
+    const candidates = [
+      (row as any).number_digits,
+      (row as any).number,
+      (row as any).e164,
+      (row as any).phone_number,
+    ];
+    for (const value of candidates) {
+      const digits = normalizePhoneDigits(value);
+      if (!digits || digits.length < 7) continue;
+      const owner: SmsPhoneOwner = {
+        id: String((row as any).id || '').trim() || null,
+        org_id: orgId,
+        number: String((row as any).number || value || '').trim() || null,
+        digits,
+        org_name: (row as any).organizations?.name || null,
+      };
+      const list = index.get(digits) || [];
+      if (!list.some((item) => item.org_id === owner.org_id && item.id === owner.id)) list.push(owner);
+      index.set(digits, list);
+    }
+  }
+  return index;
+}
+
+function parseJsonObject(value: any): any {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function smsDirectionFromText(value: any): 'inbound' | 'outbound' | 'unknown' {
+  const text = String(value || '').toLowerCase().trim();
+  if (!text) return 'unknown';
+  if (text.includes('out')) return 'outbound';
+  if (text.includes('in')) return 'inbound';
+  return 'unknown';
+}
+
+function findSmsOwner(index: Map<string, SmsPhoneOwner[]>, targetOrgIds: Set<string> | null, ...values: any[]): SmsPhoneOwner | null {
+  const matches = new Map<string, SmsPhoneOwner>();
+  for (const value of values) {
+    const digits = normalizePhoneDigits(value);
+    if (!digits) continue;
+    for (const owner of index.get(digits) || []) {
+      if (targetOrgIds && !targetOrgIds.has(owner.org_id)) continue;
+      matches.set(`${owner.org_id}:${owner.id || owner.digits}`, owner);
+    }
+  }
+  const rows = Array.from(matches.values());
+  return rows.length === 1 ? rows[0] : null;
+}
+
+function normalizeSmsRowForOwnership(row: any, index: Map<string, SmsPhoneOwner[]>, targetOrgIds: Set<string> | null) {
+  const metadata = parseJsonObject(row?.metadata || row?.raw_payload || row?.payload);
+  const businessNumber =
+    metadata?.businessNumber?.number ||
+    metadata?.businessNumber ||
+    metadata?.business_number ||
+    metadata?.phone_number ||
+    metadata?.phoneNumber ||
+    row?.business_number ||
+    row?.phone_number ||
+    null;
+  const fromNumber = row?.from_number || metadata?.from_number || metadata?.from || metadata?.sender || metadata?.source_number || null;
+  const toNumber = row?.to_number || row?.to_numbers || metadata?.to_number || metadata?.to || metadata?.recipient || metadata?.destination_number || null;
+  const owner = findSmsOwner(index, targetOrgIds, businessNumber, fromNumber, toNumber);
+  if (!owner) return null;
+
+  let direction = smsDirectionFromText(
+    metadata?.inferred_direction ||
+    metadata?.direction ||
+    metadata?.messageDirection ||
+    metadata?.message_direction ||
+    metadata?.type ||
+    metadata?.messageType
+  );
+  const ownerFrom = normalizePhoneDigits(fromNumber) === owner.digits;
+  const ownerTo = normalizePhoneDigits(toNumber) === owner.digits;
+  if (direction === 'unknown') {
+    if (ownerFrom && !ownerTo) direction = 'outbound';
+    else if (ownerTo && !ownerFrom) direction = 'inbound';
+  }
+
+  return {
+    ...row,
+    org_id: owner.org_id,
+    phone_id: row?.phone_id || owner.id,
+    from_number: fromNumber,
+    to_number: toNumber,
+    direction,
+    organizations: {
+      ...(row?.organizations || {}),
+      id: owner.org_id,
+      name: owner.org_name || row?.organizations?.name || owner.org_id,
+    },
+    metadata: {
+      ...metadata,
+      response_ownership_org_id: owner.org_id,
+      response_ownership_phone_id: owner.id,
+      response_ownership_digits: owner.digits,
+      response_direction: direction,
+    },
+  };
+}
+
 function mapAgentLiveStatusToPresence(status: string): { on_call: boolean; label: string } {
   switch (status) {
     case 'ringing':
@@ -12377,103 +12508,52 @@ app.get("/s/series", async (req, res) => {
           }
         }
 
-        // Try mightycall_sms_messages first, fallback to sms_logs
+        const ownershipIndex = await loadSmsPhoneOwnershipIndex();
+        const targetOrgSet = targetOrgIds.length > 0 ? new Set(targetOrgIds) : null;
+        const fetchLimit = Math.min(Math.max(offset + limit + 1000, 2000), 10000);
+
+        // Try mightycall_sms_messages first. We intentionally avoid strict DB org_id
+        // filtering here because older syncs stamped rows into the wrong org.
         let tableName = 'mightycall_sms_messages';
-        let query = supabaseAdmin
+        let { data, error } = await supabaseAdmin
           .from(tableName)
           .select('*, organizations(name, id)')
           .order('created_at', { ascending: false })
-          .range(offset, offset + limit - 1);
-
-        // Add org filter
-        if (targetOrgIds.length > 0) {
-          query = query.in('org_id', targetOrgIds);
-        }
-        
-        // Add phone filter for non-admin.
-        // Do not rely only on phone_id because many rows may have phone_id = null
-        // while from/to numbers are present.
-        if (!isAdmin) {
-          if (allowedPhoneIds && allowedPhoneIds.length > 0) {
-            const idClauses = allowedPhoneIds.map((id) => `phone_id.eq.${String(id).replace(/,/g, '\\,')}`);
-            const numberClauses: string[] = [];
-            for (const num of allowedPhoneNumbers) {
-              const n = String(num || '').replace(/,/g, '\\,');
-              if (!n) continue;
-              numberClauses.push(`from_number.eq.${n}`);
-              numberClauses.push(`to_number.eq.${n}`);
-            }
-            for (const d of allowedPhoneDigits) {
-              const digits = String(d || '').replace(/,/g, '\\,');
-              if (!digits) continue;
-              numberClauses.push(`from_number.ilike.*${digits}*`);
-              numberClauses.push(`to_number.ilike.*${digits}*`);
-            }
-            const clauses = idClauses.concat(numberClauses);
-            if (clauses.length > 0) query = query.or(clauses.join(','));
-          } else {
-            const numberClauses: string[] = [];
-            for (const num of allowedPhoneNumbers) {
-              const n = String(num || '').replace(/,/g, '\\,');
-              if (!n) continue;
-              numberClauses.push(`from_number.eq.${n}`);
-              numberClauses.push(`to_number.eq.${n}`);
-            }
-            for (const d of allowedPhoneDigits) {
-              const digits = String(d || '').replace(/,/g, '\\,');
-              if (!digits) continue;
-              numberClauses.push(`from_number.ilike.*${digits}*`);
-              numberClauses.push(`to_number.ilike.*${digits}*`);
-            }
-            if (numberClauses.length > 0) query = query.or(numberClauses.join(','));
-          }
-        }
-
-        let { data, error } = await query;
+          .limit(fetchLimit);
 
         // Fallback to sms_logs if mightycall_sms_messages doesn't exist
         if (error && error.code === 'PGRST205' && error.message.includes('mightycall_sms_messages')) {
           console.log('[sms/messages] mightycall_sms_messages not found, using sms_logs fallback');
           tableName = 'sms_logs';
           
-          query = supabaseAdmin
+          const fallbackQuery = supabaseAdmin
             .from('sms_logs')
             .select('*')
             .order('sent_at', { ascending: false })
-            .range(offset, offset + limit - 1);
-
-          if (targetOrgIds.length > 0) {
-            query = query.in('org_id', targetOrgIds);
-          }
-
-          // Also apply phone filter for non-admin in fallback
-          if (!isAdmin && (allowedPhoneNumbers.length > 0 || allowedPhoneDigits.length > 0)) {
-            const orParts: string[] = [];
-            for (const num of allowedPhoneNumbers) {
-              const n = String(num || '').replace(/,/g, '\\,');
-              if (n) {
-                orParts.push(`from_number.eq.${n}`);
-                orParts.push(`to_number.eq.${n}`);
-              }
-            }
-            for (const d of allowedPhoneDigits) {
-              const digits = String(d || '').replace(/,/g, '\\,');
-              if (!digits) continue;
-              orParts.push(`from_number.ilike.*${digits}*`);
-              orParts.push(`to_number.ilike.*${digits}*`);
-            }
-            if (orParts.length > 0) {
-              query = query.or(orParts.join(','));
-            }
-          }
-
-          ({ data, error } = await query);
+            .limit(fetchLimit);
+          ({ data, error } = await fallbackQuery);
         }
 
         if (error) throw error;
-        const rows = data || [];
-        if (rows.length === 0) emptyReason = 'no_synced_data';
-        res.json({ messages: rows, next_offset: rows.length === limit ? offset + rows.length : null, empty_reason: rows.length === 0 ? emptyReason : null });
+        const assignedDigitSet = new Set((allowedPhoneDigits || []).map((d) => String(d || '')).filter(Boolean));
+        const assignedIdSet = new Set((allowedPhoneIds || []).map((id) => String(id || '')).filter(Boolean));
+        const normalizedRows = (data || [])
+          .map((row: any) => normalizeSmsRowForOwnership(row, ownershipIndex, targetOrgSet))
+          .filter((row: any) => {
+            if (!row) return false;
+            if (isAdmin || orgWideSmsAccess) return true;
+            const rowPhoneId = String(row?.phone_id || '');
+            const fromDigits = normalizePhoneDigits(row?.from_number);
+            const toDigits = normalizePhoneDigits(row?.to_number);
+            return (
+              (rowPhoneId && assignedIdSet.has(rowPhoneId)) ||
+              (fromDigits && assignedDigitSet.has(fromDigits)) ||
+              (toDigits && assignedDigitSet.has(toDigits))
+            );
+          });
+        const rows = normalizedRows.slice(offset, offset + limit);
+        if (normalizedRows.length === 0) emptyReason = 'no_synced_data';
+        res.json({ messages: rows, next_offset: offset + limit < normalizedRows.length ? offset + limit : null, empty_reason: rows.length === 0 ? emptyReason : null });
       } catch (err: any) {
         console.error('[sms/messages] error:', err);
         res.status(500).json({ error: 'failed_to_fetch_messages', detail: err?.message });
