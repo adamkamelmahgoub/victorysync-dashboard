@@ -42,6 +42,7 @@ export function SMSPage() {
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [search, setSearch] = useState('');
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
+  const [directionFilter, setDirectionFilter] = useState<'all' | 'inbound' | 'outbound' | 'unknown'>('all');
 
   const loadMessages = async (reset = false) => {
     if (!user) return;
@@ -142,7 +143,12 @@ export function SMSPage() {
         .join(' ');
       return haystack.includes(term);
     });
-  }, [messages, search]);
+  }, [messages, search]).filter((message) => {
+    if (directionFilter === 'all') return true;
+    const direction = String(message.direction || '').toLowerCase();
+    if (directionFilter === 'unknown') return direction !== 'inbound' && direction !== 'outbound';
+    return direction === directionFilter;
+  });
 
   const summary = useMemo(() => {
     const inbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'inbound').length;
@@ -208,13 +214,24 @@ export function SMSPage() {
         </div>
 
         <SectionCard title="Message stream" description="Search, scan, and review your SMS traffic in one place.">
-          <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr),auto]">
+          <div className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr),auto,auto]">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search numbers, statuses, or message text"
               className="vs-input w-full"
             />
+            <div className="grid grid-cols-4 overflow-hidden rounded-2xl border border-white/8 bg-white/[0.03] text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              {(['all', 'inbound', 'outbound', 'unknown'] as const).map((value) => (
+                <button
+                  key={value}
+                  onClick={() => setDirectionFilter(value)}
+                  className={`px-3 py-3 transition ${directionFilter === value ? 'bg-cyan-400/[0.12] text-cyan-100' : 'hover:bg-white/[0.04]'}`}
+                >
+                  {value === 'all' ? 'All' : value}
+                </button>
+              ))}
+            </div>
             <button onClick={() => loadMessages(true)} className="vs-button-secondary">
               Refresh
             </button>

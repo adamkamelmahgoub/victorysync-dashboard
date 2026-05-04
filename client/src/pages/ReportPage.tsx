@@ -231,12 +231,12 @@ export default function ReportPage() {
   return (
       <PageLayout
         eyebrow="Reporting"
-        title="Reports"
-        description="Reporting for the phone numbers assigned to you, with drill-down into related calls, recordings, and SMS."
+        title="Reports Workbench"
+        description="A cleaner operational report layout with KPIs, report inventory, and call, recording, and SMS drill-down in one workspace."
         actions={actions}
       >
       <div className="space-y-6">
-        <SectionCard title="Report filters" description="Narrow the report inventory before drilling into specific activity.">
+        <SectionCard title="Operations report workspace" description="Narrow the report inventory, select a row, then inspect related calls, recordings, and SMS without leaving the page.">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,320px),1fr,auto] md:items-end">
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Report Type</label>

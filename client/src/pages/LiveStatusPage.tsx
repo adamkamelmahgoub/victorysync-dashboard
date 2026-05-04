@@ -68,6 +68,46 @@ function getLiveDuration(agent: LiveAgentStatus, nowMs: number) {
   return byStartTime;
 }
 
+function normalizedStatus(agent: LiveAgentStatus) {
+  const raw = String(agent.status || agent.raw_status || '').toLowerCase();
+  if (agent.stale) return 'stale';
+  if (raw.includes('dnd') || raw.includes('disturb')) return 'dnd';
+  if (raw.includes('offline')) return 'offline';
+  if (raw.includes('ring')) return 'ringing';
+  if (raw.includes('dial')) return 'dialing';
+  if (agent.on_call || raw.includes('call') || raw.includes('connect') || raw.includes('talk')) return 'on_call';
+  if (raw.includes('wrap')) return 'wrap_up';
+  if (raw.includes('available') || raw.includes('idle') || raw.includes('ready')) return 'available';
+  return 'unknown';
+}
+
+function statusVisuals(agent: LiveAgentStatus): {
+  badgeTone: 'neutral' | 'success' | 'warning' | 'info';
+  cardClass: string;
+  label: string;
+} {
+  switch (normalizedStatus(agent)) {
+    case 'stale':
+      return { badgeTone: 'warning', cardClass: 'border-amber-400/25 bg-amber-400/[0.035]', label: 'Stale' };
+    case 'ringing':
+      return { badgeTone: 'warning', cardClass: 'border-amber-400/25 bg-amber-400/[0.035]', label: 'Ringing' };
+    case 'dialing':
+      return { badgeTone: 'info', cardClass: 'border-cyan-400/25 bg-cyan-400/[0.035]', label: 'Dialing' };
+    case 'on_call':
+      return { badgeTone: 'info', cardClass: 'border-cyan-400/25 bg-cyan-400/[0.035]', label: 'On Call' };
+    case 'available':
+      return { badgeTone: 'success', cardClass: 'border-emerald-400/25 bg-emerald-400/[0.03]', label: 'Available' };
+    case 'dnd':
+      return { badgeTone: 'warning', cardClass: 'border-rose-400/25 bg-rose-400/[0.035]', label: 'DND' };
+    case 'offline':
+      return { badgeTone: 'neutral', cardClass: 'border-slate-500/20 bg-white/[0.018]', label: 'Offline' };
+    case 'wrap_up':
+      return { badgeTone: 'warning', cardClass: 'border-violet-400/20 bg-violet-400/[0.03]', label: 'Wrap Up' };
+    default:
+      return { badgeTone: 'neutral', cardClass: 'border-white/[0.03] bg-white/[0.025]', label: agent.status || 'Unknown' };
+  }
+}
+
 const LiveStatusPage: FC = () => {
   const { user, globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const isAdmin = globalRole === 'platform_admin';
@@ -211,47 +251,50 @@ const LiveStatusPage: FC = () => {
             />
           ) : (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              {items.map((agent) => (
-                <div key={`${agent.org_id || 'global'}:${agent.user_id}`} className="rounded-3xl border border-white/[0.03] bg-white/[0.025] p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)]">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
-                      <div className="mt-1 text-sm text-slate-400">
-                        {agent.email || 'No email'}
-                        {agent.extension ? ` - Ext ${agent.extension}` : ''}
-                        {isAdmin && agent.org_id ? ` - ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
+              {items.map((agent) => {
+                const visuals = statusVisuals(agent);
+                return (
+                  <div key={`${agent.org_id || 'global'}:${agent.user_id}`} className={`rounded-3xl border p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)] ${visuals.cardClass}`}>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
+                        <div className="mt-1 text-sm text-slate-400">
+                          {agent.email || 'No email'}
+                          {agent.extension ? ` - Ext ${agent.extension}` : ''}
+                          {isAdmin && agent.org_id ? ` - ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
+                        </div>
                       </div>
+                      <StatusBadge tone={visuals.badgeTone}>
+                        {visuals.label}
+                      </StatusBadge>
                     </div>
-                    <StatusBadge tone={agent.stale ? 'warning' : agent.on_call ? 'success' : 'neutral'}>
-                      {agent.stale ? 'Stale' : agent.on_call ? 'On Call' : (agent.status || 'Idle')}
-                    </StatusBadge>
-                  </div>
 
-                  <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="vs-surface-muted p-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
-                      <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
-                      <div className="mt-2 text-xs text-slate-500">
-                        {agent.on_call
-                          ? `${agent.direction ? `${agent.direction === 'outbound' ? 'Outbound' : 'Incoming'}${agent.from_number || agent.to_number ? ' - ' : ''}` : ''}${agent.direction === 'outbound' ? (agent.to_number || '') : (agent.from_number || '')}`
-                          : ''}
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="vs-surface-muted p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
+                        <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
+                        <div className="mt-2 text-xs text-slate-500">
+                          {agent.on_call
+                            ? `${agent.direction ? `${agent.direction === 'outbound' ? 'Outbound' : 'Incoming'}${agent.from_number || agent.to_number ? ' - ' : ''}` : ''}${agent.direction === 'outbound' ? (agent.to_number || '') : (agent.from_number || '')}`
+                            : ''}
+                        </div>
+                        <div className="mt-2 text-xs text-slate-500">Raw status: {agent.raw_status || '-'}</div>
+                        <div className="mt-1 text-xs text-slate-500">API source: {agent.api_source || agent.source || '-'}</div>
+                        <div className="mt-2 text-xs text-slate-500">Last seen {fmtDateTime(agent.last_seen_at)}</div>
                       </div>
-                      <div className="mt-2 text-xs text-slate-500">Raw status: {agent.raw_status || '-'}</div>
-                      <div className="mt-1 text-xs text-slate-500">API source: {agent.api_source || agent.source || '-'}</div>
-                      <div className="mt-2 text-xs text-slate-500">Last seen {fmtDateTime(agent.last_seen_at)}</div>
-                    </div>
-                    <div className="vs-surface-muted p-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
-                      <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
-                      {agent.on_call && (
-                        <div className="mt-2 text-xs font-semibold text-emerald-300">Live duration {getLiveDuration(agent, nowMs)}</div>
-                      )}
-                      <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-                      <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
+                      <div className="vs-surface-muted p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
+                        <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
+                        {agent.on_call && (
+                          <div className="mt-2 text-xs font-semibold text-emerald-300">Live duration {getLiveDuration(agent, nowMs)}</div>
+                        )}
+                        <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+                        <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </SectionCard>

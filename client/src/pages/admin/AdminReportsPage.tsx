@@ -226,14 +226,14 @@ const AdminReportsPage: FC = () => {
   return (
     <PageLayout
       eyebrow="Admin reporting"
-      title="Reports"
-      description="Cross-organization reporting, called-number visibility, and report drill-down activity for platform operations."
+      title="Reports Workbench"
+      description="Cross-organization operational reporting with KPI bands, report inventory, and call, recording, and SMS drill-down."
       actions={<button onClick={() => loadReports(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">{loading || syncing ? 'Refreshing reports...' : 'Refresh'}</button>}
     >
       <div className="space-y-6">
         <AdminTopNav />
 
-        <SectionCard title="Report filters" description="Compare reporting activity across organizations without leaving the admin workspace.">
+        <SectionCard title="Operations report workspace" description="Compare reporting activity across organizations, select a row, then inspect related activity without leaving the admin workspace.">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,240px),minmax(0,240px),1fr] md:items-end">
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Organization</label>

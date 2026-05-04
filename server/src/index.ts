@@ -3248,7 +3248,7 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
       });
 
       const normalizedStatus = normalizeAgentLiveEventStatus(status.normalizedStatus);
-      const isActive = !isAgentLiveTerminalStatus(normalizedStatus);
+      const isActive = normalizedStatus === 'ringing' || normalizedStatus === 'dialing' || normalizedStatus === 'answered' || normalizedStatus === 'in_progress' || normalizedStatus === 'on_call';
       const direction = status.direction || null;
       const counterpartNumber = status.counterpartNumber || null;
 
@@ -11364,10 +11364,15 @@ app.get("/s/series", async (req, res) => {
         let assignedIdSet = new Set<string>();
         let assignedNumberSet = new Set<string>();
         let assignedDigitSet = new Set<string>();
+        let orgWideReportAccess = false;
         if (!isAdmin && queryOrgIds.length > 0) {
           try {
             // collect assigned numbers/ids/digits across all orgs for THIS USER
             for (const o of queryOrgIds) {
+              if ((await isOrgAdmin(userId, o)) || (await isOrgManagerWith(userId, o, 'can_manage_agents'))) {
+                orgWideReportAccess = true;
+                continue;
+              }
               const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(o, userId);
               for (const n of numbers || []) assignedNumberSet.add(String(n));
               for (const d of digits || []) assignedDigitSet.add(String(d));
@@ -11438,7 +11443,7 @@ app.get("/s/series", async (req, res) => {
         }
 
         let rows = data || [];
-        if (!isAdmin && queryOrgIds.length > 0) {
+        if (!isAdmin && queryOrgIds.length > 0 && !orgWideReportAccess) {
           if (assignedIdSet.size === 0 && assignedNumberSet.size === 0 && assignedDigitSet.size === 0) {
             emptyReason = 'no_assigned_numbers';
             rows = [];
@@ -11486,12 +11491,15 @@ app.get("/s/series", async (req, res) => {
           const orgIds = await getUserOrgIds(userId);
           if (!orgIds.includes(report.org_id)) return res.status(403).json({ error: 'forbidden' });
 
-          const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(report.org_id, userId);
-          const assignedIdSet = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
-          const assignedNumberSet = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
-          const assignedDigitSet = new Set((digits || []).map((d: any) => String(d || '')).filter(Boolean));
-          if (!reportVisibleToAssignedPhones(report, assignedIdSet, assignedNumberSet, assignedDigitSet)) {
-            return res.status(403).json({ error: 'forbidden', detail: 'report_not_assigned_to_user_numbers' });
+          const orgWideReportAccess = (await isOrgAdmin(userId, report.org_id)) || (await isOrgManagerWith(userId, report.org_id, 'can_manage_agents'));
+          if (!orgWideReportAccess) {
+            const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(report.org_id, userId);
+            const assignedIdSet = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
+            const assignedNumberSet = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
+            const assignedDigitSet = new Set((digits || []).map((d: any) => String(d || '')).filter(Boolean));
+            if (!reportVisibleToAssignedPhones(report, assignedIdSet, assignedNumberSet, assignedDigitSet)) {
+              return res.status(403).json({ error: 'forbidden', detail: 'report_not_assigned_to_user_numbers' });
+            }
           }
         }
 
@@ -11550,7 +11558,7 @@ app.get("/s/series", async (req, res) => {
         let assignedIdSet = new Set<string>();
         let assignedNumberSet = new Set<string>();
         let assignedDigitSet = new Set<string>();
-        if (!isAdmin) {
+        if (!isAdmin && !((await isOrgAdmin(userId, report.org_id)) || (await isOrgManagerWith(userId, report.org_id, 'can_manage_agents')))) {
           const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(report.org_id, userId);
           assignedIdSet = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
           assignedNumberSet = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
@@ -12138,6 +12146,18 @@ app.get("/s/series", async (req, res) => {
         if (!isAdmin) {
           try {
             const orgIds = orgId ? [orgId] : await getUserOrgIds(userId);
+            let orgWideRecordingAccess = false;
+            for (const o of orgIds) {
+              if ((await isOrgAdmin(userId, o)) || (await isOrgManagerWith(userId, o, 'can_manage_agents'))) {
+                orgWideRecordingAccess = true;
+                break;
+              }
+            }
+            if (orgWideRecordingAccess) {
+              const rows = data || [];
+              if (!emptyReason && rows.length === 0) emptyReason = 'no_synced_data';
+              return res.json({ recordings: rows, next_offset: rows.length === limit ? offset + rows.length : null, empty_reason: rows.length === 0 ? emptyReason : null });
+            }
             const assignedIds = new Set<string>();
             const assignedNumbers = new Set<string>();
             const assignedDigits = new Set<string>();
@@ -12226,6 +12246,27 @@ app.get("/s/series", async (req, res) => {
             if (!orgId || !(await isOrgMember(actorId, orgId))) {
               return res.status(403).json({ error: 'forbidden' });
             }
+            if ((await isOrgAdmin(actorId, orgId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'))) {
+              const recordingUrl = recording.recording_url;
+              const fetched = await fetch(recordingUrl);
+              if (!fetched.ok) {
+                console.error('[recordings/download] remote fetch failed:', fetched.status);
+                return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
+              }
+              const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
+              const filename = `${id}.mp3`;
+              res.setHeader('Content-Type', contentType);
+              res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+              if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
+                const nodeStream = Readable.fromWeb((fetched as any).body);
+                nodeStream.pipe(res);
+              } else {
+                const arr = await fetched.arrayBuffer();
+                const buf = Buffer.from(arr);
+                res.send(buf);
+              }
+              return;
+            }
             const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(orgId, actorId);
             const assignedIds = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
             const assignedNumbers = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
@@ -12308,7 +12349,16 @@ app.get("/s/series", async (req, res) => {
         let allowedPhoneIds: string[] | null = null;
         let allowedPhoneNumbers: string[] = [];
         let allowedPhoneDigits: string[] = [];
+        let orgWideSmsAccess = false;
         if (!isAdmin && targetOrgIds.length > 0) {
+          for (const oId of targetOrgIds) {
+            if ((await isOrgAdmin(userId, oId)) || (await isOrgManagerWith(userId, oId, 'can_manage_agents'))) {
+              orgWideSmsAccess = true;
+              break;
+            }
+          }
+        }
+        if (!isAdmin && targetOrgIds.length > 0 && !orgWideSmsAccess) {
           // Get user's assigned phones for their org(s)
           const phonesByOrg: Record<string, string[]> = {};
           for (const oId of targetOrgIds) {
