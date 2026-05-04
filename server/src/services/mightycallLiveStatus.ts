@@ -137,7 +137,7 @@ function firstIso(...values: any[]): string | undefined {
   return undefined;
 }
 
-function normalizeFromRawStatus(rawStatus: string): NormalizedLiveStatus {
+export function normalizeFromRawStatus(rawStatus: string): NormalizedLiveStatus {
   const text = String(rawStatus || '').trim().toLowerCase();
   if (!text) return 'unknown';
   if (text.includes('ring')) return 'ringing';

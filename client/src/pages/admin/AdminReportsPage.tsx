@@ -113,7 +113,7 @@ const AdminReportsPage: FC = () => {
   const fetchOrgs = async () => {
     if (!userId) return;
     try {
-      const resp = await fetch(buildApiUrl('/api/admin/orgs'), { headers: { 'x-user-id': userId, 'x-dev-bypass': 'true' } });
+      const resp = await fetch(buildApiUrl('/api/admin/orgs'), { headers: { 'x-user-id': userId } });
       if (!resp.ok) return;
       const json = await resp.json();
       setOrgs(json.orgs || []);

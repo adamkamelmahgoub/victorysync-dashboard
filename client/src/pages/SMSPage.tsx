@@ -145,7 +145,8 @@ export function SMSPage() {
   const summary = useMemo(() => {
     const inbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'inbound').length;
     const outbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'outbound').length;
-    return { inbound, outbound };
+    const unknown = filteredMessages.length - inbound - outbound;
+    return { inbound, outbound, unknown };
   }, [filteredMessages]);
 
   if (!orgId && (!orgs || orgs.length === 0)) {
@@ -177,10 +178,11 @@ export function SMSPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <MetricStatCard label="Messages" value={messages.length} hint={orgName} />
           <MetricStatCard label="Inbound" value={summary.inbound} hint="Customer-originated messages" accent="cyan" />
           <MetricStatCard label="Outbound" value={summary.outbound} hint="Messages sent from the workspace" accent="emerald" />
+          <MetricStatCard label="Unknown" value={summary.unknown} hint="Needs direction metadata" accent="neutral" />
         </div>
 
         <SectionCard title="Message stream" description="Search, scan, and review your SMS traffic in one place.">
@@ -206,13 +208,17 @@ export function SMSPage() {
           ) : (
             <div className="space-y-3">
               {filteredMessages.map((message) => {
-                const inbound = String(message.direction || '').toLowerCase() === 'inbound';
+                const direction = String(message.direction || '').toLowerCase();
+                const inbound = direction === 'inbound';
+                const outbound = direction === 'outbound';
                 return (
                   <div key={message.id} className="vs-surface-muted p-4">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <StatusBadge tone={inbound ? 'info' : 'success'}>{inbound ? 'Inbound' : 'Outbound'}</StatusBadge>
+                          <StatusBadge tone={inbound ? 'info' : outbound ? 'success' : 'neutral'}>
+                            {inbound ? 'Inbound' : outbound ? 'Outbound' : 'Unknown'}
+                          </StatusBadge>
                           {message.status && <StatusBadge tone="neutral">{message.status}</StatusBadge>}
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">

@@ -3638,6 +3638,32 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use('/api', (_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
+const apiRateBuckets = new Map<string, { count: number; resetAt: number }>();
+app.use('/api', (req, res, next) => {
+  const now = Date.now();
+  const windowMs = 60_000;
+  const maxRequests = process.env.NODE_ENV === 'production' ? 300 : 1200;
+  const key = String(req.ip || req.socket.remoteAddress || 'unknown');
+  const current = apiRateBuckets.get(key);
+  if (!current || current.resetAt <= now) {
+    apiRateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return next();
+  }
+  current.count += 1;
+  if (current.count > maxRequests) {
+    res.setHeader('Retry-After', String(Math.ceil((current.resetAt - now) / 1000)));
+    return res.status(429).json({ error: 'rate_limited' });
+  }
+  return next();
+});
 // Disable ETag generation for API responses to avoid conditional GET returning 304
 app.disable('etag');
 
@@ -3905,6 +3931,7 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
 app.use('/api', async (req, res, next) => {
   try {
     let actor: string | null = null;
+    const incomingUserId = req.header('x-user-id') || null;
     const authorization = String(req.header('authorization') || '');
     const bearer = authorization.toLowerCase().startsWith('bearer ')
       ? authorization.slice(7).trim()
@@ -3930,8 +3957,12 @@ app.use('/api', async (req, res, next) => {
         req.headers['x-user-id'] = actor;
         console.log('[DEV BYPASS] Allowing request without auth:', req.method, req.path);
       } else {
-        actor = req.header('x-user-id') || null;
+        actor = incomingUserId;
       }
+    }
+
+    if (!actor && process.env.NODE_ENV === 'production' && incomingUserId) {
+      delete req.headers['x-user-id'];
     }
 
     (req as any).actorId = actor;
@@ -4771,9 +4802,10 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
   try {
     const { orgId } = req.params;
     const actorId = req.header('x-user-id') || null;
-    const isDev = process.env.NODE_ENV !== 'production' || req.header('x-dev-bypass') === 'true';
+    const isDev = process.env.NODE_ENV !== 'production';
 
     // Org members can view their org's phone numbers, or if in dev mode
+    if (!actorId && !isDev) return res.status(401).json({ error: 'unauthenticated' });
     if (actorId && !isDev) {
       const isMember = await isOrgMember(actorId, orgId);
       if (!isMember && !(await isPlatformAdmin(actorId))) {
@@ -4852,10 +4884,11 @@ app.get('/api/orgs/:orgId/recordings', async (req, res) => {
   try {
     const { orgId } = req.params;
     const actorId = req.header('x-user-id') || null;
-    const isDev = process.env.NODE_ENV !== 'production' || req.header('x-dev-bypass') === 'true';
+    const isDev = process.env.NODE_ENV !== 'production';
     const limit = parseInt(req.query.limit as string) || 10000;
 
     // Org members can view their org's recordings, or if in dev mode
+    if (!actorId && !isDev) return res.status(401).json({ error: 'unauthenticated' });
     if (actorId && !isDev) {
       const isMember = await isOrgMember(actorId, orgId);
       if (!isMember && !(await isPlatformAdmin(actorId))) {
@@ -11954,7 +11987,7 @@ app.get("/s/series", async (req, res) => {
         let query = supabaseAdmin
           .from('mightycall_recordings')
           .select('*, organizations(name, id)')
-          .order('created_at', { ascending: false })
+          .order('recording_date', { ascending: false, nullsFirst: false })
           .range(offset, offset + limit - 1);
 
         // If org_id is provided in query, use it (admin filtering)
@@ -12107,9 +12140,9 @@ app.get("/s/series", async (req, res) => {
           if (!id) return res.status(400).json({ error: 'missing_id' });
 
           // First try mightycall_recordings table (primary source)
-          let { data: recording, error } = await supabaseAdmin
+          let { data: recording, error }: { data: any; error: any } = await supabaseAdmin
             .from('mightycall_recordings')
-            .select('id, recording_url')
+            .select('id, org_id, phone_number_id, from_number, to_number, recording_url')
             .eq('id', id)
             .maybeSingle();
 
@@ -12117,7 +12150,7 @@ app.get("/s/series", async (req, res) => {
           if (!recording && !error) {
             const { data: call, error: callError } = await supabaseAdmin
               .from('calls')
-              .select('id, recording_url')
+              .select('id, org_id, from_number, to_number, recording_url')
               .eq('id', id)
               .maybeSingle();
 
@@ -12134,6 +12167,31 @@ app.get("/s/series", async (req, res) => {
           }
           if (!recording || !recording.recording_url) {
             return res.status(404).json({ error: 'recording_not_found' });
+          }
+
+          const isAdmin = await isPlatformAdmin(actorId);
+          if (!isAdmin) {
+            const orgId = String((recording as any).org_id || '').trim();
+            if (!orgId || !(await isOrgMember(actorId, orgId))) {
+              return res.status(403).json({ error: 'forbidden' });
+            }
+            const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(orgId, actorId);
+            const assignedIds = new Set((phones || []).map((p: any) => String(p?.id || '')).filter(Boolean));
+            const assignedNumbers = new Set((numbers || []).map((n: any) => String(n || '')).filter(Boolean));
+            const assignedDigits = new Set((digits || []).map((d: any) => String(d || '')).filter(Boolean));
+            const phoneId = String((recording as any).phone_number_id || '');
+            const from = String((recording as any).from_number || '');
+            const to = String((recording as any).to_number || '');
+            const fd = normalizePhoneDigits(from);
+            const td = normalizePhoneDigits(to);
+            const allowed = (
+              (phoneId && assignedIds.has(phoneId)) ||
+              (from && assignedNumbers.has(from)) ||
+              (to && assignedNumbers.has(to)) ||
+              (fd && assignedDigits.has(fd)) ||
+              (td && assignedDigits.has(td))
+            );
+            if (!allowed) return res.status(403).json({ error: 'forbidden', detail: 'recording_not_assigned_to_user_numbers' });
           }
 
           const recordingUrl = recording.recording_url;
@@ -12994,6 +13052,10 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
       const smsSyncResult = await syncMightyCallSMS(supabaseAdmin, orgId, overrideCreds);
       const smsSynced = Number(smsSyncResult?.smsSynced || 0);
       const phoneNumbersSynced = Number(phoneSyncResult?.upserted || phoneSyncResult?.synced || 0);
+      const recordingsSkippedUnowned = Number((result as any)?.skippedUnowned || 0);
+      const recordingsQuarantined = Number((result as any)?.quarantined || 0);
+      const smsSkippedUnowned = Number((smsSyncResult as any)?.skippedUnowned || 0);
+      const smsQuarantined = Number((smsSyncResult as any)?.quarantined || 0);
 
       // Update job record as completed (if job exists)
 	      if (job) {
@@ -13007,8 +13069,12 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
 	            phone_numbers_synced: phoneNumbersSynced,
 	            reports_synced: result.reportsSynced,
 	            recordings_synced: result.recordingsSynced,
+	            recordings_skipped_unowned: recordingsSkippedUnowned,
+	            recordings_quarantined: recordingsQuarantined,
 	            calls_synced: callsSynced,
-	            sms_synced: smsSynced
+	            sms_synced: smsSynced,
+	            sms_skipped_unowned: smsSkippedUnowned,
+	            sms_quarantined: smsQuarantined
 	          }
 	        });
 	      }
@@ -13020,8 +13086,12 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
         phone_numbers_synced: phoneNumbersSynced,
         reports_synced: result.reportsSynced,
         recordings_synced: result.recordingsSynced,
+        recordings_skipped_unowned: recordingsSkippedUnowned,
+        recordings_quarantined: recordingsQuarantined,
         calls_synced: callsSynced,
         sms_synced: smsSynced,
+        sms_skipped_unowned: smsSkippedUnowned,
+        sms_quarantined: smsQuarantined,
         job_id: job?.id || null
       });
 
@@ -13093,7 +13163,9 @@ app.post('/api/mightycall/sync/sms', apiKeyAuthMiddleware, async (req, res) => {
       res.json({
         success: true,
         org_id: orgId,
-        sms_synced: result.smsSynced
+        sms_synced: result.smsSynced,
+        skipped_unowned: Number((result as any)?.skippedUnowned || 0),
+        quarantined: Number((result as any)?.quarantined || 0)
       });
     } catch (syncError: any) {
       console.error(`[MightyCall SMS Sync] SMS sync failed for org ${orgId}:`, syncError);
@@ -13199,7 +13271,9 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
 	            start_date: actualStartDate,
 	            end_date: actualEndDate,
 	            phone_numbers_synced: Number(phoneSyncResult?.upserted || phoneSyncResult?.synced || 0),
-	            recordings_synced: result.recordingsSynced
+	            recordings_synced: result.recordingsSynced,
+	            skipped_unowned: Number((result as any)?.skippedUnowned || 0),
+	            quarantined: Number((result as any)?.quarantined || 0)
 	          }
 	        });
 	      }
@@ -13209,6 +13283,8 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
         success: true,
         org_id: orgId,
         recordings_synced: result.recordingsSynced,
+        skipped_unowned: Number((result as any)?.skippedUnowned || 0),
+        quarantined: Number((result as any)?.quarantined || 0),
         job_id: job?.id || null
       });
 

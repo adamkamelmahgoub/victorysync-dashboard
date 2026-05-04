@@ -50,7 +50,6 @@ const AdminSMSPage: FC = () => {
       const response = await fetch(buildApiUrl('/api/admin/orgs'), {
         headers: {
           'x-user-id': userId || '',
-          'x-dev-bypass': 'true',
         },
       });
       if (!response.ok) return;
@@ -134,8 +133,9 @@ const AdminSMSPage: FC = () => {
   const summary = useMemo(() => {
     const inbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'inbound').length;
     const outbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'outbound').length;
+    const unknown = filteredMessages.length - inbound - outbound;
     const uniqueOrgs = new Set(filteredMessages.map((message) => message.org_id).filter(Boolean)).size;
-    return { inbound, outbound, uniqueOrgs };
+    return { inbound, outbound, unknown, uniqueOrgs };
   }, [filteredMessages]);
 
   return (
@@ -148,11 +148,12 @@ const AdminSMSPage: FC = () => {
       <div className="space-y-6">
         <AdminTopNav />
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
           <MetricStatCard label="Messages" value={messages.length} hint="Loaded rows in the current window" />
           <MetricStatCard label="Organizations" value={summary.uniqueOrgs} hint="Active orgs in view" accent="cyan" />
           <MetricStatCard label="Inbound" value={summary.inbound} hint="Customer-originated messages" accent="cyan" />
           <MetricStatCard label="Outbound" value={summary.outbound} hint="Messages sent from client workspaces" accent="emerald" />
+          <MetricStatCard label="Unknown" value={summary.unknown} hint="Needs direction metadata" accent="neutral" />
         </div>
 
         <SectionCard
@@ -188,6 +189,7 @@ const AdminSMSPage: FC = () => {
               <option value="">All directions</option>
               <option value="inbound">Inbound</option>
               <option value="outbound">Outbound</option>
+              <option value="unknown">Unknown</option>
             </select>
             <div className="vs-surface-muted flex items-center justify-center px-4 py-3 text-sm text-slate-400">
               {filteredMessages.length} visible message{filteredMessages.length === 1 ? '' : 's'}
@@ -206,13 +208,17 @@ const AdminSMSPage: FC = () => {
           ) : (
             <div className="space-y-3">
               {filteredMessages.map((message) => {
-                const inbound = String(message.direction || '').toLowerCase() === 'inbound';
+                const direction = String(message.direction || '').toLowerCase();
+                const inbound = direction === 'inbound';
+                const outbound = direction === 'outbound';
                 return (
                   <div key={message.id} className="vs-surface-muted p-4">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <StatusBadge tone={inbound ? 'info' : 'success'}>{inbound ? 'Inbound' : 'Outbound'}</StatusBadge>
+                          <StatusBadge tone={inbound ? 'info' : outbound ? 'success' : 'neutral'}>
+                            {inbound ? 'Inbound' : outbound ? 'Outbound' : 'Unknown'}
+                          </StatusBadge>
                           <StatusBadge tone="neutral">{message.organizations?.name || 'Unassigned org'}</StatusBadge>
                           {message.status && <StatusBadge tone="neutral">{message.status}</StatusBadge>}
                         </div>

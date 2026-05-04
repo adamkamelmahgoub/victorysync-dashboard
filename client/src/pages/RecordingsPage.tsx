@@ -156,6 +156,24 @@ export function RecordingsPage() {
     }
   };
 
+  const handlePlay = async (recording: Recording) => {
+    try {
+      const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download`), {
+        headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        setError('Failed to open recording');
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err: any) {
+      setError(err?.message || 'Error opening recording');
+    }
+  };
+
   if (!orgId && (!orgs || orgs.length === 0)) {
     return (
       <PageLayout eyebrow="Recordings" title="Recordings" description="No organization selected">
@@ -217,7 +235,7 @@ export function RecordingsPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {recording.recording_url ? (
-                            <a href={recording.recording_url} target="_blank" rel="noopener noreferrer" className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</a>
+                            <button onClick={() => handlePlay(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</button>
                           ) : <span className="text-xs text-slate-500">N/A</span>}
                           <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>
                         </div>
