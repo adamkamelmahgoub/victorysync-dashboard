@@ -97,8 +97,12 @@ export function normalizePhoneDigitsForOwnership(value: any): string {
 export function directionFromText(value: any): 'inbound' | 'outbound' | 'unknown' {
   const text = String(value || '').toLowerCase().trim();
   if (!text) return 'unknown';
+  // Match common MightyCall direction values: "Inbound", "Outbound", "inbound", "outbound", "In", "Out"
   if (text.includes('out')) return 'outbound';
   if (text.includes('in')) return 'inbound';
+  // MightyCall sometimes uses "Message" type with direction in origin field
+  if (text === 'sent' || text === 'api' || text === 'external') return 'outbound';
+  if (text === 'received' || text === 'internal') return 'inbound';
   return 'unknown';
 }
 
@@ -711,7 +715,7 @@ export async function fetchMightyCallSMS(accessToken?: string, startDate?: strin
     const key = String(row?.id || row?.requestGuid || `${row?.created || ''}:${row?.textModel?.text || row?.messageInfo?.text || row?.text || ''}`);
     if (!seen.has(key)) {
       seen.add(key);
-      const direction = directionFromText(row?.direction || row?.messageDirection || row?.messageInfo?.origin || row?.origin);
+      const direction = directionFromText(row?.direction || row?.messageDirection || row?.messageInfo?.origin || row?.origin || row?.type);
       const businessNumber = pickPhoneText(row?.businessNumber?.number, row?.businessNumber, row?.messageInfo?.businessNumber);
       const clientNumber = pickPhoneText(row?.client?.address, row?.client?.number, row?.messageInfo?.client?.address);
       const fromNumber = direction === 'outbound'
@@ -1127,6 +1131,7 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
     });
   }
 
+  // Fallback 1: journal requests with Connected state
   if (allRows.length === 0) {
     const journalRows = await fetchMightyCallJournalRequests(accessToken, {
       type: 'Call',
@@ -1139,6 +1144,52 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
       allRows.push({
         call,
         sourceEndpoint: '/journal/requests?type=Call&state=Connected',
+      });
+    }
+  }
+
+  // Fallback 2: broader calls query without Connected/Open filter — some MightyCall accounts
+  // return active calls only when filtering by extension without callFilter/customFilter
+  if (allRows.length === 0) {
+    const broadRows = await fetchMightyCallCalls(accessToken, {
+      extension: normalized,
+      startUtc,
+      endUtc,
+      pageSize: '50',
+      maxPages: '1',
+      skip: '0',
+      fast: true,
+      returnOnFirstSuccess: true,
+    }, apiKeyOverride).catch(() => []);
+    strategyStats.push({ label: '/calls?extension (no filter)', rows: Array.isArray(broadRows) ? broadRows.length : 0 });
+    for (const call of Array.isArray(broadRows) ? broadRows : []) {
+      allRows.push({
+        call: {
+          ...(call || {}),
+          queryExtension: normalized,
+          query_extension: normalized,
+        },
+        sourceEndpoint: `/calls?extension=${encodeURIComponent(normalized)}`,
+      });
+    }
+  }
+
+  // Fallback 3: contact center communications (real-time events)
+  if (allRows.length === 0) {
+    const commRows = await fetchMightyCallContactCenterCommunications(accessToken, {
+      from: new Date(Date.now() - (5 * 60 * 1000)).toISOString(),
+      to: new Date(Date.now() + (60 * 1000)).toISOString(),
+      type: 'Call',
+      pageSize: '50',
+      page: '1',
+      showUsers: 'true',
+      resolveContacts: 'false',
+    }, apiKeyOverride).catch(() => []);
+    strategyStats.push({ label: '/contactcenter/communications?type=Call', rows: Array.isArray(commRows) ? commRows.length : 0 });
+    for (const call of Array.isArray(commRows) ? commRows : []) {
+      allRows.push({
+        call,
+        sourceEndpoint: '/contactcenter/communications?type=Call',
       });
     }
   }

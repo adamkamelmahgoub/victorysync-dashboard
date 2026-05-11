@@ -815,7 +815,10 @@ export async function getMightyCallStatusByExtension(input: {
     profileIdleNorm === 'wrap_up';
   const strategyStats = Array.isArray(liveCall?.debug?.strategyStats) ? liveCall.debug.strategyStats : [];
   const strictConnectedOpenRows = Number(
-    strategyStats.find((entry: any) => String(entry?.label || '') === 'strict_connected_open')?.rows ?? -1
+    strategyStats.find((entry: any) => {
+      const label = String(entry?.label || '');
+      return label === 'strict_connected_open' || label.includes('callFilter=Connected&customFilter=Open');
+    })?.rows ?? -1
   );
   const relaxedHistoryOnlyLiveSignal = Boolean(
     String(liveCall?.sourceEndpoint || '').includes('multi_strategy_live_probe') &&
@@ -856,6 +859,19 @@ export async function getMightyCallStatusByExtension(input: {
   );
 
   let decisionReason = 'profile_status_default';
+
+  // Strongest signal: we have an active call evidence with connected flag or active status
+  if (activeEvidenceAllowed) {
+    if (activeEvidenceNorm === 'ringing' || activeEvidenceNorm === 'dialing' || activeEvidenceNorm === 'on_call') {
+      normalizedStatus = activeEvidenceNorm;
+      decisionReason = 'fresh_active_evidence_status';
+    } else if (activeEvidenceHasConnectedFlag) {
+      normalizedStatus = 'on_call';
+      decisionReason = 'fresh_active_evidence_connected_flag';
+    }
+  }
+
+  // Next: direct live call object from /calls endpoint
   if ((hasFreshDirectLiveCallObject || directCurrentCallLooksActive) && directLiveSignalTrusted) {
     if (normalizedStatus === 'ringing' || normalizedStatus === 'dialing' || normalizedStatus === 'on_call') {
       decisionReason = 'direct_live_call_status';
@@ -865,29 +881,29 @@ export async function getMightyCallStatusByExtension(input: {
     } else if (onCallBoolean || (liveCall?.onCall && directLiveSignalTrusted)) {
       normalizedStatus = 'on_call';
       decisionReason = 'direct_live_call_boolean';
+    }
+    // Do NOT fall back to profile idle here — the direct live call object is strong evidence
+  }
+
+  // Only fall back to profile status if we have NO live call evidence at all
+  if (!hasDirectLiveCallObject && !activeCallEvidence && !onCallBoolean && !liveCall?.onCall) {
+    if (profileExplicitIdle) {
+      normalizedStatus = profileIdleNorm;
+      decisionReason = 'profile_idle_without_direct_live_call';
+    } else if (profileActiveSignal) {
+      normalizedStatus = profileIdleNorm;
+      decisionReason = 'profile_active_status';
     } else {
       normalizedStatus = profileIdleNorm;
-      decisionReason = 'direct_live_call_profile_fallback';
+      decisionReason = 'profile_fallback_without_fresh_evidence';
     }
-  } else if (profileExplicitIdle) {
+  }
+
+  // Safety valve: if profile explicitly says idle AND we have no strong active signal,
+  // allow profile to override — but only if there's no connected peer
+  if (profileExplicitIdle && relaxedHistoryOnlyLiveSignal && !activeEvidenceHasConnectedFlag && !liveCallHasConnectedPeer(currentCall)) {
     normalizedStatus = profileIdleNorm;
-    decisionReason = hasDirectLiveCallObject
-      ? 'profile_idle_overrides_stale_direct_live_call'
-      : 'profile_idle_without_direct_live_call';
-  } else if (profileActiveSignal) {
-    normalizedStatus = profileIdleNorm;
-    decisionReason = 'profile_active_status';
-  } else if (activeEvidenceAllowed) {
-    if (activeEvidenceNorm === 'ringing' || activeEvidenceNorm === 'dialing' || activeEvidenceNorm === 'on_call') {
-      normalizedStatus = activeEvidenceNorm;
-      decisionReason = 'fresh_active_evidence_status';
-    } else if (activeEvidenceHasConnectedFlag) {
-      normalizedStatus = 'on_call';
-      decisionReason = 'fresh_active_evidence_connected_flag';
-    }
-  } else {
-    normalizedStatus = profileIdleNorm;
-    decisionReason = 'profile_fallback_without_fresh_evidence';
+    decisionReason = 'profile_idle_overrides_relaxed_history_probe';
   }
 
   const hasStrongActiveSignal = Boolean(
