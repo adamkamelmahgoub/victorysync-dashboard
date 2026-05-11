@@ -5,7 +5,7 @@ import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { getOrgPhoneNumbers, type PhoneNumber } from '../lib/phonesApi';
-import { triggerMightyCallSMSSync } from '../lib/apiClient';
+import { sendSmsMessage, triggerMightyCallSMSSync } from '../lib/apiClient';
 
 interface SMSMessage {
   id: string;
@@ -27,11 +27,23 @@ function formatTime(message: SMSMessage) {
   return raw ? new Date(raw).toLocaleString() : '-';
 }
 
+function conversationKey(message: SMSMessage) {
+  const direction = String(message.direction || '').toLowerCase();
+  return direction === 'outbound'
+    ? (message.to_number || message.from_number || 'Unknown')
+    : (message.from_number || message.to_number || 'Unknown');
+}
+
 export function SMSPage() {
-  const { user, orgs, selectedOrgId } = useAuth();
+  const { user, orgs, selectedOrgId, globalRole } = useAuth();
   const { org: currentOrg } = useOrg();
-  const orgId = ((user?.user_metadata as any)?.org_id ?? null) || selectedOrgId || currentOrg?.id || null;
-  const orgName = orgs.find((o) => o.id === orgId)?.name || currentOrg?.name || 'your organization';
+  const isPlatformAdmin = globalRole === 'platform_admin' || globalRole === 'admin';
+  const orgId = isPlatformAdmin
+    ? (selectedOrgId || null)
+    : (((user?.user_metadata as any)?.org_id ?? null) || selectedOrgId || currentOrg?.id || null);
+  const orgName = orgId
+    ? (orgs.find((o) => o.id === orgId)?.name || currentOrg?.name || 'your organization')
+    : 'all organizations';
 
   const [messages, setMessages] = useState<SMSMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -64,9 +76,9 @@ export function SMSPage() {
     if (!reset && nextOffset == null) return;
 
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
-      if (reset) {
-        setLoading(true);
-        setError(null);
+    if (reset) {
+      setLoading(true);
+      setError(null);
     } else {
       setLoadingMore(true);
     }
@@ -77,9 +89,10 @@ export function SMSPage() {
       }
 
       const q = new URLSearchParams();
-      q.set('limit', String(PAGE_SIZE));
-      q.set('offset', String(activeOffset));
-      if (orgId) q.set('org_id', orgId);
+	      q.set('limit', String(PAGE_SIZE));
+	      q.set('offset', String(activeOffset));
+	      if (orgId) q.set('org_id', orgId);
+	      if (search.trim()) q.set('search', search.trim());
 
       const response = await fetch(buildApiUrl(`/api/sms/messages?${q.toString()}`), {
         headers: {
@@ -107,20 +120,48 @@ export function SMSPage() {
     }
   };
 
-  useEffect(() => {
-    if (user) loadMessages(true, { syncFirst: true });
-  }, [orgId, user?.id]);
+	  useEffect(() => {
+	    if (user) loadMessages(true, { syncFirst: true });
+	  }, [orgId, user?.id]);
+
+	  useEffect(() => {
+	    if (!user?.id) return;
+	    const tick = () => {
+	      if (document.visibilityState === 'visible') {
+	        void loadMessages(true);
+	      }
+	    };
+	    const intervalId = window.setInterval(tick, 10000);
+	    const onVisibility = () => {
+	      if (document.visibilityState === 'visible') tick();
+	    };
+	    document.addEventListener('visibilitychange', onVisibility);
+	    return () => {
+	      window.clearInterval(intervalId);
+	      document.removeEventListener('visibilitychange', onVisibility);
+	    };
+	  }, [user?.id, orgId, search]);
 
   useEffect(() => {
     let cancelled = false;
     const loadSenderNumbers = async () => {
-      if (!orgId || !user?.id) {
+      if ((!orgId && !isPlatformAdmin) || !user?.id) {
         setSenderNumbers([]);
         setFromNumber('');
         return;
       }
       try {
-        const rows = await getOrgPhoneNumbers(orgId, user.id);
+        const rows = isPlatformAdmin
+          ? await fetch(buildApiUrl('/api/admin/phone-numbers'), { headers: { 'x-user-id': user.id } })
+              .then(async (response) => {
+                if (!response.ok) throw new Error('Failed to fetch sender numbers');
+                const data = await response.json();
+                return (data.phone_numbers || data.numbers || []).map((row: any) => ({
+                  ...row,
+                  org_id: row.org_id || row.orgId || null,
+                })) as PhoneNumber[];
+              })
+          : await getOrgPhoneNumbers(orgId, user.id);
         if (cancelled) return;
         const usable = (rows || []).filter((row) => row.number);
         setSenderNumbers(usable);
@@ -135,10 +176,12 @@ export function SMSPage() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, user?.id]);
+  }, [orgId, user?.id, isPlatformAdmin]);
 
   const handleSendSMS = async () => {
-    if (!orgId || !user || !newMessage || !recipientNumber || !fromNumber) {
+    const selectedSender = senderNumbers.find((number) => number.number === fromNumber);
+    const sendOrgId = orgId || selectedSender?.org_id || (selectedSender as any)?.orgId || null;
+    if (!sendOrgId || !user || !newMessage || !recipientNumber || !fromNumber) {
       setError('Please fill in all fields');
       return;
     }
@@ -147,20 +190,7 @@ export function SMSPage() {
     setError(null);
 
     try {
-      const response = await fetch(buildApiUrl(`/api/orgs/${orgId}/sms/send`), {
-        method: 'POST',
-        headers: {
-          'x-user-id': user.id,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ from: fromNumber, to: recipientNumber, message: newMessage }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        setError(payload.message || 'Failed to send SMS');
-        return;
-      }
+	      await sendSmsMessage({ orgId: sendOrgId, from: fromNumber, to: recipientNumber, message: newMessage }, user.id);
 
       setNewMessage('');
       setRecipientNumber('');
@@ -196,12 +226,39 @@ export function SMSPage() {
     return direction === directionFilter;
   });
 
-  const summary = useMemo(() => {
+	  const summary = useMemo(() => {
     const inbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'inbound').length;
     const outbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'outbound').length;
     const unknown = filteredMessages.length - inbound - outbound;
     return { inbound, outbound, unknown };
-  }, [filteredMessages]);
+	  }, [filteredMessages]);
+
+	  const conversations = useMemo(() => {
+	    const groups = new Map<string, SMSMessage[]>();
+	    for (const message of filteredMessages) {
+	      const key = conversationKey(message);
+	      const rows = groups.get(key) || [];
+	      rows.push(message);
+	      groups.set(key, rows);
+	    }
+	    return Array.from(groups.entries()).map(([number, rows]) => ({
+	      number,
+	      rows: rows.slice().sort((a, b) => {
+	        const aTime = Date.parse(a.sent_at || a.message_date || a.created_at || '');
+	        const bTime = Date.parse(b.sent_at || b.message_date || b.created_at || '');
+	        return (aTime || 0) - (bTime || 0);
+	      }),
+	      latest: rows.slice().sort((a, b) => {
+	        const aTime = Date.parse(a.sent_at || a.message_date || a.created_at || '');
+	        const bTime = Date.parse(b.sent_at || b.message_date || b.created_at || '');
+	        return (bTime || 0) - (aTime || 0);
+	      })[0],
+	    })).sort((a, b) => {
+	      const aTime = Date.parse(a.latest?.sent_at || a.latest?.message_date || a.latest?.created_at || '');
+	      const bTime = Date.parse(b.latest?.sent_at || b.latest?.message_date || b.latest?.created_at || '');
+	      return (bTime || 0) - (aTime || 0);
+	    });
+	  }, [filteredMessages]);
 
   const emptyCopy = search.trim()
     ? {
@@ -223,7 +280,7 @@ export function SMSPage() {
             description: 'Once owned-number SMS is synced, messages will appear here.',
           };
 
-  if (!orgId && (!orgs || orgs.length === 0)) {
+  if (!isPlatformAdmin && !orgId && (!orgs || orgs.length === 0)) {
     return (
       <PageLayout title="SMS" description="No organization selected">
         <EmptyStatePanel
@@ -291,33 +348,42 @@ export function SMSPage() {
               description={emptyCopy.description}
             />
           ) : (
-            <div className="space-y-3">
-              {filteredMessages.map((message) => {
-                const direction = String(message.direction || '').toLowerCase();
-                const inbound = direction === 'inbound';
-                const outbound = direction === 'outbound';
-                return (
-                  <div key={message.id} className="vs-surface-muted p-4">
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <StatusBadge tone={inbound ? 'info' : outbound ? 'success' : 'neutral'}>
-                            {inbound ? 'Inbound' : outbound ? 'Outbound' : 'Unknown'}
-                          </StatusBadge>
-                          {message.status && <StatusBadge tone="neutral">{message.status}</StatusBadge>}
-                        </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
-                          <span className="font-mono text-xs text-slate-200">{message.from_number || '-'}</span>
-                          <span>to</span>
-                          <span className="font-mono text-xs text-slate-200">{message.to_number || '-'}</span>
-                        </div>
-                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{message.message_text || '-'}</p>
-                      </div>
-                      <div className="text-xs text-slate-500">{formatTime(message)}</div>
-                    </div>
-                  </div>
-                );
-              })}
+	            <div className="space-y-4">
+	              {conversations.map((conversation) => (
+	                <div key={conversation.number} className="vs-surface-muted p-4">
+	                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+	                    <div>
+	                      <div className="font-mono text-sm font-semibold text-white">{conversation.number}</div>
+	                      <div className="mt-1 text-xs text-slate-500">{conversation.rows.length} message{conversation.rows.length === 1 ? '' : 's'}</div>
+	                    </div>
+	                    <div className="text-xs text-slate-500">{conversation.latest ? formatTime(conversation.latest) : '-'}</div>
+	                  </div>
+	                  <div className="space-y-3">
+	                    {conversation.rows.map((message) => {
+	                      const direction = String(message.direction || '').toLowerCase();
+	                      const inbound = direction === 'inbound';
+	                      const outbound = direction === 'outbound';
+	                      return (
+	                        <div key={message.id} className={`rounded-2xl border px-4 py-3 ${outbound ? 'ml-auto max-w-[92%] border-emerald-400/15 bg-emerald-400/[0.04]' : 'mr-auto max-w-[92%] border-cyan-400/15 bg-cyan-400/[0.04]'}`}>
+	                          <div className="flex flex-wrap items-center gap-2">
+	                            <StatusBadge tone={inbound ? 'info' : outbound ? 'success' : 'neutral'}>
+	                              {inbound ? 'Inbound' : outbound ? 'Outbound' : 'Unknown'}
+	                            </StatusBadge>
+	                            {message.status && <StatusBadge tone="neutral">{message.status}</StatusBadge>}
+	                          </div>
+	                          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
+	                            <span className="font-mono text-xs text-slate-200">{message.from_number || '-'}</span>
+	                            <span>to</span>
+	                            <span className="font-mono text-xs text-slate-200">{message.to_number || '-'}</span>
+	                          </div>
+	                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{message.message_text || '-'}</p>
+	                          <div className="mt-2 text-xs text-slate-500">{formatTime(message)}</div>
+	                        </div>
+	                      );
+	                    })}
+	                  </div>
+	                </div>
+	              ))}
 
               {nextOffset !== null && (
                 <div className="flex justify-center pt-2">
@@ -352,7 +418,7 @@ export function SMSPage() {
                   ) : (
                     senderNumbers.map((number) => (
                       <option key={number.id || number.number} value={number.number}>
-                        {number.number}{number.label ? ` - ${number.label}` : ''}
+                        {number.number}{number.label ? ` - ${number.label}` : ''}{isPlatformAdmin && (number.org_id || (number as any).orgId) ? ` - ${orgs.find((org) => org.id === (number.org_id || (number as any).orgId))?.name || 'Org'}` : ''}
                       </option>
                     ))
                   )}

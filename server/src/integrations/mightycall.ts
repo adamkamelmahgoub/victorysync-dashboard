@@ -609,7 +609,6 @@ export async function fetchMightyCallRecordings(
   endDate?: string,
   apiKeyOverride?: string
 ) {
-  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const recordings: any[] = [];
   const seen = new Set<string>();
   const addRecording = (row: any) => {
@@ -622,12 +621,9 @@ export async function fetchMightyCallRecordings(
       row?.link ||
       row?.downloadUrl ||
       row?.RecordingLink ||
-      row?.RecordingId ||
       callRecord?.uri ||
       callRecord?.link ||
       callRecord?.downloadUrl ||
-      callRecord?.fileName ||
-      callRecord?.file_name ||
       null;
     const normalized = {
       id: row?.id || row?.recordingId || row?.externalId || row?.callId || null,
@@ -638,7 +634,7 @@ export async function fetchMightyCallRecordings(
       metadata
     };
     if (!normalized.recordingUrl && !normalized.callId && !normalized.id) return;
-    const key = String(normalized.callId || normalized.id || normalized.recordingUrl || '');
+    const key = String(normalized.recordingUrl || normalized.callId || normalized.id || '');
     if (!key || seen.has(key)) return;
     seen.add(key);
     recordings.push(normalized);
@@ -649,7 +645,8 @@ export async function fetchMightyCallRecordings(
     startUtc: startDate ? `${startDate}T00:00:00Z` : undefined,
     endUtc: endDate ? `${endDate}T23:59:59Z` : undefined,
     pageSize: '1000',
-    skip: '0'
+    skip: '0',
+    callFilter: 'Connected'
   }, apiKeyOverride);
   for (const c of calls) {
     const rec =
@@ -658,11 +655,11 @@ export async function fetchMightyCallRecordings(
       (c as any)?.call_record ??
       (c as any)?.callRecording ??
       null;
-    if (rec && (rec.uri || rec.fileName || rec.link || rec.downloadUrl || rec.recordingUrl)) {
+    if (rec && (rec.uri || rec.link || rec.downloadUrl || rec.recordingUrl)) {
       addRecording({
         id: (c as any).id || (c as any).callId,
         callId: (c as any).id || (c as any).callId,
-        recordingUrl: rec.uri || rec.fileName || rec.link || rec.downloadUrl || rec.recordingUrl,
+        recordingUrl: rec.uri || rec.link || rec.downloadUrl || rec.recordingUrl,
         duration: (c as any).duration ?? null,
         date: (c as any).dateTimeUtc ?? (c as any).created ?? null,
         metadata: c
@@ -714,7 +711,26 @@ export async function fetchMightyCallSMS(accessToken?: string, startDate?: strin
     const key = String(row?.id || row?.requestGuid || `${row?.created || ''}:${row?.textModel?.text || row?.messageInfo?.text || row?.text || ''}`);
     if (!seen.has(key)) {
       seen.add(key);
-      merged.push(row);
+      const direction = directionFromText(row?.direction || row?.messageDirection || row?.messageInfo?.origin || row?.origin);
+      const businessNumber = pickPhoneText(row?.businessNumber?.number, row?.businessNumber, row?.messageInfo?.businessNumber);
+      const clientNumber = pickPhoneText(row?.client?.address, row?.client?.number, row?.messageInfo?.client?.address);
+      const fromNumber = direction === 'outbound'
+        ? pickPhoneText(businessNumber, row?.from_number, row?.from)
+        : pickPhoneText(clientNumber, row?.from_number, row?.from);
+      const toNumber = direction === 'outbound'
+        ? pickPhoneText(clientNumber, row?.to_number, row?.to)
+        : pickPhoneText(businessNumber, row?.to_number, row?.to);
+      merged.push({
+        ...row,
+        external_id: key,
+        from_number: fromNumber,
+        to_number: toNumber,
+        message_text: row?.textModel?.text || row?.messageInfo?.text || row?.text || null,
+        direction,
+        status: row?.messageDeliveryStatus || row?.messageInfo?.deliveryStatus || row?.status || null,
+        sent_at: row?.created || row?.createdAt || row?.dateTimeUtc || null,
+        message_date: row?.created || row?.createdAt || row?.dateTimeUtc || null,
+      });
     }
   }
   return merged;
@@ -734,17 +750,20 @@ export async function sendMightyCallSMS(
     ...(request.attachments?.length ? { attachments: request.attachments } : {}),
   };
 
-  for (const url of buildUrlVariants(base, '/contactcenter/messages/send')) {
+  const endpoints = ['/contactcenter/messages/send', '/messages/send', '/api/messages/send'];
+  const urls = Array.from(new Set(endpoints.map((ep) => `${base}${ep}`)));
+  let lastError = '';
+  for (const url of urls) {
     const response = await tryPostJson(url, body, token, apiKeyOverride);
     if (response.ok) return response.body;
+    lastError = typeof response.body === 'string'
+      ? response.body
+      : response.body?.message || response.body?.error || JSON.stringify(response.body);
     if (![404, 405].includes(response.status)) {
-      const message = typeof response.body === 'string'
-        ? response.body
-        : response.body?.message || response.body?.error || JSON.stringify(response.body);
-      throw new Error(`MightyCall SMS send failed (${response.status}): ${message}`);
+      throw new Error(`MightyCall SMS send failed (${response.status}): ${lastError}`);
     }
   }
-  throw new Error('MightyCall SMS send endpoint was not found');
+  throw new Error(`MightyCall SMS send endpoint was not found${lastError ? `: ${lastError}` : ''}`);
 }
 
 export async function fetchMightyCallContacts(accessToken?: string) {
@@ -1081,77 +1100,57 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
   const now = Date.now();
   const startUtc = new Date(now - (20 * 60 * 1000)).toISOString();
   const endUtc = new Date(now + (5 * 60 * 1000)).toISOString();
-  const token = accessToken;
-  const strategies: Array<{ label: string; filters: any }> = [
-    {
-      label: 'strict_connected_open',
-      filters: {
-        extension: normalized,
-        callFilter: 'Connected',
-        customFilter: 'Open',
-        startUtc,
-        endUtc,
-        pageSize: '25',
-        maxPages: '1',
-        skip: '0',
-        fast: true,
-        returnOnFirstSuccess: true,
-      },
-    },
-    {
-      label: 'extension_scoped_relaxed',
-      filters: {
-        extension: normalized,
-        startUtc,
-        endUtc,
-        pageSize: '50',
-        maxPages: '2',
-        skip: '0',
-        fast: true,
-        returnOnFirstSuccess: true,
-      },
-    },
-    {
-      label: 'window_relaxed',
-      filters: {
-        startUtc,
-        endUtc,
-        pageSize: '75',
-        maxPages: '2',
-        skip: '0',
-        fast: true,
-        returnOnFirstSuccess: true,
-      },
-    },
-  ];
-
-  const allRows: any[] = [];
-  const seenRows = new Set<string>();
   const strategyStats: Array<{ label: string; rows: number }> = [];
-  for (const strategy of strategies) {
-    const rows = await fetchMightyCallCalls(token, strategy.filters, apiKeyOverride).catch(() => []);
-    strategyStats.push({ label: strategy.label, rows: Array.isArray(rows) ? rows.length : 0 });
-    for (const call of (Array.isArray(rows) ? rows : [])) {
-      const key = String(
-        call?.id ||
-        call?.callId ||
-        call?.requestGuid ||
-        `${extractMightyCallStartedAt(call) || ''}:${JSON.stringify(call?.called || '')}:${JSON.stringify(call?.caller || '')}`
-      );
-      if (seenRows.has(key)) continue;
-      seenRows.add(key);
-      allRows.push(call);
+  const allRows: Array<{ call: any; sourceEndpoint: string }> = [];
+
+  const primaryRows = await fetchMightyCallCalls(accessToken, {
+    extension: normalized,
+    callFilter: 'Connected',
+    customFilter: 'Open',
+    startUtc,
+    endUtc,
+    pageSize: '25',
+    maxPages: '1',
+    skip: '0',
+    fast: true,
+    returnOnFirstSuccess: true,
+  }, apiKeyOverride).catch(() => []);
+  strategyStats.push({ label: '/calls?extension&callFilter=Connected&customFilter=Open', rows: Array.isArray(primaryRows) ? primaryRows.length : 0 });
+  for (const call of Array.isArray(primaryRows) ? primaryRows : []) {
+    allRows.push({
+      call: {
+        ...(call || {}),
+        queryExtension: normalized,
+        query_extension: normalized,
+      },
+      sourceEndpoint: `/calls?extension=${encodeURIComponent(normalized)}&callFilter=Connected&customFilter=Open`,
+    });
+  }
+
+  if (allRows.length === 0) {
+    const journalRows = await fetchMightyCallJournalRequests(accessToken, {
+      type: 'Call',
+      state: 'Connected',
+      pageSize: '100',
+      page: '1',
+    }, apiKeyOverride).catch(() => []);
+    strategyStats.push({ label: '/journal/requests?type=Call&state=Connected', rows: Array.isArray(journalRows) ? journalRows.length : 0 });
+    for (const call of Array.isArray(journalRows) ? journalRows : []) {
+      allRows.push({
+        call,
+        sourceEndpoint: '/journal/requests?type=Call&state=Connected',
+      });
     }
   }
 
   const seen = new Set<string>();
-  const candidates = allRows.filter((call) => {
+  const candidates = allRows.filter(({ call, sourceEndpoint }) => {
     const scopedCall = {
       ...(call || {}),
-      queryExtension: normalized,
-      query_extension: normalized,
-      extension: normalizeExtensionValue((call as any)?.extension || normalized),
-      agent_extension: normalizeExtensionValue((call as any)?.agent_extension || normalized),
+      queryExtension: sourceEndpoint.startsWith('/calls') ? normalized : undefined,
+      query_extension: sourceEndpoint.startsWith('/calls') ? normalized : undefined,
+      extension: normalizeExtensionValue((call as any)?.extension || (sourceEndpoint.startsWith('/calls') ? normalized : '')),
+      agent_extension: normalizeExtensionValue((call as any)?.agent_extension || ''),
     };
     const key = String(call?.id || call?.callId || call?.requestGuid || `${extractMightyCallStartedAt(call) || ''}:${JSON.stringify(call?.called || '')}`);
     if (seen.has(key)) return false;
@@ -1160,19 +1159,26 @@ export async function fetchMightyCallLiveCallByExtension(extension: string, acce
   });
 
   candidates.sort((a, b) => {
-    const bTime = parseMightyCallTimestampMs(extractMightyCallStartedAt(b)) || 0;
-    const aTime = parseMightyCallTimestampMs(extractMightyCallStartedAt(a)) || 0;
+    const bTime = parseMightyCallTimestampMs(extractMightyCallStartedAt(b.call)) || 0;
+    const aTime = parseMightyCallTimestampMs(extractMightyCallStartedAt(a.call)) || 0;
     return bTime - aTime;
   });
 
-  const currentCall = candidates[0] || null;
+  const current = candidates[0] || null;
+  const currentCall = current?.call || null;
   return currentCall
     ? {
         extension: normalized,
         status: extractMightyCallStatusCandidates(currentCall).find((status) => isMightyCallActiveStatus(status)) || 'Connected',
         onCall: true,
+        from: pickPhoneText(currentCall?.from, currentCall?.from_number, currentCall?.caller?.number, currentCall?.client?.address),
+        to: pickPhoneText(currentCall?.to, currentCall?.to_number, currentCall?.called?.[0]?.phone, currentCall?.called?.[0]?.number, currentCall?.businessNumber?.number),
+        dateTimeUtc: extractMightyCallStartedAt(currentCall),
+        duration: extractMightyCallDurationSeconds(currentCall),
+        callStatus: extractMightyCallStatusCandidates(currentCall)[0] || 'Connected',
+        callRecord: currentCall?.callRecord || currentCall?.call_record || currentCall?.recording || null,
         currentCall,
-        sourceEndpoint: '/calls?multi_strategy_live_probe',
+        sourceEndpoint: current.sourceEndpoint,
         debug: {
           strategyStats,
           candidateCount: candidates.length,
@@ -1294,33 +1300,25 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
   };
   // Do not attempt "extension as secret" token flows; they are invalid and add latency.
 
-  const queryEndpoints = [
-    '/profile/status',
-    '/profile/get-status',
-    '/status',
-    '/user/status',
-    '/users/status',
-    '/extensions/status',
-  ];
-  const pathEndpoints = [
-    `/profile/status/${encodeURIComponent(normalized)}`,
-    `/profile/get-status/${encodeURIComponent(normalized)}`,
-    `/profile/${encodeURIComponent(normalized)}/status`,
-    `/users/${encodeURIComponent(normalized)}/status`,
-    `/extensions/${encodeURIComponent(normalized)}/status`,
-    `/agents/${encodeURIComponent(normalized)}/status`,
-  ];
+  const queryEndpoints = ['/profile/status'];
+  const pathEndpoints = [`/extensions/${encodeURIComponent(normalized)}/status`];
 
-  for (const ep of queryEndpoints) {
-    for (const url of buildUrlVariants(base, ep)) {
-      for (const paramName of ['extension', 'ext', 'extensionNumber', 'extension_number']) {
+	  for (const ep of queryEndpoints) {
+	    for (const url of buildUrlVariants(base, ep)) {
+	      for (const paramName of ['extension']) {
         const params = new URLSearchParams();
         params.set(paramName, normalized);
         const r = await tryFetchJson(`${url}?${params.toString()}`, accessToken, apiKeyOverride);
         if (!r.ok || !r.body) continue;
         const data = pickStatusPayload(r.body);
         if (!data) continue;
-        profileStatus = profileStatus || { ...data, extension: data?.extension || normalized, sourceEndpoint: `${ep}?${paramName}` };
+        profileStatus = profileStatus || {
+          ...data,
+          status: data?.status || data?.availability || data?.presenceStatus || data?.presence || null,
+          extension: data?.extension || normalized,
+          display_name: pickDisplayName(data),
+          sourceEndpoint: `${ep}?${paramName}`,
+        };
         break;
       }
       if (profileStatus) break;
@@ -1335,7 +1333,13 @@ export async function fetchMightyCallProfileStatusByExtension(extension: string,
         if (!r.ok || !r.body) continue;
         const data = pickStatusPayload(r.body);
         if (!data) continue;
-        profileStatus = { ...data, extension: data?.extension || normalized, sourceEndpoint: ep };
+        profileStatus = {
+          ...data,
+          status: data?.status || data?.availability || data?.presenceStatus || data?.presence || null,
+          extension: data?.extension || normalized,
+          display_name: pickDisplayName(data),
+          sourceEndpoint: ep,
+        };
         break;
       }
       if (profileStatus) break;
@@ -1918,19 +1922,18 @@ export async function syncMightyCallSMS(
           m.phone_number,
           m.phoneNumber
         );
-        const fromNumber = pickPhoneText(
+        const apiDirection = directionFromText(m.direction || m.messageDirection || m.messageInfo?.origin || m.origin || m.type);
+        const rawFromNumber = pickPhoneText(
           m.from_number,
           m.from,
-          m.messageInfo?.origin === 'Outbound' ? m.messageInfo?.businessNumber : null,
           m.sender?.number,
           m.sender,
           m.client?.address,
           m.client?.number
         );
-        const toNumber = pickPhoneText(
+        const rawToNumber = pickPhoneText(
           m.to_number,
           m.to,
-          m.messageInfo?.origin === 'Inbound' ? m.messageInfo?.businessNumber : null,
           m.recipient?.number,
           m.recipient,
           m.destination?.number,
@@ -1938,6 +1941,12 @@ export async function syncMightyCallSMS(
           m.client?.number,
           businessNumber
         );
+        const fromNumber = apiDirection === 'outbound'
+          ? pickPhoneText(businessNumber, rawFromNumber)
+          : pickPhoneText(rawFromNumber, m.client?.address, businessNumber);
+        const toNumber = apiDirection === 'outbound'
+          ? pickPhoneText(rawToNumber, m.client?.address, businessNumber)
+          : pickPhoneText(businessNumber, rawToNumber);
         const externalId = String(m?.id || m?.requestGuid || m?.external_id || `${m?.created || ''}:${m?.textModel?.text || m?.messageInfo?.text || m?.text || ''}`);
         const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, fromNumber, toNumber);
         const detectedNumbers = [businessNumber, fromNumber, toNumber].filter(Boolean);
@@ -1957,7 +1966,7 @@ export async function syncMightyCallSMS(
           continue;
         }
 
-        let direction = directionFromText(m.direction || m.messageDirection || m.messageInfo?.origin || m.origin || m.type);
+        let direction = apiDirection;
         if (direction === 'unknown') {
           if (numberMatchesOwnedPhone(fromNumber, ownedPhone) && !numberMatchesOwnedPhone(toNumber, ownedPhone)) {
             direction = 'outbound';
@@ -1974,11 +1983,11 @@ export async function syncMightyCallSMS(
           external_id: externalId,
           from_number: fromNumber,
           to_number: toNumber,
-          message_text: m.textModel?.text || m.messageInfo?.text || m.text || null,
+          message_text: m.message_text || m.textModel?.text || m.messageInfo?.text || m.text || null,
           direction,
-          status: m.messageDeliveryStatus || m.messageInfo?.deliveryStatus || m.status || 'received',
-          sent_at: m.created || new Date().toISOString(),
-          message_date: m.created || new Date().toISOString(),
+          status: m.status || m.messageDeliveryStatus || m.messageInfo?.deliveryStatus || 'received',
+          sent_at: m.sent_at || m.created || new Date().toISOString(),
+          message_date: m.message_date || m.created || new Date().toISOString(),
           metadata: {
             ...(m || {}),
             owned_phone_digits: ownedPhone.digits,

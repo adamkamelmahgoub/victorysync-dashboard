@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
@@ -40,17 +40,16 @@ function fmtDuration(s: number) {
 }
 
 export function RecordingsPage() {
-  const { user, orgs, selectedOrgId } = useAuth();
+  const { user, orgs, selectedOrgId, globalRole } = useAuth();
   const { org: currentOrg } = useOrg();
-  const orgId =
-    ((user?.user_metadata as any)?.org_id ?? null) ||
-    selectedOrgId ||
-    currentOrg?.id ||
-    null;
+  const isPlatformAdmin = globalRole === 'platform_admin' || globalRole === 'admin';
+  const orgId = isPlatformAdmin
+    ? (selectedOrgId || null)
+    : (((user?.user_metadata as any)?.org_id ?? null) || selectedOrgId || currentOrg?.id || null);
   const orgName =
-    (orgs.find((o) => o.id === orgId)?.name) ||
-    currentOrg?.name ||
-    'your organization';
+    orgId
+      ? ((orgs.find((o) => o.id === orgId)?.name) || currentOrg?.name || 'your organization')
+      : 'all organizations';
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,6 +59,10 @@ export function RecordingsPage() {
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [syncing, setSyncing] = useState(false);
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [playbackUrls, setPlaybackUrls] = useState<Record<string, string>>({});
+  const playbackUrlsRef = useRef<Record<string, string>>({});
 
   const filteredRows = useMemo(() => {
     const q = search.trim();
@@ -105,9 +108,12 @@ export function RecordingsPage() {
       }
 
       const q = new URLSearchParams();
-      q.set('limit', '500');
-      q.set('offset', String(activeOffset));
-      if (orgId) q.set('org_id', orgId);
+	      q.set('limit', '500');
+	      q.set('offset', String(activeOffset));
+	      if (orgId) q.set('org_id', orgId);
+	      if (startDate) q.set('start_date', startDate);
+	      if (endDate) q.set('end_date', endDate);
+	      if (search.trim()) q.set('search', search.trim());
       const response = await fetch(buildApiUrl(`/api/mightycall/recordings?${q.toString()}`), {
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
       });
@@ -131,13 +137,19 @@ export function RecordingsPage() {
     }
   };
 
-  useEffect(() => {
-    if (user) fetchRecordings(true, { syncFirst: true });
-  }, [orgId, user?.id]);
+	  useEffect(() => {
+	    if (user) fetchRecordings(true, { syncFirst: true });
+	  }, [orgId, user?.id, startDate, endDate]);
+
+	  useEffect(() => {
+	    return () => {
+	      Object.values(playbackUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+	    };
+	  }, []);
 
   const handleDownload = async (recording: Recording) => {
     try {
-      const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download`), {
+	      const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download?inline=1`), {
         headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
@@ -168,9 +180,13 @@ export function RecordingsPage() {
         return;
       }
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+	      const url = URL.createObjectURL(blob);
+	      setPlaybackUrls((previous) => {
+	        if (previous[recording.id]) URL.revokeObjectURL(previous[recording.id]);
+	        const next = { ...previous, [recording.id]: url };
+	        playbackUrlsRef.current = next;
+	        return next;
+	      });
     } catch (err: any) {
       setError(err?.message || 'Error opening recording');
     }
@@ -196,7 +212,7 @@ export function RecordingsPage() {
             description: 'Once owned-number recordings are synced, they will appear here.',
           };
 
-  if (!orgId && (!orgs || orgs.length === 0)) {
+  if (!isPlatformAdmin && !orgId && (!orgs || orgs.length === 0)) {
     return (
       <PageLayout eyebrow="Recordings" title="Recordings" description="No organization selected">
         <EmptyStatePanel title="No organization linked" description="Ask your org admin to assign your account to an organization before reviewing recordings." />
@@ -213,12 +229,20 @@ export function RecordingsPage() {
     >
       <div className="space-y-6">
         <SectionCard title="Recording filters" description="Search recording activity by the numbers involved.">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,320px),1fr] md:items-end">
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Search Number</label>
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="vs-input w-full" />
-            </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">{syncing ? 'Syncing recent MightyCall recordings...' : 'Scope: assigned numbers only'}</div>
+	          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,260px),180px,180px,1fr] lg:items-end">
+	            <div>
+	              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Search Number</label>
+	              <input value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => fetchRecordings(true)} placeholder="+1212..." className="vs-input w-full" />
+	            </div>
+	            <div>
+	              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Start Date</label>
+	              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input w-full" />
+	            </div>
+	            <div>
+	              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">End Date</label>
+	              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input w-full" />
+	            </div>
+	            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">{syncing ? 'Syncing recent MightyCall recordings...' : 'Scope: assigned numbers only'}</div>
           </div>
         </SectionCard>
 
@@ -256,9 +280,14 @@ export function RecordingsPage() {
                       <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(recording.recording_date || recording.created_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          {recording.recording_url ? (
-                            <button onClick={() => handlePlay(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</button>
-                          ) : <span className="text-xs text-slate-500">N/A</span>}
+	                          {recording.recording_url ? (
+	                            <>
+	                              <button onClick={() => handlePlay(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</button>
+	                              {playbackUrls[recording.id] && (
+	                                <audio src={playbackUrls[recording.id]} controls className="h-9 max-w-[220px]" />
+	                              )}
+	                            </>
+	                          ) : <span className="text-xs text-slate-500">N/A</span>}
                           <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>
                         </div>
                       </td>

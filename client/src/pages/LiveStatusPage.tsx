@@ -70,7 +70,7 @@ function getLiveDuration(agent: LiveAgentStatus, nowMs: number) {
 
 function normalizedStatus(agent: LiveAgentStatus) {
   const raw = String(agent.status || agent.raw_status || '').toLowerCase();
-  if (agent.stale) return 'stale';
+  if (agent.stale || isStale(agent)) return 'stale';
   if (raw.includes('dnd') || raw.includes('disturb')) return 'dnd';
   if (raw.includes('offline')) return 'offline';
   if (raw.includes('ring')) return 'ringing';
@@ -79,6 +79,22 @@ function normalizedStatus(agent: LiveAgentStatus) {
   if (raw.includes('wrap')) return 'wrap_up';
   if (raw.includes('available') || raw.includes('idle') || raw.includes('ready')) return 'available';
   return 'unknown';
+}
+
+function refreshedAgeMs(agent: LiveAgentStatus, nowMs = Date.now()) {
+  const raw = agent.refreshed_at || agent.last_seen_at;
+  if (!raw) return Number.POSITIVE_INFINITY;
+  const parsed = Date.parse(raw);
+  if (Number.isNaN(parsed)) return Number.POSITIVE_INFINITY;
+  return Math.max(nowMs - parsed, 0);
+}
+
+function isFresh(agent: LiveAgentStatus, nowMs = Date.now()) {
+  return refreshedAgeMs(agent, nowMs) < 30000;
+}
+
+function isStale(agent: LiveAgentStatus, nowMs = Date.now()) {
+  return refreshedAgeMs(agent, nowMs) > 60000;
 }
 
 function statusVisuals(agent: LiveAgentStatus): {
@@ -143,9 +159,11 @@ const LiveStatusPage: FC = () => {
     }
   };
 
-  useEffect(() => {
-    load();
-    const intervalId = window.setInterval(load, 2000);
+	  useEffect(() => {
+	    load();
+	    const intervalId = window.setInterval(() => {
+	      if (document.visibilityState === 'visible') load();
+	    }, 5000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') load();
     };
@@ -166,7 +184,7 @@ const LiveStatusPage: FC = () => {
   const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));
   const onCall = items.filter((agent) => agent.on_call).length;
   const idle = Math.max(items.length - onCall, 0);
-  const staleItems = items.filter((agent) => agent.stale);
+	  const staleItems = items.filter((agent) => agent.stale || isStale(agent, nowMs));
 
   const forceSync = async () => {
     if (!user?.id) return;
@@ -264,10 +282,21 @@ const LiveStatusPage: FC = () => {
                           {isAdmin && agent.org_id ? ` - ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
                         </div>
                       </div>
-                      <StatusBadge tone={visuals.badgeTone}>
-                        {visuals.label}
-                      </StatusBadge>
-                    </div>
+	                      <StatusBadge tone={visuals.badgeTone}>
+	                        {visuals.label}
+	                      </StatusBadge>
+	                      {isFresh(agent, nowMs) && !isStale(agent, nowMs) && (
+	                        <div className="flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-1 text-xs font-semibold text-emerald-200">
+	                          <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-300" />
+	                          Live
+	                        </div>
+	                      )}
+	                      {isStale(agent, nowMs) && (
+	                        <div className="rounded-full border border-amber-400/20 bg-amber-400/[0.08] px-3 py-1 text-xs font-semibold text-amber-200">
+	                          Stale
+	                        </div>
+	                      )}
+	                    </div>
 
                     <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="vs-surface-muted p-4">

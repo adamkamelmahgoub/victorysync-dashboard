@@ -29,6 +29,7 @@
 import { FRONTEND_ORIGIN, getEnvironmentHealth } from './config/env';
 import express from "express";
 import cors from "cors";
+import fetch from 'node-fetch';
 import crypto from 'crypto';
 import { supabase, supabaseAdmin } from './lib/supabaseClient';
 import { normalizePhoneDigits, normalizeToE164FromRaw } from './lib/phoneUtils';
@@ -3360,9 +3361,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       matchedLiveCall ||
       inferredLiveCall
     );
-    // Strong truth source: extension-scoped live call endpoint only.
-    // Stored/journal/contact-center data can lag and should not hold agents on-call.
-    const onCall = realtimeFallbackSaysOnCall;
+    const onCall = authoritativeStatusSaysIdle
+      ? false
+      : (authoritativeStatusSaysOnCall || realtimeFallbackSaysOnCall);
 	    const counterpart = matchedLiveCall
       ? extractCounterpartyLabel(matchedLiveCall, orgPhoneDigits, normalizedExt)
       : inferredLiveCall
@@ -3396,7 +3397,9 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
             ? 'mightycall_calls'
             : inferredLiveCall
               ? 'mightycall_calls_inferred'
-              : 'mightycall_calls'
+              : authoritativeStatusSaysOnCall
+                ? 'mightycall_status'
+                : 'mightycall_calls'
           : authoritativeStatusSaysOnCall || authoritativeStatusSaysIdle
 			      ? 'mightycall_status'
 			      : matchedLiveCall
@@ -3435,7 +3438,7 @@ async function getAgentLiveStatusItemsForOrg(orgId: string): Promise<any[]> {
       display_name: (extMeta as any)?.display_name || null,
       on_call: onCall,
 	      counterpart: onCall ? (counterpart || null) : null,
-	      status: onCall ? (callStatus || authoritativeStatusLabel || 'On Call') : (authoritativeStatusLabel || 'Available'),
+      status: onCall ? (authoritativeStatusLabel || callStatus || 'On Call') : (authoritativeStatusLabel || 'Available'),
 	      started_at: onCall ? startedAt : null,
 	      source,
 	      raw_status: callStatus || authoritativeStatusLabel || extStatus || null
@@ -6393,21 +6396,41 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
       .filter(Boolean);
     if (recipients.length === 0) return res.status(400).json({ error: 'missing_recipient' });
 
-    const assigned = await getAssignedPhoneNumbersForOrg(orgId);
-    const ownedNumbers = (assigned.phones || [])
-      .map((phone: any) => ({
-        id: String(phone?.id || '').trim() || null,
-        number: String(phone?.number || phone?.phone_number || '').trim(),
-        digits: normalizePhoneDigits(phone?.number || phone?.phone_number),
-      }))
-      .filter((phone: any) => phone.number);
+    let ownedNumbers: Array<{ id: string | null; number: string; digits: string | null; org_id?: string | null }> = [];
+    if (isAdminUser) {
+      const { data: allPhoneRows, error: allPhoneErr } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('id, org_id, number, number_digits, e164, phone_number');
+      if (allPhoneErr) throw allPhoneErr;
+      ownedNumbers = (allPhoneRows || [])
+        .map((phone: any) => ({
+          id: String(phone?.id || '').trim() || null,
+          org_id: String(phone?.org_id || '').trim() || null,
+          number: String(phone?.number || phone?.e164 || phone?.phone_number || '').trim(),
+          digits: normalizePhoneDigits(phone?.number_digits || phone?.number || phone?.e164 || phone?.phone_number),
+        }))
+        .filter((phone: any) => phone.number);
+    } else {
+      const assigned = await getAssignedPhoneNumbersForOrg(orgId);
+      ownedNumbers = (assigned.phones || [])
+        .map((phone: any) => ({
+          id: String(phone?.id || '').trim() || null,
+          org_id: orgId,
+          number: String(phone?.number || phone?.phone_number || '').trim(),
+          digits: normalizePhoneDigits(phone?.number || phone?.phone_number),
+        }))
+        .filter((phone: any) => phone.number);
+    }
     const requestedFrom = String(from || '').trim();
     const requestedFromDigits = normalizePhoneDigits(requestedFrom);
     const selectedFrom = requestedFrom
       ? ownedNumbers.find((phone: any) => phone.number === requestedFrom || phone.digits === requestedFromDigits)
       : ownedNumbers[0];
     if (!selectedFrom) {
-      return res.status(400).json({ error: 'missing_owned_sender_number', message: 'Select an SMS-capable number assigned to this organization.' });
+      return res.status(400).json({
+        error: 'missing_owned_sender_number',
+        message: isAdminUser ? 'Select a known SMS-capable number.' : 'Select an SMS-capable number assigned to this organization.'
+      });
     }
 
     let overrideCreds: any = undefined;
@@ -6451,6 +6474,84 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
   } catch (err: any) {
     console.error('org_sms_send_failed:', fmtErr(err));
     res.status(500).json({ error: 'org_sms_send_failed', detail: fmtErr(err) ?? 'unknown_error' });
+	  }
+});
+
+// POST /api/sms/send - generic org-scoped SMS send endpoint used by the SMS dashboard
+app.post('/api/sms/send', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { to, message, from, attachments } = req.body || {};
+    const orgId = String(req.body?.orgId || req.body?.org_id || '').trim();
+
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!orgId || !from || !to || !message) return res.status(400).json({ error: 'missing_required_fields' });
+
+    const isAdminUser = await isPlatformAdmin(actorId);
+    const isMember = await isOrgMember(actorId, orgId);
+    if (!isAdminUser && !isMember) return res.status(403).json({ error: 'forbidden' });
+
+    const recipients = (Array.isArray(to) ? to : [to])
+      .map((value: any) => String(value || '').trim())
+      .filter(Boolean);
+    if (recipients.length === 0) return res.status(400).json({ error: 'missing_recipient' });
+
+    const requestedFrom = String(from || '').trim();
+    const requestedFromDigits = normalizePhoneDigits(requestedFrom);
+    const { data: phoneRows, error: phoneErr } = await supabaseAdmin
+      .from('phone_numbers')
+      .select('id, org_id, number, number_digits, e164, phone_number')
+      .eq('org_id', orgId);
+    if (phoneErr) throw phoneErr;
+
+    const selectedFrom = (phoneRows || [])
+      .map((phone: any) => ({
+        id: String(phone?.id || '').trim() || null,
+        number: String(phone?.number || phone?.e164 || phone?.phone_number || '').trim(),
+        digits: normalizePhoneDigits(phone?.number_digits || phone?.number || phone?.e164 || phone?.phone_number),
+      }))
+      .find((phone: any) => phone.number === requestedFrom || phone.digits === requestedFromDigits);
+    if (!selectedFrom) return res.status(400).json({ error: 'missing_owned_sender_number' });
+
+    let overrideCreds: any = undefined;
+    try {
+      const { getOrgIntegration } = await import('./lib/integrationsStore');
+      const integ = await getOrgIntegration(orgId, 'mightycall');
+      if (integ && integ.credentials) {
+        overrideCreds = {
+          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+        };
+      }
+    } catch (ie) {
+      console.warn('[sms_send] failed to load org MightyCall integration:', ie);
+    }
+
+    const providerResult = await sendMightyCallSMS({
+      from: selectedFrom.number,
+      to: recipients,
+      message: String(message),
+      attachments: Array.isArray(attachments) ? attachments : undefined,
+    }, overrideCreds);
+    const sentAt = providerResult?.sendTime || providerResult?.sentAt || new Date().toISOString();
+    const logResult = await syncSMSLog(supabaseAdmin, orgId, {
+      id: providerResult?.id || providerResult?.messageId || null,
+      phone_id: selectedFrom.id,
+      from: providerResult?.sourcePhoneNumber || selectedFrom.number,
+      to: providerResult?.destinationPhoneNumbers || recipients,
+      text: String(message),
+      direction: 'outbound',
+      status: providerResult?.status || 'sent',
+      sent_at: sentAt,
+      sendTime: sentAt,
+      provider_response: providerResult,
+    });
+    if (!logResult.smsSynced) return res.status(500).json({ error: 'sms_log_failed' });
+
+    res.json({ success: true, message: 'SMS sent and logged', provider: providerResult });
+  } catch (err: any) {
+    console.error('sms_send_failed:', fmtErr(err));
+    res.status(500).json({ error: 'sms_send_failed', detail: fmtErr(err) ?? 'unknown_error' });
   }
 });
 
@@ -7779,21 +7880,62 @@ app.post('/api/live-status/sync', async (req, res) => {
         detail: 'agent_live_status table is not available in this Supabase project. Apply migration and reload schema cache.',
       });
     }
-    for (const orgId of orgIds) {
-      try {
-        await refreshAgentLiveStatusForOrg(orgId);
-      } catch (err: any) {
-        errors.push({ org_id: orgId, error: fmtErr(err) ?? 'unknown_error' });
-      }
-    }
+	    for (const orgId of orgIds) {
+	      try {
+	        await refreshAgentLiveStatusForOrg(orgId);
+	      } catch (err: any) {
+	        errors.push({ org_id: orgId, error: fmtErr(err) ?? 'unknown_error' });
+	      }
+	    }
+	    const [liveRows, agents] = await Promise.all([
+	      getAgentLiveStatusRowsForOrgIds(orgIds),
+	      loadRealAgentsFromOrgMembers(orgIds),
+	    ]);
+	    const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
+	    for (const agent of agents) {
+	      identityByKey.set(`${agent.org_id}:${agent.mightycall_extension}`, {
+	        user_id: agent.user_id || null,
+	        email: agent.email || null,
+	        display_name: agent.full_name || null,
+	      });
+	    }
+	    const statusByKey = new Map<string, any>();
+	    for (const row of liveRows || []) {
+	      const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
+	      if (ext) statusByKey.set(`${row?.org_id || ''}:${ext}`, row);
+	    }
+	    const items = agents.map((agent) => {
+	      const key = `${agent.org_id}:${agent.mightycall_extension}`;
+	      const row = statusByKey.get(key);
+	      if (row) return mapAgentLiveStatusToApiRow(row, identityByKey);
+	      return {
+	        user_id: agent.user_id || '',
+	        org_id: agent.org_id,
+	        email: agent.email || null,
+	        extension: agent.mightycall_extension,
+	        display_name: agent.full_name || null,
+	        on_call: false,
+	        counterpart: null,
+	        status: 'Unknown',
+	        direction: null,
+	        from_number: null,
+	        to_number: null,
+	        started_at: null,
+	        raw_status: null,
+	        api_source: 'mightycall_user_status_by_extension',
+	        refreshed_at: null,
+	        stale: true,
+	      };
+	    });
 
-    res.json({
-      source: 'mightycall_user_status_by_extension',
-      orgs_processed: orgIds.length,
-      errors,
-      refreshed_at: new Date().toISOString(),
-      duration_ms: Date.now() - startedAt,
-    });
+	    res.json({
+	      source: 'mightycall_user_status_by_extension',
+	      orgs_processed: orgIds.length,
+	      errors,
+	      items,
+	      refreshed_at: new Date().toISOString(),
+	      duration_ms: Date.now() - startedAt,
+	    });
   } catch (err: any) {
     console.error('live_status_sync_failed:', fmtErr(err));
     res.status(500).json({ error: 'live_status_sync_failed', detail: fmtErr(err) ?? 'unknown_error' });
@@ -11702,10 +11844,13 @@ app.get("/s/series", async (req, res) => {
         }
 
         const reportType = req.query.type as string || 'calls';
-        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
-        const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
-        const orgId = req.query.org_id as string || null;
-        let emptyReason: string | null = null;
+	    const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
+	    const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
+	    const orgId = req.query.org_id as string || null;
+	    const startDate = String(req.query.start_date || '').trim();
+	    const endDate = String(req.query.end_date || '').trim();
+	    const search = String(req.query.search || '').trim().toLowerCase();
+	    let emptyReason: string | null = null;
 
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
@@ -12437,10 +12582,13 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
-        const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
-        const orgId = req.query.org_id as string || null;
-        let emptyReason: string | null = null;
+	        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
+	        const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
+	        const orgId = req.query.org_id as string || null;
+	        const startDate = String(req.query.start_date || '').trim();
+	        const endDate = String(req.query.end_date || '').trim();
+	        const search = String(req.query.search || '').trim().toLowerCase();
+	        let emptyReason: string | null = null;
 
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
@@ -12579,10 +12727,32 @@ app.get("/s/series", async (req, res) => {
           } else {
             console.warn('[mightycall/recordings] calls fallback after ownership filter failed:', fmtErr(callsError));
           }
-        }
-        data = normalizedRecordingRows;
+	        }
+	        data = normalizedRecordingRows;
 
-        // Final assignment-based enforcement for non-admin users.
+	        if (startDate || endDate || search) {
+	          const startMs = startDate ? Date.parse(`${startDate}T00:00:00Z`) : null;
+	          const endMs = endDate ? Date.parse(`${endDate}T23:59:59Z`) : null;
+	          data = (data || []).filter((row: any) => {
+	            const rowDate = row?.recording_date || row?.recorded_at || row?.created_at || row?.started_at;
+	            const rowMs = rowDate ? Date.parse(String(rowDate)) : null;
+	            if (startMs && (!rowMs || rowMs < startMs)) return false;
+	            if (endMs && (!rowMs || rowMs > endMs)) return false;
+	            if (search) {
+	              const haystack = [
+	                row?.from_number,
+	                row?.to_number,
+	                row?.phone_number,
+	                row?.metadata?.from_number,
+	                row?.metadata?.to_number,
+	              ].map((value) => String(value || '').toLowerCase()).join(' ');
+	              if (!haystack.includes(search)) return false;
+	            }
+	            return true;
+	          });
+	        }
+
+	        // Final assignment-based enforcement for non-admin users.
         if (!isAdmin) {
           try {
             const orgIds = targetOrgIds;
@@ -12592,10 +12762,10 @@ app.get("/s/series", async (req, res) => {
                 orgWideRecordingAccess = true;
                 break;
               }
-            }
-            if (orgWideRecordingAccess) {
-              const normalizedRows = data || [];
-              const rows = normalizedRows.slice(offset, offset + limit);
+	            }
+	            if (orgWideRecordingAccess) {
+	              const normalizedRows = data || [];
+	              const rows = normalizedRows.slice(offset, offset + limit);
               if (!emptyReason && rows.length === 0) emptyReason = 'no_synced_data';
               return res.json({ recordings: rows, next_offset: offset + limit < normalizedRows.length ? offset + limit : null, empty_reason: rows.length === 0 ? emptyReason : null });
             }
@@ -12696,17 +12866,21 @@ app.get("/s/series", async (req, res) => {
                 return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
               }
               const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
-              const filename = `${id}.mp3`;
-              res.setHeader('Content-Type', contentType);
-              res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-              if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
-                const nodeStream = Readable.fromWeb((fetched as any).body);
-                nodeStream.pipe(res);
-              } else {
-                const arr = await fetched.arrayBuffer();
-                const buf = Buffer.from(arr);
-                res.send(buf);
-              }
+	              const filename = `${id}.mp3`;
+	              const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
+	              res.setHeader('Content-Type', contentType);
+	              res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
+	              if ((fetched as any).body && typeof (fetched as any).body.pipe === 'function') {
+	                (fetched as any).body.pipe(res);
+	              } else if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
+	                const nodeStream = Readable.fromWeb((fetched as any).body);
+	                nodeStream.pipe(res);
+	              } else {
+	                const buf = typeof (fetched as any).buffer === 'function'
+	                  ? await (fetched as any).buffer()
+	                  : Buffer.from(await (fetched as any).arrayBuffer());
+	                res.send(buf);
+	              }
               return;
             }
             const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(orgId, actorId);
@@ -12738,19 +12912,23 @@ app.get("/s/series", async (req, res) => {
 
           // Convert Web stream to Node stream when possible and pipe to response
           const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
-          const filename = `${id}.mp3`;
-          res.setHeader('Content-Type', contentType);
-          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+	          const filename = `${id}.mp3`;
+	          const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
+	          res.setHeader('Content-Type', contentType);
+	          res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
 
-          if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
-            const nodeStream = Readable.fromWeb((fetched as any).body);
-            nodeStream.pipe(res);
-          } else {
-            // Fallback: buffer into memory and send (may be larger for big files)
-            const arr = await fetched.arrayBuffer();
-            const buf = Buffer.from(arr);
-            res.send(buf);
-          }
+	          if ((fetched as any).body && typeof (fetched as any).body.pipe === 'function') {
+	            (fetched as any).body.pipe(res);
+	          } else if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
+	            const nodeStream = Readable.fromWeb((fetched as any).body);
+	            nodeStream.pipe(res);
+	          } else {
+	            // Fallback: buffer into memory and send (may be larger for big files)
+	            const buf = typeof (fetched as any).buffer === 'function'
+	              ? await (fetched as any).buffer()
+	              : Buffer.from(await (fetched as any).arrayBuffer());
+	            res.send(buf);
+	          }
         } catch (e: any) {
           console.error('[recordings/download] error:', e?.message ?? e);
           res.status(500).json({ error: 'download_failed', detail: e?.message ?? String(e) });
@@ -12765,10 +12943,11 @@ app.get("/s/series", async (req, res) => {
           return res.status(401).json({ error: 'unauthenticated' });
         }
 
-        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
-        const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
-        const orgId = req.query.org_id as string || null;
-        let emptyReason: string | null = null;
+	        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 500, 5000));
+	        const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
+	        const orgId = req.query.org_id as string || null;
+	        const search = String(req.query.search || '').trim().toLowerCase();
+	        let emptyReason: string | null = null;
 
         // Check if user is platform admin
         const isAdmin = await isPlatformAdmin(userId);
@@ -12895,7 +13074,19 @@ app.get("/s/series", async (req, res) => {
             console.warn('[sms/messages] sms_logs fallback after ownership filter failed:', fmtErr(fallbackError));
           }
         }
-        const rows = normalizedRows.slice(offset, offset + limit);
+	        if (search) {
+	          normalizedRows = normalizedRows.filter((row: any) => {
+	            const haystack = [
+	              row?.from_number,
+	              row?.to_number,
+	              row?.message_text,
+	              row?.direction,
+	              row?.status,
+	            ].map((value) => String(value || '').toLowerCase()).join(' ');
+	            return haystack.includes(search);
+	          });
+	        }
+	        const rows = normalizedRows.slice(offset, offset + limit);
         if (normalizedRows.length === 0) emptyReason = 'no_synced_data';
         res.json({ messages: rows, next_offset: offset + limit < normalizedRows.length ? offset + limit : null, empty_reason: rows.length === 0 ? emptyReason : null });
       } catch (err: any) {
