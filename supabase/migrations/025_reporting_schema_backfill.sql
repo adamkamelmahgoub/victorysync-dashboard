@@ -44,7 +44,7 @@ set
   recording_date = coalesce(recording_date, recorded_at, created_at),
   recorded_at = coalesce(recorded_at, recording_date, created_at),
   metadata = coalesce(metadata, '{}'::jsonb),
-  external_id = coalesce(external_id, call_id, recording_url),
+  external_id = coalesce(external_id, call_id::text, recording_url::text),
   from_number = coalesce(from_number, metadata->>'from_number'),
   to_number = coalesce(to_number, metadata->>'to_number')
 where recording_date is null
