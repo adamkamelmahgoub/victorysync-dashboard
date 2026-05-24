@@ -58,6 +58,8 @@ import { getMightyCallAccessToken } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgManagerWith } from './auth/rbac';
 import usersRouter from './routes/users';
 import reportsRouter from './routes/reports';
+import mightyCallApiRouter from './routes/mightycallApi';
+import { startMightyCallPolling } from './mightycall/sync';
 import { Readable } from 'stream';
 import { writeAuditLog } from './lib/audit';
 import { getMembershipDriftDetails, getMembershipDriftSummary } from './lib/memberships';
@@ -4368,87 +4370,10 @@ app.get('/api/admin/backups/export', async (req, res) => {
 });
 
 app.post('/api/webhooks/mightycall', async (req, res) => {
-  try {
-    const payload = req.body || {};
-    const events = extractMightyCallWebhookEvents(payload);
-    const results: Array<{ org_id: string | null; external_id: string; status: string }> = [];
-
-    for (const event of events) {
-      const sms = extractMightyCallWebhookSms(event);
-      const call = normalizeMightyCallWebhookCall(event);
-      if (sms && (!call.external_id || (!call.from_number && !call.to_number))) {
-        const smsOrgCall = normalizeMightyCallWebhookCall({
-          ...event,
-          from_number: sms.from_number,
-          to_number: sms.to_number,
-          external_id: sms.external_id,
-        });
-        const orgId = await resolveMightyCallWebhookOrgId(smsOrgCall);
-        if (orgId) {
-          await upsertWebhookSmsMessage(orgId, sms);
-          results.push({ org_id: orgId, external_id: sms.external_id, status: `sms_${sms.direction}` });
-        }
-        continue;
-      }
-      if (!call.external_id || (!call.from_number && !call.to_number)) continue;
-      try {
-        const writeResult = await upsertMightyCallWebhookCall(call);
-        results.push(writeResult);
-        if (writeResult.org_id) {
-          await insertWebhookCallEvent(String(writeResult.org_id), call);
-          await upsertWebhookTransfer(String(writeResult.org_id), call);
-          await upsertWebhookRecording(String(writeResult.org_id), call);
-          if (sms) await upsertWebhookSmsMessage(String(writeResult.org_id), sms);
-        }
-        if (writeResult.org_id && call.agent_extension) {
-          const eventType = String(call.payload?.EventType || call.payload?.eventType || call.status || '').toLowerCase();
-          await upsertAgentLiveStatusRow({
-            orgId: String(writeResult.org_id),
-            extension: call.agent_extension,
-            status: call.status || eventType,
-            externalCallId: call.external_id,
-            direction: call.direction,
-            fromNumber: call.from_number,
-            toNumber: call.to_number,
-            startedAt: call.started_at,
-            answeredAt: call.answered_at,
-            endedAt: call.ended_at,
-            rawEvent: call.payload,
-            lastEventAt: webhookIso(call.payload?.Timestamp || call.payload?.timestamp || call.payload?.createdAt || call.payload?.created || null),
-          });
-        }
-      } catch (error) {
-        console.error('[mightycall webhook] call upsert failed:', fmtErr(error), {
-          external_id: call.external_id,
-          status: call.status,
-        });
-      }
-    }
-
-    await writeAuditLog({
-      actor_id: 'mightycall:webhook',
-      action: 'mightycall.webhook.received',
-      org_id: payload?.org_id || payload?.orgId || null,
-      entity_type: 'webhook',
-      entity_id: payload?.id || payload?.requestGuid || null,
-      metadata: payload,
-    });
-    try {
-      await insertSyncJob({
-        org_id: payload?.org_id || payload?.orgId || null,
-        integration_type: 'mightycall_webhook',
-        status: 'received',
-        started_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-        records_processed: results.length,
-        metadata: { payload, results },
-      });
-    } catch {}
-    res.json({ ok: true, processed: results.length, received: events.length, results });
-  } catch (err: any) {
-    console.error('mightycall_webhook_failed:', fmtErr(err));
-    res.status(500).json({ error: 'mightycall_webhook_failed', detail: fmtErr(err) });
-  }
+  res.status(410).json({
+    error: 'mightycall_webhooks_disabled',
+    detail: 'VictorySync now uses MightyCall API-only polling and sync. Configure /api/mightycall/sync or backend polling instead.',
+  });
 });
 
 // Resolve authenticated actor from a Supabase bearer token.
@@ -6663,6 +6588,7 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
 	  }
 });
 
+app.use('/api', mightyCallApiRouter);
 app.use('/api/reports', reportsRouter);
 
 // POST /api/sms/send - generic org-scoped SMS send endpoint used by the SMS dashboard
@@ -14455,6 +14381,7 @@ const server = app.listen(port, '0.0.0.0', () => {
   } else {
     console.log(`Metrics API listening on port ${port}`);
   }
+  startMightyCallPolling();
 
   // Debug endpoint (also available during development) - provides lightweight health info
   app.get('/debug/status', async (req, res) => {

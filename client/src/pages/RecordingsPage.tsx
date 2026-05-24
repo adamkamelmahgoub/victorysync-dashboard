@@ -105,10 +105,6 @@ export function RecordingsPage() {
         setLoadingMore(true);
       }
 
-      if (reset && options?.syncFirst && orgId) {
-        await syncRecentRecordings();
-      }
-
       const q = new URLSearchParams();
 	      q.set('limit', '500');
 	      q.set('offset', String(activeOffset));
@@ -117,7 +113,7 @@ export function RecordingsPage() {
 		      if (endDate) q.set('end_date', endDate);
 		      if (search.trim()) q.set('search', search.trim());
 		      if (directionFilter !== 'all') q.set('direction', directionFilter);
-      const response = await fetch(buildApiUrl(`/api/mightycall/recordings?${q.toString()}`), {
+      const response = await fetch(buildApiUrl(`/api/reports/recordings?${q.toString()}`), {
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
       });
 
@@ -140,8 +136,8 @@ export function RecordingsPage() {
     }
   };
 
-	  useEffect(() => {
-	    if (user) fetchRecordings(true, { syncFirst: true });
+		  useEffect(() => {
+		    if (user) fetchRecordings(true);
 		  }, [orgId, user?.id, startDate, endDate, directionFilter]);
 
 	  useEffect(() => {
@@ -228,7 +224,7 @@ export function RecordingsPage() {
       eyebrow="Quality review"
       title="Recordings"
       description={`Organized recording history, playback, and download actions for ${orgName}.`}
-      actions={<button onClick={() => fetchRecordings(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">{loading || syncing ? 'Refreshing...' : 'Refresh'}</button>}
+	      actions={<button onClick={() => fetchRecordings(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>}
     >
       <div className="space-y-6">
         <SectionCard title="Recording filters" description="Search recording activity by the numbers involved.">

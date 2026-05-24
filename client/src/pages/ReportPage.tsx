@@ -81,7 +81,7 @@ export default function ReportPage() {
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
   const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
-  const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
+  const [selectedNumber, setSelectedNumber] = useState('');
   const [agent, setAgent] = useState('');
   const [direction, setDirection] = useState('all');
   const [status, setStatus] = useState('all');
@@ -90,6 +90,7 @@ export default function ReportPage() {
   const [overview, setOverview] = useState<Overview>({});
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const buildQuery = (extra?: Record<string, string>) => {
@@ -97,7 +98,7 @@ export default function ReportPage() {
     if (activeOrgId) q.set('org_id', activeOrgId);
     if (startDate) q.set('start_date', startDate);
     if (endDate) q.set('end_date', endDate);
-    if (selectedNumbers.length) q.set('numbers', selectedNumbers.join(','));
+    if (selectedNumber) q.set('number', selectedNumber);
     if (agent.trim()) q.set('agent', agent.trim());
     if (direction !== 'all') q.set('direction', direction);
     if (status !== 'all') q.set('status', status);
@@ -147,6 +148,27 @@ export default function ReportPage() {
   useEffect(() => { void loadNumbers(); }, [user?.id, activeOrgId]);
   useEffect(() => { void loadReport(); }, [user?.id, activeOrgId, activeTab, startDate, endDate, direction, status]);
 
+  const runSync = async () => {
+    if (!user?.id) return;
+    setSyncing(true);
+    setError(null);
+    try {
+      const q = new URLSearchParams();
+      if (activeOrgId) q.set('org_id', activeOrgId);
+      const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
+        method: 'POST',
+        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Sync failed');
+      await loadReport();
+      await loadNumbers();
+    } catch (err: any) {
+      setError(err?.message || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const kpis = useMemo(() => ([
     ['Total Calls', overview.total_calls ?? 0],
     ['Answered', overview.answered_calls ?? 0],
@@ -164,7 +186,7 @@ export default function ReportPage() {
   const resetFilters = () => {
     setStartDate(isoDateDaysAgo(30));
     setEndDate(new Date().toISOString().slice(0, 10));
-    setSelectedNumbers([]);
+    setSelectedNumber('');
     setAgent('');
     setDirection('all');
     setStatus('all');
@@ -176,34 +198,41 @@ export default function ReportPage() {
       {activeTab !== 'overview' && activeTab !== 'numbers' && (
         <button onClick={() => downloadCsv(`victorysync-${activeTab}.csv`, rows)} className="vs-button-secondary">Export CSV</button>
       )}
+      <button onClick={runSync} disabled={syncing} className="vs-button-primary">{syncing ? 'Syncing...' : 'Sync Now'}</button>
       <button onClick={() => loadReport()} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>
     </div>
   );
 
   return (
-    <PageLayout eyebrow="Reporting" title="Reports" description="Real MightyCall and Supabase reporting across calls, recordings, SMS, transfers, numbers, and agents." actions={actions}>
-      <div className="space-y-6">
-        <SectionCard title="Global filters" description="Filters are enforced by the API with organization and number-level access checks.">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-6">
+    <PageLayout
+      eyebrow="Reporting"
+      title="Reports"
+      description={`Real MightyCall reporting from local synced data. Last sync: ${fmtDate(overview.latest_sync?.finished_at || overview.latest_sync?.started_at)}`}
+      actions={actions}
+    >
+      <div className="space-y-5">
+        <SectionCard title="Filters" contentClassName="p-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-9">
             {isPlatformAdmin && (
-              <select value={activeOrgId || ''} onChange={(e) => setSelectedOrgId(e.target.value || null)} className="vs-input">
+              <select value={activeOrgId || ''} onChange={(e) => setSelectedOrgId(e.target.value || null)} className="vs-input h-10 text-sm">
                 <option value="">All organizations</option>
                 {orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             )}
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input" />
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input" />
-            <select multiple value={selectedNumbers} onChange={(e) => setSelectedNumbers(Array.from(e.currentTarget.selectedOptions).map((option) => option.value))} className="vs-input min-h-[44px]">
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input h-10 text-sm" />
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input h-10 text-sm" />
+            <select value={selectedNumber} onChange={(e) => setSelectedNumber(e.target.value)} className="vs-input h-10 text-sm">
+              <option value="">All numbers</option>
               {numbers.map((number) => <option key={number.id} value={number.number}>{number.label ? `${number.label} - ${number.number}` : number.number}</option>)}
             </select>
-            <input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="Agent extension" className="vs-input" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => loadReport()} placeholder="Search number" className="vs-input" />
-            <select value={direction} onChange={(e) => setDirection(e.target.value)} className="vs-input">
+            <input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="Extension" className="vs-input h-10 text-sm" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => loadReport()} placeholder="Search number" className="vs-input h-10 text-sm" />
+            <select value={direction} onChange={(e) => setDirection(e.target.value)} className="vs-input h-10 text-sm">
               <option value="all">All directions</option>
               <option value="inbound">Inbound</option>
               <option value="outbound">Outbound</option>
             </select>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="vs-input">
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className="vs-input h-10 text-sm">
               <option value="all">All statuses</option>
               <option value="answered">Answered</option>
               <option value="missed">Missed</option>
@@ -212,8 +241,8 @@ export default function ReportPage() {
               <option value="completed">Completed</option>
               <option value="failed">Failed</option>
             </select>
-            <button onClick={resetFilters} className="vs-button-secondary">Reset Filters</button>
-            <button onClick={() => loadReport()} className="vs-button-primary">Apply</button>
+            <button onClick={resetFilters} className="vs-button-secondary h-10">Reset</button>
+            <button onClick={() => loadReport()} className="vs-button-primary h-10">Apply</button>
           </div>
         </SectionCard>
 
@@ -240,7 +269,7 @@ export default function ReportPage() {
           </div>
         ) : activeTab === 'numbers' ? (
           <SectionCard title="Number performance" description="Assigned numbers available in the current report scope." contentClassName="p-0">
-            <ReportTable rows={numbers} columns={['number', 'label', 'org_id']} loading={loading} />
+            <ReportTable rows={numbers} columns={['number', 'label', 'org_id', 'calls', 'answered', 'missed', 'sms', 'transfers', 'recordings']} loading={loading} />
           </SectionCard>
         ) : (
           <SectionCard title={`${tabLabels.find((tab) => tab.id === activeTab)?.label} report`} description="Rows are normalized from real MightyCall/Supabase records only." contentClassName="p-0">

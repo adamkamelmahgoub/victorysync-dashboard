@@ -84,10 +84,6 @@ export function SMSPage() {
     }
 
     try {
-      if (reset && options?.syncFirst && orgId) {
-        await syncMessages();
-      }
-
       const q = new URLSearchParams();
 	      q.set('limit', String(PAGE_SIZE));
 		      q.set('offset', String(activeOffset));
@@ -121,9 +117,9 @@ export function SMSPage() {
     }
   };
 
-	  useEffect(() => {
-	    if (user) loadMessages(true, { syncFirst: true });
-	  }, [orgId, user?.id]);
+		  useEffect(() => {
+		    if (user) loadMessages(true);
+		  }, [orgId, user?.id]);
 
 	  useEffect(() => {
 	    if (!user?.id) return;

@@ -307,7 +307,26 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
     })).filter((row) => row.org_id && row.digits);
   }
   const rows = scope.isPlatformAdmin || scope.orgWide ? phones : phones.filter((phone) => scope.allowedPhoneIds.has(phone.id));
-  res.json({ numbers: rows });
+  const [calls, recordings, sms, transfers] = await Promise.all([
+    fetchTableRows('calls', 'started_at', req, scope),
+    fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
+    fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope),
+    fetchTableRows('call_transfers', 'transferred_at', req, scope),
+  ]);
+  const numbers = rows.map((phone) => {
+    const matches = (row: any) => rowMatchesDigits(row, new Set([phone.digits]));
+    const phoneCalls = calls.filter(matches);
+    return {
+      ...phone,
+      calls: phoneCalls.length,
+      answered: phoneCalls.filter((row) => statusOf(row).includes('answer') || statusOf(row).includes('complete')).length,
+      missed: phoneCalls.filter((row) => statusOf(row).includes('miss')).length,
+      sms: sms.filter(matches).length,
+      transfers: transfers.filter(matches).length,
+      recordings: recordings.filter(matches).length,
+    };
+  });
+  res.json({ numbers });
 }));
 
 router.get('/calls', (req, res) => handle(req, res, async (scope) => {
@@ -390,6 +409,17 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
     top_agents: groupCount(calls, (row) => String(row.agent_extension || row.mightycall_extension || row.metadata?.agent_extension || '').replace(/\D/g, '') || null),
     top_numbers: groupCount([...calls, ...recordings, ...sms], (row) => rowNumbers(row).find((value) => (normalizePhoneDigits(value) || '').length >= 7) || null),
   };
+  try {
+    const { data: latest } = await supabaseAdmin
+      .from('mightycall_sync_runs')
+      .select('finished_at, started_at, status, raw_result, detail')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    (overview as any).latest_sync = latest || null;
+  } catch {
+    (overview as any).latest_sync = null;
+  }
   res.json({ overview });
 }));
 
