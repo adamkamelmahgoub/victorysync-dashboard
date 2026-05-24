@@ -17,6 +17,25 @@ import {
 } from '../integrations/mightycall';
 
 const router = express.Router();
+let lastInlineLiveRefreshAt = 0;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(fallback), timeoutMs);
+    promise
+      .then((value) => resolve(value))
+      .catch(() => resolve(fallback))
+      .finally(() => clearTimeout(timeout));
+  });
+}
+
+async function refreshLiveStatusInline(reason: string) {
+  const now = Date.now();
+  if (now - lastInlineLiveRefreshAt < 4_000) return;
+  lastInlineLiveRefreshAt = now;
+  await withTimeout(runLiveStatusSync(reason), 7_000, null as any);
+  await withTimeout(syncRecentCalls(2), 7_000, 0);
+}
 
 async function getActor(req: express.Request) {
   const actorId = req.header('x-user-id') || (req as any).actorId || null;
@@ -81,6 +100,13 @@ async function getSyncOrgIds(req: express.Request) {
 }
 
 async function getOrgPhoneIds(orgId: string) {
+  try {
+    const { data, error } = await supabaseAdmin.from('org_phone_numbers').select('phone_number_id').eq('org_id', orgId).limit(1000);
+    if (!error) {
+      const ids = (data || []).map((row: any) => String(row.phone_number_id || '')).filter(Boolean);
+      if (ids.length > 0) return ids;
+    }
+  } catch {}
   try {
     const { data } = await supabaseAdmin.from('phone_numbers').select('id').eq('org_id', orgId).limit(1000);
     return (data || []).map((row: any) => String(row.id)).filter(Boolean);
@@ -209,12 +235,20 @@ async function loadAssignedExtensionRows(orgIds: string[]) {
     ? await Promise.resolve(supabaseAdmin.from('profiles').select('id, email, full_name').in('id', userIds)).then((r) => r.data || []).catch(() => [])
     : [];
   const profileById = new Map((profiles as any[]).map((row) => [String(row.id), row]));
+  const authEmailById = new Map<string, string>();
+  for (const userId of userIds) {
+    try {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const email = data?.user?.email || '';
+      if (email) authEmailById.set(userId, email);
+    } catch {}
+  }
   const byKey = new Map<string, any>();
   for (const row of rows) {
     const extension = String(row.mightycall_extension || '').replace(/\D/g, '');
     if (!extension) continue;
     const profile = row.user_id ? profileById.get(String(row.user_id)) : null;
-    const email = profile?.email || null;
+    const email = profile?.email || (row.user_id ? authEmailById.get(String(row.user_id)) : null) || null;
     const displayName = profile?.full_name || (email ? String(email).split('@')[0] : null);
     const key = `${row.org_id}:${extension}`;
     if (!byKey.has(key) || row.id) {
@@ -253,6 +287,7 @@ router.get('/live-status', async (req, res) => {
   try {
     const scope = await resolveOrgScope(req);
     if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'local_db_api_poll' });
+    await refreshLiveStatusInline('live-status-read');
     const assignments = await loadAssignedExtensionRows(scope.orgIds);
     const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
     const { data, error } = await supabaseAdmin
@@ -285,20 +320,10 @@ router.post('/live-status/sync', async (req, res) => {
   try {
     await getActor(req);
     const result: any = await runLiveStatusSync('manual-live-status');
-    let recentCalls = 0;
-    let details = { details: 0, recordings: 0, transfers: 0, transferDetailsSupported: false };
-    try {
-      recentCalls = await syncRecentCalls(4);
-      details = await syncCallDetails(10);
-    } catch (syncErr: any) {
-      (result.warnings ||= []).push(syncErr?.message || String(syncErr));
-    }
+    const recentCalls = await withTimeout(syncRecentCalls(2), 8_000, 0);
     res.json({
       ...result,
       syncedCalls: (result.syncedCalls || 0) + recentCalls,
-      syncedCallDetails: (result.syncedCallDetails || 0) + details.details,
-      syncedRecordings: (result.syncedRecordings || 0) + details.recordings,
-      syncedTransfers: (result.syncedTransfers || 0) + details.transfers,
     });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'live_status_sync_failed' });

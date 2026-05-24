@@ -95,13 +95,28 @@ function rowAgentExtension(row: any): string {
     row?.extension ||
     row?.metadata?.agent_extension ||
     row?.metadata?.mightycall_extension ||
+    row?.metadata?.agent?.extension ||
+    row?.metadata?.users?.[0]?.extension ||
     row?.raw_payload?.agent_extension ||
+    row?.raw_payload?.agent?.extension ||
+    row?.raw_payload?.users?.[0]?.extension ||
     ''
   ).replace(/\D/g, '');
 }
 
 function inferDirectionFromOwnedNumbers(row: any, ownedDigits: Set<string>): 'inbound' | 'outbound' | 'unknown' {
   const explicit = directionOf(row);
+  const origin = String(
+    row?.origin ||
+    row?.message_origin ||
+    row?.metadata?.origin ||
+    row?.metadata?.messageInfo?.origin ||
+    row?.raw_payload?.origin ||
+    ''
+  ).toLowerCase();
+  if (origin.includes('out')) return 'outbound';
+  if (origin.includes('in')) return 'inbound';
+  if (explicit === 'outbound' || explicit === 'inbound') return explicit;
   const fromDigits = normalizePhoneDigits(row?.from_number || row?.metadata?.from_number || row?.metadata?.from);
   const toDigits = normalizePhoneDigits(row?.to_number || row?.metadata?.to_number || row?.metadata?.to);
   const businessDigits = normalizePhoneDigits(row?.business_number || row?.phone_number || row?.metadata?.business_number || row?.metadata?.businessNumber?.number || row?.metadata?.businessNumber);
@@ -111,7 +126,6 @@ function inferDirectionFromOwnedNumbers(row: any, ownedDigits: Set<string>): 'in
   const hasBusinessTo = !!businessDigits && !!toDigits && businessDigits === toDigits;
   if (hasOwnedFrom || hasBusinessFrom) return 'outbound';
   if (hasOwnedTo || hasBusinessTo) return 'inbound';
-  if (explicit === 'outbound' || explicit === 'inbound') return explicit;
   return 'unknown';
 }
 
@@ -130,6 +144,41 @@ async function getOrgPhones(orgIds: string[]) {
 }
 
 async function queryPhoneNumbers(orgIds?: string[]) {
+  const byId = new Map<string, { id: string; org_id: string; number: string; label: string | null; digits: string }>();
+  try {
+    let orgPhoneQuery = supabaseAdmin
+      .from('org_phone_numbers')
+      .select('id, org_id, phone_number_id, phone_number, label');
+    if (orgIds && orgIds.length > 0) orgPhoneQuery = orgPhoneQuery.in('org_id', orgIds);
+    const { data: orgPhones, error: orgPhoneError } = await orgPhoneQuery;
+    if (!orgPhoneError && Array.isArray(orgPhones) && orgPhones.length > 0) {
+      const phoneIds = Array.from(new Set(orgPhones.map((row: any) => String(row.phone_number_id || '')).filter(Boolean)));
+      const phoneById = new Map<string, any>();
+      if (phoneIds.length > 0) {
+        for (const select of ['id, number, label, e164, phone_number, number_digits', 'id, number, label', 'id, phone_number, label']) {
+          const { data, error } = await supabaseAdmin.from('phone_numbers').select(select).in('id', phoneIds);
+          if (!error) {
+            for (const phone of data || []) phoneById.set(String((phone as any).id), phone);
+            break;
+          }
+        }
+      }
+      for (const row of orgPhones as any[]) {
+        const phone = row.phone_number_id ? phoneById.get(String(row.phone_number_id)) : null;
+        const number = String(row.phone_number || phone?.number || phone?.e164 || phone?.phone_number || '').trim();
+        const id = String(row.phone_number_id || row.id || '').trim();
+        const digits = normalizePhoneDigits(phone?.number_digits || number) || '';
+        if (!id || !row.org_id || !digits) continue;
+        byId.set(`${row.org_id}:${id}`, {
+          id,
+          org_id: String(row.org_id),
+          number,
+          label: row.label || phone?.label || null,
+          digits,
+        });
+      }
+    }
+  } catch {}
   const selects = [
     'id, org_id, number, label, number_digits, e164, phone_number',
     'id, org_id, number, label, phone_number',
@@ -141,10 +190,14 @@ async function queryPhoneNumbers(orgIds?: string[]) {
     let query = supabaseAdmin.from('phone_numbers').select(select);
     if (orgIds && orgIds.length > 0) query = query.in('org_id', orgIds);
     const { data, error } = await query;
-    if (!error) return normalizePhoneRows(data || []);
+    if (!error) {
+      for (const phone of normalizePhoneRows(data || [])) byId.set(`${phone.org_id}:${phone.id}`, phone);
+      return Array.from(byId.values());
+    }
     lastError = error;
     if (!/number_digits|e164|phone_number|number|schema cache|does not exist/i.test(error.message || '')) throw error;
   }
+  if (byId.size > 0) return Array.from(byId.values());
   throw lastError;
 }
 
@@ -232,12 +285,20 @@ async function loadAgentIdentityMap(scope: Pick<ReportScope, 'orgIds' | 'isPlatf
     ? await Promise.resolve(supabaseAdmin.from('profiles').select('id, email, full_name').in('id', userIds)).then((r) => r.data || []).catch(() => [])
     : [];
   const profileById = new Map((profiles as any[]).map((row) => [String(row.id), row]));
+  const authEmailById = new Map<string, string>();
+  for (const userId of userIds) {
+    try {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const email = data?.user?.email || '';
+      if (email) authEmailById.set(userId, email);
+    } catch {}
+  }
   const byOrgExtension = new Map<string, any>();
   const byExtension = new Map<string, any>();
   for (const row of rows) {
     const extension = rowAgentExtension(row);
     const profile = row.user_id ? profileById.get(String(row.user_id)) : null;
-    const email = profile?.email || null;
+    const email = profile?.email || (row.user_id ? authEmailById.get(String(row.user_id)) : null) || null;
     const name = profile?.full_name || (email ? String(email).split('@')[0] : null) || `Extension ${extension}`;
     const identity = {
       org_id: row.org_id || null,
@@ -434,12 +495,15 @@ function groupAgentStats(calls: any[], transfers: any[], identities: Awaited<Ret
       label: identity?.agent_name || `Extension ${extension}`,
       email: identity?.email || null,
       total_calls: 0,
+      total_recordings: 0,
+      total_sms: 0,
+      total_activity: 0,
       answered_calls: 0,
       missed_calls: 0,
       total_duration_seconds: 0,
       transfers: 0,
       count: 0,
-      unit: 'calls',
+      unit: 'activities',
     };
     byAgent.set(key, current);
     return current;
@@ -447,8 +511,13 @@ function groupAgentStats(calls: any[], transfers: any[], identities: Awaited<Ret
   for (const call of calls) {
     const current = ensure(call);
     if (!current) continue;
-    current.total_calls += 1;
-    current.count = current.total_calls;
+    const isSms = !!(call.message_text || call.body || call.message);
+    const isRecording = !!call.recording_url;
+    if (isSms) current.total_sms += 1;
+    else if (isRecording) current.total_recordings += 1;
+    else current.total_calls += 1;
+    current.total_activity += 1;
+    current.count = current.total_activity;
     if (statusOf(call).includes('answer') || statusOf(call).includes('complete')) current.answered_calls += 1;
     if (statusOf(call).includes('miss')) current.missed_calls += 1;
     current.total_duration_seconds += safeNumber(call.duration_seconds);
@@ -461,7 +530,7 @@ function groupAgentStats(calls: any[], transfers: any[], identities: Awaited<Ret
   const rows = Array.from(byAgent.values()).map((row) => ({
     ...row,
     avg_duration_seconds: row.total_calls > 0 ? Math.round(row.total_duration_seconds / row.total_calls) : 0,
-  })).sort((a, b) => b.total_calls - a.total_calls || b.transfers - a.transfers);
+  })).sort((a, b) => b.total_activity - a.total_activity || b.total_calls - a.total_calls || b.transfers - a.transfers);
   return typeof limit === 'number' ? rows.slice(0, limit) : rows;
 }
 
@@ -690,11 +759,13 @@ router.get('/transfers', (req, res) => handle(req, res, async (scope) => {
 }));
 
 router.get('/agents', (req, res) => handle(req, res, async (scope) => {
-  const [calls, transfers] = await Promise.all([
+  const [calls, recordings, sms, transfers] = await Promise.all([
     fetchTableRows('calls', 'started_at', req, scope),
+    fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
+    fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
-  const agents = groupAgentStats(calls, transfers, await loadAgentIdentityMap(scope));
+  const agents = groupAgentStats([...calls, ...recordings, ...sms], transfers, await loadAgentIdentityMap(scope));
   res.json({ agents });
 }));
 
@@ -717,7 +788,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
   const outboundSms = sms.reduce((sum, row) => sum + (row.outbound_count ? safeNumber(row.outbound_count) : (directionOf(row) === 'outbound' ? 1 : 0)), 0);
   const legacyReports = calls.length === 0 ? await fetchLegacyMightyCallReports('calls', req, scope) : [];
   const legacy = legacyOverviewFromReports(legacyReports);
-  const agentStats = groupAgentStats(calls, transfers, await loadAgentIdentityMap(scope), 10);
+  const agentStats = groupAgentStats([...calls, ...recordings, ...sms], transfers, await loadAgentIdentityMap(scope), 10);
   const overview = {
     total_calls: calls.length || legacy.total,
     answered_calls: answered || legacy.answered,
@@ -732,7 +803,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
     total_transfers: transfers.length,
     transfers_by_number: groupCount(transfers, (row) => row.original_receiving_number || row.to_number || row.transfer_target),
     top_agents: agentStats,
-    top_numbers: groupCount([...calls, ...recordings, ...sms], (row) => rowNumbers(row).find((value) => (normalizePhoneDigits(value) || '').length >= 7) || null),
+    top_numbers: groupCount([...calls, ...recordings, ...sms], (row) => rowNumbers(row).find((value) => !/[a-z]/i.test(String(value)) && (normalizePhoneDigits(value) || '').length >= 7) || null),
   };
   try {
     const { data: latest } = await supabaseAdmin

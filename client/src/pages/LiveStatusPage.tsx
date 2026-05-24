@@ -278,7 +278,7 @@ const LiveStatusPage: FC = () => {
               {items.map((agent) => {
                 const visuals = statusVisuals(agent);
                 return (
-                  <div key={`${agent.org_id || 'global'}:${agent.user_id}`} className={`rounded-3xl border p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)] ${visuals.cardClass}`}>
+                  <div key={`${agent.org_id || 'global'}:${agent.user_id || agent.extension || agent.email || 'agent'}`} className={`rounded-3xl border p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)] ${visuals.cardClass}`}>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>

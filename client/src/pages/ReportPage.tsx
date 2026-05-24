@@ -297,7 +297,7 @@ function TopList({ title, rows }: { title: string; rows: Array<{ key: string; co
                 )}
                 {typeof row.answered_calls === 'number' && (
                   <div className="mt-1 text-xs text-slate-500">
-                    {row.answered_calls} answered · {row.missed_calls || 0} missed · {row.transfers || 0} transfers
+                    {row.total_calls || 0} calls · {row.total_recordings || 0} recordings · {row.total_sms || 0} SMS · {row.transfers || 0} transfers
                   </div>
                 )}
               </div>
@@ -315,7 +315,7 @@ function TopList({ title, rows }: { title: string; rows: Array<{ key: string; co
 function ReportTable({ rows, loading, tab, columns }: { rows: Row[]; loading: boolean; tab?: ReportTab; columns?: string[] }) {
   const resolvedColumns = columns || (
     tab === 'agents'
-      ? ['agent_name', 'email', 'extension', 'total_calls', 'answered_calls', 'missed_calls', 'avg_duration_seconds', 'transfers']
+      ? ['agent_name', 'email', 'extension', 'total_activity', 'total_calls', 'total_recordings', 'total_sms', 'answered_calls', 'missed_calls', 'avg_duration_seconds', 'transfers']
       : tab === 'transfers'
         ? ['transferred_at', 'agent_extension', 'original_caller', 'original_receiving_number', 'transfer_target', 'transfer_type', 'result']
         : tab === 'sms'

@@ -108,39 +108,64 @@ export function directionFromText(value: any): 'inbound' | 'outbound' | 'unknown
 
 async function loadOwnershipIndex(supabaseAdminClient: any): Promise<OwnershipIndex> {
   const byDigits = new Map<string, OwnedPhoneMatch[]>();
-  const { data, error } = await supabaseAdminClient
-    .from('phone_numbers')
-    .select('id, org_id, number, number_digits, e164, phone_number');
-  if (error) {
-    console.warn('[MightyCall] phone ownership lookup failed:', error);
-    return { byDigits };
-  }
+  const addMatch = (match: OwnedPhoneMatch) => {
+    if (!match.digits || match.digits.length < 7 || !match.org_id) return;
+    const list = byDigits.get(match.digits) || [];
+    if (!list.some((item) => item.org_id === match.org_id && item.id === match.id)) list.push(match);
+    byDigits.set(match.digits, list);
+  };
 
-  for (const row of data || []) {
-    const candidates = [
-      (row as any).number_digits,
-      (row as any).number,
-      (row as any).e164,
-      (row as any).phone_number,
-    ];
-    const rowOrgId = String((row as any).org_id || '').trim();
-    if (!rowOrgId) continue;
-    for (const candidate of candidates) {
-      const digits = normalizePhoneDigitsForOwnership(candidate);
-      if (!digits || digits.length < 7) continue;
-      const match: OwnedPhoneMatch = {
-        id: String((row as any).id || '').trim() || null,
-        org_id: rowOrgId,
-        number: String((row as any).number || candidate || '').trim() || null,
-        digits,
-      };
-      const list = byDigits.get(digits) || [];
-      if (!list.some((item) => item.org_id === match.org_id && item.id === match.id)) {
-        list.push(match);
-      }
-      byDigits.set(digits, list);
+  let phoneRows: any[] = [];
+  for (const select of ['id, org_id, number, number_digits, e164, phone_number', 'id, org_id, number, e164, phone_number', 'id, org_id, number', 'id, org_id, phone_number']) {
+    const { data, error } = await supabaseAdminClient.from('phone_numbers').select(select);
+    if (!error) {
+      phoneRows = data || [];
+      break;
+    }
+    if (!/number_digits|e164|phone_number|number|schema cache|does not exist/i.test(error.message || '')) {
+      console.warn('[MightyCall] phone ownership lookup failed:', error);
+      break;
     }
   }
+
+  const phoneById = new Map<string, any>();
+  for (const row of phoneRows) {
+    const id = String(row?.id || '').trim();
+    if (id) phoneById.set(id, row);
+    const rowOrgId = String(row?.org_id || '').trim();
+    if (!rowOrgId) continue;
+    for (const candidate of [row?.number_digits, row?.number, row?.e164, row?.phone_number]) {
+      const digits = normalizePhoneDigitsForOwnership(candidate);
+      if (!digits) continue;
+      addMatch({
+        id: id || null,
+        org_id: rowOrgId,
+        number: String(row?.number || row?.e164 || row?.phone_number || candidate || '').trim() || null,
+        digits,
+      });
+    }
+  }
+
+  try {
+    const { data: orgPhones, error } = await supabaseAdminClient
+      .from('org_phone_numbers')
+      .select('id, org_id, phone_number_id, phone_number');
+    if (!error) {
+      for (const row of orgPhones || []) {
+        const phone = row?.phone_number_id ? phoneById.get(String(row.phone_number_id)) : null;
+        const number = row?.phone_number || phone?.number || phone?.e164 || phone?.phone_number;
+        const digits = normalizePhoneDigitsForOwnership(phone?.number_digits || number);
+        if (!digits) continue;
+        addMatch({
+          id: String(row?.phone_number_id || row?.id || '').trim() || null,
+          org_id: String(row?.org_id || '').trim(),
+          number: String(number || '').trim() || null,
+          digits,
+        });
+      }
+    }
+  } catch {}
+
   return { byDigits };
 }
 
@@ -1922,6 +1947,23 @@ export async function syncMightyCallRecordings(
         recorded_at: r.recorded_at
       })).filter((r: any) => !!r.external_id || !!r.recording_url);
 
+      const schemaDriftRows = ownedRecordings.map((r: any) => ({
+        org_id: r.org_id,
+        phone_number_id: r.phone_number_id,
+        recording_url: r.recording_url,
+        duration_seconds: r.duration_seconds,
+        recording_date: r.recording_date || r.recorded_at,
+        from_number: r.from_number,
+        to_number: r.to_number,
+        metadata: {
+          ...(r.metadata || {}),
+          external_id: r.external_id,
+          from_number: r.from_number,
+          to_number: r.to_number,
+          phone_number: r.phone_number
+        }
+      })).filter((r: any) => !!r.recording_url);
+
       const { error } = await supabaseAdminClient
         .from('mightycall_recordings')
         .upsert(recRows, { onConflict: 'org_id,external_id' });
@@ -1933,8 +1975,24 @@ export async function syncMightyCallRecordings(
         const legacyInsert = await supabaseAdminClient
           .from('mightycall_recordings')
           .upsert(legacyRows, { onConflict: 'org_id,external_id' });
-        if (legacyInsert.error) console.warn('[MightyCall] legacy recordings insert failed:', legacyInsert.error);
-        else recordingsSynced = legacyRows.length;
+        if (!legacyInsert.error) {
+          recordingsSynced = legacyRows.length;
+        } else {
+          console.warn('[MightyCall] legacy recordings insert failed:', legacyInsert.error);
+          if (/external_id|recorded_at|schema cache|does not exist/i.test(legacyInsert.error.message || '') && schemaDriftRows.length > 0) {
+            const urls = schemaDriftRows.map((row: any) => row.recording_url).filter(Boolean);
+            if (urls.length > 0) {
+              await supabaseAdminClient
+                .from('mightycall_recordings')
+                .delete()
+                .eq('org_id', orgId)
+                .in('recording_url', urls);
+            }
+            const driftInsert = await supabaseAdminClient.from('mightycall_recordings').insert(schemaDriftRows);
+            if (driftInsert.error) console.warn('[MightyCall] schema-drift recordings insert failed:', driftInsert.error);
+            else recordingsSynced = schemaDriftRows.length;
+          }
+        }
       }
     }
     return { recordingsSynced, skippedUnowned, quarantined };

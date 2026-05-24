@@ -219,7 +219,7 @@ export async function refreshLiveAgentStatus(orgId?: string | null, userId?: str
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify({ orgId: orgId || null }),
-    timeoutMs: 10000,
+    timeoutMs: 20000,
   });
 }
 
