@@ -300,6 +300,84 @@ function groupCount(rows: any[], keyFn: (row: any) => string | null, limit = 10)
     .slice(0, limit);
 }
 
+async function fetchLegacyMightyCallReports(reportType: string, req: express.Request, scope: ReportScope) {
+  if (!scope.isPlatformAdmin && scope.orgIds.length === 0) return [];
+  const start = asDateParam(req.query.start_date || req.query.from);
+  const end = asDateParam(req.query.end_date || req.query.to, true);
+  let query = supabaseAdmin.from('mightycall_reports').select('*').eq('report_type', reportType);
+  if (scope.orgIds.length > 0) query = query.in('org_id', scope.orgIds);
+  if (start) query = query.gte('report_date', start.slice(0, 10));
+  if (end) query = query.lte('report_date', end.slice(0, 10));
+  const { data, error } = await query.order('report_date', { ascending: false }).limit(5000);
+  if (error) {
+    if (error.code === 'PGRST205' || /not exist|schema cache/i.test(error.message || '')) return [];
+    throw error;
+  }
+  const numberDigits = scope.requestedPhoneDigits.size > 0 ? scope.requestedPhoneDigits : scope.allowedPhoneDigits;
+  return (data || []).filter((row: any) => {
+    const sampleNumbers = Array.isArray(row?.data?.sample_numbers) ? row.data.sample_numbers : [];
+    if (!scope.isPlatformAdmin && numberDigits.size > 0) {
+      const digits = sampleNumbers.map((value: any) => normalizePhoneDigits(value)).filter(Boolean);
+      if (!digits.some((value: any) => numberDigits.has(value))) return false;
+    }
+    if (scope.isPlatformAdmin && scope.requestedPhoneDigits.size > 0) {
+      const digits = sampleNumbers.map((value: any) => normalizePhoneDigits(value)).filter(Boolean);
+      if (!digits.some((value: any) => scope.requestedPhoneDigits.has(value))) return false;
+    }
+    return true;
+  });
+}
+
+function legacyCallRows(reports: any[]) {
+  const out: any[] = [];
+  for (const report of reports) {
+    const data = report?.data || {};
+    const samples = Array.isArray(data.sample_activity) ? data.sample_activity : [];
+    if (samples.length > 0) {
+      for (const sample of samples) {
+        out.push({
+          id: `${report.id || report.report_date}:${sample.id || out.length}`,
+          org_id: report.org_id,
+          started_at: sample.created || report.report_date,
+          from_number: sample.from_number || null,
+          to_number: sample.to_number || null,
+          duration_seconds: safeNumber(sample.duration_seconds),
+          status: sample.status || 'unknown',
+          direction: 'unknown',
+          metadata: { source: 'mightycall_reports', report_id: report.id },
+        });
+      }
+    } else {
+      out.push({
+        id: report.id,
+        org_id: report.org_id,
+        started_at: report.report_date,
+        from_number: Array.isArray(data.sample_numbers) ? data.sample_numbers[0] : null,
+        to_number: Array.isArray(data.sample_numbers) ? data.sample_numbers[1] : null,
+        duration_seconds: safeNumber(data.total_duration),
+        status: 'summary',
+        direction: 'unknown',
+        calls_count: safeNumber(data.calls_count),
+        answered_count: safeNumber(data.answered_count),
+        missed_count: safeNumber(data.missed_count),
+        metadata: { source: 'mightycall_reports', report_id: report.id },
+      });
+    }
+  }
+  return out;
+}
+
+function legacyOverviewFromReports(reports: any[]) {
+  return reports.reduce((acc, report) => {
+    const data = report?.data || {};
+    acc.total += safeNumber(data.calls_count);
+    acc.answered += safeNumber(data.answered_count);
+    acc.missed += safeNumber(data.missed_count);
+    acc.duration += safeNumber(data.total_duration);
+    return acc;
+  }, { total: 0, answered: 0, missed: 0, duration: 0 });
+}
+
 async function handle(req: express.Request, res: express.Response, fn: (scope: ReportScope) => Promise<void>) {
   try {
     const scope = await resolveScope(req);
@@ -340,7 +418,8 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
 }));
 
 router.get('/calls', (req, res) => handle(req, res, async (scope) => {
-  const rows = await fetchTableRows('calls', 'started_at', req, scope);
+  let rows = await fetchTableRows('calls', 'started_at', req, scope);
+  if (rows.length === 0) rows = legacyCallRows(await fetchLegacyMightyCallReports('calls', req, scope));
   const page = paginate(req, rows);
   res.json({ calls: page.rows, total: page.total, next_offset: page.next_offset });
 }));
@@ -403,12 +482,14 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
   const abandoned = calls.filter((row) => statusOf(row).includes('abandon')).length;
   const inboundSms = sms.filter((row) => directionOf(row) === 'inbound').length;
   const outboundSms = sms.filter((row) => directionOf(row) === 'outbound').length;
+  const legacyReports = calls.length === 0 ? await fetchLegacyMightyCallReports('calls', req, scope) : [];
+  const legacy = legacyOverviewFromReports(legacyReports);
   const overview = {
-    total_calls: calls.length,
-    answered_calls: answered,
-    missed_calls: missed,
+    total_calls: calls.length || legacy.total,
+    answered_calls: answered || legacy.answered,
+    missed_calls: missed || legacy.missed,
     abandoned_calls: abandoned,
-    avg_duration_seconds: avg(calls.map((row) => safeNumber(row.duration_seconds))),
+    avg_duration_seconds: calls.length > 0 ? avg(calls.map((row) => safeNumber(row.duration_seconds))) : (legacy.total > 0 ? Math.round(legacy.duration / legacy.total) : 0),
     avg_wait_seconds: avg(calls.map((row) => safeNumber(row.wait_seconds || row.queue_wait_seconds || row.metadata?.wait_seconds))),
     total_recordings: recordings.length,
     total_sms: sms.length,

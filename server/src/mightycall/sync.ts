@@ -190,19 +190,28 @@ async function updateExistingPhoneNumber(id: string, externalId: string, number:
 
 async function loadOrgMembersByExtension() {
   const [orgMembers, orgUsers] = await Promise.all([
-    Promise.resolve(supabaseAdmin.from('org_members').select('id, org_id, user_id, full_name, role, mightycall_extension').not('mightycall_extension', 'is', null)).then((r) => r.data || []).catch(() => []),
+    Promise.resolve(supabaseAdmin.from('org_members').select('id, org_id, user_id, role, mightycall_extension').not('mightycall_extension', 'is', null)).then((r) => r.data || []).catch(() => []),
     Promise.resolve(supabaseAdmin.from('org_users').select('id, org_id, user_id, role, mightycall_extension').not('mightycall_extension', 'is', null)).then((r) => r.data || []).catch(() => []),
   ]);
+  const userIds = Array.from(new Set(([...orgUsers, ...orgMembers] as any[]).map((row) => String(row?.user_id || '')).filter(Boolean)));
+  const profiles = userIds.length
+    ? await Promise.resolve(supabaseAdmin.from('profiles').select('id, email, full_name').in('id', userIds)).then((r) => r.data || []).catch(() => [])
+    : [];
+  const profileById = new Map((profiles as any[]).map((row) => [String(row.id), row]));
   const byExtension = new Map<string, any>();
   for (const row of [...orgUsers, ...orgMembers] as any[]) {
     const extension = normalizePhoneDigits(row?.mightycall_extension);
     if (!extension) continue;
     const key = `${row.org_id}:${extension}`;
+    const profile = row.user_id ? profileById.get(String(row.user_id)) : null;
+    const email = profile?.email || null;
+    const name = profile?.full_name || (email ? String(email).split('@')[0] : null);
     byExtension.set(key, {
       orgMemberId: row.id || null,
       orgId: row.org_id,
       userId: row.user_id || null,
-      name: row.full_name || null,
+      name,
+      email,
       role: row.role || 'agent',
       extension,
     });
@@ -289,6 +298,11 @@ export async function syncUsersAndStatuses(): Promise<{ users: number; statuses:
   let syncedStatuses = 0;
   let liveRingingSupported: 'unknown' | 'yes' | 'no' = 'unknown';
   const now = new Date().toISOString();
+  const members = Array.from(membersByExt.values());
+
+  for (const member of members) {
+    await ensureLiveStatusRosterRow(member, now);
+  }
 
   for (const user of users) {
     const extension = normalizePhoneDigits(firstString(user?.extension, user?.extensionNumber, user?.ext));
@@ -299,7 +313,6 @@ export async function syncUsersAndStatuses(): Promise<{ users: number; statuses:
     }
   }
 
-  const members = Array.from(membersByExt.values());
   for (const member of members) {
     const statusResponse = await mightyCallGetFirst<any>(USER_STATUS_PATHS, {
       extension: member.extension,
@@ -321,6 +334,34 @@ export async function syncUsersAndStatuses(): Promise<{ users: number; statuses:
 
   if (members.length > 0 && syncedStatuses > 0 && liveRingingSupported === 'unknown') liveRingingSupported = 'no';
   return { users: syncedUsers, statuses: syncedStatuses, liveRingingSupported };
+}
+
+async function ensureLiveStatusRosterRow(member: any, now: string) {
+  const { data: existing } = await supabaseAdmin
+    .from('agent_live_status')
+    .select('normalized_status, current_call_id')
+    .eq('org_id', member.orgId)
+    .eq('mightycall_extension', member.extension)
+    .maybeSingle();
+  const active = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(String((existing as any)?.normalized_status || '').toLowerCase());
+  if (active && (existing as any)?.current_call_id) return;
+  await supabaseAdmin.from('agent_live_status').upsert({
+    org_id: member.orgId,
+    org_member_id: member.orgMemberId,
+    user_id: member.userId,
+    mightycall_extension: member.extension,
+    extension: member.extension,
+    agent_name: member.name,
+    raw_status: existing ? ((existing as any).normalized_status || 'available') : 'available',
+    normalized_status: existing ? ((existing as any).normalized_status || 'available') : 'available',
+    status: existing ? ((existing as any).normalized_status || 'available') : 'available',
+    last_event_at: now,
+    last_synced_at: now,
+    source: 'assignment_roster',
+    stale: false,
+    raw_payload: { assignment: member },
+    updated_at: now,
+  }, { onConflict: 'org_id,mightycall_extension' });
 }
 
 async function upsertLiveStatus(member: any, userInfo: any, statusPayload: any, now: string) {

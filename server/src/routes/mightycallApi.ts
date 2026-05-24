@@ -29,12 +29,12 @@ async function getUserOrgIds(actorId: string) {
 }
 
 async function getLiveStatusOrgIds() {
-  const { data } = await supabaseAdmin
-    .from('agent_live_status')
-    .select('org_id')
-    .not('org_id', 'is', null)
-    .limit(1000);
-  return Array.from(new Set((data || []).map((row: any) => String(row.org_id)).filter(Boolean)));
+  const rows: any[] = [];
+  const live = await Promise.resolve(supabaseAdmin.from('agent_live_status').select('org_id').not('org_id', 'is', null).limit(1000)).then((r) => r.data || []).catch(() => []);
+  const users = await Promise.resolve(supabaseAdmin.from('org_users').select('org_id').not('mightycall_extension', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
+  const members = await Promise.resolve(supabaseAdmin.from('org_members').select('org_id').not('mightycall_extension', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
+  rows.push(...live, ...users, ...members);
+  return Array.from(new Set(rows.map((row: any) => String(row.org_id)).filter(Boolean)));
 }
 
 async function resolveOrgScope(req: express.Request) {
@@ -68,21 +68,23 @@ function liveStatusLabel(status: string) {
   }
 }
 
-function mapLiveRow(row: any, orgNames: Map<string, string>) {
+function mapLiveRow(row: any, orgNames: Map<string, string>, identityByKey: Map<string, any>) {
   const status = String(row.normalized_status || row.status || 'unknown').toLowerCase();
   const active = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(status);
   const direction = row.current_call_direction || row.direction || null;
   const counterpart = direction === 'outbound'
     ? (row.to_number || row.current_counterpart_number || null)
     : (row.from_number || row.current_counterpart_number || null);
+  const extension = row.mightycall_extension || row.extension || null;
+  const identity = identityByKey.get(`${row.org_id}:${extension}`) || {};
   return {
-    user_id: row.user_id || '',
+    user_id: row.user_id || identity.user_id || '',
     org_id: row.org_id || null,
     organization_name: orgNames.get(String(row.org_id || '')) || null,
-    email: null,
-    role: 'agent',
-    extension: row.mightycall_extension || row.extension || null,
-    display_name: row.agent_name || row.raw_payload?.userInfo?.displayName || row.raw_payload?.userInfo?.name || null,
+    email: identity.email || row.raw_payload?.assignment?.email || null,
+    role: identity.role || 'agent',
+    extension,
+    display_name: row.agent_name || identity.display_name || row.raw_payload?.userInfo?.displayName || row.raw_payload?.userInfo?.name || null,
     on_call: active,
     status: liveStatusLabel(status),
     raw_status: row.raw_status || null,
@@ -102,10 +104,64 @@ function mapLiveRow(row: any, orgNames: Map<string, string>) {
   };
 }
 
+async function loadAssignedExtensionRows(orgIds: string[]) {
+  if (orgIds.length === 0) return [];
+  const [orgUsers, orgMembers] = await Promise.all([
+    Promise.resolve(supabaseAdmin.from('org_users').select('id, org_id, user_id, role, mightycall_extension').in('org_id', orgIds).not('mightycall_extension', 'is', null)).then((r) => r.data || []).catch(() => []),
+    Promise.resolve(supabaseAdmin.from('org_members').select('id, org_id, user_id, role, mightycall_extension').in('org_id', orgIds).not('mightycall_extension', 'is', null)).then((r) => r.data || []).catch(() => []),
+  ]);
+  const rows = [...(orgUsers as any[]), ...(orgMembers as any[])].filter((row) => String(row?.mightycall_extension || '').trim());
+  const userIds = Array.from(new Set(rows.map((row) => String(row.user_id || '')).filter(Boolean)));
+  const profiles = userIds.length
+    ? await Promise.resolve(supabaseAdmin.from('profiles').select('id, email, full_name').in('id', userIds)).then((r) => r.data || []).catch(() => [])
+    : [];
+  const profileById = new Map((profiles as any[]).map((row) => [String(row.id), row]));
+  const byKey = new Map<string, any>();
+  for (const row of rows) {
+    const extension = String(row.mightycall_extension || '').replace(/\D/g, '');
+    if (!extension) continue;
+    const profile = row.user_id ? profileById.get(String(row.user_id)) : null;
+    const email = profile?.email || null;
+    const displayName = profile?.full_name || (email ? String(email).split('@')[0] : null);
+    const key = `${row.org_id}:${extension}`;
+    if (!byKey.has(key) || row.id) {
+      byKey.set(key, {
+        org_id: row.org_id,
+        user_id: row.user_id || null,
+        extension,
+        email,
+        display_name: displayName,
+        role: row.role || 'agent',
+      });
+    }
+  }
+  return Array.from(byKey.values());
+}
+
+function assignmentToLiveRow(row: any) {
+  const now = new Date().toISOString();
+  return {
+    org_id: row.org_id,
+    user_id: row.user_id,
+    mightycall_extension: row.extension,
+    extension: row.extension,
+    agent_name: row.display_name,
+    normalized_status: 'unknown',
+    status: 'unknown',
+    raw_status: 'No MightyCall status synced yet',
+    last_synced_at: null,
+    last_event_at: null,
+    updated_at: now,
+    source: 'assignment_roster',
+  };
+}
+
 router.get('/live-status', async (req, res) => {
   try {
     const scope = await resolveOrgScope(req);
     if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'local_db_api_poll' });
+    const assignments = await loadAssignedExtensionRows(scope.orgIds);
+    const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
     const { data, error } = await supabaseAdmin
       .from('agent_live_status')
       .select('*')
@@ -114,7 +170,12 @@ router.get('/live-status', async (req, res) => {
     if (error) throw error;
     const { data: orgs } = await supabaseAdmin.from('organizations').select('id, name').in('id', scope.orgIds);
     const orgNames = new Map((orgs || []).map((row: any) => [String(row.id), String(row.name || '')]));
-    const items = (data || []).map((row: any) => mapLiveRow(row, orgNames));
+    const liveByKey = new Map((data || []).map((row: any) => [`${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`, row]));
+    for (const assignment of assignments) {
+      const key = `${assignment.org_id}:${assignment.extension}`;
+      if (!liveByKey.has(key)) liveByKey.set(key, assignmentToLiveRow(assignment));
+    }
+    const items = Array.from(liveByKey.values()).map((row: any) => mapLiveRow(row, orgNames, identityByKey));
     const refreshedAt = items.map((item: any) => item.refreshed_at).filter(Boolean).sort().slice(-1)[0] || new Date().toISOString();
     res.json({
       items,
