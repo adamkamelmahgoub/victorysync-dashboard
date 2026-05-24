@@ -96,12 +96,30 @@ async function getUserOrgIds(actorId: string): Promise<string[]> {
 
 async function getOrgPhones(orgIds: string[]) {
   if (orgIds.length === 0) return [];
-  const { data, error } = await supabaseAdmin
-    .from('phone_numbers')
-    .select('id, org_id, number, label, number_digits, e164, phone_number')
-    .in('org_id', orgIds);
-  if (error) throw error;
-  return (data || []).map((row: any) => ({
+  return queryPhoneNumbers(orgIds);
+}
+
+async function queryPhoneNumbers(orgIds?: string[]) {
+  const selects = [
+    'id, org_id, number, label, number_digits, e164, phone_number',
+    'id, org_id, number, label, phone_number',
+    'id, org_id, number, label',
+    'id, org_id, phone_number, label',
+  ];
+  let lastError: any = null;
+  for (const select of selects) {
+    let query = supabaseAdmin.from('phone_numbers').select(select);
+    if (orgIds && orgIds.length > 0) query = query.in('org_id', orgIds);
+    const { data, error } = await query;
+    if (!error) return normalizePhoneRows(data || []);
+    lastError = error;
+    if (!/number_digits|e164|phone_number|number|schema cache|does not exist/i.test(error.message || '')) throw error;
+  }
+  throw lastError;
+}
+
+function normalizePhoneRows(rows: any[]) {
+  return rows.map((row: any) => ({
     id: String(row.id || ''),
     org_id: String(row.org_id || ''),
     number: String(row.number || row.e164 || row.phone_number || ''),
@@ -296,15 +314,7 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
   const orgIds = scope.isPlatformAdmin && scope.orgIds.length === 0 ? [] : scope.orgIds;
   let phones = await getOrgPhones(orgIds);
   if (scope.isPlatformAdmin && orgIds.length === 0) {
-    const { data, error } = await supabaseAdmin.from('phone_numbers').select('id, org_id, number, label, number_digits, e164, phone_number');
-    if (error) throw error;
-    phones = (data || []).map((row: any) => ({
-      id: String(row.id || ''),
-      org_id: String(row.org_id || ''),
-      number: String(row.number || row.e164 || row.phone_number || ''),
-      label: row.label || null,
-      digits: normalizePhoneDigits(row.number_digits || row.number || row.e164 || row.phone_number) || '',
-    })).filter((row) => row.org_id && row.digits);
+    phones = await queryPhoneNumbers();
   }
   const rows = scope.isPlatformAdmin || scope.orgWide ? phones : phones.filter((phone) => scope.allowedPhoneIds.has(phone.id));
   const [calls, recordings, sms, transfers] = await Promise.all([

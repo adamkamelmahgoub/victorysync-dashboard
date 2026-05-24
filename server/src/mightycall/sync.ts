@@ -110,15 +110,30 @@ async function recordSyncRun(result: SyncResult, status: 'running' | 'completed'
 }
 
 async function loadBusinessNumbers() {
-  const { data } = await supabaseAdmin
-    .from('phone_numbers')
-    .select('id, org_id, number, number_digits, e164, phone_number');
+  const data = await queryPhoneNumberRows();
   return (data || []).map((row: any) => ({
     id: String(row.id || ''),
     orgId: String(row.org_id || ''),
     number: normalizePhone(row.number || row.e164 || row.phone_number),
     digits: normalizePhoneDigits(row.number_digits || row.number || row.e164 || row.phone_number),
   })).filter((row) => row.orgId && row.digits);
+}
+
+async function queryPhoneNumberRows() {
+  const selects = [
+    'id, org_id, number, number_digits, e164, phone_number',
+    'id, org_id, number, phone_number',
+    'id, org_id, number',
+    'id, org_id, phone_number',
+  ];
+  let lastError: any = null;
+  for (const select of selects) {
+    const { data, error } = await supabaseAdmin.from('phone_numbers').select(select);
+    if (!error) return data || [];
+    lastError = error;
+    if (!/number_digits|e164|phone_number|number|schema cache|does not exist/i.test(error.message || '')) throw error;
+  }
+  throw lastError;
 }
 
 async function resolveOrgByBusinessNumber(...values: any[]) {
@@ -129,6 +144,48 @@ async function resolveOrgByBusinessNumber(...values: any[]) {
     if (match) return match;
   }
   return null;
+}
+
+async function findExistingPhoneNumber(number: string, digits: string | null) {
+  const filters = [
+    `number.eq.${number},phone_number.eq.${number}`,
+    `number.eq.${number}`,
+    `phone_number.eq.${number}`,
+    digits ? `number_digits.eq.${digits}` : '',
+  ].filter(Boolean);
+  let lastError: any = null;
+  for (const filter of filters) {
+    const { data, error } = await supabaseAdmin
+      .from('phone_numbers')
+      .select('id, org_id')
+      .or(filter)
+      .limit(1)
+      .maybeSingle();
+    if (!error) return data;
+    lastError = error;
+    if (!/number_digits|phone_number|number|schema cache|does not exist/i.test(error.message || '')) throw error;
+  }
+  if (lastError) throw lastError;
+  return null;
+}
+
+async function updateExistingPhoneNumber(id: string, externalId: string, number: string, digits: string | null, raw: any) {
+  const label = firstString(raw?.label, raw?.name);
+  const updates = [
+    { external_id: externalId, number, number_digits: digits, label, metadata: raw, is_active: raw?.isActive !== false },
+    { external_id: externalId, number, label, metadata: raw },
+    { external_id: externalId, number, label },
+    { external_id: externalId, phone_number: number, label },
+    { external_id: externalId, label },
+  ];
+  let lastError: any = null;
+  for (const update of updates) {
+    const { error } = await supabaseAdmin.from('phone_numbers').update(update).eq('id', id);
+    if (!error) return;
+    lastError = error;
+    if (!/number_digits|phone_number|number|metadata|is_active|schema cache|does not exist/i.test(error.message || '')) throw error;
+  }
+  if (lastError) throw lastError;
 }
 
 async function loadOrgMembersByExtension() {
@@ -212,21 +269,9 @@ export async function syncBusinessNumbers(): Promise<number> {
     const externalId = firstString(raw?.id, raw?.numberId, raw?.phoneNumberId, number) || number;
     const digits = normalizePhoneDigits(number);
     try {
-      const { data: existing } = await supabaseAdmin
-        .from('phone_numbers')
-        .select('id, org_id')
-        .or(`number.eq.${number},number_digits.eq.${digits}`)
-        .limit(1)
-        .maybeSingle();
+      const existing = await findExistingPhoneNumber(number, digits);
       if (existing?.id) {
-        await supabaseAdmin.from('phone_numbers').update({
-          external_id: externalId,
-          number,
-          number_digits: digits,
-          label: firstString(raw?.label, raw?.name),
-          metadata: raw,
-          is_active: raw?.isActive !== false,
-        }).eq('id', existing.id);
+        await updateExistingPhoneNumber(existing.id, externalId, number, digits, raw);
         count += 1;
       }
     } catch (err) {
