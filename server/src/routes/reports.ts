@@ -46,6 +46,18 @@ function safeNumber(value: unknown): number {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function durationToSeconds(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.round(value));
+  const text = String(value || '').trim();
+  if (!text) return 0;
+  if (/^\d+(\.\d+)?$/.test(text)) return Math.max(0, Math.round(Number(text)));
+  const parts = text.split(':').map((part) => Number(part));
+  if (parts.length >= 2 && parts.every((part) => Number.isFinite(part))) {
+    return Math.max(0, Math.round(parts.reduce((total, part) => total * 60 + part, 0)));
+  }
+  return 0;
+}
+
 function rowTimestamp(row: any): string | null {
   return firstString(row.started_at, row.recording_date, row.sent_at, row.message_date, row.transferred_at, row.created_at);
 }
@@ -85,7 +97,10 @@ function statusOf(row: any): string {
 }
 
 function directionOf(row: any): string {
-  return String(row?.direction || row?.current_call_direction || row?.metadata?.direction || '').toLowerCase();
+  const raw = String(row?.direction || row?.current_call_direction || row?.metadata?.direction || row?.metadata?.origin || row?.raw_payload?.origin || '').toLowerCase();
+  if (raw.includes('out')) return 'outbound';
+  if (raw.includes('in')) return 'inbound';
+  return raw;
 }
 
 function rowAgentExtension(row: any): string {
@@ -664,6 +679,23 @@ function normalizeSmsDirections(rows: any[], ownedDigits: Set<string>) {
   }));
 }
 
+function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
+  return rows.map((row) => {
+    const metadata = row?.metadata || row?.raw_payload || {};
+    const fromNumber = row.from_number || metadata?.from_number || metadata?.client?.address || null;
+    const toNumber = row.to_number || metadata?.to_number || metadata?.businessNumber?.number || null;
+    const businessNumber = row.business_number || metadata?.businessNumber?.number || metadata?.phone_number || null;
+    return {
+      ...row,
+      from_number: fromNumber,
+      to_number: toNumber,
+      business_number: businessNumber,
+      direction: inferDirectionFromOwnedNumbers({ ...row, from_number: fromNumber, to_number: toNumber, business_number: businessNumber, metadata }, ownedDigits),
+      duration_seconds: durationToSeconds(row.duration_seconds || metadata?.recording?.duration || metadata?.duration_seconds || metadata?.duration || metadata?.callDuration),
+    };
+  });
+}
+
 async function callRecordingRows(req: express.Request, scope: ReportScope) {
   const rows = await fetchTableRows('calls', 'started_at', req, scope);
   return rows.filter((row) => row.recording_url || row.has_recording).map((row) => ({
@@ -733,8 +765,11 @@ router.get('/calls', (req, res) => handle(req, res, async (scope) => {
 }));
 
 router.get('/recordings', (req, res) => handle(req, res, async (scope) => {
+  const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
+  const ownedDigits = new Set(phones.map((phone) => phone.digits).filter(Boolean));
   let rows = await fetchTableRows('mightycall_recordings', 'recording_date', req, scope);
   if (rows.length === 0) rows = await callRecordingRows(req, scope);
+  rows = normalizeRecordingRows(rows, ownedDigits);
   const page = paginate(req, rows);
   res.json({ recordings: page.rows, total: page.total, next_offset: page.next_offset });
 }));
@@ -778,7 +813,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
   ]);
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = new Set(phones.map((phone) => phone.digits).filter(Boolean));
-  const recordings = baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope);
+  const recordings = normalizeRecordingRows(baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope), ownedDigits);
   const legacyMessageReports = baseSms.length === 0 ? await fetchLegacyMightyCallReports('messages', req, scope) : [];
   const sms = baseSms.length > 0 ? normalizeSmsDirections(baseSms, ownedDigits) : legacyMessageRows(legacyMessageReports, ownedDigits);
   const answered = calls.filter((row) => statusOf(row).includes('answer') || statusOf(row).includes('complete')).length;

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../lib/supabaseClient';
-import { mightyCallGetFirst } from './client';
+import { getMightyCallToken, mightyCallGetFirst } from './client';
+import { fetchMightyCallLiveCallByExtension } from '../integrations/mightycall';
 import {
   arrayFromApiResponse,
   callLifecycleStatus,
@@ -324,17 +325,33 @@ export async function syncUsersAndStatuses(): Promise<{ users: number; statuses:
       extension: member.extension,
       userExtension: member.extension,
     }, { optional: true });
-    if (!statusResponse.data) continue;
+    let liveCallPayload: any = null;
+    try {
+      const token = await getMightyCallToken();
+      liveCallPayload = await fetchMightyCallLiveCallByExtension(member.extension, token);
+    } catch {}
+    if (!statusResponse.data && !liveCallPayload) continue;
+    const combinedStatusPayload = liveCallPayload
+      ? {
+          ...(statusResponse.data || {}),
+          status: liveCallPayload.status || liveCallPayload.callStatus || statusResponse.data?.status,
+          state: liveCallPayload.callStatus || statusResponse.data?.state,
+          onCall: true,
+          currentCall: liveCallPayload.currentCall || liveCallPayload,
+          sourceEndpoint: liveCallPayload.sourceEndpoint,
+          liveLookupDebug: liveCallPayload.debug,
+        }
+      : statusResponse.data;
     const statusText = firstString(
-      pickDeep(statusResponse.data, ['status.name', 'status.label', 'status.value']),
-      (statusResponse.data as any)?.status,
-      (statusResponse.data as any)?.state,
-      (statusResponse.data as any)?.availability,
-      (statusResponse.data as any)?.presenceStatus
+      pickDeep(combinedStatusPayload, ['status.name', 'status.label', 'status.value']),
+      (combinedStatusPayload as any)?.status,
+      (combinedStatusPayload as any)?.state,
+      (combinedStatusPayload as any)?.availability,
+      (combinedStatusPayload as any)?.presenceStatus
     );
     const normalized = normalizeMightyCallStatus(statusText);
     if (normalized === 'ringing' || normalized === 'dialing' || normalized === 'on_call') liveRingingSupported = 'yes';
-    await upsertLiveStatus(member, null, statusResponse.data, now);
+    await upsertLiveStatus(member, null, combinedStatusPayload, now);
     syncedStatuses += 1;
   }
 

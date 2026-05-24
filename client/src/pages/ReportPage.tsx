@@ -89,6 +89,7 @@ export default function ReportPage() {
   const [numbers, setNumbers] = useState<PhoneOption[]>([]);
   const [overview, setOverview] = useState<Overview>({});
   const [rows, setRows] = useState<Row[]>([]);
+  const [topAgentEdits, setTopAgentEdits] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +107,14 @@ export default function ReportPage() {
     Object.entries(extra || {}).forEach(([key, value]) => q.set(key, value));
     return q.toString();
   };
+
+  useEffect(() => {
+    try {
+      setTopAgentEdits(JSON.parse(localStorage.getItem('victorysync.reportTopAgentEdits') || '{}'));
+    } catch {
+      setTopAgentEdits({});
+    }
+  }, []);
 
   const loadNumbers = async () => {
     if (!user?.id) return;
@@ -193,6 +202,49 @@ export default function ReportPage() {
     setSearch('');
   };
 
+  const editedTopAgents = useMemo(() => {
+    return (overview.top_agents || []).map((row: any) => {
+      const edit = topAgentEdits[row.key] || {};
+      return {
+        ...row,
+        ...edit,
+        label: edit.label || row.label || row.agent_name || row.key,
+        count: edit.count !== undefined && edit.count !== '' ? Number(edit.count) : row.count,
+      };
+    }).filter((row: any) => !row.hidden).sort((a: any, b: any) => Number(a.rank || 999) - Number(b.rank || 999) || Number(b.count || 0) - Number(a.count || 0));
+  }, [overview.top_agents, topAgentEdits]);
+
+  const editTopAgent = (row: any) => {
+    const label = window.prompt('Top agent display name', row.label || row.agent_name || row.key);
+    if (label === null) return;
+    const count = window.prompt('Displayed result count', String(row.count ?? 0));
+    if (count === null) return;
+    const rank = window.prompt('Pinned rank (1 is first, blank for automatic)', String(row.rank || ''));
+    if (rank === null) return;
+    const next = {
+      ...topAgentEdits,
+      [row.key]: {
+        label: label.trim() || row.label || row.agent_name || row.key,
+        count: Number.isFinite(Number(count)) ? Number(count) : row.count,
+        rank: rank.trim() ? Number(rank) : undefined,
+      },
+    };
+    setTopAgentEdits(next);
+    localStorage.setItem('victorysync.reportTopAgentEdits', JSON.stringify(next));
+  };
+
+  const openRecording = async (row: Row) => {
+    if (!user?.id || !row.id) return;
+    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(row.id))}/download?inline=1`), {
+      headers: { 'x-user-id': user.id },
+    });
+    if (!response.ok) throw new Error('Recording link failed');
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
   const actions = (
     <div className="flex flex-wrap gap-2">
       {activeTab !== 'overview' && activeTab !== 'numbers' && (
@@ -262,7 +314,7 @@ export default function ReportPage() {
               {kpis.map(([label, value]) => <MetricStatCard key={label} label={String(label)} value={value} />)}
             </div>
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-              <TopList title="Top Agents" rows={overview.top_agents || []} />
+              <TopList title="Top Agents" rows={editedTopAgents} onEdit={editTopAgent} />
               <TopList title="Top Numbers" rows={overview.top_numbers || []} />
               <TopList title="Transfers By Number" rows={overview.transfers_by_number || []} />
             </div>
@@ -273,7 +325,7 @@ export default function ReportPage() {
           </SectionCard>
         ) : (
           <SectionCard title={`${tabLabels.find((tab) => tab.id === activeTab)?.label} report`} description="Rows are normalized from real MightyCall/Supabase records only." contentClassName="p-0">
-            <ReportTable rows={rows} loading={loading} tab={activeTab} />
+            <ReportTable rows={rows} loading={loading} tab={activeTab} onOpenRecording={openRecording} />
           </SectionCard>
         )}
       </div>
@@ -281,7 +333,7 @@ export default function ReportPage() {
   );
 }
 
-function TopList({ title, rows }: { title: string; rows: Array<{ key: string; count: number }> }) {
+function TopList({ title, rows, onEdit }: { title: string; rows: Array<{ key: string; count: number }>; onEdit?: (row: any) => void }) {
   return (
     <SectionCard title={title}>
       {rows.length === 0 ? <EmptyStatePanel title="No data" description="No matching rows in this filter window." /> : (
@@ -301,9 +353,10 @@ function TopList({ title, rows }: { title: string; rows: Array<{ key: string; co
                   </div>
                 )}
               </div>
-              <span className="shrink-0 text-sm font-semibold text-white">
-                {row.count}{row.unit ? ` ${row.unit}` : ''}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-sm font-semibold text-white">{row.count}{row.unit ? ` ${row.unit}` : ''}</span>
+                {onEdit && <button type="button" onClick={() => onEdit(row)} className="vs-button-secondary px-2 py-1 text-xs">Edit</button>}
+              </div>
             </div>
           ))}
         </div>
@@ -312,7 +365,7 @@ function TopList({ title, rows }: { title: string; rows: Array<{ key: string; co
   );
 }
 
-function ReportTable({ rows, loading, tab, columns }: { rows: Row[]; loading: boolean; tab?: ReportTab; columns?: string[] }) {
+function ReportTable({ rows, loading, tab, columns, onOpenRecording }: { rows: Row[]; loading: boolean; tab?: ReportTab; columns?: string[]; onOpenRecording?: (row: Row) => Promise<void> }) {
   const resolvedColumns = columns || (
     tab === 'agents'
       ? ['agent_name', 'email', 'extension', 'total_activity', 'total_calls', 'total_recordings', 'total_sms', 'answered_calls', 'missed_calls', 'avg_duration_seconds', 'transfers']
@@ -339,7 +392,7 @@ function ReportTable({ rows, loading, tab, columns }: { rows: Row[]; loading: bo
             <tr key={String(row.id || row.external_id || row.external_call_id || index)} className="hover:bg-white/[0.03]">
               {resolvedColumns.map((column) => (
                 <td key={column} className="max-w-[320px] truncate px-4 py-3 text-slate-200">
-                  {cellValue(row, column)}
+                  {cellValue(row, column, onOpenRecording)}
                 </td>
               ))}
             </tr>
@@ -350,12 +403,12 @@ function ReportTable({ rows, loading, tab, columns }: { rows: Row[]; loading: bo
   );
 }
 
-function cellValue(row: Row, column: string) {
+function cellValue(row: Row, column: string, onOpenRecording?: (row: Row) => Promise<void>) {
   const value = row[column];
   if (column.includes('date') || column.endsWith('_at')) return <span className="text-xs text-slate-400">{fmtDate(String(value || ''))}</span>;
   if (column.includes('duration')) return fmtSeconds(value);
   if (column === 'recording_url') {
-    return value ? <a className="text-cyan-200 hover:text-cyan-100" href={String(value)} target="_blank" rel="noreferrer">Download / Open</a> : <span className="text-slate-500">Recording unavailable</span>;
+    return value ? <button type="button" className="text-cyan-200 hover:text-cyan-100" onClick={() => onOpenRecording?.(row).catch(() => window.open(String(value), '_blank', 'noopener,noreferrer'))}>Download / Open</button> : <span className="text-slate-500">Recording unavailable</span>;
   }
   if (column === 'direction' || column === 'status' || column === 'result' || column === 'transfer_type') {
     return <StatusBadge tone={badgeTone(String(value || ''))}>{String(value || 'unknown')}</StatusBadge>;

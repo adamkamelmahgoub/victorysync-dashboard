@@ -12979,7 +12979,12 @@ app.get("/s/series", async (req, res) => {
             }
             if ((await isOrgAdmin(actorId, orgId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'))) {
               const recordingUrl = recording.recording_url;
-              const fetched = await fetch(recordingUrl);
+              const fetched = await fetch(recordingUrl, {
+                headers: {
+                  Accept: 'audio/*,application/octet-stream,*/*',
+                  'User-Agent': 'Mozilla/5.0 VictorySync Recording Proxy',
+                },
+              } as any);
               if (!fetched.ok) {
                 console.error('[recordings/download] remote fetch failed:', fetched.status);
                 return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
@@ -13023,7 +13028,12 @@ app.get("/s/series", async (req, res) => {
 
           const recordingUrl = recording.recording_url;
           // Fetch remote asset
-          const fetched = await fetch(recordingUrl);
+          const fetched = await fetch(recordingUrl, {
+            headers: {
+              Accept: 'audio/*,application/octet-stream,*/*',
+              'User-Agent': 'Mozilla/5.0 VictorySync Recording Proxy',
+            },
+          } as any);
           if (!fetched.ok) {
             console.error('[recordings/download] remote fetch failed:', fetched.status);
             return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
