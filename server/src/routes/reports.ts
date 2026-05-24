@@ -53,12 +53,14 @@ function rowNumbers(row: any): string[] {
   const metadata = row?.metadata || row?.raw_payload || {};
   const values = [
     row?.phone_number,
+    row?.business_number,
     row?.from_number,
     row?.to_number,
     row?.original_caller,
     row?.original_receiving_number,
     row?.transfer_target,
     metadata?.phone_number,
+    metadata?.business_number,
     metadata?.businessNumber?.number,
     metadata?.businessNumber,
     metadata?.from_number,
@@ -83,6 +85,21 @@ function statusOf(row: any): string {
 
 function directionOf(row: any): string {
   return String(row?.direction || row?.current_call_direction || row?.metadata?.direction || '').toLowerCase();
+}
+
+function inferDirectionFromOwnedNumbers(row: any, ownedDigits: Set<string>): 'inbound' | 'outbound' | 'unknown' {
+  const explicit = directionOf(row);
+  const fromDigits = normalizePhoneDigits(row?.from_number || row?.metadata?.from_number || row?.metadata?.from);
+  const toDigits = normalizePhoneDigits(row?.to_number || row?.metadata?.to_number || row?.metadata?.to);
+  const businessDigits = normalizePhoneDigits(row?.business_number || row?.phone_number || row?.metadata?.business_number || row?.metadata?.businessNumber?.number || row?.metadata?.businessNumber);
+  const hasOwnedFrom = !!fromDigits && ownedDigits.has(fromDigits);
+  const hasOwnedTo = !!toDigits && ownedDigits.has(toDigits);
+  const hasBusinessFrom = !!businessDigits && !!fromDigits && businessDigits === fromDigits;
+  const hasBusinessTo = !!businessDigits && !!toDigits && businessDigits === toDigits;
+  if (hasOwnedFrom || hasBusinessFrom) return 'outbound';
+  if (hasOwnedTo || hasBusinessTo) return 'inbound';
+  if (explicit === 'outbound' || explicit === 'inbound') return explicit;
+  return 'unknown';
 }
 
 async function getUserOrgIds(actorId: string): Promise<string[]> {
@@ -378,6 +395,77 @@ function legacyOverviewFromReports(reports: any[]) {
   }, { total: 0, answered: 0, missed: 0, duration: 0 });
 }
 
+function legacyMessageRows(reports: any[], ownedDigits: Set<string>) {
+  const out: any[] = [];
+  for (const report of reports) {
+    const data = report?.data || {};
+    const samples = Array.isArray(data.sample_activity) ? data.sample_activity : [];
+    if (samples.length > 0) {
+      for (const sample of samples) {
+        const row = {
+          id: `${report.id || report.report_date}:${sample.id || out.length}`,
+          org_id: report.org_id,
+          sent_at: sample.created || report.report_date,
+          message_date: sample.created || report.report_date,
+          from_number: sample.from_number || null,
+          to_number: sample.to_number || null,
+          business_number: sample.business_number || null,
+          message_text: sample.message_text || sample.text || null,
+          status: sample.status || 'unknown',
+          direction: sample.direction || 'unknown',
+          metadata: { source: 'mightycall_reports', report_id: report.id, ...sample },
+        };
+        out.push({ ...row, direction: inferDirectionFromOwnedNumbers(row, ownedDigits) });
+      }
+    } else {
+      const row = {
+        id: report.id,
+        org_id: report.org_id,
+        sent_at: report.report_date,
+        message_date: report.report_date,
+        from_number: Array.isArray(data.sample_numbers) ? data.sample_numbers[0] : null,
+        to_number: Array.isArray(data.sample_numbers) ? data.sample_numbers[1] : null,
+        message_text: null,
+        status: 'summary',
+        direction: 'unknown',
+        messages_count: safeNumber(data.messages_count),
+        inbound_count: safeNumber(data.inbound_count),
+        outbound_count: safeNumber(data.outbound_count),
+        metadata: { source: 'mightycall_reports', report_id: report.id },
+      };
+      out.push({ ...row, direction: inferDirectionFromOwnedNumbers(row, ownedDigits) });
+    }
+  }
+  return out;
+}
+
+function normalizeSmsDirections(rows: any[], ownedDigits: Set<string>) {
+  return rows.map((row) => ({
+    ...row,
+    direction: inferDirectionFromOwnedNumbers(row, ownedDigits),
+  }));
+}
+
+async function callRecordingRows(req: express.Request, scope: ReportScope) {
+  const rows = await fetchTableRows('calls', 'started_at', req, scope);
+  return rows.filter((row) => row.recording_url || row.has_recording).map((row) => ({
+    id: row.id,
+    org_id: row.org_id,
+    external_id: row.external_id,
+    external_call_id: row.external_call_id || row.external_id,
+    recording_date: row.started_at,
+    recorded_at: row.started_at,
+    from_number: row.from_number,
+    to_number: row.to_number,
+    business_number: row.business_number || row.to_number,
+    direction: row.direction || 'unknown',
+    duration_seconds: row.duration_seconds || 0,
+    recording_url: row.recording_url || null,
+    extension: row.extension || row.agent_extension || null,
+    metadata: { source: 'calls.recording_url', call_id: row.id },
+  }));
+}
+
 async function handle(req: express.Request, res: express.Response, fn: (scope: ReportScope) => Promise<void>) {
   try {
     const scope = await resolveScope(req);
@@ -395,12 +483,14 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
     phones = await queryPhoneNumbers();
   }
   const rows = scope.isPlatformAdmin || scope.orgWide ? phones : phones.filter((phone) => scope.allowedPhoneIds.has(phone.id));
-  const [calls, recordings, sms, transfers] = await Promise.all([
+  const [calls, baseRecordings, baseSms, transfers] = await Promise.all([
     fetchTableRows('calls', 'started_at', req, scope),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
     fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
+  const recordings = baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope);
+  const sms = normalizeSmsDirections(baseSms, new Set(phones.map((phone) => phone.digits).filter(Boolean)));
   const numbers = rows.map((phone) => {
     const matches = (row: any) => rowMatchesDigits(row, new Set([phone.digits]));
     const phoneCalls = calls.filter(matches);
@@ -425,13 +515,17 @@ router.get('/calls', (req, res) => handle(req, res, async (scope) => {
 }));
 
 router.get('/recordings', (req, res) => handle(req, res, async (scope) => {
-  const rows = await fetchTableRows('mightycall_recordings', 'recording_date', req, scope);
+  let rows = await fetchTableRows('mightycall_recordings', 'recording_date', req, scope);
+  if (rows.length === 0) rows = await callRecordingRows(req, scope);
   const page = paginate(req, rows);
   res.json({ recordings: page.rows, total: page.total, next_offset: page.next_offset });
 }));
 
 router.get('/sms', (req, res) => handle(req, res, async (scope) => {
-  const rows = await fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope);
+  const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
+  const ownedDigits = new Set(phones.map((phone) => phone.digits).filter(Boolean));
+  let rows = normalizeSmsDirections(await fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope), ownedDigits);
+  if (rows.length === 0) rows = legacyMessageRows(await fetchLegacyMightyCallReports('messages', req, scope), ownedDigits);
   const page = paginate(req, rows);
   res.json({ sms: page.rows, messages: page.rows, total: page.total, next_offset: page.next_offset });
 }));
@@ -471,17 +565,22 @@ router.get('/agents', (req, res) => handle(req, res, async (scope) => {
 }));
 
 router.get('/overview', (req, res) => handle(req, res, async (scope) => {
-  const [calls, recordings, sms, transfers] = await Promise.all([
+  const [calls, baseRecordings, baseSms, transfers] = await Promise.all([
     fetchTableRows('calls', 'started_at', req, scope),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
     fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
+  const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
+  const ownedDigits = new Set(phones.map((phone) => phone.digits).filter(Boolean));
+  const recordings = baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope);
+  const legacyMessageReports = baseSms.length === 0 ? await fetchLegacyMightyCallReports('messages', req, scope) : [];
+  const sms = baseSms.length > 0 ? normalizeSmsDirections(baseSms, ownedDigits) : legacyMessageRows(legacyMessageReports, ownedDigits);
   const answered = calls.filter((row) => statusOf(row).includes('answer') || statusOf(row).includes('complete')).length;
   const missed = calls.filter((row) => statusOf(row).includes('miss')).length;
   const abandoned = calls.filter((row) => statusOf(row).includes('abandon')).length;
-  const inboundSms = sms.filter((row) => directionOf(row) === 'inbound').length;
-  const outboundSms = sms.filter((row) => directionOf(row) === 'outbound').length;
+  const inboundSms = sms.reduce((sum, row) => sum + (row.inbound_count ? safeNumber(row.inbound_count) : (directionOf(row) === 'inbound' ? 1 : 0)), 0);
+  const outboundSms = sms.reduce((sum, row) => sum + (row.outbound_count ? safeNumber(row.outbound_count) : (directionOf(row) === 'outbound' ? 1 : 0)), 0);
   const legacyReports = calls.length === 0 ? await fetchLegacyMightyCallReports('calls', req, scope) : [];
   const legacy = legacyOverviewFromReports(legacyReports);
   const overview = {
@@ -492,7 +591,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
     avg_duration_seconds: calls.length > 0 ? avg(calls.map((row) => safeNumber(row.duration_seconds))) : (legacy.total > 0 ? Math.round(legacy.duration / legacy.total) : 0),
     avg_wait_seconds: avg(calls.map((row) => safeNumber(row.wait_seconds || row.queue_wait_seconds || row.metadata?.wait_seconds))),
     total_recordings: recordings.length,
-    total_sms: sms.length,
+    total_sms: sms.reduce((sum, row) => sum + (row.messages_count ? safeNumber(row.messages_count) : 1), 0),
     inbound_sms: inboundSms,
     outbound_sms: outboundSms,
     total_transfers: transfers.length,

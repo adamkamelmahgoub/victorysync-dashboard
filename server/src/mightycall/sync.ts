@@ -314,7 +314,13 @@ export async function syncUsersAndStatuses(): Promise<{ users: number; statuses:
   }
 
   for (const member of members) {
-    const statusResponse = await mightyCallGetFirst<any>(USER_STATUS_PATHS, {
+    const statusPaths = [
+      ...USER_STATUS_PATHS,
+      `/users/${encodeURIComponent(member.extension)}/status`,
+      `/user/${encodeURIComponent(member.extension)}/status`,
+      `/profiles/${encodeURIComponent(member.extension)}/status`,
+    ];
+    const statusResponse = await mightyCallGetFirst<any>(statusPaths, {
       extension: member.extension,
       userExtension: member.extension,
     }, { optional: true });
@@ -373,7 +379,11 @@ async function upsertLiveStatus(member: any, userInfo: any, statusPayload: any, 
     userInfo?.status
   );
   const currentCall = statusPayload?.currentCall || statusPayload?.current_call || statusPayload?.call || null;
-  const status = normalizeMightyCallStatus(rawStatus);
+  const currentCallStatus = currentCall ? liveStatusFromCall(currentCall) : null;
+  const rawNormalizedStatus = normalizeMightyCallStatus(rawStatus);
+  const status = currentCallStatus && (rawNormalizedStatus === 'unknown' || rawNormalizedStatus === 'available')
+    ? currentCallStatus
+    : rawNormalizedStatus;
   const fromNumber = normalizePhone(firstString(currentCall?.from_number, currentCall?.from, currentCall?.caller?.number, currentCall?.client?.address));
   const toNumber = normalizePhone(firstString(currentCall?.to_number, currentCall?.to, currentCall?.destination?.number, currentCall?.called?.[0]?.phone));
   const businessNumber = normalizePhone(firstString(currentCall?.businessNumber?.number, currentCall?.businessNumber));

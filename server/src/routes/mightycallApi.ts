@@ -191,8 +191,22 @@ router.get('/live-status', async (req, res) => {
 router.post('/live-status/sync', async (req, res) => {
   try {
     await getActor(req);
-    const result = await runLiveStatusSync('manual-live-status');
-    res.json(result);
+    const result: any = await runLiveStatusSync('manual-live-status');
+    let recentCalls = 0;
+    let details = { details: 0, recordings: 0, transfers: 0, transferDetailsSupported: false };
+    try {
+      recentCalls = await syncRecentCalls(4);
+      details = await syncCallDetails(10);
+    } catch (syncErr: any) {
+      (result.warnings ||= []).push(syncErr?.message || String(syncErr));
+    }
+    res.json({
+      ...result,
+      syncedCalls: (result.syncedCalls || 0) + recentCalls,
+      syncedCallDetails: (result.syncedCallDetails || 0) + details.details,
+      syncedRecordings: (result.syncedRecordings || 0) + details.recordings,
+      syncedTransfers: (result.syncedTransfers || 0) + details.transfers,
+    });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'live_status_sync_failed' });
   }
