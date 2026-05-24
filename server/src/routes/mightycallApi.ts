@@ -9,6 +9,12 @@ import {
   syncSmsIfApiSupported,
   syncTransfersFromCallDetailsIfAvailable,
 } from '../mightycall/sync';
+import {
+  syncMightyCallCallHistory,
+  syncMightyCallRecordings,
+  syncMightyCallReports,
+  syncMightyCallSMS,
+} from '../integrations/mightycall';
 
 const router = express.Router();
 
@@ -52,6 +58,93 @@ async function resolveOrgScope(req: express.Request) {
     return { actorId, admin, orgIds: [requestedOrgId] };
   }
   return { actorId, admin, orgIds: orgIds.slice(0, 1) };
+}
+
+async function getSyncOrgIds(req: express.Request) {
+  const actorId = await getActor(req);
+  const requestedOrgId = String(req.query.org_id || req.body?.orgId || req.body?.org_id || '').trim();
+  const admin = await isPlatformAdmin(actorId);
+  if (requestedOrgId) {
+    if (!admin && !(await isOrgMember(actorId, requestedOrgId))) {
+      const err = new Error('forbidden') as Error & { status?: number };
+      err.status = 403;
+      throw err;
+    }
+    return { actorId, admin, orgIds: [requestedOrgId] };
+  }
+  if (admin) {
+    const { data, error } = await supabaseAdmin.from('organizations').select('id').limit(100);
+    if (error) throw error;
+    return { actorId, admin, orgIds: (data || []).map((row: any) => String(row.id)).filter(Boolean) };
+  }
+  return { actorId, admin, orgIds: (await getUserOrgIds(actorId)).slice(0, 1) };
+}
+
+async function getOrgPhoneIds(orgId: string) {
+  try {
+    const { data } = await supabaseAdmin.from('phone_numbers').select('id').eq('org_id', orgId).limit(1000);
+    return (data || []).map((row: any) => String(row.id)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function syncDateRange(req: express.Request) {
+  const end = String(req.query.end_date || req.body?.endDate || req.body?.end_date || new Date().toISOString().slice(0, 10));
+  const start = String(
+    req.query.start_date ||
+    req.body?.startDate ||
+    req.body?.start_date ||
+    new Date(Date.now() - (180 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10)
+  );
+  return { start: start.slice(0, 10), end: end.slice(0, 10) };
+}
+
+async function runLegacyJournalSync(req: express.Request, options: { includeReports?: boolean; includeCalls?: boolean; includeRecordings?: boolean; includeSms?: boolean } = {}) {
+  const scope = await getSyncOrgIds(req);
+  const { start, end } = syncDateRange(req);
+  const result = {
+    orgsSynced: 0,
+    reportsSynced: 0,
+    callsSynced: 0,
+    recordingsSynced: 0,
+    smsSynced: 0,
+    skippedUnowned: 0,
+    quarantined: 0,
+    warnings: [] as string[],
+  };
+  for (const orgId of scope.orgIds) {
+    const phoneIds = await getOrgPhoneIds(orgId);
+    try {
+      if (options.includeReports !== false) {
+        const reports = await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end);
+        result.reportsSynced += reports.reportsSynced || 0;
+        result.recordingsSynced += reports.recordingsSynced || 0;
+        result.skippedUnowned += (reports as any).skippedUnowned || 0;
+        result.quarantined += (reports as any).quarantined || 0;
+      }
+      if (options.includeCalls !== false) {
+        const calls = await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end });
+        result.callsSynced += calls.callsSynced || 0;
+      }
+      if (options.includeRecordings) {
+        const recordings = await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end);
+        result.recordingsSynced += recordings.recordingsSynced || 0;
+        result.skippedUnowned += recordings.skippedUnowned || 0;
+        result.quarantined += recordings.quarantined || 0;
+      }
+      if (options.includeSms !== false) {
+        const sms = await syncMightyCallSMS(supabaseAdmin, orgId);
+        result.smsSynced += sms.smsSynced || 0;
+        result.skippedUnowned += sms.skippedUnowned || 0;
+        result.quarantined += sms.quarantined || 0;
+      }
+      result.orgsSynced += 1;
+    } catch (err: any) {
+      result.warnings.push(`${orgId}: ${err?.message || String(err)}`);
+    }
+  }
+  return result;
 }
 
 function liveStatusLabel(status: string) {
@@ -214,13 +307,19 @@ router.post('/live-status/sync', async (req, res) => {
 
 router.post('/mightycall/sync', async (req, res) => {
   try {
-    const actorId = await getActor(req);
-    const orgId = String(req.query.org_id || req.body?.orgId || req.body?.org_id || '').trim();
-    if (orgId && !(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, orgId))) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-    const result = await runMightyCallSync('manual-full-sync');
-    res.json(result);
+    await getSyncOrgIds(req);
+    const [apiResult, journalResult] = await Promise.all([
+      runMightyCallSync('manual-full-sync'),
+      runLegacyJournalSync(req, { includeReports: true, includeCalls: false, includeRecordings: false, includeSms: true }),
+    ]);
+    res.json({
+      ...apiResult,
+      journal: journalResult,
+      syncedCalls: (apiResult.syncedCalls || 0) + journalResult.callsSynced,
+      syncedRecordings: (apiResult.syncedRecordings || 0) + journalResult.recordingsSynced,
+      syncedSms: (apiResult.syncedSms || 0) + journalResult.smsSynced,
+      warnings: [...(apiResult.warnings || []), ...journalResult.warnings],
+    });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'mightycall_sync_failed' });
   }
@@ -228,19 +327,18 @@ router.post('/mightycall/sync', async (req, res) => {
 
 router.post('/mightycall/sync/recordings', async (req, res) => {
   try {
-    const actorId = await getActor(req);
-    const orgId = String(req.query.org_id || req.body?.orgId || req.body?.org_id || '').trim();
-    if (orgId && !(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, orgId))) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-    await syncRecentCalls(168);
-    const details = await syncCallDetails(100);
+    await getSyncOrgIds(req);
+    const [journal, details] = await Promise.all([
+      runLegacyJournalSync(req, { includeReports: false, includeCalls: false, includeRecordings: true, includeSms: false }),
+      syncRecentCalls(168).then(() => syncCallDetails(100)),
+    ]);
     res.json({
       ok: true,
-      recordings_synced: details.recordings,
+      recordings_synced: details.recordings + journal.recordingsSynced,
       call_details_synced: details.details,
       transfers_synced: details.transfers,
-      source: 'mightycall_api_call_details',
+      journal,
+      source: 'mightycall_api_call_details_and_journal',
     });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'mightycall_recordings_sync_failed' });
@@ -249,18 +347,18 @@ router.post('/mightycall/sync/recordings', async (req, res) => {
 
 router.post('/mightycall/sync/sms', async (req, res) => {
   try {
-    const actorId = await getActor(req);
-    const orgId = String(req.query.org_id || req.body?.orgId || req.body?.org_id || '').trim();
-    if (orgId && !(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, orgId))) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-    const result = await syncSmsIfApiSupported();
+    await getSyncOrgIds(req);
+    const [result, journal] = await Promise.all([
+      syncSmsIfApiSupported(),
+      runLegacyJournalSync(req, { includeReports: true, includeCalls: false, includeRecordings: false, includeSms: true }),
+    ]);
     res.json({
       ok: true,
-      sms_synced: result.synced,
+      sms_synced: result.synced + journal.smsSynced,
       smsSupported: result.supported,
       reason: result.reason,
-      source: result.supported ? 'mightycall_api' : 'local_db_only',
+      journal,
+      source: result.supported ? 'mightycall_api_and_journal' : 'mightycall_journal_or_local_db',
     });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'mightycall_sms_sync_failed' });

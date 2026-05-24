@@ -286,10 +286,24 @@ function TopList({ title, rows }: { title: string; rows: Array<{ key: string; co
     <SectionCard title={title}>
       {rows.length === 0 ? <EmptyStatePanel title="No data" description="No matching rows in this filter window." /> : (
         <div className="space-y-3">
-          {rows.map((row) => (
-            <div key={row.key} className="flex items-center justify-between rounded-2xl bg-white/[0.03] px-4 py-3">
-              <span className="truncate font-mono text-sm text-slate-200">{row.key}</span>
-              <span className="text-sm font-semibold text-white">{row.count}</span>
+          {rows.map((row: any) => (
+            <div key={row.key || `${row.org_id || ''}:${row.extension || row.label}`} className="flex items-center justify-between gap-4 rounded-2xl bg-white/[0.03] px-4 py-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-slate-100">{row.label || row.agent_name || row.key}</div>
+                {(row.email || row.extension) && (
+                  <div className="truncate text-xs text-slate-500">
+                    {[row.email, row.extension ? `Ext ${row.extension}` : null].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+                {typeof row.answered_calls === 'number' && (
+                  <div className="mt-1 text-xs text-slate-500">
+                    {row.answered_calls} answered · {row.missed_calls || 0} missed · {row.transfers || 0} transfers
+                  </div>
+                )}
+              </div>
+              <span className="shrink-0 text-sm font-semibold text-white">
+                {row.count}{row.unit ? ` ${row.unit}` : ''}
+              </span>
             </div>
           ))}
         </div>
@@ -301,7 +315,7 @@ function TopList({ title, rows }: { title: string; rows: Array<{ key: string; co
 function ReportTable({ rows, loading, tab, columns }: { rows: Row[]; loading: boolean; tab?: ReportTab; columns?: string[] }) {
   const resolvedColumns = columns || (
     tab === 'agents'
-      ? ['extension', 'total_calls', 'answered_calls', 'missed_calls', 'avg_duration_seconds', 'transfers']
+      ? ['agent_name', 'email', 'extension', 'total_calls', 'answered_calls', 'missed_calls', 'avg_duration_seconds', 'transfers']
       : tab === 'transfers'
         ? ['transferred_at', 'agent_extension', 'original_caller', 'original_receiving_number', 'transfer_target', 'transfer_type', 'result']
         : tab === 'sms'
@@ -341,7 +355,7 @@ function cellValue(row: Row, column: string) {
   if (column.includes('date') || column.endsWith('_at')) return <span className="text-xs text-slate-400">{fmtDate(String(value || ''))}</span>;
   if (column.includes('duration')) return fmtSeconds(value);
   if (column === 'recording_url') {
-    return value ? <a className="text-cyan-200 hover:text-cyan-100" href={String(value)} target="_blank" rel="noreferrer">Open</a> : <span className="text-slate-500">Recording unavailable</span>;
+    return value ? <a className="text-cyan-200 hover:text-cyan-100" href={String(value)} target="_blank" rel="noreferrer">Download / Open</a> : <span className="text-slate-500">Recording unavailable</span>;
   }
   if (column === 'direction' || column === 'status' || column === 'result' || column === 'transfer_type') {
     return <StatusBadge tone={badgeTone(String(value || ''))}>{String(value || 'unknown')}</StatusBadge>;

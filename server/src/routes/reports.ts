@@ -10,6 +10,7 @@ type ReportScope = {
   orgWide: boolean;
   allowedPhoneIds: Set<string>;
   allowedPhoneDigits: Set<string>;
+  allowedExtensions: Set<string>;
   requestedPhoneDigits: Set<string>;
 };
 
@@ -85,6 +86,18 @@ function statusOf(row: any): string {
 
 function directionOf(row: any): string {
   return String(row?.direction || row?.current_call_direction || row?.metadata?.direction || '').toLowerCase();
+}
+
+function rowAgentExtension(row: any): string {
+  return String(
+    row?.agent_extension ||
+    row?.mightycall_extension ||
+    row?.extension ||
+    row?.metadata?.agent_extension ||
+    row?.metadata?.mightycall_extension ||
+    row?.raw_payload?.agent_extension ||
+    ''
+  ).replace(/\D/g, '');
 }
 
 function inferDirectionFromOwnedNumbers(row: any, ownedDigits: Set<string>): 'inbound' | 'outbound' | 'unknown' {
@@ -172,6 +185,85 @@ async function getUserAssignedPhoneIds(actorId: string, orgIds: string[]) {
   return out;
 }
 
+async function getUserAssignedExtensions(actorId: string, orgIds: string[]) {
+  const out = new Set<string>();
+  if (orgIds.length === 0) return out;
+  const addRows = (rows: any[] | null | undefined) => {
+    for (const row of rows || []) {
+      const extension = String(row?.mightycall_extension || row?.extension || '').replace(/\D/g, '');
+      if (extension) out.add(extension);
+    }
+  };
+  try {
+    const { data } = await supabaseAdmin
+      .from('org_users')
+      .select('mightycall_extension')
+      .eq('user_id', actorId)
+      .in('org_id', orgIds);
+    addRows(data as any[]);
+  } catch {}
+  try {
+    const { data } = await supabaseAdmin
+      .from('org_members')
+      .select('mightycall_extension')
+      .eq('user_id', actorId)
+      .in('org_id', orgIds);
+    addRows(data as any[]);
+  } catch {}
+  return out;
+}
+
+async function loadAgentIdentityMap(scope: Pick<ReportScope, 'orgIds' | 'isPlatformAdmin'>) {
+  const queryRows = async (table: string) => {
+    try {
+      let query = supabaseAdmin
+        .from(table)
+        .select('id, org_id, user_id, role, mightycall_extension');
+      if (scope.orgIds.length > 0) query = query.in('org_id', scope.orgIds);
+      return ((await query.not('mightycall_extension', 'is', null)).data || []) as any[];
+    } catch {
+      return [];
+    }
+  };
+  const [orgUsers, orgMembers] = await Promise.all([queryRows('org_users'), queryRows('org_members')]);
+  const rows = [...orgUsers, ...orgMembers].filter((row) => rowAgentExtension(row));
+  const userIds = Array.from(new Set(rows.map((row) => String(row.user_id || '')).filter(Boolean)));
+  const profiles = userIds.length
+    ? await Promise.resolve(supabaseAdmin.from('profiles').select('id, email, full_name').in('id', userIds)).then((r) => r.data || []).catch(() => [])
+    : [];
+  const profileById = new Map((profiles as any[]).map((row) => [String(row.id), row]));
+  const byOrgExtension = new Map<string, any>();
+  const byExtension = new Map<string, any>();
+  for (const row of rows) {
+    const extension = rowAgentExtension(row);
+    const profile = row.user_id ? profileById.get(String(row.user_id)) : null;
+    const email = profile?.email || null;
+    const name = profile?.full_name || (email ? String(email).split('@')[0] : null) || `Extension ${extension}`;
+    const identity = {
+      org_id: row.org_id || null,
+      user_id: row.user_id || null,
+      extension,
+      agent_name: name,
+      email,
+      role: row.role || 'agent',
+    };
+    byOrgExtension.set(`${row.org_id}:${extension}`, identity);
+    if (!byExtension.has(extension)) byExtension.set(extension, identity);
+  }
+  return { byOrgExtension, byExtension };
+}
+
+function resolveAgentIdentity(row: any, identities: Awaited<ReturnType<typeof loadAgentIdentityMap>>) {
+  const extension = rowAgentExtension(row);
+  if (!extension) return null;
+  return identities.byOrgExtension.get(`${row.org_id || ''}:${extension}`) || identities.byExtension.get(extension) || {
+    extension,
+    agent_name: `Extension ${extension}`,
+    email: null,
+    org_id: row.org_id || null,
+  };
+}
+
 async function resolveScope(req: express.Request): Promise<ReportScope> {
   const actorId = req.header('x-user-id') || '';
   if (!actorId) {
@@ -200,6 +292,7 @@ async function resolveScope(req: express.Request): Promise<ReportScope> {
       orgWide: false,
       allowedPhoneIds: new Set(),
       allowedPhoneDigits: new Set(),
+      allowedExtensions: new Set(),
       requestedPhoneDigits: new Set(),
     };
   }
@@ -216,6 +309,7 @@ async function resolveScope(req: express.Request): Promise<ReportScope> {
 
   const phones = await getOrgPhones(orgIds);
   const assignedPhoneIds = orgWide ? new Set(phones.map((phone) => phone.id)) : await getUserAssignedPhoneIds(actorId, orgIds);
+  const allowedExtensions = orgWide || admin ? new Set<string>() : await getUserAssignedExtensions(actorId, orgIds);
   const allowedPhones = orgWide ? phones : phones.filter((phone) => assignedPhoneIds.has(phone.id));
   const allowedPhoneDigits = new Set(allowedPhones.map((phone) => phone.digits).filter((value): value is string => !!value));
   const requestedPhoneDigits = new Set(csvParam(req.query.phone_number || req.query.number || req.query.numbers).map((value) => normalizePhoneDigits(value)).filter((value): value is string => !!value));
@@ -237,11 +331,12 @@ async function resolveScope(req: express.Request): Promise<ReportScope> {
     orgWide,
     allowedPhoneIds: new Set(allowedPhones.map((phone) => phone.id).filter((value): value is string => !!value)),
     allowedPhoneDigits,
+    allowedExtensions,
     requestedPhoneDigits,
   };
 }
 
-function applyCommonFilters(rows: any[], req: express.Request, scope: ReportScope) {
+function applyCommonFilters(rows: any[], req: express.Request, scope: ReportScope, options: { skipDirection?: boolean } = {}) {
   const direction = String(req.query.direction || '').toLowerCase();
   const status = String(req.query.status || '').toLowerCase();
   const agent = String(req.query.agent || req.query.extension || '').replace(/\D/g, '');
@@ -249,13 +344,20 @@ function applyCommonFilters(rows: any[], req: express.Request, scope: ReportScop
   const numberDigits = scope.requestedPhoneDigits.size > 0 ? scope.requestedPhoneDigits : scope.allowedPhoneDigits;
 
   return rows.filter((row) => {
-    if (!scope.isPlatformAdmin && !rowMatchesDigits(row, numberDigits)) return false;
+    if (!scope.isPlatformAdmin) {
+      const matchesRequestedPhone = scope.requestedPhoneDigits.size === 0 || rowMatchesDigits(row, scope.requestedPhoneDigits);
+      if (!matchesRequestedPhone) return false;
+      if (!scope.orgWide && scope.requestedPhoneDigits.size === 0) {
+        const matchesAllowedPhone = scope.allowedPhoneDigits.size > 0 && rowMatchesDigits(row, scope.allowedPhoneDigits);
+        const matchesAssignedAgent = scope.allowedExtensions.size > 0 && scope.allowedExtensions.has(rowAgentExtension(row));
+        if (!matchesAllowedPhone && !matchesAssignedAgent) return false;
+      }
+    }
     if (scope.isPlatformAdmin && scope.requestedPhoneDigits.size > 0 && !rowMatchesDigits(row, scope.requestedPhoneDigits)) return false;
-    if (direction && direction !== 'all' && directionOf(row) !== direction) return false;
+    if (!options.skipDirection && direction && direction !== 'all' && directionOf(row) !== direction) return false;
     if (status && status !== 'all' && statusOf(row) !== status) return false;
     if (agent) {
-      const rowAgent = String(row?.agent_extension || row?.mightycall_extension || row?.metadata?.agent_extension || row?.raw_payload?.agent_extension || '').replace(/\D/g, '');
-      if (rowAgent !== agent) return false;
+      if (rowAgentExtension(row) !== agent) return false;
     }
     if (search) {
       const haystack = [
@@ -272,7 +374,7 @@ function applyCommonFilters(rows: any[], req: express.Request, scope: ReportScop
   });
 }
 
-async function fetchTableRows(table: string, dateColumn: string, req: express.Request, scope: ReportScope, max = 10000) {
+async function fetchTableRows(table: string, dateColumn: string, req: express.Request, scope: ReportScope, max = 10000, options: { skipDirection?: boolean } = {}) {
   if (!scope.isPlatformAdmin && scope.orgIds.length === 0) return [];
   const start = asDateParam(req.query.start_date || req.query.from);
   const end = asDateParam(req.query.end_date || req.query.to, true);
@@ -286,7 +388,7 @@ async function fetchTableRows(table: string, dateColumn: string, req: express.Re
     if (error.code === 'PGRST205' || /not exist|schema cache/i.test(error.message || '')) return [];
     throw error;
   }
-  return applyCommonFilters(data || [], req, scope);
+  return applyCommonFilters(data || [], req, scope, options);
 }
 
 function paginate(req: express.Request, rows: any[]) {
@@ -317,6 +419,52 @@ function groupCount(rows: any[], keyFn: (row: any) => string | null, limit = 10)
     .slice(0, limit);
 }
 
+function groupAgentStats(calls: any[], transfers: any[], identities: Awaited<ReturnType<typeof loadAgentIdentityMap>>, limit?: number) {
+  const byAgent = new Map<string, any>();
+  const ensure = (row: any) => {
+    const extension = rowAgentExtension(row);
+    if (!extension) return null;
+    const identity = resolveAgentIdentity(row, identities);
+    const key = `${identity?.org_id || row.org_id || ''}:${extension}`;
+    const current = byAgent.get(key) || {
+      key,
+      extension,
+      org_id: identity?.org_id || row.org_id || null,
+      agent_name: identity?.agent_name || `Extension ${extension}`,
+      label: identity?.agent_name || `Extension ${extension}`,
+      email: identity?.email || null,
+      total_calls: 0,
+      answered_calls: 0,
+      missed_calls: 0,
+      total_duration_seconds: 0,
+      transfers: 0,
+      count: 0,
+      unit: 'calls',
+    };
+    byAgent.set(key, current);
+    return current;
+  };
+  for (const call of calls) {
+    const current = ensure(call);
+    if (!current) continue;
+    current.total_calls += 1;
+    current.count = current.total_calls;
+    if (statusOf(call).includes('answer') || statusOf(call).includes('complete')) current.answered_calls += 1;
+    if (statusOf(call).includes('miss')) current.missed_calls += 1;
+    current.total_duration_seconds += safeNumber(call.duration_seconds);
+  }
+  for (const transfer of transfers) {
+    const current = ensure(transfer);
+    if (!current) continue;
+    current.transfers += 1;
+  }
+  const rows = Array.from(byAgent.values()).map((row) => ({
+    ...row,
+    avg_duration_seconds: row.total_calls > 0 ? Math.round(row.total_duration_seconds / row.total_calls) : 0,
+  })).sort((a, b) => b.total_calls - a.total_calls || b.transfers - a.transfers);
+  return typeof limit === 'number' ? rows.slice(0, limit) : rows;
+}
+
 async function fetchLegacyMightyCallReports(reportType: string, req: express.Request, scope: ReportScope) {
   if (!scope.isPlatformAdmin && scope.orgIds.length === 0) return [];
   const start = asDateParam(req.query.start_date || req.query.from);
@@ -331,6 +479,7 @@ async function fetchLegacyMightyCallReports(reportType: string, req: express.Req
     throw error;
   }
   const numberDigits = scope.requestedPhoneDigits.size > 0 ? scope.requestedPhoneDigits : scope.allowedPhoneDigits;
+  if (!scope.isPlatformAdmin && !scope.orgWide && numberDigits.size === 0) return [];
   return (data || []).filter((row: any) => {
     const sampleNumbers = Array.isArray(row?.data?.sample_numbers) ? row.data.sample_numbers : [];
     if (!scope.isPlatformAdmin && numberDigits.size > 0) {
@@ -486,7 +635,7 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
   const [calls, baseRecordings, baseSms, transfers] = await Promise.all([
     fetchTableRows('calls', 'started_at', req, scope),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
-    fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope),
+    fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
   const recordings = baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope);
@@ -524,8 +673,12 @@ router.get('/recordings', (req, res) => handle(req, res, async (scope) => {
 router.get('/sms', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = new Set(phones.map((phone) => phone.digits).filter(Boolean));
-  let rows = normalizeSmsDirections(await fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope), ownedDigits);
+  const requestedDirection = String(req.query.direction || '').toLowerCase();
+  let rows = normalizeSmsDirections(await fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }), ownedDigits);
   if (rows.length === 0) rows = legacyMessageRows(await fetchLegacyMightyCallReports('messages', req, scope), ownedDigits);
+  if (requestedDirection && requestedDirection !== 'all') {
+    rows = rows.filter((row) => directionOf(row) === requestedDirection);
+  }
   const page = paginate(req, rows);
   res.json({ sms: page.rows, messages: page.rows, total: page.total, next_offset: page.next_offset });
 }));
@@ -541,26 +694,7 @@ router.get('/agents', (req, res) => handle(req, res, async (scope) => {
     fetchTableRows('calls', 'started_at', req, scope),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
-  const byAgent = new Map<string, any>();
-  for (const call of calls) {
-    const extension = String(call.agent_extension || call.mightycall_extension || call.metadata?.agent_extension || '').replace(/\D/g, '') || 'unknown';
-    const current = byAgent.get(extension) || { extension, total_calls: 0, answered_calls: 0, missed_calls: 0, total_duration_seconds: 0, transfers: 0 };
-    current.total_calls += 1;
-    if (statusOf(call).includes('answer') || statusOf(call).includes('complete')) current.answered_calls += 1;
-    if (statusOf(call).includes('miss')) current.missed_calls += 1;
-    current.total_duration_seconds += safeNumber(call.duration_seconds);
-    byAgent.set(extension, current);
-  }
-  for (const transfer of transfers) {
-    const extension = String(transfer.agent_extension || transfer.mightycall_extension || '').replace(/\D/g, '') || 'unknown';
-    const current = byAgent.get(extension) || { extension, total_calls: 0, answered_calls: 0, missed_calls: 0, total_duration_seconds: 0, transfers: 0 };
-    current.transfers += 1;
-    byAgent.set(extension, current);
-  }
-  const agents = Array.from(byAgent.values()).map((row) => ({
-    ...row,
-    avg_duration_seconds: row.total_calls > 0 ? Math.round(row.total_duration_seconds / row.total_calls) : 0,
-  })).sort((a, b) => b.total_calls - a.total_calls);
+  const agents = groupAgentStats(calls, transfers, await loadAgentIdentityMap(scope));
   res.json({ agents });
 }));
 
@@ -568,7 +702,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
   const [calls, baseRecordings, baseSms, transfers] = await Promise.all([
     fetchTableRows('calls', 'started_at', req, scope),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
-    fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope),
+    fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
@@ -583,6 +717,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
   const outboundSms = sms.reduce((sum, row) => sum + (row.outbound_count ? safeNumber(row.outbound_count) : (directionOf(row) === 'outbound' ? 1 : 0)), 0);
   const legacyReports = calls.length === 0 ? await fetchLegacyMightyCallReports('calls', req, scope) : [];
   const legacy = legacyOverviewFromReports(legacyReports);
+  const agentStats = groupAgentStats(calls, transfers, await loadAgentIdentityMap(scope), 10);
   const overview = {
     total_calls: calls.length || legacy.total,
     answered_calls: answered || legacy.answered,
@@ -596,7 +731,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
     outbound_sms: outboundSms,
     total_transfers: transfers.length,
     transfers_by_number: groupCount(transfers, (row) => row.original_receiving_number || row.to_number || row.transfer_target),
-    top_agents: groupCount(calls, (row) => String(row.agent_extension || row.mightycall_extension || row.metadata?.agent_extension || '').replace(/\D/g, '') || null),
+    top_agents: agentStats,
     top_numbers: groupCount([...calls, ...recordings, ...sms], (row) => rowNumbers(row).find((value) => (normalizePhoneDigits(value) || '').length >= 7) || null),
   };
   try {
