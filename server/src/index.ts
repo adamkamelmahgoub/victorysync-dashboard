@@ -57,6 +57,7 @@ import {
 import { getMightyCallAccessToken } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgManagerWith } from './auth/rbac';
 import usersRouter from './routes/users';
+import reportsRouter from './routes/reports';
 import { Readable } from 'stream';
 import { writeAuditLog } from './lib/audit';
 import { getMembershipDriftDetails, getMembershipDriftSummary } from './lib/memberships';
@@ -844,6 +845,8 @@ function normalizeMightyCallWebhookStatus(raw: any): string {
   ).trim().toLowerCase();
 
   if (!status) return 'ringing';
+  if (status.includes('transfer')) return 'transferring';
+  if (status.includes('hold')) return 'on_hold';
   if (status.includes('completed') || status.includes('complete') || status.includes('hang')) return 'completed';
   if (status.includes('stopringing') || status.includes('stop_ringing')) return 'no_answer';
   if (status.includes('answer') || status.includes('connect')) return 'answered';
@@ -937,10 +940,33 @@ function normalizeMightyCallWebhookCall(raw: any) {
     raw?.sessionId,
     raw?.session_id,
     raw?.metadata?.external_id,
-    raw?.metadata?.call_id,
+      raw?.metadata?.call_id,
   ) || [normalizePhoneDigits(fromNumber), normalizePhoneDigits(toNumber), startedAt || timestamp].join(':');
   const directionText = String(raw?.direction ?? raw?.Direction ?? raw?.Body?.Direction ?? raw?.body?.Direction ?? eventType).toLowerCase();
   const direction = directionText.includes('out') ? 'outbound' : directionText.includes('in') ? 'inbound' : null;
+  const transferTarget = firstWebhookValue(
+    raw?.transfer_target,
+    raw?.transferTarget,
+    raw?.TransferTarget,
+    raw?.targetExtension,
+    raw?.target_extension,
+    raw?.targetNumber,
+    raw?.target_number,
+    raw?.transferredTo,
+    raw?.transferred_to,
+    raw?.metadata?.transfer_target,
+  );
+  const recordingUrl = firstWebhookValue(
+    raw?.recording_url,
+    raw?.recordingUrl,
+    raw?.recording?.url,
+    raw?.recording?.uri,
+    raw?.recording?.link,
+    raw?.recordings?.[0]?.url,
+    raw?.recordings?.[0]?.uri,
+    raw?.recordings?.[0]?.link,
+    raw?.metadata?.recording_url,
+  );
 
   return {
     external_id: externalId,
@@ -952,6 +978,8 @@ function normalizeMightyCallWebhookCall(raw: any) {
     duration_seconds: webhookSeconds(raw?.duration_seconds ?? raw?.durationSeconds ?? raw?.duration),
     status: normalizeMightyCallWebhookStatus(raw),
     direction,
+    transfer_target: transferTarget,
+    recording_url: recordingUrl,
     agent_extension: firstWebhookValue(
       raw?.agent_extension,
       raw?.agentExtension,
@@ -1028,8 +1056,8 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
   let existing: any = null;
   if (orgId) {
     const { data } = await supabaseAdmin
-      .from('calls')
-      .select('id, started_at, agent_extension, metadata')
+        .from('calls')
+        .select('id, started_at, answered_at, ended_at, duration_seconds, direction, from_number, to_number, agent_extension, metadata')
       .eq('org_id', orgId)
       .eq('external_id', call.external_id)
       .maybeSingle();
@@ -1040,7 +1068,7 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
     try {
       const { data } = await supabaseAdmin
         .from('calls')
-        .select('id, org_id, started_at, agent_extension, metadata')
+        .select('id, org_id, started_at, answered_at, ended_at, duration_seconds, direction, from_number, to_number, agent_extension, metadata')
         .eq('external_id', call.external_id)
         .order('started_at', { ascending: false })
         .limit(1)
@@ -1056,18 +1084,21 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
   const row: any = {
     org_id: orgId,
     external_id: call.external_id,
-    from_number: call.from_number,
-    to_number: call.to_number,
+    from_number: call.from_number || existing?.from_number || null,
+    to_number: call.to_number || existing?.to_number || null,
     started_at: call.started_at || existing?.started_at || new Date().toISOString(),
-    answered_at: call.answered_at,
-    ended_at: call.ended_at,
-    duration_seconds: call.duration_seconds,
+    answered_at: call.answered_at || existing?.answered_at || null,
+    ended_at: call.ended_at || existing?.ended_at || null,
+    duration_seconds: call.duration_seconds ?? existing?.duration_seconds ?? null,
     status: call.status,
+    direction: call.direction || existing?.direction || null,
     agent_extension: normalizeExtension(call.agent_extension) || existing?.agent_extension || null,
     metadata: {
       ...metadata,
       source: 'mightycall_webhook',
       event_type: call.payload?.EventType ?? call.payload?.eventType ?? null,
+      transfer_target: call.transfer_target || metadata?.transfer_target || null,
+      recording_url: call.recording_url || metadata?.recording_url || null,
       raw: call.payload,
     },
   };
@@ -1087,9 +1118,131 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
   return { org_id: orgId, external_id: call.external_id, status: call.status };
 }
 
-function normalizeAgentLiveEventStatus(value: any): 'ringing' | 'dialing' | 'answered' | 'in_progress' | 'on_call' | 'completed' | 'missed' | 'failed' | 'available' | 'wrap_up' | 'dnd' | 'offline' | 'unknown' {
+function extractMightyCallWebhookSms(raw: any) {
+  const eventType = String(raw?.EventType ?? raw?.eventType ?? raw?.type ?? '').toLowerCase();
+  const hasMessageText = raw?.message_text || raw?.messageText || raw?.text || raw?.textModel?.text || raw?.messageInfo?.text || raw?.Body?.Text || raw?.body?.text;
+  const looksLikeSms = eventType.includes('sms') || eventType.includes('message') || !!hasMessageText;
+  if (!looksLikeSms) return null;
+  const fromNumber = firstWebhookValue(raw?.from_number, raw?.fromNumber, raw?.from, raw?.From, raw?.sender?.number, raw?.sender, raw?.client?.address);
+  const toNumber = firstWebhookValue(raw?.to_number, raw?.toNumber, raw?.to, raw?.To, raw?.recipient?.number, raw?.recipient, raw?.destination?.number);
+  const externalId = firstWebhookValue(raw?.message_id, raw?.messageId, raw?.external_message_id, raw?.externalMessageId, raw?.id, raw?.Id, raw?.requestGuid)
+    || [normalizePhoneDigits(fromNumber), normalizePhoneDigits(toNumber), webhookIso(raw?.created || raw?.timestamp || raw?.Timestamp) || new Date().toISOString(), String(hasMessageText || '').slice(0, 64)].join(':');
+  const directionText = String(raw?.direction ?? raw?.Direction ?? raw?.messageDirection ?? raw?.origin ?? raw?.messageInfo?.origin ?? eventType).toLowerCase();
+  const direction = directionText.includes('out') || directionText.includes('sent') ? 'outbound' : directionText.includes('in') || directionText.includes('received') ? 'inbound' : 'unknown';
+  return {
+    external_id: externalId,
+    from_number: fromNumber,
+    to_number: toNumber,
+    message_text: String(hasMessageText || '').trim() || null,
+    direction,
+    status: firstWebhookValue(raw?.status, raw?.messageDeliveryStatus, raw?.messageInfo?.deliveryStatus) || (direction === 'outbound' ? 'sent' : 'received'),
+    sent_at: webhookIso(raw?.sent_at || raw?.message_date || raw?.created || raw?.timestamp || raw?.Timestamp) || new Date().toISOString(),
+    payload: raw,
+  };
+}
+
+async function upsertWebhookSmsMessage(orgId: string, sms: NonNullable<ReturnType<typeof extractMightyCallWebhookSms>>) {
+  const ownershipIndex = await loadSmsPhoneOwnershipIndex();
+  const owner = findSmsOwner(ownershipIndex, new Set([orgId]), sms.from_number, sms.to_number);
+  await supabaseAdmin.from('mightycall_sms_messages').upsert({
+    org_id: orgId,
+    phone_id: owner?.id || null,
+    external_id: sms.external_id,
+    from_number: sms.from_number,
+    to_number: sms.to_number,
+    message_text: sms.message_text,
+    direction: sms.direction,
+    status: sms.status,
+    sent_at: sms.sent_at,
+    message_date: sms.sent_at,
+    metadata: {
+      ...sms.payload,
+      source: 'mightycall_webhook',
+      owned_phone_digits: owner?.digits || null,
+    },
+  }, { onConflict: 'org_id,external_id' });
+}
+
+async function insertWebhookCallEvent(orgId: string, call: ReturnType<typeof normalizeMightyCallWebhookCall>) {
+  try {
+    const eventId = firstWebhookValue(call.payload?.event_id, call.payload?.eventId, call.payload?.EventId, call.payload?.id, call.payload?.Id)
+      || [call.external_id, call.status, webhookIso(call.payload?.Timestamp || call.payload?.timestamp || call.payload?.created) || new Date().toISOString()].join(':');
+    await supabaseAdmin.from('call_events').upsert({
+      org_id: orgId,
+      external_event_id: eventId,
+      external_call_id: call.external_id,
+      event_type: call.status,
+      event_at: webhookIso(call.payload?.Timestamp || call.payload?.timestamp || call.payload?.created) || new Date().toISOString(),
+      agent_extension: normalizeExtension(call.agent_extension) || null,
+      direction: call.direction,
+      from_number: call.from_number,
+      to_number: call.to_number,
+      raw_payload: call.payload,
+    }, { onConflict: 'org_id,external_event_id' });
+  } catch (err: any) {
+    console.warn('[mightycall webhook] call_events write skipped:', fmtErr(err));
+  }
+}
+
+async function upsertWebhookTransfer(orgId: string, call: ReturnType<typeof normalizeMightyCallWebhookCall>) {
+  if (call.status !== 'transferring' && !call.transfer_target) return;
+  try {
+    const transferId = firstWebhookValue(call.payload?.transfer_id, call.payload?.transferId, call.payload?.event_id, call.payload?.eventId)
+      || [call.external_id, normalizeExtension(call.agent_extension), call.transfer_target || 'target', webhookIso(call.payload?.Timestamp || call.payload?.timestamp) || new Date().toISOString()].join(':');
+    await supabaseAdmin.from('call_transfers').upsert({
+      org_id: orgId,
+      external_transfer_id: transferId,
+      external_call_id: call.external_id,
+      transfer_type: String(call.payload?.transferType || call.payload?.transfer_type || '').toLowerCase().includes('warm') ? 'warm' : String(call.payload?.transferType || call.payload?.transfer_type || '').toLowerCase().includes('cold') ? 'cold' : 'unknown',
+      transfer_target: call.transfer_target || null,
+      result: call.ended_at ? 'completed' : 'unknown',
+      agent_extension: normalizeExtension(call.agent_extension) || null,
+      original_caller: call.from_number,
+      original_receiving_number: call.to_number,
+      direction: call.direction,
+      transferred_at: webhookIso(call.payload?.Timestamp || call.payload?.timestamp || call.started_at) || new Date().toISOString(),
+      raw_payload: call.payload,
+    }, { onConflict: 'org_id,external_transfer_id' });
+  } catch (err: any) {
+    console.warn('[mightycall webhook] call_transfers write skipped:', fmtErr(err));
+  }
+}
+
+async function upsertWebhookRecording(orgId: string, call: ReturnType<typeof normalizeMightyCallWebhookCall>) {
+  if (!call.recording_url) return;
+  try {
+    const ownershipIndex = await loadSmsPhoneOwnershipIndex();
+    const owner = findSmsOwner(ownershipIndex, new Set([orgId]), call.to_number, call.from_number);
+    const externalId = firstWebhookValue(call.payload?.recording_id, call.payload?.recordingId, call.payload?.recording?.id, call.external_id, call.recording_url) || call.external_id;
+    await supabaseAdmin.from('mightycall_recordings').upsert({
+      org_id: orgId,
+      phone_number_id: owner?.id || null,
+      external_id: externalId,
+      call_id: call.external_id,
+      phone_number: owner?.number || call.to_number || call.from_number || null,
+      recording_url: call.recording_url,
+      duration_seconds: call.duration_seconds,
+      recording_date: call.ended_at || call.started_at || new Date().toISOString(),
+      recorded_at: call.ended_at || call.started_at || new Date().toISOString(),
+      from_number: call.from_number,
+      to_number: call.to_number,
+      metadata: {
+        ...call.payload,
+        source: 'mightycall_webhook',
+        external_call_id: call.external_id,
+        direction: call.direction,
+      },
+    }, { onConflict: 'org_id,external_id' });
+  } catch (err: any) {
+    console.warn('[mightycall webhook] recording write skipped:', fmtErr(err));
+  }
+}
+
+function normalizeAgentLiveEventStatus(value: any): 'ringing' | 'dialing' | 'answered' | 'in_progress' | 'on_call' | 'on_hold' | 'transferring' | 'completed' | 'missed' | 'failed' | 'available' | 'wrap_up' | 'dnd' | 'offline' | 'unknown' {
   const text = String(value || '').toLowerCase().trim();
   if (!text) return 'unknown';
+  if (text.includes('transfer')) return 'transferring';
+  if (text.includes('hold')) return 'on_hold';
   if (text.includes('miss')) return 'missed';
   if (text.includes('fail') || text.includes('error') || text.includes('busy')) return 'failed';
   if (text.includes('complete') || text.includes('end') || text.includes('hang') || text.includes('stopring')) return 'completed';
@@ -1111,7 +1264,7 @@ function isAgentLiveTerminalStatus(status: string): boolean {
 
 function toDbAgentNormalizedStatus(
   status: string
-): 'available' | 'ringing' | 'dialing' | 'on_call' | 'wrap_up' | 'dnd' | 'offline' | 'unknown' {
+): 'available' | 'ringing' | 'dialing' | 'on_call' | 'on_hold' | 'transferring' | 'wrap_up' | 'dnd' | 'offline' | 'unknown' {
   switch (status) {
     case 'ringing':
       return 'ringing';
@@ -1119,6 +1272,10 @@ function toDbAgentNormalizedStatus(
       return 'dialing';
     case 'on_call':
       return 'on_call';
+    case 'on_hold':
+      return 'on_hold';
+    case 'transferring':
+      return 'transferring';
     case 'answered':
     case 'in_progress':
       return 'on_call';
@@ -1483,6 +1640,10 @@ function mapAgentLiveStatusToPresence(status: string): { on_call: boolean; label
       return { on_call: true, label: 'Dialing' };
     case 'on_call':
       return { on_call: true, label: 'On Call' };
+    case 'on_hold':
+      return { on_call: true, label: 'On Hold' };
+    case 'transferring':
+      return { on_call: true, label: 'Transferring' };
     case 'answered':
       return { on_call: true, label: 'Answered' };
     case 'in_progress':
@@ -1637,7 +1798,7 @@ async function upsertAgentLiveStatusRow(params: {
   } catch {}
 
   const isTerminal = isAgentLiveTerminalStatus(normalizedStatus);
-  const isActiveCallLike = normalizedStatus === 'ringing' || normalizedStatus === 'dialing' || normalizedStatus === 'answered' || normalizedStatus === 'in_progress';
+  const isActiveCallLike = normalizedStatus === 'ringing' || normalizedStatus === 'dialing' || normalizedStatus === 'answered' || normalizedStatus === 'in_progress' || normalizedStatus === 'on_hold' || normalizedStatus === 'transferring';
   const derivedStatusStartedAt = isTerminal
     ? null
     : (params.statusStartedAt || params.startedAt || (isActiveCallLike ? eventAt : null));
@@ -2337,11 +2498,15 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     statusNorm === 'answered' ||
     statusNorm === 'in_progress' ||
     statusNorm === 'on_call' ||
+    statusNorm === 'on_hold' ||
+    statusNorm === 'transferring' ||
     rawNorm === 'ringing' ||
     rawNorm === 'dialing' ||
     rawNorm === 'answered' ||
     rawNorm === 'in_progress' ||
-    rawNorm === 'on_call'
+    rawNorm === 'on_call' ||
+    rawNorm === 'on_hold' ||
+    rawNorm === 'transferring'
   );
   const rawLooksTerminalOrIdle =
     rawNorm === 'available' ||
@@ -4209,17 +4374,38 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
     const results: Array<{ org_id: string | null; external_id: string; status: string }> = [];
 
     for (const event of events) {
+      const sms = extractMightyCallWebhookSms(event);
       const call = normalizeMightyCallWebhookCall(event);
+      if (sms && (!call.external_id || (!call.from_number && !call.to_number))) {
+        const smsOrgCall = normalizeMightyCallWebhookCall({
+          ...event,
+          from_number: sms.from_number,
+          to_number: sms.to_number,
+          external_id: sms.external_id,
+        });
+        const orgId = await resolveMightyCallWebhookOrgId(smsOrgCall);
+        if (orgId) {
+          await upsertWebhookSmsMessage(orgId, sms);
+          results.push({ org_id: orgId, external_id: sms.external_id, status: `sms_${sms.direction}` });
+        }
+        continue;
+      }
       if (!call.external_id || (!call.from_number && !call.to_number)) continue;
       try {
         const writeResult = await upsertMightyCallWebhookCall(call);
         results.push(writeResult);
+        if (writeResult.org_id) {
+          await insertWebhookCallEvent(String(writeResult.org_id), call);
+          await upsertWebhookTransfer(String(writeResult.org_id), call);
+          await upsertWebhookRecording(String(writeResult.org_id), call);
+          if (sms) await upsertWebhookSmsMessage(String(writeResult.org_id), sms);
+        }
         if (writeResult.org_id && call.agent_extension) {
           const eventType = String(call.payload?.EventType || call.payload?.eventType || call.status || '').toLowerCase();
           await upsertAgentLiveStatusRow({
             orgId: String(writeResult.org_id),
             extension: call.agent_extension,
-            status: eventType || call.status,
+            status: call.status || eventType,
             externalCallId: call.external_id,
             direction: call.direction,
             fromNumber: call.from_number,
@@ -6476,6 +6662,8 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
     res.status(500).json({ error: 'org_sms_send_failed', detail: fmtErr(err) ?? 'unknown_error' });
 	  }
 });
+
+app.use('/api/reports', reportsRouter);
 
 // POST /api/sms/send - generic org-scoped SMS send endpoint used by the SMS dashboard
 app.post('/api/sms/send', async (req, res) => {
@@ -12730,7 +12918,8 @@ app.get("/s/series", async (req, res) => {
 	        }
 	        data = normalizedRecordingRows;
 
-	        if (startDate || endDate || search) {
+		        const recordingDirection = String(req.query.direction || '').toLowerCase();
+		        if (startDate || endDate || search || (recordingDirection && recordingDirection !== 'all')) {
 	          const startMs = startDate ? Date.parse(`${startDate}T00:00:00Z`) : null;
 	          const endMs = endDate ? Date.parse(`${endDate}T23:59:59Z`) : null;
 	          data = (data || []).filter((row: any) => {
@@ -12738,7 +12927,7 @@ app.get("/s/series", async (req, res) => {
 	            const rowMs = rowDate ? Date.parse(String(rowDate)) : null;
 	            if (startMs && (!rowMs || rowMs < startMs)) return false;
 	            if (endMs && (!rowMs || rowMs > endMs)) return false;
-	            if (search) {
+		            if (search) {
 	              const haystack = [
 	                row?.from_number,
 	                row?.to_number,
@@ -12746,11 +12935,15 @@ app.get("/s/series", async (req, res) => {
 	                row?.metadata?.from_number,
 	                row?.metadata?.to_number,
 	              ].map((value) => String(value || '').toLowerCase()).join(' ');
-	              if (!haystack.includes(search)) return false;
-	            }
-	            return true;
-	          });
-	        }
+		              if (!haystack.includes(search)) return false;
+		            }
+		            if (recordingDirection && recordingDirection !== 'all') {
+		              const rowDirection = String(row?.direction || row?.metadata?.response_direction || '').toLowerCase();
+		              if (rowDirection !== recordingDirection) return false;
+		            }
+		            return true;
+		          });
+		        }
 
 	        // Final assignment-based enforcement for non-admin users.
         if (!isAdmin) {
@@ -13074,8 +13267,8 @@ app.get("/s/series", async (req, res) => {
             console.warn('[sms/messages] sms_logs fallback after ownership filter failed:', fmtErr(fallbackError));
           }
         }
-	        if (search) {
-	          normalizedRows = normalizedRows.filter((row: any) => {
+		        if (search) {
+		          normalizedRows = normalizedRows.filter((row: any) => {
 	            const haystack = [
 	              row?.from_number,
 	              row?.to_number,
@@ -13083,10 +13276,18 @@ app.get("/s/series", async (req, res) => {
 	              row?.direction,
 	              row?.status,
 	            ].map((value) => String(value || '').toLowerCase()).join(' ');
-	            return haystack.includes(search);
-	          });
-	        }
-	        const rows = normalizedRows.slice(offset, offset + limit);
+		            return haystack.includes(search);
+		          });
+		        }
+		        const directionFilter = String(req.query.direction || '').toLowerCase();
+		        if (directionFilter && directionFilter !== 'all') {
+		          normalizedRows = normalizedRows.filter((row: any) => {
+		            const rowDirection = String(row?.direction || '').toLowerCase();
+		            if (directionFilter === 'unknown') return rowDirection !== 'inbound' && rowDirection !== 'outbound';
+		            return rowDirection === directionFilter;
+		          });
+		        }
+		        const rows = normalizedRows.slice(offset, offset + limit);
         if (normalizedRows.length === 0) emptyReason = 'no_synced_data';
         res.json({ messages: rows, next_offset: offset + limit < normalizedRows.length ? offset + limit : null, empty_reason: rows.length === 0 ? emptyReason : null });
       } catch (err: any) {

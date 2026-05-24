@@ -14,6 +14,8 @@ export type NormalizedLiveStatus =
   | 'ringing'
   | 'dialing'
   | 'on_call'
+  | 'on_hold'
+  | 'transferring'
   | 'wrap_up'
   | 'dnd'
   | 'offline'
@@ -140,6 +142,8 @@ function firstIso(...values: any[]): string | undefined {
 export function normalizeFromRawStatus(rawStatus: string): NormalizedLiveStatus {
   const text = String(rawStatus || '').trim().toLowerCase();
   if (!text) return 'unknown';
+  if (text.includes('transfer')) return 'transferring';
+  if (text.includes('hold')) return 'on_hold';
   if (text.includes('ring')) return 'ringing';
   if (text.includes('dial') || text.includes('calling')) return 'dialing';
   if (text.includes('on a call') || text.includes('on call')) return 'on_call';

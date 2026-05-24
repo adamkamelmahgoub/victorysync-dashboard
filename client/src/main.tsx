@@ -362,7 +362,7 @@ function AppRouter() {
         path="/admin/reports"
         element={
           <AdminRoute>
-            <AdminReportsPage />
+            <ReportPage />
           </AdminRoute>
         }
       />

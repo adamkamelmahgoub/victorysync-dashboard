@@ -90,9 +90,10 @@ export function SMSPage() {
 
       const q = new URLSearchParams();
 	      q.set('limit', String(PAGE_SIZE));
-	      q.set('offset', String(activeOffset));
-	      if (orgId) q.set('org_id', orgId);
-	      if (search.trim()) q.set('search', search.trim());
+		      q.set('offset', String(activeOffset));
+		      if (orgId) q.set('org_id', orgId);
+		      if (search.trim()) q.set('search', search.trim());
+		      if (directionFilter !== 'all') q.set('direction', directionFilter);
 
       const response = await fetch(buildApiUrl(`/api/sms/messages?${q.toString()}`), {
         headers: {
@@ -140,7 +141,7 @@ export function SMSPage() {
 	      window.clearInterval(intervalId);
 	      document.removeEventListener('visibilitychange', onVisibility);
 	    };
-	  }, [user?.id, orgId, search]);
+		  }, [user?.id, orgId, search, directionFilter]);
 
   useEffect(() => {
     let cancelled = false;

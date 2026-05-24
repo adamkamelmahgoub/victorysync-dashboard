@@ -45,8 +45,9 @@ function fmtDuration(s: number) {
 }
 
 const AdminRecordingsPage: FC = () => {
-  const { user, selectedOrgId } = useAuth();
+  const { user, selectedOrgId, globalRole } = useAuth();
   const userId = user?.id;
+  const isPlatformAdmin = globalRole === 'platform_admin' || globalRole === 'admin';
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -92,10 +93,10 @@ const AdminRecordingsPage: FC = () => {
       setFilterOrgId(selectedOrgId);
       return;
     }
-    if (orgs.length > 0) {
+    if (!isPlatformAdmin && orgs.length > 0) {
       setFilterOrgId(orgs[0].id);
     }
-  }, [selectedOrgId, orgs, filterOrgId]);
+  }, [selectedOrgId, orgs, filterOrgId, isPlatformAdmin]);
 
   const syncRecentRecordings = async () => {
     if (!userId || !filterOrgId) return;

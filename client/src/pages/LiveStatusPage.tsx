@@ -75,6 +75,8 @@ function normalizedStatus(agent: LiveAgentStatus) {
   if (raw.includes('offline')) return 'offline';
   if (raw.includes('ring')) return 'ringing';
   if (raw.includes('dial')) return 'dialing';
+  if (raw.includes('hold')) return 'on_hold';
+  if (raw.includes('transfer')) return 'transferring';
   if (agent.on_call || raw.includes('call') || raw.includes('connect') || raw.includes('talk')) return 'on_call';
   if (raw.includes('wrap')) return 'wrap_up';
   if (raw.includes('available') || raw.includes('idle') || raw.includes('ready')) return 'available';
@@ -111,6 +113,10 @@ function statusVisuals(agent: LiveAgentStatus): {
       return { badgeTone: 'info', cardClass: 'border-cyan-400/25 bg-cyan-400/[0.035]', label: 'Dialing' };
     case 'on_call':
       return { badgeTone: 'info', cardClass: 'border-cyan-400/25 bg-cyan-400/[0.035]', label: 'On Call' };
+    case 'on_hold':
+      return { badgeTone: 'warning', cardClass: 'border-amber-400/25 bg-amber-400/[0.035]', label: 'On Hold' };
+    case 'transferring':
+      return { badgeTone: 'info', cardClass: 'border-cyan-400/25 bg-cyan-400/[0.035]', label: 'Transferring' };
     case 'available':
       return { badgeTone: 'success', cardClass: 'border-emerald-400/25 bg-emerald-400/[0.03]', label: 'Available' };
     case 'dnd':

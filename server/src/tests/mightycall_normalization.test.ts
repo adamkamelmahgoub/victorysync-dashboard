@@ -12,6 +12,8 @@ test('live status normalization treats direct active states as on-call', () => {
 test('live status normalization preserves ringing, dialing, and idle states', () => {
   assert.equal(normalizeFromRawStatus('Ringing'), 'ringing');
   assert.equal(normalizeFromRawStatus('Dialing'), 'dialing');
+  assert.equal(normalizeFromRawStatus('On Hold'), 'on_hold');
+  assert.equal(normalizeFromRawStatus('Transfer in progress'), 'transferring');
   assert.equal(normalizeFromRawStatus('Available'), 'available');
   assert.equal(normalizeFromRawStatus('Offline'), 'offline');
 });

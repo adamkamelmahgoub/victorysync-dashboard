@@ -15,6 +15,7 @@ type Recording = {
   duration?: number | null;
   recording_date?: string | null;
   recording_url?: string | null;
+  direction?: string | null;
   created_at?: string | null;
 };
 
@@ -61,6 +62,7 @@ export function RecordingsPage() {
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [directionFilter, setDirectionFilter] = useState('all');
   const [playbackUrls, setPlaybackUrls] = useState<Record<string, string>>({});
   const playbackUrlsRef = useRef<Record<string, string>>({});
 
@@ -111,9 +113,10 @@ export function RecordingsPage() {
 	      q.set('limit', '500');
 	      q.set('offset', String(activeOffset));
 	      if (orgId) q.set('org_id', orgId);
-	      if (startDate) q.set('start_date', startDate);
-	      if (endDate) q.set('end_date', endDate);
-	      if (search.trim()) q.set('search', search.trim());
+		      if (startDate) q.set('start_date', startDate);
+		      if (endDate) q.set('end_date', endDate);
+		      if (search.trim()) q.set('search', search.trim());
+		      if (directionFilter !== 'all') q.set('direction', directionFilter);
       const response = await fetch(buildApiUrl(`/api/mightycall/recordings?${q.toString()}`), {
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
       });
@@ -139,7 +142,7 @@ export function RecordingsPage() {
 
 	  useEffect(() => {
 	    if (user) fetchRecordings(true, { syncFirst: true });
-	  }, [orgId, user?.id, startDate, endDate]);
+		  }, [orgId, user?.id, startDate, endDate, directionFilter]);
 
 	  useEffect(() => {
 	    return () => {
@@ -229,7 +232,7 @@ export function RecordingsPage() {
     >
       <div className="space-y-6">
         <SectionCard title="Recording filters" description="Search recording activity by the numbers involved.">
-	          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,260px),180px,180px,1fr] lg:items-end">
+		          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,260px),180px,180px,180px,1fr] lg:items-end">
 	            <div>
 	              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Search Number</label>
 	              <input value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => fetchRecordings(true)} placeholder="+1212..." className="vs-input w-full" />
@@ -238,10 +241,18 @@ export function RecordingsPage() {
 	              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Start Date</label>
 	              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input w-full" />
 	            </div>
-	            <div>
-	              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">End Date</label>
-	              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input w-full" />
-	            </div>
+		            <div>
+		              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">End Date</label>
+		              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input w-full" />
+		            </div>
+		            <div>
+		              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Direction</label>
+		              <select value={directionFilter} onChange={(e) => setDirectionFilter(e.target.value)} className="vs-input w-full">
+		                <option value="all">All</option>
+		                <option value="inbound">Inbound</option>
+		                <option value="outbound">Outbound</option>
+		              </select>
+		            </div>
 	            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">{syncing ? 'Syncing recent MightyCall recordings...' : 'Scope: assigned numbers only'}</div>
           </div>
         </SectionCard>

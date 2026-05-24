@@ -1,409 +1,323 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Navigate } from 'react-router-dom';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
-import { triggerMightyCallReportsSync } from '../lib/apiClient';
 
-type ReportRow = {
-  id: string;
-  org_id: string;
-  report_type: string;
-  report_date?: string;
-  created_at?: string;
-  from_number?: string;
-  to_number?: string;
-  numbers_called?: string[];
-  data?: {
-    calls_count?: number;
-    answered_count?: number;
-    missed_count?: number;
-    sample_numbers?: string[];
-  };
-};
+type ReportTab = 'overview' | 'calls' | 'recordings' | 'sms' | 'transfers' | 'numbers' | 'agents';
 
-type ReportDetailResponse = {
-  report: ReportRow;
-  kpis: {
-    total_calls: number;
-    answered_calls: number;
-    missed_calls: number;
-    answer_rate_pct: number;
-    total_duration_seconds: number;
-    avg_call_duration_seconds: number;
-  };
-  numbers: string[];
-  all_numbers_called?: string[];
-  related: {
-    calls: Array<{ id: string; from_number?: string; to_number?: string; status?: string; duration_seconds?: number; started_at?: string }>;
-    recordings: Array<{ id: string; from_number?: string; to_number?: string; duration_seconds?: number; recording_date?: string; recording_url?: string }>;
-    sms: Array<{ id: string; from_number?: string; to_number?: string; direction?: string; status?: string; created_at?: string; message_text?: string }>;
-  };
-};
+type PhoneOption = { id: string; org_id: string; number: string; label?: string | null; digits: string };
+type Overview = Record<string, any>;
+type Row = Record<string, any>;
 
-function displayNumber(value?: string, fallback?: string) {
-  const primary = String(value || '').trim();
-  if (primary) return primary;
-  const secondary = String(fallback || '').trim();
-  return secondary || '-';
-}
-
-const PAGE_SIZE = 500;
+const tabLabels: Array<{ id: ReportTab; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'calls', label: 'Calls' },
+  { id: 'recordings', label: 'Recordings' },
+  { id: 'sms', label: 'SMS' },
+  { id: 'transfers', label: 'Transfers' },
+  { id: 'numbers', label: 'Numbers' },
+  { id: 'agents', label: 'Agents' },
+];
 
 function isoDateDaysAgo(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-function fmtDate(v?: string) {
-  if (!v) return '-';
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString();
+function fmtDate(value?: string | null) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '-' : parsed.toLocaleString();
 }
 
-function fmtSeconds(total: number) {
-  const s = Math.max(0, Number(total) || 0);
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}m ${r}s`;
+function fmtSeconds(value: unknown) {
+  const total = Math.max(0, Math.round(Number(value) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
+function numberText(row: Row) {
+  return [row.from_number, row.to_number, row.phone_number, row.original_caller, row.original_receiving_number]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' -> ') || '-';
+}
+
+function badgeTone(value?: string | null): 'neutral' | 'success' | 'warning' | 'info' {
+  const text = String(value || '').toLowerCase();
+  if (text.includes('answer') || text.includes('complete') || text.includes('sent') || text.includes('received')) return 'success';
+  if (text.includes('miss') || text.includes('fail') || text.includes('abandon')) return 'warning';
+  if (text.includes('inbound') || text.includes('outbound') || text.includes('transfer')) return 'info';
+  return 'neutral';
+}
+
+function downloadCsv(filename: string, rows: Row[]) {
+  if (rows.length === 0) return;
+  const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row).filter((key) => typeof row[key] !== 'object'))));
+  const csv = [
+    keys.join(','),
+    ...rows.map((row) => keys.map((key) => `"${String(row[key] ?? '').replace(/"/g, '""')}"`).join(',')),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export default function ReportPage() {
-  const { user, globalRole } = useAuth();
+  const { user, globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const { org } = useOrg();
+  const isPlatformAdmin = globalRole === 'platform_admin';
+  const activeOrgId = isPlatformAdmin ? selectedOrgId : (selectedOrgId || org?.id || orgs[0]?.id || null);
 
-  const [reports, setReports] = useState<ReportRow[]>([]);
+  const [activeTab, setActiveTab] = useState<ReportTab>('overview');
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
+  const [agent, setAgent] = useState('');
+  const [direction, setDirection] = useState('all');
+  const [status, setStatus] = useState('all');
+  const [search, setSearch] = useState('');
+  const [numbers, setNumbers] = useState<PhoneOption[]>([]);
+  const [overview, setOverview] = useState<Overview>({});
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
-  const [emptyReason, setEmptyReason] = useState<string | null>(null);
-  const [filterType, setFilterType] = useState('calls');
-  const [nextOffset, setNextOffset] = useState<number | null>(0);
+  const [error, setError] = useState<string | null>(null);
 
-  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<ReportDetailResponse | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [detailTab, setDetailTab] = useState<'calls' | 'recordings' | 'sms'>('calls');
-  const [syncing, setSyncing] = useState(false);
-
-  const isAdmin = globalRole === 'platform_admin';
-
-  if (isAdmin) {
-    return <Navigate to="/admin/reports" replace />;
-  }
-
-  const rowNumbers = (r: ReportRow) => {
-    const values = [
-      ...(r.numbers_called || []),
-      ...(r.data?.sample_numbers || []),
-      r.from_number || '',
-      r.to_number || '',
-    ].map((v) => String(v || '').trim()).filter(Boolean);
-    return Array.from(new Set(values));
+  const buildQuery = (extra?: Record<string, string>) => {
+    const q = new URLSearchParams();
+    if (activeOrgId) q.set('org_id', activeOrgId);
+    if (startDate) q.set('start_date', startDate);
+    if (endDate) q.set('end_date', endDate);
+    if (selectedNumbers.length) q.set('numbers', selectedNumbers.join(','));
+    if (agent.trim()) q.set('agent', agent.trim());
+    if (direction !== 'all') q.set('direction', direction);
+    if (status !== 'all') q.set('status', status);
+    if (search.trim()) q.set('search', search.trim());
+    Object.entries(extra || {}).forEach(([key, value]) => q.set(key, value));
+    return q.toString();
   };
 
-  const summary = useMemo(() => {
-    const totalReports = reports.length;
-    const totalCalls = reports.reduce((a, r) => a + Number(r.data?.calls_count || 0), 0);
-    const answered = reports.reduce((a, r) => a + Number(r.data?.answered_count || 0), 0);
-    const missed = reports.reduce((a, r) => a + Number(r.data?.missed_count || 0), 0);
-    return { totalReports, totalCalls, answered, missed };
-  }, [reports]);
-
-  const syncRecentReports = async () => {
-    if (!user?.id || !org?.id) return;
-    setSyncing(true);
-    try {
-      await triggerMightyCallReportsSync(org.id, isoDateDaysAgo(2), new Date().toISOString().slice(0, 10), user.id);
-    } catch (e: any) {
-      console.warn('[ReportPage] recent MightyCall sync failed:', e?.message || e);
-    } finally {
-      setSyncing(false);
-    }
+  const loadNumbers = async () => {
+    if (!user?.id) return;
+    const response = await fetch(buildApiUrl(`/api/reports/numbers?${buildQuery()}`), {
+      headers: { 'x-user-id': user.id },
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    setNumbers(data.numbers || []);
   };
 
-  const loadReports = async (reset = false, options?: { syncFirst?: boolean }) => {
-    if (!user) return;
-    if (!reset && nextOffset == null) return;
-
-    const activeOffset = reset ? 0 : (nextOffset ?? 0);
-
+  const loadReport = async () => {
+    if (!user?.id) return;
+    setLoading(true);
+    setError(null);
     try {
-      if (reset) {
-        setLoading(true);
-        setListError(null);
+      if (activeTab === 'overview') {
+        const response = await fetch(buildApiUrl(`/api/reports/overview?${buildQuery()}`), { headers: { 'x-user-id': user.id } });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Failed to load overview');
+        const data = await response.json();
+        setOverview(data.overview || {});
+        setRows([]);
+      } else if (activeTab === 'numbers') {
+        await loadNumbers();
+        setRows([]);
       } else {
-        setLoadingMore(true);
+        const endpoint = activeTab === 'agents' ? 'agents' : activeTab;
+        const response = await fetch(buildApiUrl(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' })}`), { headers: { 'x-user-id': user.id } });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `Failed to load ${activeTab}`);
+        const data = await response.json();
+        setRows(data[activeTab] || data.messages || data.agents || []);
       }
-
-      if (reset && options?.syncFirst && org?.id) {
-        await syncRecentReports();
-      }
-
-      let url = buildApiUrl(`/api/mightycall/reports?type=${encodeURIComponent(filterType)}&limit=${PAGE_SIZE}&offset=${activeOffset}`);
-      if (org?.id) url += `&org_id=${encodeURIComponent(org.id)}`;
-
-      const response = await fetch(url, {
-        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        setListError(err?.detail || err?.error || 'Failed to load reports');
-        return;
-      }
-
-      const data = await response.json();
-      const rows: ReportRow[] = data.reports || [];
-      setReports((prev) => (reset ? rows : [...prev, ...rows]));
-      setNextOffset(data.next_offset ?? null);
-      if (reset) setEmptyReason(data.empty_reason || null);
-      if (reset) {
-        if (rows.length > 0) setSelectedReportId((prev) => prev || rows[0].id);
-        else {
-          setSelectedReportId(null);
-          setDetail(null);
-          setDetailError(null);
-        }
-      }
-    } catch (e: any) {
-      setListError(e?.message || 'Failed to load reports');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load reports');
     } finally {
-      if (reset) setLoading(false);
-      else setLoadingMore(false);
+      setLoading(false);
     }
   };
 
-  const openDetail = async (reportId: string) => {
-    if (!user) return;
-    setSelectedReportId(reportId);
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetail(null);
-    setDetailTab('calls');
+  useEffect(() => { void loadNumbers(); }, [user?.id, activeOrgId]);
+  useEffect(() => { void loadReport(); }, [user?.id, activeOrgId, activeTab, startDate, endDate, direction, status]);
 
-    try {
-      const response = await fetch(buildApiUrl(`/api/mightycall/reports/${encodeURIComponent(reportId)}?related_limit=5000`), {
-        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        setDetailError(err?.detail || err?.error || 'Failed to load report detail');
-        return;
-      }
-      const data = await response.json();
-      setDetail(data);
-    } catch (e: any) {
-      setDetailError(e?.message || 'Failed to load report detail');
-    } finally {
-      setDetailLoading(false);
-    }
+  const kpis = useMemo(() => ([
+    ['Total Calls', overview.total_calls ?? 0],
+    ['Answered', overview.answered_calls ?? 0],
+    ['Missed', overview.missed_calls ?? 0],
+    ['Abandoned', overview.abandoned_calls ?? 0],
+    ['Avg Duration', fmtSeconds(overview.avg_duration_seconds)],
+    ['Avg Wait', fmtSeconds(overview.avg_wait_seconds)],
+    ['Recordings', overview.total_recordings ?? 0],
+    ['SMS', overview.total_sms ?? 0],
+    ['Inbound SMS', overview.inbound_sms ?? 0],
+    ['Outbound SMS', overview.outbound_sms ?? 0],
+    ['Transfers', overview.total_transfers ?? 0],
+  ]), [overview]);
+
+  const resetFilters = () => {
+    setStartDate(isoDateDaysAgo(30));
+    setEndDate(new Date().toISOString().slice(0, 10));
+    setSelectedNumbers([]);
+    setAgent('');
+    setDirection('all');
+    setStatus('all');
+    setSearch('');
   };
-
-  useEffect(() => { loadReports(true, { syncFirst: true }); }, [user?.id, filterType, org?.id]);
-  useEffect(() => {
-    if (selectedReportId) openDetail(selectedReportId);
-  }, [selectedReportId]);
 
   const actions = (
-    <button onClick={() => loadReports(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">
-      {loading || syncing ? 'Refreshing reports...' : 'Refresh'}
-    </button>
+    <div className="flex flex-wrap gap-2">
+      {activeTab !== 'overview' && activeTab !== 'numbers' && (
+        <button onClick={() => downloadCsv(`victorysync-${activeTab}.csv`, rows)} className="vs-button-secondary">Export CSV</button>
+      )}
+      <button onClick={() => loadReport()} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>
+    </div>
   );
 
-  const emptyCopy = emptyReason === 'no_assigned_numbers'
-    ? {
-        title: 'No assigned numbers',
-        description: 'This account is not assigned to any phone numbers for the selected workspace yet.',
-      }
-    : emptyReason === 'no_org_membership'
-      ? {
-          title: 'No organization access',
-          description: 'This account is not linked to an organization that can view reports.',
-        }
-      : {
-          title: 'No reports found',
-          description: 'No synced report rows matched the current workspace and filter selection.',
-        };
-
   return (
-      <PageLayout
-        eyebrow="Reporting"
-        title="Reports Workbench"
-        description="A cleaner operational report layout with KPIs, report inventory, and call, recording, and SMS drill-down in one workspace."
-        actions={actions}
-      >
+    <PageLayout eyebrow="Reporting" title="Reports" description="Real MightyCall and Supabase reporting across calls, recordings, SMS, transfers, numbers, and agents." actions={actions}>
       <div className="space-y-6">
-        <SectionCard title="Operations report workspace" description="Narrow the report inventory, select a row, then inspect related calls, recordings, and SMS without leaving the page.">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,320px),1fr,auto] md:items-end">
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Report Type</label>
-              <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="vs-input w-full">
-                <option value="calls">Calls</option>
-                <option value="messages">Messages</option>
-                <option value="analytics">Analytics</option>
+        <SectionCard title="Global filters" description="Filters are enforced by the API with organization and number-level access checks.">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-6">
+            {isPlatformAdmin && (
+              <select value={activeOrgId || ''} onChange={(e) => setSelectedOrgId(e.target.value || null)} className="vs-input">
+                <option value="">All organizations</option>
+                {orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
-            </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
-              Scope: Assigned numbers only
-            </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-400">
-              {syncing ? 'Syncing recent MightyCall activity...' : `Loaded ${reports.length} report${reports.length === 1 ? '' : 's'}`}
-            </div>
+            )}
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input" />
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input" />
+            <select multiple value={selectedNumbers} onChange={(e) => setSelectedNumbers(Array.from(e.currentTarget.selectedOptions).map((option) => option.value))} className="vs-input min-h-[44px]">
+              {numbers.map((number) => <option key={number.id} value={number.number}>{number.label ? `${number.label} - ${number.number}` : number.number}</option>)}
+            </select>
+            <input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="Agent extension" className="vs-input" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => loadReport()} placeholder="Search number" className="vs-input" />
+            <select value={direction} onChange={(e) => setDirection(e.target.value)} className="vs-input">
+              <option value="all">All directions</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className="vs-input">
+              <option value="all">All statuses</option>
+              <option value="answered">Answered</option>
+              <option value="missed">Missed</option>
+              <option value="abandoned">Abandoned</option>
+              <option value="voicemail">Voicemail</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+            </select>
+            <button onClick={resetFilters} className="vs-button-secondary">Reset Filters</button>
+            <button onClick={() => loadReport()} className="vs-button-primary">Apply</button>
           </div>
         </SectionCard>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricStatCard label="Reports" value={summary.totalReports} />
-          <MetricStatCard label="Total Calls" value={summary.totalCalls} />
-          <MetricStatCard label="Answered" value={summary.answered} accent="emerald" />
-          <MetricStatCard label="Missed" value={summary.missed} accent="amber" />
+        <div className="flex gap-2 overflow-x-auto">
+          {tabLabels.map((tab) => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={activeTab === tab.id ? 'vs-button-primary' : 'vs-button-secondary'}>
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-          <SectionCard
-            title="Report list"
-            description="Select a row to inspect all calls, recordings, and messages related to that report."
-            className="xl:col-span-7"
-            contentClassName="p-0"
-          >
-            {listError ? (
-              <div className="px-5 py-10 text-sm text-rose-300">{listError}</div>
-            ) : loading ? (
-              <div className="px-5 py-10 text-sm text-slate-400">Loading reports...</div>
-            ) : reports.length === 0 ? (
-              <div className="p-5">
-                <EmptyStatePanel title={emptyCopy.title} description={emptyCopy.description} />
-              </div>
-            ) : (
-              <div className="max-h-[72vh] overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Type</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Calls</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Answered</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Missed</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Numbers</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/6">
-                    {reports.map((r) => (
-                      <tr
-                        key={r.id}
-                        onClick={() => setSelectedReportId(r.id)}
-                        className={`cursor-pointer transition ${selectedReportId === r.id ? 'bg-cyan-400/[0.08]' : 'hover:bg-white/[0.03]'}`}
-                      >
-                        <td className="px-4 py-3 text-slate-200">{r.report_type || '-'}</td>
-                        <td className="px-4 py-3 text-slate-100">{r.data?.calls_count ?? '-'}</td>
-                        <td className="px-4 py-3 text-emerald-200">{r.data?.answered_count ?? '-'}</td>
-                        <td className="px-4 py-3 text-amber-200">{r.data?.missed_count ?? '-'}</td>
-                        <td className="max-w-[260px] truncate px-4 py-3 font-mono text-xs text-slate-400">{rowNumbers(r).join(', ') || '-'}</td>
-                        <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(r.report_date || r.created_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {nextOffset !== null && (
-                  <div className="flex justify-center border-t border-white/8 p-4">
-                    <button onClick={() => loadReports(false)} disabled={loadingMore} className="vs-button-secondary">
-                      {loadingMore ? 'Loading more...' : 'Load more'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+        {error && <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+
+        {activeTab === 'overview' ? (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {kpis.map(([label, value]) => <MetricStatCard key={label} label={String(label)} value={value} />)}
+            </div>
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+              <TopList title="Top Agents" rows={overview.top_agents || []} />
+              <TopList title="Top Numbers" rows={overview.top_numbers || []} />
+              <TopList title="Transfers By Number" rows={overview.transfers_by_number || []} />
+            </div>
+          </div>
+        ) : activeTab === 'numbers' ? (
+          <SectionCard title="Number performance" description="Assigned numbers available in the current report scope." contentClassName="p-0">
+            <ReportTable rows={numbers} columns={['number', 'label', 'org_id']} loading={loading} />
           </SectionCard>
-
-          <SectionCard
-            title="Report detail"
-            description="KPI snapshot and related activity for the selected report."
-            className="xl:col-span-5"
-          >
-            {detailLoading ? (
-              <div className="text-sm text-slate-400">Loading detail...</div>
-            ) : detailError ? (
-              <div className="text-sm text-rose-300">{detailError}</div>
-            ) : !detail ? (
-              <EmptyStatePanel title="No report selected" description="Choose a report from the list to view its KPI summary and related activity." />
-            ) : (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="vs-surface-muted p-4"><div className="text-xs text-slate-500">Total Calls</div><div className="mt-2 text-2xl font-semibold text-white">{detail.kpis.total_calls}</div></div>
-                  <div className="vs-surface-muted p-4"><div className="text-xs text-slate-500">Answer Rate</div><div className="mt-2 text-2xl font-semibold text-cyan-200">{detail.kpis.answer_rate_pct}%</div></div>
-                  <div className="vs-surface-muted p-4"><div className="text-xs text-slate-500">Answered</div><div className="mt-2 text-2xl font-semibold text-emerald-200">{detail.kpis.answered_calls}</div></div>
-                  <div className="vs-surface-muted p-4"><div className="text-xs text-slate-500">Missed</div><div className="mt-2 text-2xl font-semibold text-amber-200">{detail.kpis.missed_calls}</div></div>
-                </div>
-
-                <div className="vs-surface-muted p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Numbers called</div>
-                  <div className="mt-3 break-words font-mono text-xs text-slate-200">{(detail.all_numbers_called || detail.numbers || []).join(', ') || '-'}</div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => setDetailTab('calls')} className={detailTab === 'calls' ? 'vs-button-primary' : 'vs-button-secondary'}>Calls ({detail.related.calls.length})</button>
-                  <button onClick={() => setDetailTab('recordings')} className={detailTab === 'recordings' ? 'vs-button-primary' : 'vs-button-secondary'}>Recordings ({detail.related.recordings.length})</button>
-                  <button onClick={() => setDetailTab('sms')} className={detailTab === 'sms' ? 'vs-button-primary' : 'vs-button-secondary'}>SMS ({detail.related.sms.length})</button>
-                </div>
-
-                <div className="overflow-auto rounded-3xl border border-white/8">
-                  {detailTab === 'calls' && (
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
-                        <tr><th className="px-3 py-3 text-left">From</th><th className="px-3 py-3 text-left">To</th><th className="px-3 py-3 text-left">Status</th><th className="px-3 py-3 text-left">Duration</th><th className="px-3 py-3 text-left">Started</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/6">
-                        {detail.related.calls.length === 0 ? (
-                          <tr><td className="px-3 py-4 text-slate-400" colSpan={5}>No related calls found for this report.</td></tr>
-                        ) : detail.related.calls.map((c) => (
-                          <tr key={c.id}>
-                            <td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.from_number, detail.report.from_number)}</td>
-                            <td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.to_number, detail.report.to_number)}</td>
-                            <td className="px-3 py-3"><StatusBadge tone={String(c.status || '').toLowerCase().includes('miss') ? 'warning' : 'neutral'}>{c.status || '-'}</StatusBadge></td>
-                            <td className="px-3 py-3 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td>
-                            <td className="px-3 py-3 text-slate-500">{fmtDate(c.started_at)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                  {detailTab === 'recordings' && (
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
-                        <tr><th className="px-3 py-3 text-left">From</th><th className="px-3 py-3 text-left">To</th><th className="px-3 py-3 text-left">Duration</th><th className="px-3 py-3 text-left">Date</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/6">
-                        {detail.related.recordings.length === 0 ? (
-                          <tr><td className="px-3 py-4 text-slate-400" colSpan={4}>No related recordings found for this report.</td></tr>
-                        ) : detail.related.recordings.map((r) => (
-                          <tr key={r.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(r.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(r.to_number, detail.report.to_number)}</td><td className="px-3 py-3 text-slate-300">{fmtSeconds(Number(r.duration_seconds || 0))}</td><td className="px-3 py-3 text-slate-500">{fmtDate(r.recording_date)}</td></tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                  {detailTab === 'sms' && (
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
-                        <tr><th className="px-3 py-3 text-left">From</th><th className="px-3 py-3 text-left">To</th><th className="px-3 py-3 text-left">Direction</th><th className="px-3 py-3 text-left">Date</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/6">
-                        {detail.related.sms.length === 0 ? (
-                          <tr><td className="px-3 py-4 text-slate-400" colSpan={4}>No related SMS found for this report.</td></tr>
-                        ) : detail.related.sms.map((s) => (
-                          <tr key={s.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(s.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(s.to_number, detail.report.to_number)}</td><td className="px-3 py-3 text-slate-300">{s.direction || '-'}</td><td className="px-3 py-3 text-slate-500">{fmtDate(s.created_at)}</td></tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              </div>
-            )}
+        ) : (
+          <SectionCard title={`${tabLabels.find((tab) => tab.id === activeTab)?.label} report`} description="Rows are normalized from real MightyCall/Supabase records only." contentClassName="p-0">
+            <ReportTable rows={rows} loading={loading} tab={activeTab} />
           </SectionCard>
-        </div>
+        )}
       </div>
     </PageLayout>
   );
+}
+
+function TopList({ title, rows }: { title: string; rows: Array<{ key: string; count: number }> }) {
+  return (
+    <SectionCard title={title}>
+      {rows.length === 0 ? <EmptyStatePanel title="No data" description="No matching rows in this filter window." /> : (
+        <div className="space-y-3">
+          {rows.map((row) => (
+            <div key={row.key} className="flex items-center justify-between rounded-2xl bg-white/[0.03] px-4 py-3">
+              <span className="truncate font-mono text-sm text-slate-200">{row.key}</span>
+              <span className="text-sm font-semibold text-white">{row.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function ReportTable({ rows, loading, tab, columns }: { rows: Row[]; loading: boolean; tab?: ReportTab; columns?: string[] }) {
+  const resolvedColumns = columns || (
+    tab === 'agents'
+      ? ['extension', 'total_calls', 'answered_calls', 'missed_calls', 'avg_duration_seconds', 'transfers']
+      : tab === 'transfers'
+        ? ['transferred_at', 'agent_extension', 'original_caller', 'original_receiving_number', 'transfer_target', 'transfer_type', 'result']
+        : tab === 'sms'
+          ? ['sent_at', 'from_number', 'to_number', 'direction', 'status', 'message_text']
+          : tab === 'recordings'
+            ? ['recording_date', 'from_number', 'to_number', 'direction', 'duration_seconds', 'recording_url']
+            : ['started_at', 'agent_extension', 'from_number', 'to_number', 'direction', 'status', 'duration_seconds']
+  );
+
+  if (loading) return <div className="px-5 py-10 text-sm text-slate-400">Loading report rows...</div>;
+  if (rows.length === 0) return <div className="p-5"><EmptyStatePanel title="No matching data" description="No real records matched the current filters." /></div>;
+
+  return (
+    <div className="overflow-auto">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
+          <tr>{resolvedColumns.map((column) => <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">{column.replace(/_/g, ' ')}</th>)}</tr>
+        </thead>
+        <tbody className="divide-y divide-white/6">
+          {rows.map((row, index) => (
+            <tr key={String(row.id || row.external_id || row.external_call_id || index)} className="hover:bg-white/[0.03]">
+              {resolvedColumns.map((column) => (
+                <td key={column} className="max-w-[320px] truncate px-4 py-3 text-slate-200">
+                  {cellValue(row, column)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function cellValue(row: Row, column: string) {
+  const value = row[column];
+  if (column.includes('date') || column.endsWith('_at')) return <span className="text-xs text-slate-400">{fmtDate(String(value || ''))}</span>;
+  if (column.includes('duration')) return fmtSeconds(value);
+  if (column === 'recording_url') {
+    return value ? <a className="text-cyan-200 hover:text-cyan-100" href={String(value)} target="_blank" rel="noreferrer">Open</a> : <span className="text-slate-500">Recording unavailable</span>;
+  }
+  if (column === 'direction' || column === 'status' || column === 'result' || column === 'transfer_type') {
+    return <StatusBadge tone={badgeTone(String(value || ''))}>{String(value || 'unknown')}</StatusBadge>;
+  }
+  if (column === 'message_text') return String(value || '').slice(0, 160) || '-';
+  if (column === 'number') return <span className="font-mono">{String(value || numberText(row))}</span>;
+  return String(value ?? '-') || '-';
 }
