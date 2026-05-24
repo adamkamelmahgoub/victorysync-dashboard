@@ -6,10 +6,24 @@ alter table if exists public.mightycall_reports
   add column if not exists data jsonb not null default '{}'::jsonb,
   add column if not exists updated_at timestamptz not null default now();
 
-update public.mightycall_reports
-set data = coalesce(data, metrics, '{}'::jsonb)
-where data = '{}'::jsonb
-  and metrics is not null;
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'mightycall_reports'
+      and column_name = 'metrics'
+  ) then
+    execute $sql$
+      update public.mightycall_reports
+      set data = coalesce(data, metrics, '{}'::jsonb)
+      where data = '{}'::jsonb
+        and metrics is not null
+    $sql$;
+  end if;
+end
+$$;
 
 alter table if exists public.mightycall_recordings
   add column if not exists external_id text,
