@@ -183,6 +183,11 @@ export function RecordingsPage() {
         headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
+        if (recording.recording_url) {
+          window.open(recording.recording_url, '_blank', 'noopener,noreferrer');
+          setError(null);
+          return;
+        }
         setError('Failed to open recording');
         return;
       }
@@ -195,6 +200,10 @@ export function RecordingsPage() {
 	        return next;
 	      });
     } catch (err: any) {
+      if (recording.recording_url) {
+        window.open(recording.recording_url, '_blank', 'noopener,noreferrer');
+        return;
+      }
       setError(err?.message || 'Error opening recording');
     }
   };

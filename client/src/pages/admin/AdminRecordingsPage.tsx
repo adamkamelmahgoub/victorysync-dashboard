@@ -156,6 +156,11 @@ const AdminRecordingsPage: FC = () => {
         headers: { 'x-user-id': userId, 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
+        if (recording.recording_url) {
+          window.open(recording.recording_url, '_blank', 'noopener,noreferrer');
+          setListError(null);
+          return;
+        }
         const err = await response.json().catch(() => ({}));
         setListError(err?.detail || err?.error || 'Failed to open recording');
         return;
@@ -165,6 +170,10 @@ const AdminRecordingsPage: FC = () => {
       window.open(url, '_blank', 'noopener,noreferrer');
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (e: any) {
+      if (recording.recording_url) {
+        window.open(recording.recording_url, '_blank', 'noopener,noreferrer');
+        return;
+      }
       setListError(e?.message || 'Failed to open recording');
     }
   };

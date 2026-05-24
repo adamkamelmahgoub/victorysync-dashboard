@@ -810,6 +810,10 @@ function webhookSeconds(value: any): number | null {
   if (value == null || value === '') return null;
   const numeric = Number(value);
   if (Number.isFinite(numeric)) return Math.max(0, Math.round(numeric));
+  const parts = String(value).trim().split(':').map((part) => Number(part));
+  if (parts.length >= 2 && parts.every((part) => Number.isFinite(part))) {
+    return Math.max(0, Math.round(parts.reduce((total, part) => total * 60 + part, 0)));
+  }
   return null;
 }
 
@@ -1484,7 +1488,33 @@ function normalizeRecordingRowForOwnership(row: any, index: PhoneOwnershipIndex,
     row?.business_number ||
     row?.phone_number ||
     null;
-  const fromNumber =
+  const clientNumber =
+    metadata?.client?.address ||
+    metadata?.client?.number ||
+    metadata?.caller_number ||
+    metadata?.caller?.number ||
+    metadata?.from_number ||
+    metadata?.from ||
+    row?.from_number ||
+    null;
+  const rawToNumber =
+    row?.to_number ||
+    metadata?.to_number ||
+    metadata?.to ||
+    metadata?.recipient ||
+    metadata?.destination_number ||
+    metadata?.destination?.number ||
+    metadata?.called?.[0]?.phone ||
+    metadata?.called?.[0]?.number ||
+    null;
+  const originText = String(metadata?.origin || metadata?.direction || row?.direction || '').toLowerCase();
+  const looksOutbound = originText.includes('out');
+  const looksInbound = originText.includes('in');
+  const fromNumber = looksOutbound && businessNumber
+    ? businessNumber
+    : looksInbound && clientNumber
+      ? clientNumber
+      :
     row?.from_number ||
     metadata?.from_number ||
     metadata?.from ||
@@ -1493,7 +1523,11 @@ function normalizeRecordingRowForOwnership(row: any, index: PhoneOwnershipIndex,
     metadata?.client?.number ||
     metadata?.client?.address ||
     null;
-  const toNumber =
+  const toNumber = looksOutbound && clientNumber
+    ? clientNumber
+    : looksInbound && businessNumber
+      ? businessNumber
+      :
     row?.to_number ||
     metadata?.to_number ||
     metadata?.to ||
@@ -1504,10 +1538,14 @@ function normalizeRecordingRowForOwnership(row: any, index: PhoneOwnershipIndex,
     metadata?.called?.[0]?.number ||
     null;
   const owner = ownerFromPhoneId(index, targetOrgIds, row?.phone_number_id || row?.phone_id || metadata?.phone_number_id || metadata?.phone_id)
-    || findSmsOwner(index, targetOrgIds, businessNumber, toNumber, fromNumber);
+    || findSmsOwner(index, targetOrgIds, businessNumber, rawToNumber, toNumber, fromNumber);
   if (!owner) return null;
 
-  const direction = normalizePhoneDigits(fromNumber) === owner.digits
+  const direction = looksOutbound
+    ? 'outbound'
+    : looksInbound
+      ? 'inbound'
+      : normalizePhoneDigits(fromNumber) === owner.digits
     ? 'outbound'
     : normalizePhoneDigits(toNumber) === owner.digits
       ? 'inbound'
@@ -1521,7 +1559,7 @@ function normalizeRecordingRowForOwnership(row: any, index: PhoneOwnershipIndex,
     from_number: fromNumber,
     to_number: toNumber,
     direction: row?.direction || direction,
-    duration_seconds: row?.duration_seconds || row?.duration || null,
+    duration_seconds: row?.duration_seconds || webhookSeconds(metadata?.recording?.duration || metadata?.duration || row?.duration) || null,
     recording_date: row?.recording_date || row?.recorded_at || row?.created_at || row?.started_at,
     organizations: {
       ...(row?.organizations || {}),
@@ -1600,7 +1638,31 @@ function normalizeLegacyRecordingRowForVisibility(row: any, targetOrgIds: Set<st
   if (targetOrgIds && (!orgId || !targetOrgIds.has(orgId))) return null;
 
   const metadata = parseJsonObject(row?.metadata || row?.raw_payload || row?.payload);
-  const fromNumber =
+  const businessNumber =
+    metadata?.businessNumber?.number ||
+    metadata?.businessNumber ||
+    metadata?.business_number ||
+    metadata?.phone_number ||
+    row?.business_number ||
+    row?.phone_number ||
+    null;
+  const clientNumber =
+    metadata?.client?.address ||
+    metadata?.client?.number ||
+    metadata?.caller_number ||
+    metadata?.caller?.number ||
+    metadata?.from_number ||
+    metadata?.from ||
+    row?.from_number ||
+    null;
+  const originText = String(metadata?.origin || metadata?.direction || row?.direction || '').toLowerCase();
+  const looksOutbound = originText.includes('out');
+  const looksInbound = originText.includes('in');
+  const fromNumber = looksOutbound && businessNumber
+    ? businessNumber
+    : looksInbound && clientNumber
+      ? clientNumber
+      :
     row?.from_number ||
     metadata?.from_number ||
     metadata?.from ||
@@ -1609,7 +1671,11 @@ function normalizeLegacyRecordingRowForVisibility(row: any, targetOrgIds: Set<st
     metadata?.client?.number ||
     metadata?.client?.address ||
     null;
-  const toNumber =
+  const toNumber = looksOutbound && clientNumber
+    ? clientNumber
+    : looksInbound && businessNumber
+      ? businessNumber
+      :
     row?.to_number ||
     metadata?.to_number ||
     metadata?.to ||
@@ -1624,7 +1690,8 @@ function normalizeLegacyRecordingRowForVisibility(row: any, targetOrgIds: Set<st
     ...row,
     from_number: fromNumber,
     to_number: toNumber,
-    duration_seconds: row?.duration_seconds || row?.duration || null,
+    direction: looksOutbound ? 'outbound' : looksInbound ? 'inbound' : row?.direction || null,
+    duration_seconds: row?.duration_seconds || webhookSeconds(metadata?.recording?.duration || metadata?.duration || row?.duration) || null,
     recording_date: row?.recording_date || row?.recorded_at || row?.created_at || row?.started_at,
     metadata: {
       ...metadata,

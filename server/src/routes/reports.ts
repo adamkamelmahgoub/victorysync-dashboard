@@ -682,9 +682,15 @@ function normalizeSmsDirections(rows: any[], ownedDigits: Set<string>) {
 function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
   return rows.map((row) => {
     const metadata = row?.metadata || row?.raw_payload || {};
-    const fromNumber = row.from_number || metadata?.from_number || metadata?.client?.address || null;
-    const toNumber = row.to_number || metadata?.to_number || metadata?.businessNumber?.number || null;
     const businessNumber = row.business_number || metadata?.businessNumber?.number || metadata?.phone_number || null;
+    const clientNumber = metadata?.client?.address || metadata?.client?.number || metadata?.caller_number || row.from_number || metadata?.from_number || null;
+    const origin = String(metadata?.origin || row.direction || '').toLowerCase();
+    const fromNumber = origin.includes('out')
+      ? (businessNumber || row.from_number || metadata?.from_number || null)
+      : (row.from_number || metadata?.from_number || metadata?.client?.address || null);
+    const toNumber = origin.includes('out')
+      ? (clientNumber || row.to_number || metadata?.to_number || null)
+      : (row.to_number || metadata?.to_number || metadata?.businessNumber?.number || null);
     return {
       ...row,
       from_number: fromNumber,
