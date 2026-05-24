@@ -84,6 +84,7 @@ export function SMSPage() {
     }
 
     try {
+      if (options?.syncFirst) await syncMessages();
       const q = new URLSearchParams();
 	      q.set('limit', String(PAGE_SIZE));
 		      q.set('offset', String(activeOffset));
@@ -91,7 +92,7 @@ export function SMSPage() {
 		      if (search.trim()) q.set('search', search.trim());
 		      if (directionFilter !== 'all') q.set('direction', directionFilter);
 
-      const response = await fetch(buildApiUrl(`/api/sms/messages?${q.toString()}`), {
+      const response = await fetch(buildApiUrl(`/api/reports/sms?${q.toString()}`), {
         headers: {
           'x-user-id': user.id,
           'Content-Type': 'application/json',

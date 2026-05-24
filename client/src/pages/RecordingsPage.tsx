@@ -4,7 +4,6 @@ import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard } from '../components/DashboardPrimitives';
-import { triggerMightyCallRecordingsSync } from '../lib/apiClient';
 
 type Recording = {
   id: string;
@@ -80,12 +79,21 @@ export function RecordingsPage() {
   }, [filteredRows]);
 
   const syncRecentRecordings = async () => {
-    if (!user?.id || !orgId) return;
+    if (!user?.id) return;
     setSyncing(true);
+    setError(null);
     try {
-      await triggerMightyCallRecordingsSync(orgId, isoDateDaysAgo(180), new Date().toISOString().slice(0, 10), user.id);
+      const q = new URLSearchParams();
+      if (orgId) q.set('org_id', orgId);
+      const response = await fetch(buildApiUrl(`/api/mightycall/sync/recordings?${q.toString()}`), {
+        method: 'POST',
+        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgId: orgId || null }),
+      });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Failed to sync recordings');
+      await fetchRecordings(true);
     } catch (e: any) {
-      console.warn('[RecordingsPage] recent MightyCall sync failed:', e?.message || e);
+      setError(e?.message || 'Failed to sync recent MightyCall recordings');
     } finally {
       setSyncing(false);
     }
@@ -224,7 +232,14 @@ export function RecordingsPage() {
       eyebrow="Quality review"
       title="Recordings"
       description={`Organized recording history, playback, and download actions for ${orgName}.`}
-	      actions={<button onClick={() => fetchRecordings(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>}
+	      actions={(
+	        <div className="flex flex-wrap gap-2">
+	          <button onClick={syncRecentRecordings} disabled={syncing || loading} className="vs-button-primary">
+	            {syncing ? 'Syncing...' : 'Sync Recordings'}
+	          </button>
+	          <button onClick={() => fetchRecordings(true)} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>
+	        </div>
+	      )}
     >
       <div className="space-y-6">
         <SectionCard title="Recording filters" description="Search recording activity by the numbers involved.">

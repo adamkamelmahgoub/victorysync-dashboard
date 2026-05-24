@@ -5,7 +5,7 @@
  * This file creates a Supabase admin client using only process.env variables.
  * In Vercel or other Node.js hosts, ensure these env vars are set:
  * - SUPABASE_URL (e.g., https://xxxxx.supabase.co)
- * - SUPABASE_SERVICE_KEY (Service Role Key from Supabase settings)
+ * - SUPABASE_SERVICE_KEY or SUPABASE_SERVICE_ROLE_KEY (Service Role Key from Supabase settings)
  * 
  * The client is configured with autoRefreshToken: false and persistSession: false
  * because this is a server-side admin client, not a browser client.
@@ -15,7 +15,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Read env vars directly from process.env
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Validate at module load time
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {

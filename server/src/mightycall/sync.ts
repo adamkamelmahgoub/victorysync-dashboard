@@ -2,12 +2,15 @@ import { supabaseAdmin } from '../lib/supabaseClient';
 import { mightyCallGetFirst } from './client';
 import {
   arrayFromApiResponse,
+  callLifecycleStatus,
   detectDirectionFromNumbers,
   detectTransferFromCallDetail,
+  directionFromText,
   findRecordingUrl,
   firstIso,
   firstNumber,
   firstString,
+  liveStatusFromCall,
   normalizeCallStatus,
   normalizeMightyCallStatus,
   normalizePhone,
@@ -43,13 +46,13 @@ let lastStatusSyncAt = 0;
 let lastRecentCallsSyncAt = 0;
 let lastSlowSyncAt = 0;
 
-const CALL_LIST_PATHS = ['/calls', '/call-history', '/callhistory', '/journal/calls'];
-const CALL_DETAIL_PATHS = ['/calls/{id}', '/call-history/{id}', '/callhistory/{id}', '/journal/calls/{id}'];
+const CALL_LIST_PATHS = ['/calls', '/call-history', '/callhistory', '/journal/calls', '/journal/requests'];
+const CALL_DETAIL_PATHS = ['/calls/{id}', '/call-history/{id}', '/callhistory/{id}', '/journal/calls/{id}', '/journal/requests/{id}', '/requests/{id}'];
 const BUSINESS_NUMBER_PATHS = ['/phonenumbers', '/phone_numbers', '/business-numbers', '/businessNumbers'];
 const USER_PATHS = ['/users', '/profiles', '/members'];
 const USER_STATUS_PATHS = ['/profile/status', '/users/status', '/user/status', '/status'];
 const VOICEMAIL_PATHS = ['/voicemails', '/voice-mails', '/voicemail'];
-const SMS_PATHS = ['/messages', '/sms', '/text-messages', '/journal/messages', '/journal/requests'];
+const SMS_PATHS = ['/journal/requests', '/messages', '/sms', '/text-messages', '/journal/messages'];
 
 function emptyResult(reason: string): SyncResult {
   return {
@@ -150,18 +153,35 @@ async function loadOrgMembersByExtension() {
   return byExtension;
 }
 
+function membersForExtension(membersByExt: Map<string, any>, extension: string | null, orgId?: string | null) {
+  if (!extension) return [];
+  const all = Array.from(membersByExt.values()).filter((row) => row.extension === extension);
+  if (!orgId) return all;
+  return all.filter((row) => String(row.orgId) === String(orgId));
+}
+
+function unwrapApiObject(body: any) {
+  if (body && !Array.isArray(body) && body.data && !Array.isArray(body.data) && typeof body.data === 'object') return body.data;
+  return body;
+}
+
 function normalizeCallRow(raw: any, owner: Awaited<ReturnType<typeof resolveOrgByBusinessNumber>>, businessNumbers: string[]) {
   const externalCallId = firstString(raw?.external_call_id, raw?.externalCallId, raw?.callId, raw?.id, raw?.requestGuid, raw?.guid);
   const fromNumber = normalizePhone(firstString(raw?.from_number, raw?.from, raw?.caller?.number, raw?.client?.address, raw?.source?.number));
   const toNumber = normalizePhone(firstString(raw?.to_number, raw?.to, raw?.called?.[0]?.phone, raw?.businessNumber?.number, raw?.destination?.number));
   const businessNumber = normalizePhone(firstString(raw?.business_number, raw?.businessNumber?.number, raw?.businessNumber, owner?.number, toNumber, fromNumber));
-  const explicitDirection = String(firstString(raw?.direction, raw?.callDirection, raw?.Direction) || '').toLowerCase();
-  const direction = explicitDirection.includes('out')
-    ? 'outbound'
-    : explicitDirection.includes('in')
-      ? 'inbound'
-      : detectDirectionFromNumbers(fromNumber, toNumber, businessNumbers);
-  const extension = normalizePhoneDigits(firstString(raw?.extension, raw?.agent_extension, raw?.agent?.extension, raw?.user?.extension, raw?.called?.[0]?.extension));
+  const explicitDirection = directionFromText(firstString(raw?.direction, raw?.callDirection, raw?.Direction, raw?.origin, raw?.requestOrigin));
+  const direction = explicitDirection !== 'unknown' ? explicitDirection : detectDirectionFromNumbers(fromNumber, toNumber, businessNumbers);
+  const extension = normalizePhoneDigits(firstString(
+    raw?.extension,
+    raw?.agent_extension,
+    raw?.agentExtension,
+    raw?.agent?.extension,
+    raw?.user?.extension,
+    raw?.called?.[0]?.extension,
+    raw?.userExtension,
+    raw?.extensionNumber
+  ));
   return {
     externalCallId,
     orgId: owner?.orgId || null,
@@ -173,10 +193,10 @@ function normalizeCallRow(raw: any, owner: Awaited<ReturnType<typeof resolveOrgB
     extension,
     startedAt: firstIso(raw?.started_at, raw?.startedAt, raw?.dateTimeUtc, raw?.created, raw?.timestamp),
     connectedAt: firstIso(raw?.connected_at, raw?.connectedAt, raw?.answered_at, raw?.answeredAt),
-    endedAt: firstIso(raw?.ended_at, raw?.endedAt, raw?.endTime, raw?.finishedAt),
+    endedAt: firstIso(raw?.ended_at, raw?.endedAt, raw?.endTime, raw?.finishedAt, raw?.completedAt),
     durationSeconds: firstNumber(raw?.duration_seconds, raw?.durationSeconds, raw?.duration, raw?.callDuration),
     waitSeconds: firstNumber(raw?.wait_seconds, raw?.waitSeconds, raw?.queueWaitSeconds),
-    status: normalizeCallStatus(firstString(raw?.status, raw?.callStatus, raw?.state)),
+    status: normalizeCallStatus(firstString(raw?.status, raw?.callStatus, raw?.state, raw?.requestState, raw?.callState, raw?.result)),
     recordingUrl: findRecordingUrl(raw),
     raw,
   };
@@ -330,23 +350,183 @@ export async function syncRecentCalls(windowHours = 48): Promise<number> {
   const response = await mightyCallGetFirst<any>(CALL_LIST_PATHS, {
     from: start,
     to: end,
+    dateFrom: start,
+    dateTo: end,
     startUtc: start,
     endUtc: end,
+    type: 'Call',
+    requestType: 'Call',
+    showUsers: true,
     pageSize: 200,
     limit: 200,
   }, { optional: true });
-  const rawCalls = arrayFromApiResponse(response.data, ['data.calls', 'calls', 'items']);
+  const rawCalls = arrayFromApiResponse(response.data, ['data.calls', 'calls', 'requests', 'data.requests', 'items']);
   const businessPhones = await loadBusinessNumbers();
   const businessNumbers = businessPhones.map((phone) => phone.number).filter((value): value is string => !!value);
+  const membersByExt = await loadOrgMembersByExtension();
   let count = 0;
+  const activeKeys = new Set<string>();
   for (const raw of rawCalls.slice(0, 500)) {
     const owner = await resolveOrgByBusinessNumber(raw?.businessNumber?.number, raw?.businessNumber, raw?.to, raw?.to_number, raw?.from, raw?.from_number);
     const call = normalizeCallRow(raw, owner, businessNumbers);
     if (!call.orgId || !call.externalCallId) continue;
     await upsertCall(call);
+    const activeStatus = liveStatusFromCall({ ...raw, ...call });
+    if (activeStatus) {
+      await upsertLiveStatusFromCall(call, raw, activeStatus, membersByExt);
+      if (call.extension) activeKeys.add(`${call.orgId}:${call.extension}`);
+    } else {
+      await clearCompletedLiveStatus(call);
+    }
+    if (call.recordingUrl) {
+      await upsertRecording({
+        org_id: call.orgId,
+        external_call_id: call.externalCallId,
+        external_id: call.externalCallId,
+        from_number: call.fromNumber,
+        to_number: call.toNumber,
+        business_number: call.businessNumber,
+        direction: call.direction,
+        agent_extension: call.extension,
+        started_at: call.startedAt,
+        duration_seconds: call.durationSeconds,
+      }, raw, call.recordingUrl);
+    }
     count += 1;
   }
+  await expireCallPollStatuses(activeKeys);
   return count;
+}
+
+async function upsertLiveStatusFromCall(
+  call: ReturnType<typeof normalizeCallRow>,
+  raw: any,
+  normalizedStatus: 'ringing' | 'dialing' | 'on_call' | 'on_hold' | 'transferring',
+  membersByExt: Map<string, any>
+) {
+  if (!call.orgId || !call.extension || !call.externalCallId) return;
+  const member = membersForExtension(membersByExt, call.extension, call.orgId)[0] || {
+    orgId: call.orgId,
+    orgMemberId: null,
+    userId: null,
+    name: null,
+    extension: call.extension,
+  };
+  const now = new Date().toISOString();
+  const startedAt = call.startedAt || firstIso(raw?.created, raw?.dateTimeUtc) || now;
+  const direction = call.direction === 'unknown' ? null : call.direction;
+  const counterpart = direction === 'outbound' ? call.toNumber : call.fromNumber;
+  const row = {
+    org_id: call.orgId,
+    org_member_id: member.orgMemberId,
+    user_id: member.userId,
+    mightycall_user_id: firstString(raw?.userId, raw?.user?.id, raw?.agent?.id),
+    mightycall_extension: call.extension,
+    extension: call.extension,
+    agent_name: firstString(raw?.user?.displayName, raw?.user?.name, raw?.agent?.displayName, raw?.agent?.name, member.name),
+    raw_status: callLifecycleStatus(raw) || normalizedStatus,
+    normalized_status: normalizedStatus,
+    status: normalizedStatus,
+    current_call_id: call.externalCallId,
+    external_call_id: call.externalCallId,
+    current_call_direction: direction,
+    direction,
+    from_number: call.fromNumber,
+    to_number: call.toNumber,
+    business_number: call.businessNumber,
+    current_counterpart_number: counterpart,
+    started_at: startedAt,
+    answered_at: call.connectedAt,
+    status_started_at: startedAt,
+    ended_at: null,
+    last_event_at: now,
+    last_synced_at: now,
+    source: 'mightycall_api_call_poll',
+    stale: false,
+    raw_payload: raw,
+    raw_event: raw,
+    updated_at: now,
+  };
+  await supabaseAdmin.from('agent_live_status').upsert(row, { onConflict: 'org_id,mightycall_extension' });
+  try {
+    await supabaseAdmin.from('live_agent_statuses').upsert({
+      org_id: call.orgId,
+      org_member_id: member.orgMemberId,
+      mightycall_user_id: row.mightycall_user_id,
+      agent_name: row.agent_name,
+      extension: call.extension,
+      status: normalizedStatus,
+      raw_status: row.raw_status,
+      direction,
+      current_call_id: call.externalCallId,
+      from_number: call.fromNumber,
+      to_number: call.toNumber,
+      business_number: call.businessNumber,
+      started_at: startedAt,
+      connected_at: call.connectedAt,
+      last_seen_at: now,
+      raw_payload: raw,
+      updated_at: now,
+    }, { onConflict: 'org_id,extension' });
+  } catch {}
+}
+
+async function clearCompletedLiveStatus(call: ReturnType<typeof normalizeCallRow>) {
+  if (!call.orgId || !call.externalCallId) return;
+  const now = new Date().toISOString();
+  await supabaseAdmin
+    .from('agent_live_status')
+    .update({
+      normalized_status: 'available',
+      status: 'available',
+      raw_status: 'available',
+      current_call_id: null,
+      external_call_id: null,
+      current_call_direction: null,
+      direction: null,
+      current_counterpart_number: null,
+      ended_at: call.endedAt || now,
+      last_event_at: now,
+      last_synced_at: now,
+      source: 'mightycall_api_call_poll',
+      stale: false,
+      updated_at: now,
+    })
+    .eq('org_id', call.orgId)
+    .eq('current_call_id', call.externalCallId);
+}
+
+async function expireCallPollStatuses(activeKeys: Set<string>) {
+  const now = new Date().toISOString();
+  const { data } = await supabaseAdmin
+    .from('agent_live_status')
+    .select('org_id, mightycall_extension, normalized_status, current_call_id')
+    .eq('source', 'mightycall_api_call_poll')
+    .in('normalized_status', ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'])
+    .limit(1000);
+  for (const row of data || []) {
+    const key = `${(row as any).org_id}:${(row as any).mightycall_extension}`;
+    if (activeKeys.has(key)) continue;
+    await supabaseAdmin
+      .from('agent_live_status')
+      .update({
+        normalized_status: 'available',
+        status: 'available',
+        raw_status: 'available',
+        current_call_id: null,
+        external_call_id: null,
+        current_call_direction: null,
+        direction: null,
+        current_counterpart_number: null,
+        ended_at: now,
+        last_event_at: now,
+        last_synced_at: now,
+        stale: false,
+        updated_at: now,
+      })
+      .eq('org_id', (row as any).org_id)
+      .eq('mightycall_extension', (row as any).mightycall_extension);
+  }
 }
 
 async function upsertCall(call: ReturnType<typeof normalizeCallRow>) {
@@ -404,30 +584,38 @@ export async function syncCallDetails(maxCalls = 50): Promise<{ details: number;
   let recordings = 0;
   let transfers = 0;
   let transferDetailsSupported = false;
+  const membersByExt = await loadOrgMembersByExtension();
   for (const row of data || []) {
     const externalCallId = String((row as any).external_call_id || (row as any).external_id || '');
     if (!externalCallId) continue;
     const paths = CALL_DETAIL_PATHS.map((path) => path.replace('{id}', encodeURIComponent(externalCallId)));
     const response = await mightyCallGetFirst<any>(paths, {}, { optional: true });
     if (!response.data) continue;
+    const detailRaw = unwrapApiObject(response.data);
     details += 1;
-    const recordingUrl = findRecordingUrl(response.data);
-    const transfer = detectTransferFromCallDetail(response.data);
+    const recordingUrl = findRecordingUrl(detailRaw);
+    const transfer = detectTransferFromCallDetail(detailRaw);
     const owner = await resolveOrgByBusinessNumber((row as any).business_number, (row as any).to_number, (row as any).from_number);
-    const call = normalizeCallRow({ ...(row as any), ...response.data, id: externalCallId }, owner || {
+    const call = normalizeCallRow({ ...(row as any), ...detailRaw, id: externalCallId }, owner || {
       orgId: (row as any).org_id,
       id: '',
       number: (row as any).business_number || null,
       digits: normalizePhoneDigits((row as any).business_number) || '',
     }, [(row as any).business_number].filter(Boolean));
     await upsertCall({ ...call, orgId: (row as any).org_id, externalCallId });
+    const activeStatus = liveStatusFromCall({ ...detailRaw, ...call });
+    if (activeStatus) {
+      await upsertLiveStatusFromCall({ ...call, orgId: (row as any).org_id, externalCallId }, detailRaw, activeStatus, membersByExt);
+    } else {
+      await clearCompletedLiveStatus({ ...call, orgId: (row as any).org_id, externalCallId });
+    }
     if (recordingUrl) {
-      await upsertRecording((row as any), response.data, recordingUrl);
+      await upsertRecording((row as any), detailRaw, recordingUrl);
       recordings += 1;
     }
     if (transfer) {
       transferDetailsSupported = true;
-      await upsertTransfer((row as any), response.data, transfer);
+      await upsertTransfer((row as any), detailRaw, transfer);
       transfers += 1;
     }
   }
@@ -495,7 +683,22 @@ export async function syncVoicemails(): Promise<number> {
 }
 
 export async function syncSmsIfApiSupported(): Promise<{ synced: number; supported: boolean; reason?: string }> {
-  const response = await mightyCallGetFirst<any>(SMS_PATHS, { type: 'Message', requestType: 'Message', pageSize: 100, limit: 100 }, { optional: true });
+  const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const end = new Date().toISOString();
+  const response = await mightyCallGetFirst<any>(SMS_PATHS, {
+    type: 'Message',
+    requestType: 'Message',
+    origin: 'All',
+    state: 'All',
+    showUsers: true,
+    resolveContacts: false,
+    from: start,
+    to: end,
+    dateFrom: start,
+    dateTo: end,
+    pageSize: 200,
+    limit: 200,
+  }, { optional: true });
   if (!response.data) {
     return {
       synced: 0,
@@ -503,16 +706,26 @@ export async function syncSmsIfApiSupported(): Promise<{ synced: number; support
       reason: 'MightyCall API documentation did not expose SMS/message history endpoint',
     };
   }
-  const rows = arrayFromApiResponse(response.data, ['data.messages', 'messages', 'requests', 'items']);
+  const rows = arrayFromApiResponse(response.data, ['data.messages', 'messages', 'data.requests', 'requests', 'items']);
   const businessPhones = await loadBusinessNumbers();
   const businessNumbers = businessPhones.map((phone) => phone.number).filter((value): value is string => !!value);
   let synced = 0;
   for (const raw of rows) {
-    const from = normalizePhone(firstString(raw?.from_number, raw?.from, raw?.sender?.number, raw?.client?.address));
-    const to = normalizePhone(firstString(raw?.to_number, raw?.to, raw?.recipient?.number, raw?.destination?.number));
-    const owner = await resolveOrgByBusinessNumber(from, to, raw?.businessNumber?.number, raw?.businessNumber);
+    const apiDirection = directionFromText(firstString(raw?.direction, raw?.messageDirection, raw?.messageInfo?.origin, raw?.origin, raw?.type));
+    const businessNumber = normalizePhone(firstString(raw?.businessNumber?.number, raw?.businessNumber, raw?.messageInfo?.businessNumber));
+    const clientNumber = normalizePhone(firstString(raw?.client?.address, raw?.client?.number, raw?.messageInfo?.client?.address));
+    const rawFrom = normalizePhone(firstString(raw?.from_number, raw?.from, raw?.sender?.number, raw?.sender, raw?.client?.address));
+    const rawTo = normalizePhone(firstString(raw?.to_number, raw?.to, raw?.recipient?.number, raw?.recipient, raw?.destination?.number));
+    const from = apiDirection === 'outbound'
+      ? (businessNumber || rawFrom)
+      : (rawFrom || clientNumber);
+    const to = apiDirection === 'outbound'
+      ? (rawTo || clientNumber)
+      : (businessNumber || rawTo);
+    const owner = await resolveOrgByBusinessNumber(businessNumber, from, to);
     if (!owner) continue;
-    const direction = detectDirectionFromNumbers(from, to, businessNumbers);
+    const inferredDirection = detectDirectionFromNumbers(from, to, businessNumbers);
+    const direction = apiDirection !== 'unknown' ? apiDirection : inferredDirection;
     const externalId = firstString(raw?.messageId, raw?.message_id, raw?.id, raw?.requestGuid)
       || [from, to, firstIso(raw?.created, raw?.sentAt) || new Date().toISOString()].join(':');
     await supabaseAdmin.from('mightycall_sms_messages').upsert({

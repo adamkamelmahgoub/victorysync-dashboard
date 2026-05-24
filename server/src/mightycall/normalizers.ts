@@ -53,11 +53,32 @@ export function findRecordingUrl(raw: any): string | null {
     'recording.url',
     'recording.mediaUrl',
     'recording.audioUrl',
+    'callRecord.uri',
+    'callRecord.link',
+    'callRecord.downloadUrl',
+    'callRecord.recordingUrl',
+    'call_record.uri',
+    'call_record.link',
+    'call_record.downloadUrl',
+    'callRecording.uri',
+    'callRecording.link',
+    'callRecording.downloadUrl',
     'recordings.0.url',
+    'recordings.0.uri',
+    'recordings.0.link',
+    'recordings.0.downloadUrl',
     'recordings.0.mediaUrl',
     'recordings.0.audioUrl',
   ]);
   return value ? String(value) : null;
+}
+
+export function directionFromText(value: unknown): NormalizedDirection {
+  const text = String(value || '').toLowerCase().trim();
+  if (!text) return 'unknown';
+  if (text.includes('out') || text === 'sent' || text === 'api' || text === 'external') return 'outbound';
+  if (text.includes('in') || text === 'received' || text === 'internal') return 'inbound';
+  return 'unknown';
 }
 
 export function normalizeMightyCallStatus(rawStatus: string | null | undefined) {
@@ -87,7 +108,7 @@ export function normalizeCallStatus(rawStatus: unknown): string {
 }
 
 export function detectTransferFromCallDetail(raw: any) {
-  const transferTarget = pickDeep(raw, [
+  let transferTarget = pickDeep(raw, [
     'transferTarget',
     'TransferTarget',
     'transferredTo',
@@ -96,15 +117,81 @@ export function detectTransferFromCallDetail(raw: any) {
     'transfer.target',
     'legs.0.transferTarget',
     'legs.0.transferredTo',
+    'callLegs.0.transferTarget',
+    'callLegs.0.transferredTo',
+    'history.0.transferTarget',
+    'history.0.transferredTo',
+    'events.0.transferTarget',
+    'events.0.transferredTo',
   ]);
-  const transferType = pickDeep(raw, ['transferType', 'TransferType', 'transfer.type']);
-  const transferStatus = pickDeep(raw, ['transferStatus', 'TransferStatus', 'transfer.status']);
+  let transferType = pickDeep(raw, ['transferType', 'TransferType', 'transfer.type', 'legs.0.transferType', 'callLegs.0.transferType']);
+  let transferStatus = pickDeep(raw, ['transferStatus', 'TransferStatus', 'transfer.status', 'legs.0.transferStatus', 'callLegs.0.transferStatus']);
+  if (!transferTarget && !transferType && !transferStatus) {
+    const discovered = findTransferLike(raw);
+    transferTarget = discovered.target;
+    transferType = discovered.type;
+    transferStatus = discovered.status;
+  }
   if (!transferTarget && !transferType && !transferStatus) return null;
   return {
     transferTarget: transferTarget ? String(transferTarget) : null,
     transferType: transferType ? String(transferType) : 'unknown',
     transferStatus: transferStatus ? String(transferStatus) : 'unknown',
   };
+}
+
+function findTransferLike(raw: any): { target: string | null; type: string | null; status: string | null } {
+  const out = { target: null as string | null, type: null as string | null, status: null as string | null };
+  const seen = new Set<any>();
+  const visit = (value: any) => {
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    for (const [key, child] of Object.entries(value)) {
+      const lower = key.toLowerCase();
+      if (lower.includes('transfer')) {
+        if (typeof child === 'string' || typeof child === 'number') {
+          if (lower.includes('target') || lower.includes('to')) out.target ||= String(child);
+          else if (lower.includes('type')) out.type ||= String(child);
+          else if (lower.includes('status') || lower.includes('result')) out.status ||= String(child);
+          else out.type ||= String(child);
+        } else if (child && typeof child === 'object') {
+          out.target ||= firstString((child as any).target, (child as any).to, (child as any).transferredTo, (child as any).extension, (child as any).number);
+          out.type ||= firstString((child as any).type, (child as any).transferType);
+          out.status ||= firstString((child as any).status, (child as any).result, (child as any).transferStatus);
+        }
+      }
+      if (lower === 'transferredto' || lower === 'transferdestination') out.target ||= firstString(child);
+      visit(child);
+    }
+  };
+  visit(raw);
+  return out;
+}
+
+export function callLifecycleStatus(raw: any): string {
+  return String(firstString(
+    raw?.normalized_status,
+    raw?.status,
+    raw?.callStatus,
+    raw?.state,
+    raw?.requestState,
+    raw?.callState,
+    raw?.result
+  ) || '').toLowerCase();
+}
+
+export function liveStatusFromCall(raw: any): 'ringing' | 'dialing' | 'on_call' | 'on_hold' | 'transferring' | null {
+  const status = callLifecycleStatus(raw);
+  const endedAt = firstIso(raw?.ended_at, raw?.endedAt, raw?.endTime, raw?.finishedAt, raw?.completedAt);
+  if (endedAt) return null;
+  if (status.includes('miss') || status.includes('complete') || status.includes('end') || status.includes('hang') || status.includes('fail') || status.includes('cancel') || status.includes('abandon') || status.includes('voice')) return null;
+  if (status.includes('transfer')) return 'transferring';
+  if (status.includes('hold')) return 'on_hold';
+  if (status.includes('ring')) return 'ringing';
+  if (status.includes('dial')) return 'dialing';
+  if (status.includes('progress') || status.includes('connect') || status.includes('talk') || status.includes('busy') || status.includes('active') || status.includes('current') || status.includes('answer')) return 'on_call';
+  if (raw?.currentCall || raw?.current_call || raw?.call) return 'on_call';
+  return null;
 }
 
 export function arrayFromApiResponse(body: any, keys: string[] = []): any[] {

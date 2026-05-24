@@ -1,7 +1,14 @@
 import express from 'express';
 import { isOrgMember, isPlatformAdmin } from '../auth/rbac';
 import { supabaseAdmin } from '../lib/supabaseClient';
-import { runLiveStatusSync, runMightyCallSync } from '../mightycall/sync';
+import {
+  runLiveStatusSync,
+  runMightyCallSync,
+  syncCallDetails,
+  syncRecentCalls,
+  syncSmsIfApiSupported,
+  syncTransfersFromCallDetailsIfAvailable,
+} from '../mightycall/sync';
 
 const router = express.Router();
 
@@ -141,6 +148,61 @@ router.post('/mightycall/sync', async (req, res) => {
     res.json(result);
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'mightycall_sync_failed' });
+  }
+});
+
+router.post('/mightycall/sync/recordings', async (req, res) => {
+  try {
+    const actorId = await getActor(req);
+    const orgId = String(req.query.org_id || req.body?.orgId || req.body?.org_id || '').trim();
+    if (orgId && !(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, orgId))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    await syncRecentCalls(168);
+    const details = await syncCallDetails(100);
+    res.json({
+      ok: true,
+      recordings_synced: details.recordings,
+      call_details_synced: details.details,
+      transfers_synced: details.transfers,
+      source: 'mightycall_api_call_details',
+    });
+  } catch (err: any) {
+    res.status(err?.status || 500).json({ error: err?.message || 'mightycall_recordings_sync_failed' });
+  }
+});
+
+router.post('/mightycall/sync/sms', async (req, res) => {
+  try {
+    const actorId = await getActor(req);
+    const orgId = String(req.query.org_id || req.body?.orgId || req.body?.org_id || '').trim();
+    if (orgId && !(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, orgId))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const result = await syncSmsIfApiSupported();
+    res.json({
+      ok: true,
+      sms_synced: result.synced,
+      smsSupported: result.supported,
+      reason: result.reason,
+      source: result.supported ? 'mightycall_api' : 'local_db_only',
+    });
+  } catch (err: any) {
+    res.status(err?.status || 500).json({ error: err?.message || 'mightycall_sms_sync_failed' });
+  }
+});
+
+router.post('/mightycall/sync/transfers', async (req, res) => {
+  try {
+    const actorId = await getActor(req);
+    const orgId = String(req.query.org_id || req.body?.orgId || req.body?.org_id || '').trim();
+    if (orgId && !(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, orgId))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const transfers = await syncTransfersFromCallDetailsIfAvailable();
+    res.json({ ok: true, transfers_synced: transfers, source: 'mightycall_api_call_details' });
+  } catch (err: any) {
+    res.status(err?.status || 500).json({ error: err?.message || 'mightycall_transfers_sync_failed' });
   }
 });
 
