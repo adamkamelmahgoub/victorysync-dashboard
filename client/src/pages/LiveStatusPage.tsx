@@ -13,6 +13,7 @@ type LiveAgentStatus = {
   on_call: boolean;
   counterpart?: string | null;
   status?: string | null;
+  normalized_status?: string | null;
   direction?: string | null;
   from_number?: string | null;
   to_number?: string | null;
@@ -69,7 +70,8 @@ function getLiveDuration(agent: LiveAgentStatus, nowMs: number) {
 }
 
 function normalizedStatus(agent: LiveAgentStatus) {
-  const raw = String(agent.status || agent.raw_status || '').toLowerCase();
+  const raw = String(agent.normalized_status || agent.status || agent.raw_status || '').toLowerCase();
+  if (agent.on_call || raw.includes('on_call') || raw.includes('on call') || raw.includes('connect') || raw.includes('talk')) return 'on_call';
   if (agent.stale || isStale(agent)) return 'stale';
   if (raw.includes('dnd') || raw.includes('disturb')) return 'dnd';
   if (raw.includes('offline')) return 'offline';
@@ -77,7 +79,7 @@ function normalizedStatus(agent: LiveAgentStatus) {
   if (raw.includes('dial')) return 'dialing';
   if (raw.includes('hold')) return 'on_hold';
   if (raw.includes('transfer')) return 'transferring';
-  if (agent.on_call || raw.includes('call') || raw.includes('connect') || raw.includes('talk')) return 'on_call';
+  if (raw.includes('call')) return 'on_call';
   if (raw.includes('wrap')) return 'wrap_up';
   if (raw.includes('available') || raw.includes('idle') || raw.includes('ready')) return 'available';
   return 'unknown';
@@ -190,7 +192,7 @@ const LiveStatusPage: FC = () => {
   const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));
   const onCall = items.filter((agent) => agent.on_call).length;
   const idle = Math.max(items.length - onCall, 0);
-	  const staleItems = items.filter((agent) => agent.stale || isStale(agent, nowMs));
+	  const staleItems = items.filter((agent) => !agent.on_call && (agent.stale || isStale(agent, nowMs)));
 
   const forceSync = async () => {
     if (!user?.id) return;

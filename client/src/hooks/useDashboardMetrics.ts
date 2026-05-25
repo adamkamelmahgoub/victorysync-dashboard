@@ -28,26 +28,26 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
     setLoading(true);
     setError(null);
     try {
-      // Call backend API which handles today's metrics and org filtering
       const baseUrl = API_BASE_URL || window.location.origin;
-      const url = new URL(`${baseUrl}/api/client-metrics`);
+      const today = new Date().toISOString().slice(0, 10);
+      const url = new URL(`${baseUrl}/api/reports/overview`);
       if (orgId) {
         url.searchParams.set('org_id', orgId);
       }
+      url.searchParams.set('start_date', today);
+      url.searchParams.set('end_date', today);
 
       const headers: Record<string, string> = {};
       if (user && user.id) headers['x-user-id'] = user.id;
 
       const json = await fetchJson(url.toString(), { headers });
-      const metrics = json.metrics || {
-        total_calls: 0,
-        answered_calls: 0,
-        answer_rate_pct: 0,
-        avg_wait_seconds: 0,
-      };
+      const overview = json.overview || {};
+      const totalCalls = Number(overview.total_calls || 0);
+      const answeredCalls = Number(overview.answered_calls || 0);
+      const answerRatePct = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
 
       // Map backend response to frontend interface
-      const answer_rate_today = metrics.answer_rate_pct ?? 0;
+      const answer_rate_today = answerRatePct;
       
       // For yesterday's rate, we'd need a separate call; for now use a default
       const answer_rate_yesterday = answer_rate_today * 0.9; // Placeholder
@@ -58,8 +58,8 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       if (orgId) {
         try {
           try {
-            const orgData = await fetchJson(buildApiUrl(`/api/admin/orgs/${orgId}`), { headers });
-            assignedPhones = orgData.phones || [];
+            const numbersData = await fetchJson(buildApiUrl(`/api/reports/numbers?org_id=${encodeURIComponent(orgId)}&start_date=${today}&end_date=${today}`), { headers });
+            assignedPhones = (numbersData.numbers || []).map((row: any) => ({ id: row.id, number: row.number, label: row.label }));
           } catch (e) {
             // keep assignedPhones empty on failure
             console.warn('Failed to fetch assigned phones:', e);
@@ -70,10 +70,10 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       }
 
       setMetrics({
-        total_calls_today: metrics.total_calls ?? 0,
-        answered_calls_today: metrics.answered_calls ?? 0,
+        total_calls_today: totalCalls,
+        answered_calls_today: answeredCalls,
         answer_rate_today,
-        avg_wait_seconds_today: metrics.avg_wait_seconds ?? 0,
+        avg_wait_seconds_today: Number(overview.avg_wait_seconds || 0),
         answer_rate_yesterday,
         delta_pp,
         assignedPhones,

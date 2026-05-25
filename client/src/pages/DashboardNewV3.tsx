@@ -14,6 +14,10 @@ type LiveAgentStatus = {
   on_call: boolean;
   counterpart?: string | null;
   status?: string | null;
+  normalized_status?: string | null;
+  direction?: string | null;
+  from_number?: string | null;
+  to_number?: string | null;
   started_at?: string | null;
   source?: string | null;
   raw_status?: string | null;
@@ -119,7 +123,7 @@ const DashboardNewV3: FC = () => {
   const answered = metrics?.answered_calls_today || 0;
   const total = metrics?.total_calls_today || 0;
   const missed = Math.max(total - answered, 0);
-  const onCallCount = liveAgents.filter((agent) => agent.on_call).length;
+  const onCallCount = liveAgents.filter((agent) => agent.on_call || String(agent.normalized_status || agent.status || '').toLowerCase().includes('call')).length;
   const availableCount = Math.max(liveAgents.length - onCallCount, 0);
 
   const workflowCards = useMemo(() => ([
@@ -345,8 +349,8 @@ const DashboardNewV3: FC = () => {
                             {agent.extension ? ` - Ext ${agent.extension}` : ''}
                           </div>
                         </div>
-                        <StatusBadge tone={agent.on_call ? 'success' : 'neutral'}>
-                          {agent.on_call ? 'On Call' : (agent.status || 'Idle')}
+                        <StatusBadge tone={(agent.on_call || String(agent.normalized_status || agent.status || '').toLowerCase().includes('call')) ? 'success' : 'neutral'}>
+                          {(agent.on_call || String(agent.normalized_status || agent.status || '').toLowerCase().includes('call')) ? 'On Call' : (agent.status || 'Idle')}
                         </StatusBadge>
                       </div>
 
@@ -354,6 +358,9 @@ const DashboardNewV3: FC = () => {
                         <div className="vs-surface-muted p-4">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Counterpart</div>
                           <div className="mt-3 text-sm text-slate-200 break-words">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
+                          {agent.on_call && agent.direction && (
+                            <div className="mt-2 text-xs text-slate-500">{agent.direction === 'outbound' ? 'Outbound' : 'Inbound'}</div>
+                          )}
                         </div>
                         <div className="vs-surface-muted p-4">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Call state</div>
