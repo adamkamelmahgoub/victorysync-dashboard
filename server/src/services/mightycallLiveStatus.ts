@@ -202,7 +202,7 @@ async function fetchOfficialProfileStatusByExtension(
 
   for (const attempt of attempts) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
     let res: any;
     try {
       res = await fetch(attempt.url, {
@@ -274,6 +274,10 @@ function parseMs(value: any): number | null {
 function parseDurationSeconds(value: any): number | null {
   const num = Number(value);
   if (!Number.isFinite(num) || num < 0) return null;
+  // MightyCall call evidence often returns duration as milliseconds while some
+  // report endpoints use seconds. Treat large numeric values as milliseconds so
+  // completed calls expire quickly instead of staying "on call" for hours.
+  if (num > 6 * 60 * 60) return Math.floor(num / 1000);
   return Math.floor(num);
 }
 
@@ -615,17 +619,17 @@ export async function getMightyCallStatusByExtension(input: {
   const [officialProfile, fallbackProfile, liveCall, recentCalls, recentCallsBroad, recentComms] = await Promise.all([
     withTimeout(
       fetchOfficialProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
-      4200,
+      1800,
       null
     ),
     withTimeout(
       fetchMightyCallProfileStatusByExtension(extension, token, apiKeyOverride).catch(() => null),
-      4200,
+      1800,
       null
     ),
     withTimeout(
       fetchMightyCallLiveCallByExtension(extension, token, apiKeyOverride).catch(() => null),
-      4200,
+      1800,
       null
     ),
     withTimeout(
@@ -638,7 +642,7 @@ export async function getMightyCallStatusByExtension(input: {
         fast: true,
         returnOnFirstSuccess: true,
       }, apiKeyOverride).catch(() => []),
-      4200,
+      1800,
       [] as any[]
     ),
     withTimeout(
@@ -650,7 +654,7 @@ export async function getMightyCallStatusByExtension(input: {
         fast: true,
         returnOnFirstSuccess: true,
       }, apiKeyOverride).catch(() => []),
-      4200,
+      1800,
       [] as any[]
     ),
     withTimeout(
@@ -663,7 +667,7 @@ export async function getMightyCallStatusByExtension(input: {
         showUsers: 'true',
         resolveContacts: 'false',
       }, apiKeyOverride).catch(() => []),
-      4200,
+      1800,
       [] as any[]
     ),
   ]);

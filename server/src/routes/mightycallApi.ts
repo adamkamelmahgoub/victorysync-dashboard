@@ -336,7 +336,7 @@ async function loadDirectMightyCallStatuses(assignments: any[]) {
     try {
       const status = await withTimeout(
         getMightyCallStatusByExtension({ extension: assignment.extension, orgId: assignment.org_id }),
-        6500,
+        3000,
         null as any
       );
       return status ? resolverStatusToLiveRow(assignment, status) : null;
@@ -356,7 +356,6 @@ router.get('/live-status', async (req, res) => {
     res.setHeader('Expires', '0');
     const scope = await resolveOrgScope(req);
     if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'mightycall_api_live_refresh', api_source: 'mightycall_api_poll' });
-    const refreshResult = await refreshLiveStatusInline('live-status-read');
     const assignments = await loadAssignedExtensionRows(scope.orgIds);
     const direct = await loadDirectMightyCallStatuses(assignments);
     const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
@@ -384,8 +383,13 @@ router.get('/live-status', async (req, res) => {
       refreshed_at: refreshedAt,
       source: 'mightycall_api_live_refresh',
       api_source: 'mightycall_api_poll',
-      live_status_version: 'api-only-live-refresh',
-      sync: refreshResult || null,
+      live_status_version: 'api-only-direct-live-refresh',
+      sync: {
+        ok: true,
+        skipped: true,
+        reason: 'direct_extension_status_read',
+        refreshed_at: new Date().toISOString(),
+      },
       direct_warnings: direct.warnings,
     });
   } catch (err: any) {

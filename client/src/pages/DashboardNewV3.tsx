@@ -112,7 +112,7 @@ const DashboardNewV3: FC = () => {
     };
 
     loadLiveAgents();
-    const intervalId = window.setInterval(loadLiveAgents, 5000);
+    const intervalId = window.setInterval(loadLiveAgents, 2500);
     const onFocus = () => {
       if (document.visibilityState === 'visible') loadLiveAgents();
     };

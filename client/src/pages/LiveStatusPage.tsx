@@ -178,7 +178,7 @@ const LiveStatusPage: FC = () => {
 	    load();
 	    const intervalId = window.setInterval(() => {
 	      if (document.visibilityState === 'visible') load();
-	    }, 2500);
+	    }, 1000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') load();
     };
