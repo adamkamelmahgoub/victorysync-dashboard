@@ -46,7 +46,7 @@ export type MightyCallStatusByExtension = {
 };
 
 const LIVE_STATUS_RESOLVER_VERSION = 'deterministic_v2';
-const LIVE_EVIDENCE_FRESH_MS = 60_000;
+const LIVE_EVIDENCE_FRESH_MS = 20_000;
 const LIVE_DURATION_PROGRESS_WINDOW_MS = 25_000;
 const LIVE_DURATION_MAP_TTL_MS = 10 * 60 * 1000;
 const liveDurationProgressByCallId = new Map<string, {
@@ -538,7 +538,8 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
         row?.connected === true ||
         row?.is_connected === true ||
         row?.onCall === true ||
-        row?.inCall === true
+        row?.inCall === true ||
+        liveCallHasConnectedPeer(row)
       );
       const startedMs = parseMs(
         row?.started_at ||
@@ -561,7 +562,7 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
       }
       if (!startedMs) return hasActiveStatus || hasConnectedFlag;
       const ageMs = now - startedMs;
-      if (!(ageMs >= 0 && ageMs <= (20 * 60 * 1000))) return false;
+      if (!(ageMs >= 0 && ageMs <= (5 * 60 * 1000))) return false;
       return hasActiveStatus || hasConnectedFlag;
     });
 
@@ -659,7 +660,7 @@ export async function getMightyCallStatusByExtension(input: {
     ),
     withTimeout(
       fetchMightyCallContactCenterCommunications(token, {
-        from: new Date(Date.now() - (3 * 60 * 1000)).toISOString(),
+        from: new Date(Date.now() - (45 * 1000)).toISOString(),
         to: new Date(Date.now() + (60 * 1000)).toISOString(),
         type: 'Call',
         pageSize: '50',

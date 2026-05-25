@@ -28,6 +28,9 @@ type LiveAgentStatus = {
   stale_after?: string | null;
   stale?: boolean;
   evidence_age_ms?: number | null;
+  decision_reason?: string | null;
+  source_endpoint?: string | null;
+  current_call_id?: string | null;
 };
 
 function fmtDurationFrom(startAt?: string | null, nowMs = Date.now()) {
@@ -325,6 +328,8 @@ const LiveStatusPage: FC = () => {
                         </div>
                         <div className="mt-2 text-xs text-slate-500">Raw status: {agent.raw_status || '-'}</div>
                         <div className="mt-1 text-xs text-slate-500">API source: {agent.api_source || agent.source || '-'}</div>
+                        <div className="mt-1 text-xs text-slate-500">Decision: {agent.decision_reason || '-'}</div>
+                        <div className="mt-1 text-xs text-slate-500">Call ID: {agent.current_call_id || '-'}</div>
                         <div className="mt-2 text-xs text-slate-500">Last seen {fmtDateTime(agent.last_seen_at)}</div>
                       </div>
                       <div className="vs-surface-muted p-4">

@@ -230,6 +230,10 @@ function mapLiveRow(row: any, orgNames: Map<string, string>, identityByKey: Map<
     stale: false,
     source: row.source || 'mightycall_api_poll',
     api_source: row.source || 'mightycall_api_poll',
+    decision_reason: extensionStatus.decisionReason || row.raw_payload?.resolverRaw?.decisionReason || null,
+    source_endpoint: row.raw_payload?.resolverRaw?.profileStatus?.sourceEndpoint || null,
+    current_call_id: active ? row.current_call_id || null : null,
+    evidence_age_ms: extensionStatus.evidenceAgeMs ?? row.raw_payload?.resolverRaw?.activeEvidenceAgeMs ?? null,
   };
 }
 
