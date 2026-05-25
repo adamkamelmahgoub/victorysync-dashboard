@@ -164,6 +164,8 @@ export default function ReportPage() {
     try {
       const q = new URLSearchParams();
       if (activeOrgId) q.set('org_id', activeOrgId);
+      if (startDate) q.set('start_date', startDate);
+      if (endDate) q.set('end_date', endDate);
       const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
         method: 'POST',
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },

@@ -9,6 +9,7 @@ import {
   syncSmsIfApiSupported,
   syncTransfersFromCallDetailsIfAvailable,
 } from '../mightycall/sync';
+import { getMightyCallStatusByExtension } from '../services/mightycallLiveStatus';
 import {
   syncMightyCallCallHistory,
   syncMightyCallRecordings,
@@ -292,12 +293,67 @@ function assignmentToLiveRow(row: any) {
   };
 }
 
+function resolverStatusToLiveRow(assignment: any, status: any) {
+  const now = new Date().toISOString();
+  const normalized = status?.normalizedStatus === 'unknown' ? 'available' : (status?.normalizedStatus || 'unknown');
+  const active = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(normalized);
+  return {
+    org_id: assignment.org_id,
+    user_id: assignment.user_id,
+    mightycall_user_id: status?.mightycallUserId || null,
+    mightycall_extension: assignment.extension,
+    extension: assignment.extension,
+    agent_name: status?.name || assignment.display_name || assignment.email || null,
+    normalized_status: normalized,
+    status: normalized,
+    raw_status: status?.rawStatus || normalized,
+    current_call_id: active ? status?.currentCallId || null : null,
+    current_call_direction: active ? status?.direction || null : null,
+    direction: active ? status?.direction || null : null,
+    current_counterpart_number: active ? status?.counterpartNumber || null : null,
+    status_started_at: active ? status?.statusStartedAt || null : null,
+    started_at: active ? status?.statusStartedAt || null : null,
+    last_synced_at: status?.lastSyncedAt || now,
+    last_event_at: status?.lastSyncedAt || now,
+    updated_at: now,
+    source: status?.source || 'mightycall_user_status_by_extension',
+    raw_payload: {
+      assignment,
+      extensionStatus: status,
+      mightycallEmail: status?.email || null,
+      resolverRaw: status?.raw || null,
+    },
+  };
+}
+
+async function loadDirectMightyCallStatuses(assignments: any[]) {
+  if (assignments.length === 0) return { rows: [] as any[], warnings: [] as string[] };
+  const warnings: string[] = [];
+  const limited = assignments.slice(0, 25);
+  const rows = await Promise.all(limited.map(async (assignment) => {
+    try {
+      const status = await withTimeout(
+        getMightyCallStatusByExtension({ extension: assignment.extension, orgId: assignment.org_id }),
+        6500,
+        null as any
+      );
+      return status ? resolverStatusToLiveRow(assignment, status) : null;
+    } catch (err: any) {
+      warnings.push(`${assignment.extension}: ${err?.message || String(err)}`);
+      return null;
+    }
+  }));
+  if (assignments.length > limited.length) warnings.push(`Live status direct refresh limited to ${limited.length} assigned extensions`);
+  return { rows: rows.filter(Boolean), warnings };
+}
+
 router.get('/live-status', async (req, res) => {
   try {
     const scope = await resolveOrgScope(req);
     if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'mightycall_api_live_refresh', api_source: 'mightycall_api_poll' });
     const refreshResult = await refreshLiveStatusInline('live-status-read');
     const assignments = await loadAssignedExtensionRows(scope.orgIds);
+    const direct = await loadDirectMightyCallStatuses(assignments);
     const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
     const { data, error } = await supabaseAdmin
       .from('agent_live_status')
@@ -308,6 +364,10 @@ router.get('/live-status', async (req, res) => {
     const { data: orgs } = await supabaseAdmin.from('organizations').select('id, name').in('id', scope.orgIds);
     const orgNames = new Map((orgs || []).map((row: any) => [String(row.id), String(row.name || '')]));
     const liveByKey = new Map((data || []).map((row: any) => [`${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`, row]));
+    for (const row of direct.rows) {
+      const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
+      liveByKey.set(key, row);
+    }
     for (const assignment of assignments) {
       const key = `${assignment.org_id}:${assignment.extension}`;
       if (!liveByKey.has(key)) liveByKey.set(key, assignmentToLiveRow(assignment));
@@ -321,6 +381,7 @@ router.get('/live-status', async (req, res) => {
       api_source: 'mightycall_api_poll',
       live_status_version: 'api-only-live-refresh',
       sync: refreshResult || null,
+      direct_warnings: direct.warnings,
     });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'live_status_failed' });
@@ -346,7 +407,7 @@ router.post('/mightycall/sync', async (req, res) => {
     await getSyncOrgIds(req);
     const [apiResult, journalResult] = await Promise.all([
       runMightyCallSync('manual-full-sync'),
-      runLegacyJournalSync(req, { includeReports: true, includeCalls: false, includeRecordings: false, includeSms: true }),
+      runLegacyJournalSync(req, { includeReports: true, includeCalls: true, includeRecordings: true, includeSms: true }),
     ]);
     res.json({
       ...apiResult,
