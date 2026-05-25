@@ -33,7 +33,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
 
 async function refreshLiveStatusInline(reason: string) {
   const now = Date.now();
-  if (now - lastInlineLiveRefreshAt < 4_000) return lastInlineLiveRefreshResult;
   lastInlineLiveRefreshAt = now;
   const statusResult = await withTimeout(runLiveStatusSync(reason), 7_000, { ok: false, timeout: true, warnings: ['MightyCall status refresh timed out'] } as any);
   const recentCalls = await withTimeout(syncRecentCalls(2), 7_000, 0);
@@ -352,6 +351,9 @@ async function loadDirectMightyCallStatuses(assignments: any[]) {
 
 router.get('/live-status', async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     const scope = await resolveOrgScope(req);
     if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'mightycall_api_live_refresh', api_source: 'mightycall_api_poll' });
     const refreshResult = await refreshLiveStatusInline('live-status-read');

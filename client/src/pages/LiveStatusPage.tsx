@@ -148,13 +148,15 @@ const LiveStatusPage: FC = () => {
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const liveRequestSeq = useRef(0);
   const liveRequestInFlight = useRef(false);
+  const lastLiveRequestStartedAt = useRef(0);
 
   const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
 
   const load = async () => {
     if (!user?.id) return;
-    if (liveRequestInFlight.current) return;
+    if (liveRequestInFlight.current && Date.now() - lastLiveRequestStartedAt.current < 10000) return;
     liveRequestInFlight.current = true;
+    lastLiveRequestStartedAt.current = Date.now();
     const requestSeq = ++liveRequestSeq.current;
     try {
       setLoading(true);
@@ -176,7 +178,7 @@ const LiveStatusPage: FC = () => {
 	    load();
 	    const intervalId = window.setInterval(() => {
 	      if (document.visibilityState === 'visible') load();
-	    }, 5000);
+	    }, 2500);
     const onFocus = () => {
       if (document.visibilityState === 'visible') load();
     };

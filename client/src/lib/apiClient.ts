@@ -207,10 +207,12 @@ export async function getVerifiedAdminMightyCallExtensions(userId?: string) {
 export async function getLiveAgentStatus(params?: { orgId?: string | null }, userId?: string) {
   const q = new URLSearchParams();
   if (params?.orgId) q.set('org_id', params.orgId);
+  q.set('_live', String(Date.now()));
   const suffix = q.toString() ? `?${q.toString()}` : '';
   return await fetchJson(`/api/live-status${suffix}`, {
-    headers: { 'x-user-id': userId || '' },
-    timeoutMs: 20000,
+    cache: 'no-store',
+    headers: { 'x-user-id': userId || '', 'Cache-Control': 'no-cache' },
+    timeoutMs: 12000,
   });
 }
 

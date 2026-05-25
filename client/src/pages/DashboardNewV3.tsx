@@ -73,6 +73,7 @@ const DashboardNewV3: FC = () => {
   const [liveError, setLiveError] = useState<string | null>(null);
   const [liveRefreshedAt, setLiveRefreshedAt] = useState<string | null>(null);
   const liveRequestInFlight = useRef(false);
+  const lastLiveRequestStartedAt = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +81,7 @@ const DashboardNewV3: FC = () => {
     const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
 
     const loadLiveAgents = async () => {
-      if (liveRequestInFlight.current) return;
+      if (liveRequestInFlight.current && Date.now() - lastLiveRequestStartedAt.current < 10000) return;
       if (!user?.id) {
         if (!cancelled) {
           setLiveAgents([]);
@@ -91,6 +92,7 @@ const DashboardNewV3: FC = () => {
       }
 
       liveRequestInFlight.current = true;
+      lastLiveRequestStartedAt.current = Date.now();
       try {
         if (!cancelled) {
           setLiveLoading(true);
@@ -110,7 +112,7 @@ const DashboardNewV3: FC = () => {
     };
 
     loadLiveAgents();
-    const intervalId = window.setInterval(loadLiveAgents, 15000);
+    const intervalId = window.setInterval(loadLiveAgents, 5000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') loadLiveAgents();
     };
