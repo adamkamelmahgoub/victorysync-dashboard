@@ -30,6 +30,11 @@ type WorkflowCardProps = {
   onClick: () => void;
 };
 
+function isAgentOnCall(agent: LiveAgentStatus) {
+  const status = String(agent.normalized_status || agent.status || '').toLowerCase();
+  return agent.on_call || status.includes('on_call') || status.includes('on call') || status.includes('ring') || status.includes('dial') || status.includes('hold') || status.includes('transfer') || status.includes('connect') || status.includes('talk');
+}
+
 function formatSecondsAsMinutes(s: number | undefined | null) {
   if (!s && s !== 0) return '0m 0s';
   const secs = Math.round(s || 0);
@@ -123,7 +128,7 @@ const DashboardNewV3: FC = () => {
   const answered = metrics?.answered_calls_today || 0;
   const total = metrics?.total_calls_today || 0;
   const missed = Math.max(total - answered, 0);
-  const onCallCount = liveAgents.filter((agent) => agent.on_call || String(agent.normalized_status || agent.status || '').toLowerCase().includes('call')).length;
+  const onCallCount = liveAgents.filter(isAgentOnCall).length;
   const availableCount = Math.max(liveAgents.length - onCallCount, 0);
 
   const workflowCards = useMemo(() => ([
@@ -341,6 +346,10 @@ const DashboardNewV3: FC = () => {
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                   {liveAgents.map((agent) => (
                     <div key={agent.user_id} className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
+                      {(() => {
+                        const active = isAgentOnCall(agent);
+                        return (
+                          <>
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <div className="text-base font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
@@ -349,25 +358,28 @@ const DashboardNewV3: FC = () => {
                             {agent.extension ? ` - Ext ${agent.extension}` : ''}
                           </div>
                         </div>
-                        <StatusBadge tone={(agent.on_call || String(agent.normalized_status || agent.status || '').toLowerCase().includes('call')) ? 'success' : 'neutral'}>
-                          {(agent.on_call || String(agent.normalized_status || agent.status || '').toLowerCase().includes('call')) ? 'On Call' : (agent.status || 'Idle')}
+                        <StatusBadge tone={active ? 'success' : 'neutral'}>
+                          {active ? 'On Call' : (agent.status || 'Idle')}
                         </StatusBadge>
                       </div>
 
                       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div className="vs-surface-muted p-4">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Counterpart</div>
-                          <div className="mt-3 text-sm text-slate-200 break-words">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
-                          {agent.on_call && agent.direction && (
+                          <div className="mt-3 text-sm text-slate-200 break-words">{active ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
+                          {active && agent.direction && (
                             <div className="mt-2 text-xs text-slate-500">{agent.direction === 'outbound' ? 'Outbound' : 'Inbound'}</div>
                           )}
                         </div>
                         <div className="vs-surface-muted p-4">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Call state</div>
-                          <div className="mt-3 text-sm text-slate-200">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
-                          <div className="mt-2 text-xs text-slate-500">Started {agent.on_call ? formatDateTime(agent.started_at) : '-'}</div>
+                          <div className="mt-3 text-sm text-slate-200">{agent.status || (active ? 'On Call' : 'Idle')}</div>
+                          <div className="mt-2 text-xs text-slate-500">Started {active ? formatDateTime(agent.started_at) : '-'}</div>
                         </div>
                       </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>

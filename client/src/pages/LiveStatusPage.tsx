@@ -85,6 +85,11 @@ function normalizedStatus(agent: LiveAgentStatus) {
   return 'unknown';
 }
 
+function isAgentOnCall(agent: LiveAgentStatus) {
+  const status = normalizedStatus(agent);
+  return agent.on_call || ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(status);
+}
+
 function refreshedAgeMs(agent: LiveAgentStatus, nowMs = Date.now()) {
   const raw = agent.refreshed_at || agent.last_seen_at;
   if (!raw) return Number.POSITIVE_INFINITY;
@@ -190,9 +195,9 @@ const LiveStatusPage: FC = () => {
   }, []);
 
   const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));
-  const onCall = items.filter((agent) => agent.on_call).length;
+  const onCall = items.filter(isAgentOnCall).length;
   const idle = Math.max(items.length - onCall, 0);
-	  const staleItems = items.filter((agent) => !agent.on_call && (agent.stale || isStale(agent, nowMs)));
+	  const staleItems = items.filter((agent) => !isAgentOnCall(agent) && (agent.stale || isStale(agent, nowMs)));
 
   const forceSync = async () => {
     if (!user?.id) return;
@@ -279,6 +284,7 @@ const LiveStatusPage: FC = () => {
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               {items.map((agent) => {
                 const visuals = statusVisuals(agent);
+                const active = isAgentOnCall(agent);
                 return (
                   <div key={`${agent.org_id || 'global'}:${agent.user_id || agent.extension || agent.email || 'agent'}`} className={`rounded-3xl border p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)] ${visuals.cardClass}`}>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -309,9 +315,9 @@ const LiveStatusPage: FC = () => {
                     <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="vs-surface-muted p-4">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">With</div>
-                        <div className="mt-3 break-words text-sm text-slate-200">{agent.on_call ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
+                        <div className="mt-3 break-words text-sm text-slate-200">{active ? (agent.counterpart || 'Unknown number') : 'Not on a call'}</div>
                         <div className="mt-2 text-xs text-slate-500">
-                          {agent.on_call
+                          {active
                             ? `${agent.direction ? `${agent.direction === 'outbound' ? 'Outbound' : 'Incoming'}${agent.from_number || agent.to_number ? ' - ' : ''}` : ''}${agent.direction === 'outbound' ? (agent.to_number || '') : (agent.from_number || '')}`
                             : ''}
                         </div>
@@ -321,11 +327,11 @@ const LiveStatusPage: FC = () => {
                       </div>
                       <div className="vs-surface-muted p-4">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Started</div>
-                        <div className="mt-3 text-sm text-slate-200">{agent.on_call ? fmtDateTime(agent.started_at) : '-'}</div>
-                        {agent.on_call && (
+                        <div className="mt-3 text-sm text-slate-200">{active ? fmtDateTime(agent.started_at) : '-'}</div>
+                        {active && (
                           <div className="mt-2 text-xs font-semibold text-emerald-300">Live duration {getLiveDuration(agent, nowMs)}</div>
                         )}
-                        <div className="mt-2 text-xs text-slate-500">{agent.status || (agent.on_call ? 'On Call' : 'Idle')}</div>
+                        <div className="mt-2 text-xs text-slate-500">{agent.status || (active ? 'On Call' : 'Idle')}</div>
                         <div className="mt-2 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
                       </div>
                     </div>
