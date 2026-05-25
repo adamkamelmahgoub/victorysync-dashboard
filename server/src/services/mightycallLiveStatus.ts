@@ -179,29 +179,49 @@ async function fetchOfficialProfileStatusByExtension(
   apiKeyOverride?: string
 ): Promise<any | null> {
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
-  const endpoint = '/profile/status';
-  const params = new URLSearchParams({ extension });
-  const url = `${base}${endpoint}?${params.toString()}`;
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 1800);
-  let res: any;
-  try {
-    res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-        'x-api-key': apiKeyOverride || MIGHTYCALL_API_KEY || '',
-      },
-      signal: controller.signal as any,
-    });
-  } finally {
-    clearTimeout(timeoutId);
+  const headers = {
+    Accept: 'application/json',
+    Authorization: `Bearer ${accessToken}`,
+    'x-api-key': apiKeyOverride || MIGHTYCALL_API_KEY || '',
+  };
+  const attempts: Array<{ label: string; url: string }> = [];
+  for (const paramName of ['extension', 'ext', 'extensionNumber']) {
+    const params = new URLSearchParams({ [paramName]: extension });
+    attempts.push({ label: `/profile/status?${paramName}`, url: `${base}/profile/status?${params.toString()}` });
   }
-  if (!res.ok) return null;
-  const body = await res.json().catch(() => null);
-  return pickProfileStatusPayload(body, extension);
+  for (const path of [
+    `/profile/status/${encodeURIComponent(extension)}`,
+    `/profile/${encodeURIComponent(extension)}/status`,
+    `/profiles/${encodeURIComponent(extension)}/status`,
+    `/users/${encodeURIComponent(extension)}/status`,
+    `/user/${encodeURIComponent(extension)}/status`,
+    `/extensions/${encodeURIComponent(extension)}/status`,
+  ]) {
+    attempts.push({ label: path, url: `${base}${path}` });
+  }
+
+  for (const attempt of attempts) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    let res: any;
+    try {
+      res = await fetch(attempt.url, {
+        method: 'GET',
+        headers,
+        signal: controller.signal as any,
+      });
+    } catch {
+      clearTimeout(timeoutId);
+      continue;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    if (!res?.ok) continue;
+    const body = await res.json().catch(() => null);
+    const payload = pickProfileStatusPayload(body, extension);
+    if (payload) return { ...payload, sourceEndpoint: attempt.label };
+  }
+  return null;
 }
 
 function deriveDirection(value: any): 'inbound' | 'outbound' | null {

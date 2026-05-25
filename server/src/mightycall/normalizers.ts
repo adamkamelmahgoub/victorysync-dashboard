@@ -31,11 +31,14 @@ export function detectDirectionFromNumbers(
   toNumber: string | null,
   assignedBusinessNumbers: string[]
 ): NormalizedDirection {
-  const assigned = new Set(
-    assignedBusinessNumbers.map(normalizePhone).filter((value): value is string => !!value)
-  );
-  if (fromNumber && assigned.has(fromNumber)) return 'outbound';
-  if (toNumber && assigned.has(toNumber)) return 'inbound';
+  const assigned = new Set(assignedBusinessNumbers.map(normalizePhone).filter((value): value is string => !!value));
+  const assignedDigits = new Set(assignedBusinessNumbers.map(normalizePhoneDigits).filter((value): value is string => !!value));
+  const from = normalizePhone(fromNumber);
+  const to = normalizePhone(toNumber);
+  const fromDigits = normalizePhoneDigits(fromNumber);
+  const toDigits = normalizePhoneDigits(toNumber);
+  if ((from && assigned.has(from)) || (fromDigits && assignedDigits.has(fromDigits))) return 'outbound';
+  if ((to && assigned.has(to)) || (toDigits && assignedDigits.has(toDigits))) return 'inbound';
   return 'unknown';
 }
 

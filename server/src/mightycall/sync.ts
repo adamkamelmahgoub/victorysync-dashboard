@@ -239,7 +239,8 @@ function normalizeCallRow(raw: any, owner: Awaited<ReturnType<typeof resolveOrgB
   const toNumber = normalizePhone(firstString(raw?.to_number, raw?.to, raw?.called?.[0]?.phone, raw?.businessNumber?.number, raw?.destination?.number));
   const businessNumber = normalizePhone(firstString(raw?.business_number, raw?.businessNumber?.number, raw?.businessNumber, owner?.number, toNumber, fromNumber));
   const explicitDirection = directionFromText(firstString(raw?.direction, raw?.callDirection, raw?.Direction, raw?.origin, raw?.requestOrigin));
-  const direction = explicitDirection !== 'unknown' ? explicitDirection : detectDirectionFromNumbers(fromNumber, toNumber, businessNumbers);
+  const directionNumbers = Array.from(new Set([...businessNumbers, owner?.number].filter((value): value is string => !!value)));
+  const direction = explicitDirection !== 'unknown' ? explicitDirection : detectDirectionFromNumbers(fromNumber, toNumber, directionNumbers);
   const extension = normalizePhoneDigits(firstString(
     raw?.extension,
     raw?.agent_extension,
