@@ -1,14 +1,49 @@
 // client/src/lib/apiClient.ts
 import { API_BASE_URL, buildApiUrl } from "../config";
+import { supabase } from "./supabaseClient";
 
 type Json = any;
 type FetchJsonInit = RequestInit & { timeoutMs?: number };
 
+function shouldAttachBrowserAuth(url: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.origin === window.location.origin) return parsed.pathname.startsWith("/api");
+    if (!API_BASE_URL) return false;
+    const apiOrigin = new URL(API_BASE_URL, window.location.origin).origin;
+    return parsed.origin === apiOrigin;
+  } catch {
+    return false;
+  }
+}
+
+async function withBrowserAuthHeaders(url: string, init?: FetchJsonInit): Promise<FetchJsonInit | undefined> {
+  if (!shouldAttachBrowserAuth(url)) return init;
+
+  const headers = new Headers(init?.headers || {});
+  try {
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
+    if (session?.access_token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${session.access_token}`);
+    }
+    if (session?.user?.id && !headers.has("x-user-id")) {
+      headers.set("x-user-id", session.user.id);
+    }
+  } catch (err) {
+    console.warn("[apiClient] Failed to attach Supabase session to API request", err);
+  }
+
+  return { ...(init || {}), headers };
+}
+
 export async function fetchJson(path: string, init?: FetchJsonInit) {
   const url = path.startsWith("http") ? path : buildApiUrl(path);
+  const requestInit = await withBrowserAuthHeaders(url, init);
   // Use a generous timeout to avoid indefinite fetch hangs in the browser
   // 15s gives the backend time to process requests, while still catching hangs
-  const timeoutMs = init?.timeoutMs ?? 15000; // 15s default
+  const timeoutMs = requestInit?.timeoutMs ?? 15000; // 15s default
 
   async function fetchWithTimeout(u: string, i?: FetchJsonInit, t = timeoutMs) {
     if (typeof (import.meta as any).env !== 'undefined' && (import.meta as any).env.VITE_DEBUG_API === 'true') {
@@ -31,7 +66,7 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
     }
   }
 
-  const res = await fetchWithTimeout(url, init);
+  const res = await fetchWithTimeout(url, requestInit);
   // Optionally dump response metadata and snippet to console when debug enabled
   if (typeof (import.meta as any).env !== 'undefined' && (import.meta as any).env.VITE_DEBUG_API === 'true') {
     const contentType = res.headers.get('content-type') || 'unknown';

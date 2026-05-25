@@ -46,7 +46,7 @@ async function refreshLiveStatusInline(reason: string) {
 }
 
 async function getActor(req: express.Request) {
-  const actorId = req.header('x-user-id') || (req as any).actorId || null;
+  const actorId = (req as any).actorId || req.header('x-user-id') || null;
   if (!actorId) {
     const err = new Error('unauthenticated') as Error & { status?: number };
     err.status = 401;
@@ -340,7 +340,7 @@ async function loadDirectMightyCallStatuses(assignments: any[]) {
     try {
       const status = await withTimeout(
         getMightyCallStatusByExtension({ extension: assignment.extension, orgId: assignment.org_id }),
-        3000,
+        5500,
         null as any
       );
       return status ? resolverStatusToLiveRow(assignment, status) : null;
@@ -359,7 +359,7 @@ router.get('/live-status', async (req, res) => {
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
     const scope = await resolveOrgScope(req);
-    if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'mightycall_api_live_refresh', api_source: 'mightycall_api_poll' });
+    if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'mightycall_api_direct', api_source: 'mightycall_api_direct' });
     const assignments = await loadAssignedExtensionRows(scope.orgIds);
     const direct = await loadDirectMightyCallStatuses(assignments);
     const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
@@ -379,9 +379,9 @@ router.get('/live-status', async (req, res) => {
     res.json({
       items,
       refreshed_at: refreshedAt,
-      source: 'mightycall_api_live_refresh',
-      api_source: 'mightycall_api_poll',
-      live_status_version: 'mightycall-api-direct-no-status-db',
+      source: 'mightycall_api_direct',
+      api_source: 'mightycall_api_direct',
+      live_status_version: 'mightycall-api-direct-authenticated',
       sync: {
         ok: true,
         skipped: true,
