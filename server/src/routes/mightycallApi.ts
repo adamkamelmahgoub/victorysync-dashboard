@@ -363,15 +363,9 @@ router.get('/live-status', async (req, res) => {
     const assignments = await loadAssignedExtensionRows(scope.orgIds);
     const direct = await loadDirectMightyCallStatuses(assignments);
     const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
-    const { data, error } = await supabaseAdmin
-      .from('agent_live_status')
-      .select('*')
-      .in('org_id', scope.orgIds)
-      .order('mightycall_extension', { ascending: true });
-    if (error) throw error;
     const { data: orgs } = await supabaseAdmin.from('organizations').select('id, name').in('id', scope.orgIds);
     const orgNames = new Map((orgs || []).map((row: any) => [String(row.id), String(row.name || '')]));
-    const liveByKey = new Map((data || []).map((row: any) => [`${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`, row]));
+    const liveByKey = new Map<string, any>();
     for (const row of direct.rows) {
       const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
       liveByKey.set(key, row);
@@ -387,7 +381,7 @@ router.get('/live-status', async (req, res) => {
       refreshed_at: refreshedAt,
       source: 'mightycall_api_live_refresh',
       api_source: 'mightycall_api_poll',
-      live_status_version: 'api-only-direct-live-refresh',
+      live_status_version: 'mightycall-api-direct-no-status-db',
       sync: {
         ok: true,
         skipped: true,
