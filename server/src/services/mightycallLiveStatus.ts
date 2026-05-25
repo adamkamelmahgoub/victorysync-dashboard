@@ -754,7 +754,8 @@ export async function getMightyCallStatusByExtension(input: {
     activeCallEvidence?.connected === true ||
     activeCallEvidence?.is_connected === true ||
     activeCallEvidence?.onCall === true ||
-    activeCallEvidence?.inCall === true
+    activeCallEvidence?.inCall === true ||
+    liveCallHasConnectedPeer(activeCallEvidence)
   );
   const activeEvidenceStartedMs = parseMs(
     activeCallEvidence?.started_at ||
@@ -881,17 +882,29 @@ export async function getMightyCallStatusByExtension(input: {
     activeEvidenceFresh &&
     activeEvidenceMatchesProfileId
   );
+  const activeConnectedEvidenceAllowed = Boolean(
+    activeCallEvidence &&
+    activeEvidenceMatchesProfileId &&
+    !activeEvidenceExpiredByDuration &&
+    activeEvidenceHasConnectedFlag &&
+    (
+      activeEvidenceNorm === 'on_call' ||
+      activeEvidenceNorm === 'ringing' ||
+      activeEvidenceNorm === 'dialing' ||
+      isActiveCallStatusText(activeEvidenceStatusText)
+    )
+  );
 
   let decisionReason = 'profile_status_default';
 
   // Strongest signal: we have an active call evidence with connected flag or active status
-  if (activeEvidenceAllowed) {
+  if (activeEvidenceAllowed || activeConnectedEvidenceAllowed) {
     if (activeEvidenceNorm === 'ringing' || activeEvidenceNorm === 'dialing' || activeEvidenceNorm === 'on_call') {
       normalizedStatus = activeEvidenceNorm;
-      decisionReason = 'fresh_active_evidence_status';
+      decisionReason = activeEvidenceAllowed ? 'fresh_active_evidence_status' : 'connected_active_evidence_status';
     } else if (activeEvidenceHasConnectedFlag) {
       normalizedStatus = 'on_call';
-      decisionReason = 'fresh_active_evidence_connected_flag';
+      decisionReason = activeEvidenceAllowed ? 'fresh_active_evidence_connected_flag' : 'connected_active_evidence_flag';
     }
   }
 
@@ -934,7 +947,8 @@ export async function getMightyCallStatusByExtension(input: {
     onCallBoolean ||
     profileActiveSignal ||
     (liveCall?.onCall && directLiveSignalTrusted) ||
-    activeEvidenceAllowed
+    activeEvidenceAllowed ||
+    activeConnectedEvidenceAllowed
   );
 
   const effectiveDirection = deriveDirection(

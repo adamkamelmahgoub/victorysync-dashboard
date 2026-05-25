@@ -495,6 +495,51 @@ function groupCount(rows: any[], keyFn: (row: any) => string | null, limit = 10)
     .slice(0, limit);
 }
 
+function groupBusinessNumberCounts(
+  rows: any[],
+  phones: Array<{ number: string; digits: string; label?: string | null }>,
+  limit = 10
+) {
+  const phoneByDigits = new Map(phones.filter((phone) => phone.digits).map((phone) => [phone.digits, phone]));
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const candidates = [
+      row?.business_number,
+      row?.phone_number,
+      row?.original_receiving_number,
+      row?.metadata?.business_number,
+      row?.metadata?.businessNumber?.number,
+      row?.raw_payload?.businessNumber?.number,
+      row?.raw_payload?.businessNumber,
+      row?.direction === 'outbound' ? row?.from_number : null,
+      row?.direction === 'inbound' ? row?.to_number : null,
+      row?.from_number,
+      row?.to_number,
+    ];
+    let matched: string | null = null;
+    for (const value of candidates) {
+      const digits = normalizePhoneDigits(value);
+      if (digits && phoneByDigits.has(digits)) {
+        matched = digits;
+        break;
+      }
+    }
+    if (!matched) continue;
+    counts.set(matched, (counts.get(matched) || 0) + 1);
+  }
+  return Array.from(phoneByDigits.values())
+    .map((phone) => ({
+      key: phone.number || phone.digits,
+      label: phone.label || phone.number || phone.digits,
+      number: phone.number,
+      count: counts.get(phone.digits) || 0,
+      unit: 'calls',
+    }))
+    .filter((row) => row.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
 function groupAgentStats(calls: any[], transfers: any[], identities: Awaited<ReturnType<typeof loadAgentIdentityMap>>, limit?: number) {
   const byAgent = new Map<string, any>();
   const ensure = (row: any) => {
@@ -746,6 +791,84 @@ function normalizeReportCallStatus(row: any) {
   return raw || 'unknown';
 }
 
+function findTransferInfo(raw: any): { target: string | null; type: string; status: string } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const directTarget = firstString(
+    raw.transfer_target,
+    raw.transferTarget,
+    raw.transferredTo,
+    raw.transfer?.target,
+    raw.transfer?.to,
+    raw.transfer?.transferredTo
+  );
+  const directType = firstString(raw.transfer_type, raw.transferType, raw.transfer?.type);
+  const directStatus = firstString(raw.transfer_status, raw.transferStatus, raw.transfer?.status, raw.transfer?.result);
+  if (directTarget || directType || directStatus) {
+    return {
+      target: directTarget,
+      type: directType || 'unknown',
+      status: directStatus || 'unknown',
+    };
+  }
+
+  const seen = new Set<any>();
+  const stack = [raw];
+  let target: string | null = null;
+  let type: string | null = null;
+  let status: string | null = null;
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+    for (const [key, value] of Object.entries(current)) {
+      const lower = key.toLowerCase();
+      if (lower.includes('transfer') || lower === 'transferredto') {
+        if (typeof value === 'string' || typeof value === 'number') {
+          if (lower.includes('target') || lower.includes('to') || lower === 'transferredto') target ||= String(value);
+          else if (lower.includes('status') || lower.includes('result')) status ||= String(value);
+          else if (lower.includes('type')) type ||= String(value);
+          else type ||= String(value);
+        } else if (value && typeof value === 'object') {
+          target ||= firstString((value as any).target, (value as any).to, (value as any).transferredTo, (value as any).extension, (value as any).number);
+          type ||= firstString((value as any).type, (value as any).transferType);
+          status ||= firstString((value as any).status, (value as any).result, (value as any).transferStatus);
+        }
+      }
+      if (value && typeof value === 'object') stack.push(value);
+    }
+  }
+  if (!target && !type && !status) return null;
+  return { target, type: type || 'unknown', status: status || 'unknown' };
+}
+
+function transferRowsFromCalls(calls: any[]) {
+  const rows: any[] = [];
+  for (const call of calls) {
+    const raw = call?.raw_payload || call?.metadata || call;
+    const transfer = findTransferInfo(raw);
+    if (!transfer) continue;
+    rows.push({
+      id: `${call.id || call.external_call_id || call.external_id}:transfer`,
+      org_id: call.org_id,
+      external_call_id: call.external_call_id || call.external_id || call.id,
+      transferred_at: call.ended_at || call.started_at || call.created_at,
+      from_number: call.from_number,
+      to_number: call.to_number,
+      business_number: call.business_number,
+      original_caller: call.from_number,
+      original_receiving_number: call.to_number || call.business_number,
+      agent_extension: rowAgentExtension(call),
+      extension: rowAgentExtension(call),
+      transfer_target: transfer.target,
+      transfer_type: transfer.type,
+      transfer_status: transfer.status,
+      result: transfer.status,
+      raw_payload: raw,
+    });
+  }
+  return rows;
+}
+
 function ownedDigitsForScope(phones: Array<{ digits: string }>, scope: ReportScope) {
   return new Set([
     ...phones.map((phone) => phone.digits).filter(Boolean),
@@ -792,23 +915,26 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
   }
   const rows = scope.isPlatformAdmin || scope.orgWide ? phones : phones.filter((phone) => scope.allowedPhoneIds.has(phone.id));
   const [calls, baseRecordings, baseSms, transfers] = await Promise.all([
-    fetchTableRows('calls', 'started_at', req, scope),
+    fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
     fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
+  const ownedDigits = ownedDigitsForScope(phones, scope);
+  const normalizedCalls = normalizeCallRows(calls, ownedDigits);
+  const transferRows = transfers.length > 0 ? transfers : applyCommonFilters(transferRowsFromCalls(calls), req, scope);
   const recordings = baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope);
   const sms = normalizeSmsDirections(baseSms, new Set(phones.map((phone) => phone.digits).filter(Boolean)));
   const numbers = rows.map((phone) => {
     const matches = (row: any) => rowMatchesDigits(row, new Set([phone.digits]));
-    const phoneCalls = calls.filter(matches);
+    const phoneCalls = normalizedCalls.filter(matches);
     return {
       ...phone,
       calls: phoneCalls.length,
       answered: phoneCalls.filter((row) => statusOf(row).includes('answer') || statusOf(row).includes('complete')).length,
       missed: phoneCalls.filter((row) => statusOf(row).includes('miss')).length,
       sms: sms.filter(matches).length,
-      transfers: transfers.filter(matches).length,
+      transfers: transferRows.filter(matches).length,
       recordings: recordings.filter(matches).length,
     };
   });
@@ -850,27 +976,32 @@ router.get('/sms', (req, res) => handle(req, res, async (scope) => {
 }));
 
 router.get('/transfers', (req, res) => handle(req, res, async (scope) => {
-  const rows = await fetchTableRows('call_transfers', 'transferred_at', req, scope);
+  let rows = await fetchTableRows('call_transfers', 'transferred_at', req, scope);
+  if (rows.length === 0) {
+    const calls = await fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true });
+    rows = applyCommonFilters(transferRowsFromCalls(calls), req, scope);
+  }
   const page = paginate(req, rows);
   res.json({ transfers: page.rows, total: page.total, next_offset: page.next_offset });
 }));
 
 router.get('/agents', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
-  const ownedDigits = new Set(phones.map((phone) => phone.digits).filter(Boolean));
+  const ownedDigits = ownedDigitsForScope(phones, scope);
   const [calls, recordings, sms, transfers] = await Promise.all([
     fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
     fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
-  const agents = groupAgentStats([...normalizeCallRows(calls, ownedDigits), ...recordings, ...sms], transfers, await loadAgentIdentityMap(scope));
+  const transferRows = transfers.length > 0 ? transfers : applyCommonFilters(transferRowsFromCalls(calls), req, scope);
+  const agents = groupAgentStats([...normalizeCallRows(calls, ownedDigits), ...recordings, ...sms], transferRows, await loadAgentIdentityMap(scope));
   res.json({ agents });
 }));
 
 router.get('/overview', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
-  const ownedDigits = new Set(phones.map((phone) => phone.digits).filter(Boolean));
+  const ownedDigits = ownedDigitsForScope(phones, scope);
   const [baseCalls, baseRecordings, baseSms, transfers] = await Promise.all([
     fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
@@ -878,6 +1009,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
   const calls = normalizeCallRows(baseCalls, ownedDigits);
+  const transferRows = transfers.length > 0 ? transfers : applyCommonFilters(transferRowsFromCalls(baseCalls), req, scope);
   const recordings = normalizeRecordingRows(baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope), ownedDigits);
   const legacyMessageReports = baseSms.length === 0 ? await fetchLegacyMightyCallReports('messages', req, scope) : [];
   const sms = baseSms.length > 0 ? normalizeSmsDirections(baseSms, ownedDigits) : legacyMessageRows(legacyMessageReports, ownedDigits);
@@ -888,7 +1020,7 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
   const outboundSms = sms.reduce((sum, row) => sum + (row.outbound_count ? safeNumber(row.outbound_count) : (directionOf(row) === 'outbound' ? 1 : 0)), 0);
   const legacyReports = calls.length === 0 ? await fetchLegacyMightyCallReports('calls', req, scope) : [];
   const legacy = legacyOverviewFromReports(legacyReports);
-  const agentStats = groupAgentStats([...calls, ...recordings, ...sms], transfers, await loadAgentIdentityMap(scope), 10);
+  const agentStats = groupAgentStats([...calls, ...recordings, ...sms], transferRows, await loadAgentIdentityMap(scope), 10);
   const overview = {
     total_calls: calls.length || legacy.total,
     answered_calls: answered || legacy.answered,
@@ -900,10 +1032,10 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
     total_sms: sms.reduce((sum, row) => sum + (row.messages_count ? safeNumber(row.messages_count) : 1), 0),
     inbound_sms: inboundSms,
     outbound_sms: outboundSms,
-    total_transfers: transfers.length,
-    transfers_by_number: groupCount(transfers, (row) => row.original_receiving_number || row.to_number || row.transfer_target),
+    total_transfers: transferRows.length,
+    transfers_by_number: groupBusinessNumberCounts(transferRows, phones),
     top_agents: agentStats,
-    top_numbers: groupCount([...calls, ...recordings, ...sms], (row) => rowNumbers(row).find((value) => !/[a-z]/i.test(String(value)) && (normalizePhoneDigits(value) || '').length >= 7) || null),
+    top_numbers: groupBusinessNumberCounts(calls, phones),
   };
   try {
     const { data: latest } = await supabaseAdmin
