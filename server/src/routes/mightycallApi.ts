@@ -18,6 +18,7 @@ import {
 
 const router = express.Router();
 let lastInlineLiveRefreshAt = 0;
+let lastInlineLiveRefreshResult: any = null;
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
   return new Promise((resolve) => {
@@ -31,10 +32,17 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
 
 async function refreshLiveStatusInline(reason: string) {
   const now = Date.now();
-  if (now - lastInlineLiveRefreshAt < 4_000) return;
+  if (now - lastInlineLiveRefreshAt < 4_000) return lastInlineLiveRefreshResult;
   lastInlineLiveRefreshAt = now;
-  await withTimeout(runLiveStatusSync(reason), 7_000, null as any);
-  await withTimeout(syncRecentCalls(2), 7_000, 0);
+  const statusResult = await withTimeout(runLiveStatusSync(reason), 7_000, { ok: false, timeout: true, warnings: ['MightyCall status refresh timed out'] } as any);
+  const recentCalls = await withTimeout(syncRecentCalls(2), 7_000, 0);
+  lastInlineLiveRefreshResult = {
+    ...(statusResult || {}),
+    syncedCalls: ((statusResult as any)?.syncedCalls || 0) + recentCalls,
+    source: 'mightycall_api_live_refresh',
+    refreshed_at: new Date().toISOString(),
+  };
+  return lastInlineLiveRefreshResult;
 }
 
 async function getActor(req: express.Request) {
@@ -219,7 +227,7 @@ function mapLiveRow(row: any, orgNames: Map<string, string>, identityByKey: Map<
     refreshed_at: row.last_synced_at || row.updated_at || null,
     stale: false,
     source: row.source || 'mightycall_api_poll',
-    api_source: 'local_db_api_poll',
+    api_source: row.source || 'mightycall_api_poll',
   };
 }
 
@@ -286,8 +294,8 @@ function assignmentToLiveRow(row: any) {
 router.get('/live-status', async (req, res) => {
   try {
     const scope = await resolveOrgScope(req);
-    if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'local_db_api_poll' });
-    await refreshLiveStatusInline('live-status-read');
+    if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'mightycall_api_live_refresh', api_source: 'mightycall_api_poll' });
+    const refreshResult = await refreshLiveStatusInline('live-status-read');
     const assignments = await loadAssignedExtensionRows(scope.orgIds);
     const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
     const { data, error } = await supabaseAdmin
@@ -308,8 +316,10 @@ router.get('/live-status', async (req, res) => {
     res.json({
       items,
       refreshed_at: refreshedAt,
-      source: 'local_db_api_poll',
-      live_status_version: 'api-only-db-read',
+      source: 'mightycall_api_live_refresh',
+      api_source: 'mightycall_api_poll',
+      live_status_version: 'api-only-live-refresh',
+      sync: refreshResult || null,
     });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'live_status_failed' });
