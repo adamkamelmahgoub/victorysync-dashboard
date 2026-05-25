@@ -199,6 +199,7 @@ function mapLiveRow(row: any, orgNames: Map<string, string>, identityByKey: Map<
   const status = String(row.normalized_status || row.status || 'unknown').toLowerCase();
   const active = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(status);
   const direction = row.current_call_direction || row.direction || null;
+  const extensionStatus = row.raw_payload?.extensionStatus || {};
   const counterpart = direction === 'outbound'
     ? (row.to_number || row.current_counterpart_number || null)
     : (row.from_number || row.current_counterpart_number || null);
@@ -208,10 +209,10 @@ function mapLiveRow(row: any, orgNames: Map<string, string>, identityByKey: Map<
     user_id: row.user_id || identity.user_id || '',
     org_id: row.org_id || null,
     organization_name: orgNames.get(String(row.org_id || '')) || null,
-    email: identity.email || row.raw_payload?.assignment?.email || null,
+    email: identity.email || extensionStatus.email || row.raw_payload?.mightycallEmail || row.raw_payload?.assignment?.email || null,
     role: identity.role || 'agent',
     extension,
-    display_name: row.agent_name || identity.display_name || row.raw_payload?.userInfo?.displayName || row.raw_payload?.userInfo?.name || null,
+    display_name: row.agent_name || extensionStatus.name || identity.display_name || row.raw_payload?.userInfo?.displayName || row.raw_payload?.userInfo?.name || null,
     on_call: active,
     status: liveStatusLabel(status),
     raw_status: row.raw_status || null,

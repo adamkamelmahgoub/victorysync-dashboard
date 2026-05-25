@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../lib/supabaseClient';
 import { getMightyCallToken, mightyCallGetFirst } from './client';
 import { fetchMightyCallLiveCallByExtension } from '../integrations/mightycall';
+import { getMightyCallStatusByExtension, type MightyCallStatusByExtension } from '../services/mightycallLiveStatus';
 import {
   arrayFromApiResponse,
   callLifecycleStatus,
@@ -315,6 +316,19 @@ export async function syncUsersAndStatuses(): Promise<{ users: number; statuses:
   }
 
   for (const member of members) {
+    try {
+      const extensionStatus = await getMightyCallStatusByExtension({
+        extension: member.extension,
+        orgId: member.orgId,
+      });
+      await upsertLiveStatusFromExtensionResolver(member, extensionStatus, now);
+      syncedStatuses += 1;
+      if (['ringing', 'dialing', 'on_call'].includes(extensionStatus.normalizedStatus)) liveRingingSupported = 'yes';
+      continue;
+    } catch (err) {
+      console.warn('[mightycall api sync] extension status resolver failed:', safeWarning(err));
+    }
+
     const statusPaths = [
       ...USER_STATUS_PATHS,
       `/users/${encodeURIComponent(member.extension)}/status`,
@@ -357,6 +371,66 @@ export async function syncUsersAndStatuses(): Promise<{ users: number; statuses:
 
   if (members.length > 0 && syncedStatuses > 0 && liveRingingSupported === 'unknown') liveRingingSupported = 'no';
   return { users: syncedUsers, statuses: syncedStatuses, liveRingingSupported };
+}
+
+async function upsertLiveStatusFromExtensionResolver(member: any, status: MightyCallStatusByExtension, now: string) {
+  const normalized = status.normalizedStatus === 'unknown' ? 'available' : status.normalizedStatus;
+  const active = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(normalized);
+  const row = {
+    org_id: member.orgId,
+    org_member_id: member.orgMemberId,
+    user_id: member.userId,
+    mightycall_user_id: status.mightycallUserId || null,
+    mightycall_extension: member.extension,
+    extension: member.extension,
+    agent_name: firstString(status.name, member.name, member.email),
+    raw_status: status.rawStatus || normalized,
+    normalized_status: normalized,
+    status: normalized,
+    current_call_id: active ? status.currentCallId || null : null,
+    current_call_direction: active ? status.direction || null : null,
+    direction: active ? status.direction || null : null,
+    from_number: null,
+    to_number: null,
+    business_number: null,
+    current_counterpart_number: active ? status.counterpartNumber || null : null,
+    started_at: active ? status.statusStartedAt || null : null,
+    status_started_at: active ? status.statusStartedAt || null : null,
+    last_event_at: now,
+    last_synced_at: status.lastSyncedAt || now,
+    source: status.source || 'mightycall_user_status_by_extension',
+    stale: false,
+    raw_payload: {
+      assignment: member,
+      extensionStatus: status,
+      mightycallEmail: status.email || null,
+      resolverRaw: status.raw,
+    },
+    raw_event: null,
+    updated_at: now,
+  };
+  await supabaseAdmin.from('agent_live_status').upsert(row, { onConflict: 'org_id,mightycall_extension' });
+  try {
+    await supabaseAdmin.from('live_agent_statuses').upsert({
+      org_id: member.orgId,
+      org_member_id: member.orgMemberId,
+      mightycall_user_id: row.mightycall_user_id,
+      agent_name: row.agent_name,
+      extension: member.extension,
+      status: row.normalized_status,
+      raw_status: row.raw_status,
+      direction: row.direction,
+      current_call_id: row.current_call_id,
+      from_number: row.from_number,
+      to_number: row.to_number,
+      business_number: row.business_number,
+      started_at: row.started_at,
+      connected_at: row.started_at,
+      last_seen_at: row.last_synced_at,
+      raw_payload: row.raw_payload,
+      updated_at: now,
+    }, { onConflict: 'org_id,extension' });
+  } catch {}
 }
 
 async function ensureLiveStatusRosterRow(member: any, now: string) {
