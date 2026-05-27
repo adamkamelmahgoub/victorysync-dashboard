@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import PageLayout from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
@@ -41,41 +41,6 @@ const statusOptions = [
 ];
 
 // ─── audio ───────────────────────────────────────────────────────────────────
-
-let leadAudioContext: AudioContext | null = null;
-
-async function playLeadBeep() {
-  try {
-    const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtor) return false;
-    const ctx = leadAudioContext || new AudioCtor();
-    leadAudioContext = ctx;
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
-    }
-    if (ctx.state !== 'running') return false;
-    const beep = (freq: number, start: number, duration: number) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = freq;
-      osc.type = 'square';
-      gain.gain.setValueAtTime(0.001, ctx.currentTime + start);
-      gain.gain.exponentialRampToValueAtTime(0.95, ctx.currentTime + start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
-      osc.start(ctx.currentTime + start);
-      osc.stop(ctx.currentTime + start + duration + 0.05);
-    };
-    beep(740, 0, 0.16);
-    beep(1280, 0.18, 0.16);
-    beep(740, 0.36, 0.16);
-    beep(1280, 0.54, 0.22);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -137,10 +102,6 @@ function statusTone(status?: string | null): 'neutral' | 'success' | 'warning' |
   if (status === 'contacted' || status === 'callback') return 'warning';
   if (status === 'new') return 'info';
   return 'neutral';
-}
-
-function isLeadAcknowledged(lead?: LeadItem | null) {
-  return ['accepted', 'declined', 'contacted', 'qualified', 'transferred', 'not_interested', 'no_answer', 'callback'].includes(String(lead?.status || ''));
 }
 
 // ─── component ───────────────────────────────────────────────────────────────
@@ -206,8 +167,6 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<LeadItem | null>(null);
-  const [latestLead, setLatestLead] = useState<LeadItem | null>(null);
-  const [soundBlocked, setSoundBlocked] = useState(false);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const [revealedPhones, setRevealedPhones] = useState<Set<string>>(new Set());
 
@@ -267,7 +226,6 @@ export default function LeadsPage() {
         const lead = payload.new as LeadItem;
         if (orgFilter && lead.organization_id !== orgFilter) return;
         setLeads((prev) => [lead, ...prev.filter((item) => item.id !== lead.id)].slice(0, 100));
-        setLatestLead(lead);
         setHighlightedIds((prev) => new Set(prev).add(lead.id));
         window.setTimeout(() => setHighlightedIds((prev) => {
           const next = new Set(prev); next.delete(lead.id); return next;
@@ -286,10 +244,6 @@ export default function LeadsPage() {
         const lead = payload.new as LeadItem;
         setLeads((prev) => prev.map((item) => item.id === lead.id ? lead : item));
         setSelectedLead((current) => current?.id === lead.id ? lead : current);
-        setLatestLead((current) => {
-          if (current?.id !== lead.id) return current;
-          return isLeadAcknowledged(lead) ? null : lead;
-        });
       })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
@@ -301,42 +255,12 @@ export default function LeadsPage() {
     const result = await updateLead(lead.id, patch, user.id);
     setLeads((prev) => prev.map((item) => item.id === lead.id ? result.item : item));
     setSelectedLead(result.item);
-    setLatestLead((current) => {
-      if (current?.id !== lead.id) return current;
-      return isLeadAcknowledged(result.item) ? null : result.item;
-    });
   };
 
   const onCallLead = async (lead: LeadItem) => {
     await updateSelected(lead, { status: 'accepted', assign_to_me: true, increment_attempts: true });
     window.location.href = `tel:${lead.phone}`;
   };
-
-  const acceptLead = async (lead: LeadItem) => {
-    await updateSelected(lead, { status: 'accepted', assign_to_me: true });
-  };
-
-  const declineLead = async (lead: LeadItem) => {
-    await updateSelected(lead, { status: 'declined' });
-  };
-
-  const activeAlertLead = latestLead && !isLeadAcknowledged(latestLead) ? latestLead : null;
-
-  useEffect(() => {
-    if (!activeAlertLead) return;
-    let cancelled = false;
-    const beep = () => {
-      void playLeadBeep().then((ok) => {
-        if (!cancelled) setSoundBlocked(!ok);
-      });
-    };
-    beep();
-    const id = window.setInterval(beep, 1200);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [activeAlertLead?.id]);
 
   // ── visibility settings save ───────────────────────────────────────────────
   const saveVisibility = async (next: LeadsVisibility) => {
@@ -362,6 +286,13 @@ export default function LeadsPage() {
     ['Contact rate', `${summary?.contact_rate_pct ?? 0}%`, 'Contacted / total'],
     ['Transfer rate', `${summary?.transfer_rate_pct ?? 0}%`, 'Transferred / contacted'],
   ];
+
+  const activeAlertLead: LeadItem | null = null;
+  const soundBlocked = false;
+  const setSoundBlocked = (_blocked: boolean) => {};
+  const playLeadBeep = async () => false;
+  const acceptLead = async (_lead: LeadItem) => {};
+  const declineLead = async (_lead: LeadItem) => {};
 
   // ── access denied ──────────────────────────────────────────────────────────
   if (!hasAccess) {

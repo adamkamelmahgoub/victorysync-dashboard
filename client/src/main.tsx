@@ -34,6 +34,7 @@ import OrgManagePage from './pages/OrgManagePage';
 import OrgAdminRoute from './components/OrgAdminRoute';
 import ErrorBoundary from "./components/ErrorBoundary";
 import LoggingProvider from "./components/LoggingProvider";
+import LeadAlertOverlay from "./components/LeadAlertOverlay";
 import { SettingsPage } from "./pages/SettingsPage";
 import { NumbersPage } from "./pages/NumbersPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -423,6 +424,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
               <LoggingProvider />
               {/* ToastProvider provides a simple global toast UI */}
               <ToastProvider>
+                <LeadAlertOverlay />
                 <AppRouter />
               </ToastProvider>
             </ErrorBoundary>
