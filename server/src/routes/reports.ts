@@ -776,10 +776,25 @@ function normalizeReportCallStatus(row: any) {
   const raw = String(
     row?.status ||
     row?.call_status ||
+    row?.call_result ||
+    row?.result ||
+    row?.disposition ||
     row?.metadata?.status ||
     row?.metadata?.callStatus ||
+    row?.metadata?.call_result ||
+    row?.metadata?.result ||
+    row?.metadata?.disposition ||
+    row?.metadata?.finalStatus ||
+    row?.metadata?.callInfo?.status ||
+    row?.metadata?.callInfo?.result ||
     row?.raw_payload?.status ||
     row?.raw_payload?.callStatus ||
+    row?.raw_payload?.call_result ||
+    row?.raw_payload?.result ||
+    row?.raw_payload?.disposition ||
+    row?.raw_payload?.finalStatus ||
+    row?.raw_payload?.callInfo?.status ||
+    row?.raw_payload?.callInfo?.result ||
     row?.raw_payload?.state ||
     ''
   ).toLowerCase();
@@ -788,6 +803,18 @@ function normalizeReportCallStatus(row: any) {
   if (raw.includes('abandon')) return 'abandoned';
   if (raw.includes('voice')) return 'voicemail';
   if (raw.includes('fail') || raw.includes('busy') || raw.includes('cancel')) return 'failed';
+  const durationSeconds = durationToSeconds(
+    row?.duration_seconds ??
+    row?.durationSeconds ??
+    row?.duration ??
+    row?.metadata?.duration_seconds ??
+    row?.metadata?.durationSeconds ??
+    row?.metadata?.duration ??
+    row?.raw_payload?.duration_seconds ??
+    row?.raw_payload?.durationSeconds ??
+    row?.raw_payload?.duration
+  );
+  if (durationSeconds > 0 || row?.connected_at || row?.answered_at || row?.metadata?.answered_at || row?.raw_payload?.answered_at) return 'answered';
   return raw || 'unknown';
 }
 

@@ -21,52 +21,80 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
 
   useEffect(() => {
     fetchMetrics();
+    const id = window.setInterval(fetchMetrics, 15_000);
+    return () => window.clearInterval(id);
     // eslint-disable-next-line
   }, [orgId, user?.id]);
+
+  function dateKey(date: Date) {
+    return date.toISOString().slice(0, 10);
+  }
+
+  function previousDateKey(date: Date) {
+    const previous = new Date(date);
+    previous.setDate(previous.getDate() - 1);
+    return dateKey(previous);
+  }
+
+  function answerRate(overview: any) {
+    const totalCalls = Number(overview?.total_calls || 0);
+    const answeredCalls = Number(overview?.answered_calls || 0);
+    return totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
+  }
 
   async function fetchMetrics() {
     setLoading(true);
     setError(null);
     try {
       const baseUrl = API_BASE_URL || window.location.origin;
-      const today = new Date().toISOString().slice(0, 10);
+      const now = new Date();
+      const today = dateKey(now);
+      const yesterday = previousDateKey(now);
       const url = new URL(`${baseUrl}/api/reports/overview`);
       if (orgId) {
         url.searchParams.set('org_id', orgId);
       }
       url.searchParams.set('start_date', today);
       url.searchParams.set('end_date', today);
+      url.searchParams.set('_fresh', String(Date.now()));
+
+      const yesterdayUrl = new URL(`${baseUrl}/api/reports/overview`);
+      if (orgId) {
+        yesterdayUrl.searchParams.set('org_id', orgId);
+      }
+      yesterdayUrl.searchParams.set('start_date', yesterday);
+      yesterdayUrl.searchParams.set('end_date', yesterday);
+      yesterdayUrl.searchParams.set('_fresh', String(Date.now()));
 
       const headers: Record<string, string> = {};
       if (user && user.id) headers['x-user-id'] = user.id;
 
-      const json = await fetchJson(url.toString(), { headers });
+      const [json, yesterdayJson] = await Promise.all([
+        fetchJson(url.toString(), { headers, cache: 'no-store' }),
+        fetchJson(yesterdayUrl.toString(), { headers, cache: 'no-store' }).catch(() => ({ overview: {} })),
+      ]);
       const overview = json.overview || {};
+      const yesterdayOverview = yesterdayJson.overview || {};
       const totalCalls = Number(overview.total_calls || 0);
       const answeredCalls = Number(overview.answered_calls || 0);
-      const answerRatePct = totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
 
-      // Map backend response to frontend interface
-      const answer_rate_today = answerRatePct;
-      
-      // For yesterday's rate, we'd need a separate call; for now use a default
-      const answer_rate_yesterday = answer_rate_today * 0.9; // Placeholder
+      const answer_rate_today = answerRate(overview);
+      const answer_rate_yesterday = answerRate(yesterdayOverview);
       const delta_pp = answer_rate_today - answer_rate_yesterday;
 
-      // If orgId is set, fetch assigned phones for transparency
       let assignedPhones: Array<{ id: string; number: string; label?: string | null }> = [];
-      if (orgId) {
-        try {
-          try {
-            const numbersData = await fetchJson(buildApiUrl(`/api/reports/numbers?org_id=${encodeURIComponent(orgId)}&start_date=${today}&end_date=${today}`), { headers });
-            assignedPhones = (numbersData.numbers || []).map((row: any) => ({ id: row.id, number: row.number, label: row.label }));
-          } catch (e) {
-            // keep assignedPhones empty on failure
-            console.warn('Failed to fetch assigned phones:', e);
-          }
-        } catch (e) {
-          console.warn('Failed to fetch assigned phones:', e);
-        }
+      try {
+        const numbersPath = orgId
+          ? `/api/reports/numbers?org_id=${encodeURIComponent(orgId)}&start_date=${today}&end_date=${today}&_fresh=${Date.now()}`
+          : `/api/reports/numbers?start_date=${today}&end_date=${today}&_fresh=${Date.now()}`;
+        const numbersData = await fetchJson(buildApiUrl(numbersPath), { headers, cache: 'no-store' });
+        assignedPhones = (numbersData.numbers || []).map((row: any) => ({
+          id: row.id || row.phone_number_id || row.number,
+          number: row.number || row.phone_number || row.business_number,
+          label: row.label || row.organization_name || null,
+        })).filter((row: any) => row.number);
+      } catch (e) {
+        console.warn('Failed to fetch assigned phones:', e);
       }
 
       setMetrics({
