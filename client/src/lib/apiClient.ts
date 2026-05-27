@@ -345,6 +345,8 @@ export type LeadItem = {
   lead_type?: string | null;
   opt_in_source?: string | null;
   ip_address?: string | null;
+  trusted_id?: string | null;
+  form_number?: string | null;
   tcpa_consent?: boolean | null;
   tcpa_timestamp?: string | null;
   status?: string | null;
@@ -392,6 +394,16 @@ export async function updateLead(leadId: string, patch: Record<string, any>, use
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify(patch),
   }) as { item: LeadItem };
+}
+
+export type LeadsVisibility = { agents: boolean; clients: boolean };
+
+export async function updateLeadsVisibility(orgId: string, visibility: Partial<LeadsVisibility>, userId?: string) {
+  return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/leads-visibility`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify(visibility),
+  }) as { org: { id: string; leads_visibility: LeadsVisibility } };
 }
 
 export async function listMightyCallSyncJobs(params?: { orgId?: string; status?: string; limit?: number }, userId?: string) {

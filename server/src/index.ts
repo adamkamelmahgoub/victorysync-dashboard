@@ -4419,6 +4419,8 @@ function mapMcGrawLead(body: any) {
     tcpa_timestamp: timestamp,
     source: 'mcgrawnow',
     source_lead_id: pickLeadValue(body, ['lead_id', 'source_lead_id', 'id']) ? String(pickLeadValue(body, ['lead_id', 'source_lead_id', 'id'])).trim() : null,
+    trusted_id: pickLeadValue(body, ['trusted_id', 'trustedId', 'trusted_form_id']) ? String(pickLeadValue(body, ['trusted_id', 'trustedId', 'trusted_form_id'])).trim().slice(0, 500) : null,
+    form_number: pickLeadValue(body, ['form_number', 'formNumber', 'form_id', 'formId']) ? String(pickLeadValue(body, ['form_number', 'formNumber', 'form_id', 'formId'])).trim().slice(0, 200) : null,
     raw_payload: stripSensitiveFields(body),
   };
 }
@@ -9851,6 +9853,32 @@ app.put('/api/orgs/:orgId', async (req, res) => {
   } catch (e: any) {
     console.error('update_org_failed:', fmtErr(e));
     res.status(500).json({ error: 'update_org_failed', detail: fmtErr(e) });
+  }
+});
+
+// PATCH /api/orgs/:orgId/leads-visibility — update which roles can see the leads page
+app.patch('/api/orgs/:orgId/leads-visibility', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const isAdmin = await isOrgAdmin(actorId, orgId).catch(() => false);
+    const isPlatAdmin = await isPlatformAdmin(actorId).catch(() => false);
+    if (!isAdmin && !isPlatAdmin) return res.status(403).json({ error: 'forbidden' });
+    const { agents, clients } = req.body || {};
+    const visibility: Record<string, boolean> = {};
+    if (typeof agents === 'boolean') visibility.agents = agents;
+    if (typeof clients === 'boolean') visibility.clients = clients;
+    const { data, error } = await supabaseAdmin
+      .from('organizations')
+      .update({ leads_visibility: visibility })
+      .eq('id', orgId)
+      .select('id, leads_visibility')
+      .maybeSingle();
+    if (error) throw error;
+    return res.json({ org: data });
+  } catch (e: any) {
+    res.status(500).json({ error: 'leads_visibility_update_failed', detail: fmtErr(e) });
   }
 });
 
