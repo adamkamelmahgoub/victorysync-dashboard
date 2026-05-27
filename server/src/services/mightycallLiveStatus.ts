@@ -46,7 +46,7 @@ export type MightyCallStatusByExtension = {
 };
 
 const LIVE_STATUS_RESOLVER_VERSION = 'deterministic_v2';
-const LIVE_EVIDENCE_FRESH_MS = 20_000;
+const LIVE_EVIDENCE_FRESH_MS = 8_000; // 8s: completed call records must not linger as "active" signal
 const LIVE_DURATION_PROGRESS_WINDOW_MS = 25_000;
 const LIVE_DURATION_MAP_TTL_MS = 10 * 60 * 1000;
 const liveDurationProgressByCallId = new Map<string, {
@@ -147,11 +147,15 @@ export function normalizeFromRawStatus(rawStatus: string): NormalizedLiveStatus 
   if (text.includes('ring')) return 'ringing';
   if (text.includes('dial') || text.includes('calling')) return 'dialing';
   if (text.includes('on a call') || text.includes('on call')) return 'on_call';
+  // MightyCall profile status values: Busy = agent is on an active call
+  if (text === 'busy' || text === 'incall' || text === 'in_call' || text === 'oncall') return 'on_call';
   if (text.includes('connect') || text.includes('talk') || text.includes('in progress') || text.includes('active call') || text.includes('in call')) return 'on_call';
+  if (text.includes('busy')) return 'on_call';
   if (text.includes('wrap')) return 'wrap_up';
   if (text.includes('do not disturb') || text === 'dnd' || text.includes('disturb')) return 'dnd';
   if (text.includes('offline')) return 'offline';
-  if (text.includes('outbound')) return 'available';
+  // MightyCall "Free" = agent is available (not on a call)
+  if (text === 'free' || text.includes('free')) return 'available';
   if (text.includes('available') || text.includes('idle') || text.includes('ready')) return 'available';
   return 'unknown';
 }
@@ -673,6 +677,55 @@ export async function getMightyCallStatusByExtension(input: {
     ),
   ]);
   const profile = officialProfile || fallbackProfile;
+
+  // --- PROFILE-FIRST FAST PATH ---
+  // If the profile status endpoint returns a definitive answer (Available/Busy/DND/Offline),
+  // trust it immediately without waiting for call-record evidence.
+  // MightyCall profile status is real-time; call records only appear after calls complete.
+  if (profile && !liveCall?.currentCall) {
+    const profileRaw = String(
+      profile?.status?.name || profile?.status?.label || profile?.status?.value ||
+      profile?.status || profile?.availability || profile?.presenceStatus || ''
+    ).trim();
+    const profileNorm = normalizeFromRawStatus(profileRaw);
+    if (profileNorm === 'available' || profileNorm === 'dnd' || profileNorm === 'offline') {
+      // Definitive idle — return immediately, don't let stale call records override
+      const now = new Date().toISOString();
+      return {
+        extension,
+        rawStatus: profileRaw,
+        normalizedStatus: profileNorm,
+        source: 'mightycall_user_status_by_extension',
+        lastSyncedAt: now,
+        raw: profile,
+        decisionReason: 'profile_definitive_idle',
+        resolverVersion: LIVE_STATUS_RESOLVER_VERSION,
+        mightycallUserId: profile?.userId || profile?.user_id || profile?.id || undefined,
+        email: profile?.email || undefined,
+        name: profile?.name || profile?.displayName || profile?.display_name || undefined,
+      };
+    }
+    if (profileNorm === 'on_call' || profileNorm === 'ringing' || profileNorm === 'dialing') {
+      // Definitive active — return on_call immediately
+      const now = new Date().toISOString();
+      return {
+        extension,
+        rawStatus: profileRaw,
+        normalizedStatus: profileNorm,
+        source: 'mightycall_user_status_by_extension',
+        lastSyncedAt: now,
+        raw: profile,
+        decisionReason: 'profile_definitive_active',
+        resolverVersion: LIVE_STATUS_RESOLVER_VERSION,
+        mightycallUserId: profile?.userId || profile?.user_id || profile?.id || undefined,
+        email: profile?.email || undefined,
+        name: profile?.name || profile?.displayName || profile?.display_name || undefined,
+        statusStartedAt: profile?.statusStartedAt || profile?.status_started_at || undefined,
+      };
+    }
+  }
+  // --- END PROFILE-FIRST FAST PATH ---
+
   const currentCall = firstObject(
     liveCall?.currentCall,
     profile?.currentCall,

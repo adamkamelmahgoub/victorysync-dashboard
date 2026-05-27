@@ -110,8 +110,19 @@ declare global {
 }
 
 // Helper to safely format errors for logging (avoids TS property errors)
-function fmtErr(e: any) {
-  return (e as any)?.message ?? e;
+function fmtErr(e: any): string {
+  const msg = String((e as any)?.message ?? e ?? 'unknown_error');
+  // Never leak stack traces or internal paths in production
+  if (process.env.NODE_ENV === 'production') return msg.split('\n')[0].slice(0, 200);
+  return msg;
+}
+
+const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+const IS_DEBUG = LOG_LEVEL === 'debug' || LOG_LEVEL === 'verbose' || LOG_LEVEL === 'trace';
+
+function logDebug(event: string, meta: Record<string, any> = {}) {
+  if (!IS_DEBUG) return;
+  console.log(JSON.stringify({ level: 'debug', event, ts: new Date().toISOString(), ...meta }));
 }
 
 function logStructured(level: 'info' | 'warn' | 'error', event: string, meta: Record<string, any> = {}) {
@@ -126,6 +137,27 @@ function logStructured(level: 'info' | 'warn' | 'error', event: string, meta: Re
   else if (level === 'warn') console.warn(line);
   else console.log(line);
 }
+
+// ─── In-memory rate limiter ───────────────────────────────────────────────────
+// Lightweight sliding-window counter; no Redis required.
+const _rateLimitWindows = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
+  const now = Date.now();
+  const existing = _rateLimitWindows.get(key);
+  if (!existing || now > existing.resetAt) {
+    _rateLimitWindows.set(key, { count: 1, resetAt: now + windowMs });
+    return true; // allowed
+  }
+  existing.count += 1;
+  if (existing.count > maxRequests) return false; // blocked
+  return true;
+}
+// Prune stale entries every 5 minutes to prevent memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _rateLimitWindows) { if (now > v.resetAt) _rateLimitWindows.delete(k); }
+}, 5 * 60 * 1000);
+// ──────────────────────────────────────────────────────────────────────────────
 
 async function getProductionReadinessSnapshot() {
   const schema = await getSchemaHealth();
@@ -2510,7 +2542,7 @@ async function loadRealAgentsFromOrgMembers(orgIds: string[]): Promise<RealAgent
       }))
       .filter((row: any) => !!row.org_id && !!row.org_member_id && !!row.mightycall_extension);
     if (normalizedRows.length > 0) {
-      console.log('[live-status] roster fallback: using real org_users agent extensions (org_members had none)');
+      logDebug('live-status.roster.fallback2', { reason: 'org_members_empty' });
     }
   }
 
@@ -2621,7 +2653,7 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
   const resolverVersion = String((payloadMeta as any)?.resolverVersion || '');
   const idleAndNoFreshStart =
     (statusNorm === 'available' || statusNorm === 'dnd' || statusNorm === 'offline' || statusNorm === 'wrap_up') &&
-    (!Number.isFinite(startedMs) || ((Date.now() - startedMs) > 90_000));
+    (!Number.isFinite(startedMs) || ((Date.now() - startedMs) > 25_000));
   const effectiveOnCall = idleAndNoFreshStart ? false : (presence.on_call || activeCallHint);
   const effectiveStatus = effectiveOnCall
     ? (statusNorm === 'unknown' || statusNorm === 'available' ? 'On Call' : presence.label)
@@ -3926,7 +3958,7 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
 
   // Hard stale-eviction pass: clear any rows still marked active when evidence is old
   // and raw status is already idle/terminal.
-  const staleCutoffIso = new Date(Date.now() - 90_000).toISOString();
+  const staleCutoffIso = new Date(Date.now() - 25_000).toISOString();
   const idleRawStatuses = ['available', 'dnd', 'offline', 'wrap_up', 'unknown'];
   const { data: staleRows } = await supabaseAdmin
     .from('agent_live_status')
@@ -3957,6 +3989,30 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
   }
 }
 
+async function buildLiveStatusSnapshot(orgId: string): Promise<any[]> {
+  const [liveRows, agents] = await Promise.all([
+    getAgentLiveStatusRowsForOrgIds([orgId]),
+    loadRealAgentsFromOrgMembers([orgId]),
+  ]);
+  const statusByKey = new Map<string, any>();
+  for (const row of liveRows || []) {
+    const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
+    if (ext) statusByKey.set(`${row?.org_id || ''}:${ext}`, row);
+  }
+  const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
+  for (const agent of agents) {
+    identityByKey.set(`${agent.org_id}:${agent.mightycall_extension}`, {
+      user_id: agent.user_id || null, email: agent.email || null, display_name: agent.full_name || null,
+    });
+  }
+  return agents.map((agent) => {
+    const key = `${agent.org_id}:${agent.mightycall_extension}`;
+    const liveRow = statusByKey.get(key);
+    if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
+    return { user_id: agent.user_id || '', org_id: agent.org_id, email: agent.email || null, extension: agent.mightycall_extension, display_name: agent.full_name || null, on_call: false, status: 'Unknown', stale: true };
+  });
+}
+
 async function runLiveAgentPresenceRefreshCycle() {
   if (livePresenceRefreshInFlight) return;
   livePresenceRefreshInFlight = true;
@@ -3967,27 +4023,7 @@ async function runLiveAgentPresenceRefreshCycle() {
       // Push to any SSE clients watching this org
       if (liveStatusSseClients.has(orgId) && liveStatusSseClients.get(orgId)!.size > 0) {
         try {
-          const [liveRows, agents] = await Promise.all([
-            getAgentLiveStatusRowsForOrgIds([orgId]),
-            loadRealAgentsFromOrgMembers([orgId]),
-          ]);
-          const statusByKey = new Map<string, any>();
-          for (const row of liveRows || []) {
-            const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
-            if (ext) statusByKey.set(`${row?.org_id || ''}:${ext}`, row);
-          }
-          const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
-          for (const agent of agents) {
-            identityByKey.set(`${agent.org_id}:${agent.mightycall_extension}`, {
-              user_id: agent.user_id || null, email: agent.email || null, display_name: agent.full_name || null,
-            });
-          }
-          const items = agents.map((agent) => {
-            const key = `${agent.org_id}:${agent.mightycall_extension}`;
-            const liveRow = statusByKey.get(key);
-            if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
-            return { user_id: agent.user_id || '', org_id: agent.org_id, email: agent.email || null, extension: agent.mightycall_extension, display_name: agent.full_name || null, on_call: false, status: 'Unknown', stale: true };
-          });
+          const items = await buildLiveStatusSnapshot(orgId);
           broadcastSseEvent(orgId, { items, refreshed_at: new Date().toISOString(), source: 'sse_push' });
         } catch { /* best-effort SSE push */ }
       }
@@ -4282,13 +4318,19 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '512kb' }));
+app.use(express.urlencoded({ extended: true, limit: '512kb' }));
 app.use('/api', (_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // HSTS: tell browsers to always use HTTPS for the next year
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  // Basic CSP for API responses (prevents JSON responses being rendered as HTML by mistake)
+  res.setHeader('Content-Security-Policy', "default-src 'none'");
   next();
 });
 
@@ -4473,6 +4515,10 @@ function mapMcGrawLead(body: any) {
 }
 
 app.post('/api/leads/inbound', async (req, res) => {
+  const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim() || 'unknown';
+  if (!checkRateLimit(`leads_inbound:${ip}`, 60, 60_000)) {
+    return res.status(429).json({ success: false, error: 'rate_limit_exceeded', retryAfter: 60 });
+  }
   const headerSecret = String(req.header('x-api-key') || '');
   const expectedSecret = process.env.MCGRAWNOW_WEBHOOK_SECRET || '';
   if (!expectedSecret || !headerSecret || headerSecret !== expectedSecret) {
@@ -4907,15 +4953,115 @@ app.get('/api/admin/backups/export', async (req, res) => {
 });
 
 app.post('/api/webhooks/mightycall', async (req, res) => {
-  res.status(410).json({
-    error: 'mightycall_webhooks_disabled',
-    detail: 'VictorySync now uses MightyCall API-only polling and sync. Configure /api/mightycall/sync or backend polling instead.',
-  });
+  const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim() || 'unknown';
+  if (!checkRateLimit(`mc_webhook:${ip}`, 120, 60_000)) {
+    return res.status(429).json({ error: 'rate_limit_exceeded', retryAfter: 60 });
+  }
+  try {
+    // --- HMAC signature verification (optional but strongly recommended in prod) ---
+    const webhookSecret = process.env.MIGHTYCALL_WEBHOOK_SECRET || '';
+    if (webhookSecret) {
+      const sigHeader = String(req.headers['x-mightycall-signature'] || req.headers['x-webhook-signature'] || req.headers['x-hub-signature-256'] || '');
+      if (sigHeader) {
+        const crypto = await import('crypto');
+        const rawBody = JSON.stringify(req.body);
+        const expected = 'sha256=' + crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+        if (sigHeader !== expected) {
+          console.warn('[mightycall webhook] signature mismatch — rejecting');
+          return res.status(401).json({ error: 'invalid_signature' });
+        }
+      }
+    }
+
+    const payload = req.body;
+    if (!payload) return res.status(400).json({ error: 'empty_payload' });
+
+    const events = extractMightyCallWebhookEvents(payload);
+    if (events.length === 0) return res.status(200).json({ received: true, events_processed: 0 });
+
+    // Collect orgs that need an immediate live-status refresh
+    const orgsToRefresh = new Set<string>();
+    const results: any[] = [];
+
+    for (const rawEvent of events) {
+      try {
+        // --- Profile status change events (instant on/off call detection) ---
+        const eventType = String(rawEvent?.EventType ?? rawEvent?.eventType ?? rawEvent?.event_name ?? rawEvent?.type ?? '').toLowerCase();
+        const isProfileEvent = eventType.includes('profile') || eventType.includes('presence') || eventType.includes('status') || eventType.includes('availability');
+        if (isProfileEvent) {
+          const extension = normalizeExtension(
+            rawEvent?.extension ?? rawEvent?.Extension ?? rawEvent?.agentExtension ?? rawEvent?.agent_extension ??
+            rawEvent?.user?.extension ?? rawEvent?.agent?.extension
+          );
+          if (extension) {
+            // Find org for this extension
+            try {
+              const { data: extRow } = await supabaseAdmin
+                .from('org_users')
+                .select('org_id')
+                .eq('mightycall_extension', extension)
+                .limit(1)
+                .maybeSingle();
+              if (extRow?.org_id) orgsToRefresh.add(String(extRow.org_id));
+            } catch (_) {}
+            try {
+              const { data: extRow2 } = await supabaseAdmin
+                .from('agent_extensions')
+                .select('org_id')
+                .eq('extension', extension)
+                .limit(1)
+                .maybeSingle();
+              if (extRow2?.org_id) orgsToRefresh.add(String(extRow2.org_id));
+            } catch (_) {}
+          }
+          results.push({ type: 'profile_event', extension, event_type: eventType });
+          continue;
+        }
+
+        // --- Call events (answered, completed, ringing, etc.) ---
+        const call = normalizeMightyCallWebhookCall(rawEvent);
+        const upserted = await upsertMightyCallWebhookCall(call);
+        if (upserted.org_id) orgsToRefresh.add(upserted.org_id);
+        results.push({ type: 'call_event', ...upserted });
+      } catch (evtErr) {
+        console.warn('[mightycall webhook] event processing error:', fmtErr(evtErr));
+        results.push({ type: 'error', error: fmtErr(evtErr) });
+      }
+    }
+
+    // Fire immediate live-status refresh for all affected orgs (non-blocking)
+    if (orgsToRefresh.size > 0) {
+      const refreshPromises = Array.from(orgsToRefresh).map(async (orgId) => {
+        try {
+          await withDeadline(refreshAgentLiveStatusForOrg(orgId), 5000, null as any);
+          // Push SSE to connected dashboard clients
+          if (liveStatusSseClients.has(orgId) && liveStatusSseClients.get(orgId)!.size > 0) {
+            try {
+              const items = await buildLiveStatusSnapshot(orgId);
+              broadcastSseEvent(orgId, { items, refreshed_at: new Date().toISOString(), source: 'webhook_push' });
+            } catch (_) {}
+          }
+        } catch (refreshErr) {
+          console.warn('[mightycall webhook] refresh failed for org', orgId, fmtErr(refreshErr));
+        }
+      });
+      // Don't await — respond immediately, refresh in background
+      Promise.all(refreshPromises).catch(() => {});
+    }
+
+    return res.status(200).json({ received: true, events_processed: results.length, orgs_refreshed: orgsToRefresh.size, results });
+  } catch (err) {
+    console.error('[mightycall webhook] fatal error:', fmtErr(err));
+    return res.status(500).json({ error: 'internal_error' });
+  }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   try {
     const ipAddress = String(req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+    if (!checkRateLimit(`auth_login:${ipAddress}`, 20, 60_000)) {
+      return res.status(429).json({ error: 'Too many requests. Please wait.' });
+    }
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
     if (!email || !password || !email.includes('@')) return res.status(400).json({ error: 'invalid_credentials' });
@@ -5847,31 +5993,30 @@ app.get("/api/admin/mightycall/extensions", async (_req, res) => {
   }
 });
 
-// GET /api/admin/phone-numbers - generic phone numbers listing
+// GET /api/admin/phone-numbers - generic phone numbers listing (platform-admin only)
 app.get('/api/admin/phone-numbers', async (req, res) => {
   try {
-    // TODO: Re-enable auth check once x-user-id header transmission is fixed
-    // For now, return all unassigned phone numbers without auth
-    
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const adminOk = await isPlatformAdmin(actorId);
+    if (!adminOk) return res.status(403).json({ error: 'forbidden', detail: 'platform_admin_required' });
+
     const orgId = req.query.orgId as string | undefined;
     const unassignedOnly = (req.query.unassignedOnly as string | undefined) === 'true';
 
-    // Select basic columns that always exist
     let q = supabaseAdmin.from('phone_numbers').select('id, number, label, org_id').order('created_at', { ascending: true });
     if (unassignedOnly) q = q.is('org_id', null);
     if (orgId) q = q.eq('org_id', orgId);
 
     const { data, error } = await q;
     if (error) throw error;
-    const mapped = (data || []).map((r: any) => {
-      return {
-        id: r.id,
-        number: r.number,
-        label: r.label ?? null,
-        orgId: r.org_id ?? null,
-        isActive: typeof r.is_active === 'boolean' ? r.is_active : true
-      };
-    }).filter((p: any) => p.number); // Filter out records with no phone number
+    const mapped = (data || []).map((r: any) => ({
+      id: r.id,
+      number: r.number,
+      label: r.label ?? null,
+      orgId: r.org_id ?? null,
+      isActive: typeof r.is_active === 'boolean' ? r.is_active : true,
+    })).filter((p: any) => p.number);
     res.json({ phone_numbers: mapped });
   } catch (err: any) {
     console.error('list_phone_numbers_failed:', fmtErr(err));
@@ -5898,7 +6043,7 @@ app.get('/api/orgs/:orgId/phone-numbers', async (req, res) => {
     }
 
     const isAdmin = actorId && await isPlatformAdmin(actorId);
-    console.log('[get_org_phone_numbers] params:', { orgId, actorId, isDev, isAdmin });
+    logDebug('get_org_phone_numbers.params', { orgId, isDev, isAdmin });
 
     // Admins see ALL phone numbers; regular users see only assigned numbers
     if (isAdmin) {
@@ -8311,27 +8456,7 @@ app.get('/api/orgs/:orgId/live-status/stream', async (req, res) => {
 
     // Send initial snapshot immediately
     try {
-      const [liveRows, agents] = await Promise.all([
-        getAgentLiveStatusRowsForOrgIds([orgId]),
-        loadRealAgentsFromOrgMembers([orgId]),
-      ]);
-      const statusByKey = new Map<string, any>();
-      for (const row of liveRows || []) {
-        const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
-        if (ext) statusByKey.set(`${row?.org_id || ''}:${ext}`, row);
-      }
-      const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
-      for (const agent of agents) {
-        identityByKey.set(`${agent.org_id}:${agent.mightycall_extension}`, {
-          user_id: agent.user_id || null, email: agent.email || null, display_name: agent.full_name || null,
-        });
-      }
-      const items = agents.map((agent) => {
-        const key = `${agent.org_id}:${agent.mightycall_extension}`;
-        const liveRow = statusByKey.get(key);
-        if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
-        return { user_id: agent.user_id || '', org_id: agent.org_id, email: agent.email || null, extension: agent.mightycall_extension, display_name: agent.full_name || null, on_call: false, status: 'Unknown', stale: true };
-      });
+      const items = await buildLiveStatusSnapshot(orgId);
       res.write(`data: ${JSON.stringify({ items, refreshed_at: new Date().toISOString(), source: 'sse_initial' })}\n\n`);
     } catch { /* best-effort initial push */ }
 
@@ -12125,6 +12250,7 @@ app.get("/s/series", async (req, res) => {
         const csv = [header.join(','), ...rows].join('\n');
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="invoice-${invoice.invoice_number || invoice.id}.csv"`);
+        res.setHeader('Content-Disposition', 'attachment; filename="invoices.csv"');
         res.send(csv);
       } catch (err: any) {
         console.error('[billing/invoices export] error:', err);
@@ -12399,6 +12525,7 @@ app.get("/s/series", async (req, res) => {
         const csv = [header.join(','), ...rows].join('\n');
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="invoice-${(invoice as any).invoice_number || invoice.id}.csv"`);
+        res.setHeader('Content-Disposition', 'attachment; filename="invoice.csv"');
         res.send(csv);
       } catch (err: any) {
         console.error('[client/billing/invoice export] error:', err);

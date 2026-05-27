@@ -150,6 +150,9 @@ const LiveStatusPage: FC = () => {
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState<number>(Date.now());
   const [sseConnected, setSseConnected] = useState(false);
+  const [sseReconnecting, setSseReconnecting] = useState(false);
+  const sseReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sseReconnectDelay = useRef(1000);
   const liveRequestSeq = useRef(0);
   const liveRequestInFlight = useRef(false);
   const lastLiveRequestStartedAt = useRef(0);
@@ -179,29 +182,58 @@ const LiveStatusPage: FC = () => {
     }
   };
 
-  // SSE: real-time stream for immediate on-call detection
+  // SSE: real-time stream with auto-reconnect
   useEffect(() => {
     if (!activeOrgId || !user?.id) return;
-    if (esRef.current) { esRef.current.close(); esRef.current = null; setSseConnected(false); }
-    let es: EventSource;
-    try {
-      es = new EventSource(`/api/orgs/${encodeURIComponent(activeOrgId)}/live-status/stream?userId=${encodeURIComponent(user.id)}`);
-    } catch { return; }
-    esRef.current = es;
-    es.onopen = () => setSseConnected(true);
-    es.onmessage = (evt) => {
+    let cancelled = false;
+
+    const connect = () => {
+      if (cancelled) return;
+      if (esRef.current) { esRef.current.close(); esRef.current = null; }
+      let es: EventSource;
       try {
-        const json = JSON.parse(evt.data);
-        if (Array.isArray(json.items)) {
-          setItems(json.items as LiveAgentStatus[]);
-          setRefreshedAt(json.refreshed_at || new Date().toISOString());
-          setLoading(false);
-          setError(null);
-        }
-      } catch { /* ignore malformed events */ }
+        es = new EventSource(`/api/orgs/${encodeURIComponent(activeOrgId)}/live-status/stream?userId=${encodeURIComponent(user.id)}`);
+      } catch { return; }
+      esRef.current = es;
+      es.onopen = () => {
+        if (cancelled) { es.close(); return; }
+        setSseConnected(true);
+        setSseReconnecting(false);
+        sseReconnectDelay.current = 1000; // reset backoff on success
+      };
+      es.onmessage = (evt) => {
+        try {
+          const json = JSON.parse(evt.data);
+          if (Array.isArray(json.items)) {
+            setItems(json.items as LiveAgentStatus[]);
+            setRefreshedAt(json.refreshed_at || new Date().toISOString());
+            setLoading(false);
+            setError(null);
+          }
+        } catch { /* ignore malformed events */ }
+      };
+      es.onerror = () => {
+        es.close();
+        esRef.current = null;
+        setSseConnected(false);
+        if (cancelled) return;
+        setSseReconnecting(true);
+        // Exponential backoff: 1s → 2s → 4s → 8s → max 30s
+        const delay = sseReconnectDelay.current;
+        sseReconnectDelay.current = Math.min(delay * 2, 30_000);
+        sseReconnectTimer.current = setTimeout(connect, delay);
+      };
     };
-    es.onerror = () => { setSseConnected(false); es.close(); esRef.current = null; };
-    return () => { es.close(); esRef.current = null; setSseConnected(false); };
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (sseReconnectTimer.current) clearTimeout(sseReconnectTimer.current);
+      esRef.current?.close();
+      esRef.current = null;
+      setSseConnected(false);
+      setSseReconnecting(false);
+    };
   }, [activeOrgId, user?.id]);
 
   // Polling fallback — slower when SSE is live, faster when not
@@ -259,10 +291,16 @@ const LiveStatusPage: FC = () => {
           ))}
         </select>
       )}
-      {sseConnected && (
+      {sseConnected && !sseReconnecting && (
         <div className="flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/[0.08] px-3 py-1 text-xs font-semibold text-emerald-300">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
           Live stream
+        </div>
+      )}
+      {sseReconnecting && (
+        <div className="flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/[0.08] px-3 py-1 text-xs font-semibold text-amber-300">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+          Reconnecting…
         </div>
       )}
       <button onClick={load} disabled={loading} className="vs-button-secondary">
@@ -272,7 +310,7 @@ const LiveStatusPage: FC = () => {
         {syncing ? 'Syncing now...' : 'Force Sync'}
       </button>
     </div>
-  ), [forceSync, isAdmin, loading, orgs, selectedOrgId, setSelectedOrgId, sseConnected, syncing]);
+  ), [forceSync, isAdmin, loading, orgs, selectedOrgId, setSelectedOrgId, sseConnected, sseReconnecting, syncing]);
 
   const meta = (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
