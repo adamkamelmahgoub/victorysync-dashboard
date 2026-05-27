@@ -2968,7 +2968,7 @@ const LIVE_CALL_LOOKBACK_MS = 72 * 60 * 60 * 1000;
 const ACTIVE_CALL_MAX_AGE_MS = 45 * 1000;
 const JOURNAL_LIVE_SIGNAL_MAX_AGE_MS = 15 * 1000;
 const CONTACT_CENTER_LIVE_SIGNAL_MAX_AGE_MS = 15 * 1000;
-const LIVE_AGENT_PRESENCE_REFRESH_MS = 3000;
+const LIVE_AGENT_PRESENCE_REFRESH_MS = 1500;
 const LIVE_AGENT_PRESENCE_STALE_MS = 10000;
 const LIVE_AGENT_PRESENCE_REQUEST_FRESH_MS = 2000;
 const LIVE_AGENT_PRESENCE_REQUEST_WAIT_MS = 1200;
@@ -3770,6 +3770,24 @@ async function refreshLiveAgentPresenceForOrg(orgId: string) {
 
 let livePresenceRefreshInFlight = false;
 const livePresenceOrgRefreshLocks = new Map<string, Promise<any>>();
+// SSE: keyed by orgId. Each set holds active response objects.
+const liveStatusSseClients = new Map<string, Set<any>>();
+function registerSseClient(key: string, res: any) {
+  if (!liveStatusSseClients.has(key)) liveStatusSseClients.set(key, new Set());
+  liveStatusSseClients.get(key)!.add(res);
+}
+function unregisterSseClient(key: string, res: any) {
+  liveStatusSseClients.get(key)?.delete(res);
+}
+function broadcastSseEvent(key: string, payload: object) {
+  const clients = liveStatusSseClients.get(key);
+  if (!clients || clients.size === 0) return;
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const client of Array.from(clients)) {
+    try { client.write(data); } catch { clients.delete(client); }
+  }
+}
+
 
 async function refreshLiveAgentPresence(orgId?: string | null) {
   const targetOrgIds = orgId ? [orgId] : await getLivePresenceOrgIds();
@@ -3944,7 +3962,36 @@ async function runLiveAgentPresenceRefreshCycle() {
   livePresenceRefreshInFlight = true;
   try {
     const orgIds = await getLivePresenceOrgIds();
-    await Promise.all(orgIds.map((orgId) => refreshAgentLiveStatusForOrg(orgId)));
+    await Promise.all(orgIds.map(async (orgId) => {
+      await refreshAgentLiveStatusForOrg(orgId);
+      // Push to any SSE clients watching this org
+      if (liveStatusSseClients.has(orgId) && liveStatusSseClients.get(orgId)!.size > 0) {
+        try {
+          const [liveRows, agents] = await Promise.all([
+            getAgentLiveStatusRowsForOrgIds([orgId]),
+            loadRealAgentsFromOrgMembers([orgId]),
+          ]);
+          const statusByKey = new Map<string, any>();
+          for (const row of liveRows || []) {
+            const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
+            if (ext) statusByKey.set(`${row?.org_id || ''}:${ext}`, row);
+          }
+          const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
+          for (const agent of agents) {
+            identityByKey.set(`${agent.org_id}:${agent.mightycall_extension}`, {
+              user_id: agent.user_id || null, email: agent.email || null, display_name: agent.full_name || null,
+            });
+          }
+          const items = agents.map((agent) => {
+            const key = `${agent.org_id}:${agent.mightycall_extension}`;
+            const liveRow = statusByKey.get(key);
+            if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
+            return { user_id: agent.user_id || '', org_id: agent.org_id, email: agent.email || null, extension: agent.mightycall_extension, display_name: agent.full_name || null, on_call: false, status: 'Unknown', stale: true };
+          });
+          broadcastSseEvent(orgId, { items, refreshed_at: new Date().toISOString(), source: 'sse_push' });
+        } catch { /* best-effort SSE push */ }
+      }
+    }));
   } catch (err: any) {
     console.warn('[agent-live-status] background refresh failed:', fmtErr(err));
   } finally {
@@ -8234,6 +8281,72 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
   } catch (err: any) {
     console.error('agent_live_status_failed:', fmtErr(err));
     res.status(500).json({ error: 'agent_live_status_failed', detail: fmtErr(err) ?? 'unknown_error' });
+  }
+});
+
+// SSE: real-time live status stream for a specific org
+app.get('/api/orgs/:orgId/live-status/stream', async (req, res) => {
+  try {
+    const actorId = (req.query.userId as string) || req.header('x-user-id') || null;
+    const { orgId } = req.params;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const isMember = !!(await supabaseAdmin
+      .from('org_users')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('user_id', actorId)
+      .maybeSingle()
+      .then(r => r.data));
+    const allowed = isMember || (await isPlatformAdmin(actorId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'));
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    registerSseClient(orgId, res);
+
+    // Send initial snapshot immediately
+    try {
+      const [liveRows, agents] = await Promise.all([
+        getAgentLiveStatusRowsForOrgIds([orgId]),
+        loadRealAgentsFromOrgMembers([orgId]),
+      ]);
+      const statusByKey = new Map<string, any>();
+      for (const row of liveRows || []) {
+        const ext = normalizeExtension(row?.mightycall_extension || row?.extension);
+        if (ext) statusByKey.set(`${row?.org_id || ''}:${ext}`, row);
+      }
+      const identityByKey = new Map<string, { user_id: string | null; email: string | null; display_name: string | null }>();
+      for (const agent of agents) {
+        identityByKey.set(`${agent.org_id}:${agent.mightycall_extension}`, {
+          user_id: agent.user_id || null, email: agent.email || null, display_name: agent.full_name || null,
+        });
+      }
+      const items = agents.map((agent) => {
+        const key = `${agent.org_id}:${agent.mightycall_extension}`;
+        const liveRow = statusByKey.get(key);
+        if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
+        return { user_id: agent.user_id || '', org_id: agent.org_id, email: agent.email || null, extension: agent.mightycall_extension, display_name: agent.full_name || null, on_call: false, status: 'Unknown', stale: true };
+      });
+      res.write(`data: ${JSON.stringify({ items, refreshed_at: new Date().toISOString(), source: 'sse_initial' })}\n\n`);
+    } catch { /* best-effort initial push */ }
+
+    // Keep-alive ping every 20s
+    const pingId = setInterval(() => {
+      try { res.write(': ping\n\n'); } catch { clearInterval(pingId); }
+    }, 20000);
+
+    req.on('close', () => {
+      clearInterval(pingId);
+      unregisterSseClient(orgId, res);
+    });
+  } catch (err: any) {
+    console.error('[sse] live-status stream error:', fmtErr(err));
+    if (!res.headersSent) res.status(500).json({ error: 'stream_failed' });
   }
 });
 

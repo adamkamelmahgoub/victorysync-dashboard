@@ -149,9 +149,11 @@ const LiveStatusPage: FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState<number>(Date.now());
+  const [sseConnected, setSseConnected] = useState(false);
   const liveRequestSeq = useRef(0);
   const liveRequestInFlight = useRef(false);
   const lastLiveRequestStartedAt = useRef(0);
+  const esRef = useRef<EventSource | null>(null);
 
   const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
 
@@ -177,11 +179,37 @@ const LiveStatusPage: FC = () => {
     }
   };
 
-	  useEffect(() => {
-	    load();
-	    const intervalId = window.setInterval(() => {
-	      if (document.visibilityState === 'visible') load();
-	    }, 1000);
+  // SSE: real-time stream for immediate on-call detection
+  useEffect(() => {
+    if (!activeOrgId || !user?.id) return;
+    if (esRef.current) { esRef.current.close(); esRef.current = null; setSseConnected(false); }
+    let es: EventSource;
+    try {
+      es = new EventSource(`/api/orgs/${encodeURIComponent(activeOrgId)}/live-status/stream?userId=${encodeURIComponent(user.id)}`);
+    } catch { return; }
+    esRef.current = es;
+    es.onopen = () => setSseConnected(true);
+    es.onmessage = (evt) => {
+      try {
+        const json = JSON.parse(evt.data);
+        if (Array.isArray(json.items)) {
+          setItems(json.items as LiveAgentStatus[]);
+          setRefreshedAt(json.refreshed_at || new Date().toISOString());
+          setLoading(false);
+          setError(null);
+        }
+      } catch { /* ignore malformed events */ }
+    };
+    es.onerror = () => { setSseConnected(false); es.close(); esRef.current = null; };
+    return () => { es.close(); esRef.current = null; setSseConnected(false); };
+  }, [activeOrgId, user?.id]);
+
+  // Polling fallback — slower when SSE is live, faster when not
+  useEffect(() => {
+    load();
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load();
+    }, sseConnected ? 3000 : 1000);
     const onFocus = () => {
       if (document.visibilityState === 'visible') load();
     };
@@ -192,7 +220,7 @@ const LiveStatusPage: FC = () => {
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('visibilitychange', onFocus);
     };
-  }, [user?.id, activeOrgId]);
+  }, [user?.id, activeOrgId, sseConnected]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -231,6 +259,12 @@ const LiveStatusPage: FC = () => {
           ))}
         </select>
       )}
+      {sseConnected && (
+        <div className="flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/[0.08] px-3 py-1 text-xs font-semibold text-emerald-300">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+          Live stream
+        </div>
+      )}
       <button onClick={load} disabled={loading} className="vs-button-secondary">
         {loading ? 'Refreshing live...' : 'Refresh Live'}
       </button>
@@ -238,7 +272,7 @@ const LiveStatusPage: FC = () => {
         {syncing ? 'Syncing now...' : 'Force Sync'}
       </button>
     </div>
-  ), [forceSync, isAdmin, loading, orgs, selectedOrgId, setSelectedOrgId, syncing]);
+  ), [forceSync, isAdmin, loading, orgs, selectedOrgId, setSelectedOrgId, sseConnected, syncing]);
 
   const meta = (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
