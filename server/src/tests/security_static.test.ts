@@ -27,3 +27,19 @@ test('admin compatibility endpoints use platform-admin guard', () => {
     assert.match(source, new RegExp(`requirePlatformAdminRequest\\(req, res, '${action}'\\)`));
   }
 });
+
+test('mcgraw now lead intake is external-key protected and duplicate aware', () => {
+  const source = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+  const apiSecurity = readFileSync(join(process.cwd(), 'src', 'security', 'apiSecurity.ts'), 'utf8');
+  const migration = readFileSync(join(repoRoot, 'supabase', 'migrations', '028_mcgrawnow_leads.sql'), 'utf8');
+
+  assert.match(source, /app\.post\('\/api\/leads\/inbound'/);
+  assert.match(source, /MCGRAWNOW_WEBHOOK_SECRET/);
+  assert.match(source, /insertLogSafely\(supabaseAdmin, 'lead_duplicates'/);
+  assert.match(source, /\.from\('lead_sources'\)/);
+  assert.match(apiSecurity, /leads-inbound/);
+  assert.match(apiSecurity, /requests: 500/);
+  assert.match(migration, /create table if not exists public\.leads/);
+  assert.match(migration, /alter table public\.leads enable row level security/);
+  assert.match(migration, /alter publication supabase_realtime add table public\.leads/);
+});

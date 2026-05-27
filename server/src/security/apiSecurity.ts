@@ -32,6 +32,7 @@ const publicApiRoutes = [
   /^\/auth\/validate-invite$/,
   /^\/auth\/signup-with-invite$/,
   /^\/access-code\/verify$/,
+  /^\/leads\/inbound$/,
   /^\/webhooks\/mightycall$/,
 ];
 
@@ -94,6 +95,7 @@ function resolveLimitRule(req: Request): LimitRule {
   if (method === 'POST' && path === '/auth/signup') return { name: 'auth-signup', requests: 3, window: '1 m', keyBy: 'ip' };
   if (method === 'POST' && path === '/auth/reset-password') return { name: 'auth-reset-password', requests: 3, window: '1 m', keyBy: 'ip' };
   if (method === 'POST' && path === '/access-code/verify') return { name: 'access-code-verify', requests: 5, window: '10 m', keyBy: 'ip' };
+  if (method === 'POST' && path === '/leads/inbound') return { name: 'leads-inbound', requests: 500, window: '1 m', keyBy: 'ip' };
   if (method === 'GET' && path.startsWith('/dashboard/')) return { name: 'dashboard-read', requests: 60, window: '1 m', keyBy: 'user' };
   if (method === 'GET' && path.startsWith('/kpi/')) return { name: 'kpi-read', requests: 30, window: '1 m', keyBy: 'user' };
   if (method === 'POST') return { name: 'post-default', requests: 20, window: '1 m', keyBy: 'user' };

@@ -48,6 +48,7 @@ import { DebugAuthPage } from "./pages/DebugAuthPage";
 import { APIKeysPage } from "./pages/APIKeysPage";
 import BillingPage from "./pages/BillingPage";
 import LiveStatusPage from "./pages/LiveStatusPage";
+import LeadsPage from "./pages/LeadsPage";
 import AdminDiagnosticsPage from "./pages/admin/AdminDiagnosticsPage";
 import AdminLogsPage from "./pages/admin/AdminLogsPage";
 import { installAuthenticatedFetch } from "./lib/installAuthenticatedFetch";
@@ -152,6 +153,14 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <DashboardNewV3 />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/leads"
+        element={
+          <ProtectedRoute>
+            <LeadsPage />
           </ProtectedRoute>
         }
       />

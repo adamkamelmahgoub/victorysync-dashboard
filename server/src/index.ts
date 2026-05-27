@@ -32,6 +32,7 @@ import express from "express";
 import cors from "cors";
 import fetch from 'node-fetch';
 import crypto from 'crypto';
+import { z } from 'zod';
 import { supabase, supabaseAdmin } from './lib/supabaseClient';
 import { normalizePhoneDigits, normalizeToE164FromRaw } from './lib/phoneUtils';
 import { 
@@ -4235,6 +4236,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use('/api', (_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -4353,6 +4355,253 @@ app.post('/api/logs/auth', async (req, res) => {
     }
   } catch {}
   res.json({ ok: true });
+});
+
+const inboundLeadSchema = z.record(z.string(), z.any()).refine((body) => {
+  const phone = body.phone || body.phone_number || body.primary_phone;
+  return String(phone || '').replace(/\D/g, '').length >= 7;
+}, 'phone is required');
+
+function pickLeadValue(body: any, keys: string[]) {
+  for (const key of keys) {
+    const value = body?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+  }
+  return null;
+}
+
+function parseLeadBoolean(value: any) {
+  const text = String(value ?? '').trim().toLowerCase();
+  return ['true', '1', 'yes', 'y', 'on', 'consent', 'consented'].includes(text);
+}
+
+function parseLeadNumber(value: any) {
+  const num = Number(String(value ?? '').replace(/[$,]/g, ''));
+  return Number.isFinite(num) ? num : null;
+}
+
+async function resolveLeadOrganization(body: any, sourceName: string, _leadType: string | null) {
+  const campaignId = String(pickLeadValue(body, ['campaign_id', 'campaignId', 'campaign', 'cid']) || '').trim();
+  let query = supabaseAdmin
+    .from('lead_sources')
+    .select('organization_id, lead_type')
+    .eq('source_name', sourceName)
+    .eq('active', true)
+    .limit(1);
+  if (campaignId) query = query.eq('campaign_id', campaignId);
+  try {
+    const { data } = await query.maybeSingle();
+    return data?.organization_id || process.env.VICTORYSYNC_DEFAULT_ORG_ID || null;
+  } catch {
+    return process.env.VICTORYSYNC_DEFAULT_ORG_ID || null;
+  }
+}
+
+function mapMcGrawLead(body: any) {
+  const firstName = pickLeadValue(body, ['first_name', 'fname', 'firstName']);
+  const lastName = pickLeadValue(body, ['last_name', 'lname', 'lastName']);
+  const rawPhone = pickLeadValue(body, ['phone', 'phone_number', 'primary_phone']);
+  const phone = normalizeToE164FromRaw(String(rawPhone || '')) || String(rawPhone || '').replace(/\D/g, '');
+  const rawTimestamp = pickLeadValue(body, ['timestamp', 'created_at', 'tcpa_timestamp', 'consent_timestamp']);
+  const timestamp = rawTimestamp && !Number.isNaN(Date.parse(String(rawTimestamp))) ? new Date(String(rawTimestamp)).toISOString() : null;
+  const leadType = String(pickLeadValue(body, ['lead_type', 'vertical']) || 'debt_relief').trim() || 'debt_relief';
+  return {
+    first_name: firstName ? String(firstName).trim() : null,
+    last_name: lastName ? String(lastName).trim() : null,
+    phone,
+    email: pickLeadValue(body, ['email', 'email_address']) ? String(pickLeadValue(body, ['email', 'email_address'])).trim().toLowerCase() : null,
+    state: pickLeadValue(body, ['state']) ? String(pickLeadValue(body, ['state'])).trim().toUpperCase().slice(0, 20) : null,
+    debt_amount: parseLeadNumber(pickLeadValue(body, ['debt_amount', 'total_debt', 'unsecured_debt'])),
+    lead_type: leadType,
+    opt_in_source: pickLeadValue(body, ['opt_in_source', 'source', 'lead_source']) ? String(pickLeadValue(body, ['opt_in_source', 'source', 'lead_source'])).trim().slice(0, 200) : null,
+    ip_address: pickLeadValue(body, ['ip_address', 'ip']) ? String(pickLeadValue(body, ['ip_address', 'ip'])).trim() : null,
+    tcpa_consent: parseLeadBoolean(pickLeadValue(body, ['tcpa_optin', 'consent', 'tcpa_consent'])),
+    tcpa_timestamp: timestamp,
+    source: 'mcgrawnow',
+    source_lead_id: pickLeadValue(body, ['lead_id', 'source_lead_id', 'id']) ? String(pickLeadValue(body, ['lead_id', 'source_lead_id', 'id'])).trim() : null,
+    raw_payload: stripSensitiveFields(body),
+  };
+}
+
+app.post('/api/leads/inbound', async (req, res) => {
+  const headerSecret = String(req.header('x-api-key') || '');
+  const expectedSecret = process.env.MCGRAWNOW_WEBHOOK_SECRET || '';
+  if (!expectedSecret || !headerSecret || headerSecret !== expectedSecret) {
+    return res.status(401).json({ success: false, error: 'unauthorized' });
+  }
+
+  try {
+    const parsed = inboundLeadSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      await insertLogSafely(supabaseAdmin, 'error_logs', {
+        error_type: 'lead_webhook_validation',
+        error_message: 'McGraw Now lead missing required phone field',
+        endpoint: '/api/leads/inbound',
+        request_payload: stripSensitiveFields(req.body || {}),
+        ip_address: getRequestIpHash(req as any),
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+      });
+      return res.json({ success: false, ignored: true });
+    }
+
+    const mapped = mapMcGrawLead(req.body || {});
+    const organizationId = await resolveLeadOrganization(req.body || {}, 'mcgrawnow', mapped.lead_type);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: duplicate } = await supabaseAdmin
+      .from('leads')
+      .select('id')
+      .eq('phone', mapped.phone)
+      .gte('received_at', thirtyDaysAgo)
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (duplicate?.id) {
+      await insertLogSafely(supabaseAdmin, 'lead_duplicates', {
+        phone: mapped.phone,
+        source_lead_id: mapped.source_lead_id,
+        original_lead_id: duplicate.id,
+        raw_payload: mapped.raw_payload,
+        source: 'mcgrawnow',
+      });
+      return res.json({ success: true, duplicate: true, lead_id: duplicate.id });
+    }
+
+    const { data: inserted, error } = await supabaseAdmin
+      .from('leads')
+      .insert({
+        ...mapped,
+        organization_id: organizationId,
+      })
+      .select('id, first_name, state, debt_amount, organization_id')
+      .maybeSingle();
+    if (error) throw error;
+
+    await insertLogSafely(supabaseAdmin, 'activity_logs', {
+      user_id: null,
+      organization_id: organizationId,
+      event_type: 'notification',
+      event_name: 'New lead notification queued',
+      page: '/dashboard/leads',
+      element: 'new-lead-banner',
+      metadata: { lead_id: inserted?.id, source: 'mcgrawnow' },
+      ip_address: getRequestIpHash(req as any),
+      user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+    });
+
+    return res.json({ success: true, lead_id: inserted?.id });
+  } catch (e) {
+    await insertLogSafely(supabaseAdmin, 'error_logs', {
+      error_type: 'lead_webhook_error',
+      error_message: fmtErr(e) || 'Failed to ingest McGraw Now lead',
+      endpoint: '/api/leads/inbound',
+      request_payload: stripSensitiveFields(req.body || {}),
+      ip_address: getRequestIpHash(req as any),
+      user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+    });
+    return res.json({ success: false, accepted: true });
+  }
+});
+
+app.get('/api/leads/summary', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    const orgId = String(req.query.organization_id || req.query.org_id || '').trim() || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const actorIsPlatformAdmin = await isPlatformAdmin(actorId);
+    if (orgId && !actorIsPlatformAdmin && !(await isOrgMember(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    const today = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    let query = supabaseAdmin.from('leads').select('id, status, contacted_at, transferred_at').gte('received_at', today).limit(5000);
+    if (orgId) query = query.eq('organization_id', orgId);
+    if (!orgId && !actorIsPlatformAdmin) {
+      const { data: memberships } = await supabaseAdmin.from('org_users').select('org_id').eq('user_id', actorId);
+      const orgIds = Array.from(new Set((memberships || []).map((row: any) => String(row.org_id || '')).filter(Boolean)));
+      if (orgIds.length === 0) return res.json({ total_today: 0, new_leads: 0, contacted_today: 0, transferred_today: 0, contact_rate_pct: 0, transfer_rate_pct: 0 });
+      query = query.in('organization_id', orgIds);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = data || [];
+    const contacted = rows.filter((row: any) => row.contacted_at || row.status === 'contacted' || row.status === 'qualified' || row.status === 'transferred').length;
+    const transferred = rows.filter((row: any) => row.transferred_at || row.status === 'transferred').length;
+    res.json({
+      total_today: rows.length,
+      new_leads: rows.filter((row: any) => row.status === 'new').length,
+      contacted_today: contacted,
+      transferred_today: transferred,
+      contact_rate_pct: rows.length ? Math.round((contacted / rows.length) * 100) : 0,
+      transfer_rate_pct: contacted ? Math.round((transferred / contacted) * 100) : 0,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'leads_summary_failed', detail: fmtErr(e) });
+  }
+});
+
+app.get('/api/leads', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    const orgId = String(req.query.organization_id || req.query.org_id || '').trim() || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const actorIsPlatformAdmin = await isPlatformAdmin(actorId);
+    if (orgId && !actorIsPlatformAdmin && !(await isOrgMember(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 100);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
+    let query = supabaseAdmin.from('leads').select('*', { count: 'exact' }).order('received_at', { ascending: false }).range(offset, offset + limit - 1);
+    if (orgId) query = query.eq('organization_id', orgId);
+    if (!orgId && !actorIsPlatformAdmin) {
+      const { data: memberships } = await supabaseAdmin.from('org_users').select('org_id').eq('user_id', actorId);
+      const orgIds = Array.from(new Set((memberships || []).map((row: any) => String(row.org_id || '')).filter(Boolean)));
+      if (orgIds.length === 0) return res.json({ items: [], count: 0, limit, offset });
+      query = query.in('organization_id', orgIds);
+    }
+    if (req.query.status) query = query.eq('status', String(req.query.status));
+    if (req.query.state) query = query.eq('state', String(req.query.state).toUpperCase());
+    if (req.query.agent_id) query = query.eq('assigned_agent_id', String(req.query.agent_id));
+    if (req.query.start_date) query = query.gte('received_at', String(req.query.start_date));
+    if (req.query.end_date) query = query.lte('received_at', String(req.query.end_date));
+    if (req.query.search) {
+      const search = String(req.query.search).replace(/[%_,]/g, '').slice(0, 100);
+      query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,phone.ilike.%${search}%`);
+    }
+    const { data, error, count } = await query;
+    if (error) throw error;
+    res.json({ items: data || [], count: count || 0, limit, offset });
+  } catch (e) {
+    res.status(500).json({ error: 'leads_fetch_failed', detail: fmtErr(e) });
+  }
+});
+
+app.patch('/api/leads/:leadId', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const leadId = String(req.params.leadId || '');
+    const { data: existing } = await supabaseAdmin.from('leads').select('organization_id, call_attempts').eq('id', leadId).maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'lead_not_found' });
+    if (!(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, existing.organization_id))) return res.status(403).json({ error: 'forbidden' });
+    const allowedStatuses = ['new', 'contacted', 'qualified', 'transferred', 'not_interested', 'no_answer', 'callback'];
+    const patch: any = {};
+    if (req.body.status && allowedStatuses.includes(String(req.body.status))) {
+      patch.status = String(req.body.status);
+      if (patch.status === 'contacted') patch.contacted_at = new Date().toISOString();
+      if (patch.status === 'transferred') patch.transferred_at = new Date().toISOString();
+    }
+    if (req.body.notes !== undefined) patch.notes = String(req.body.notes || '').slice(0, 5000);
+    if (req.body.assigned_agent_id) {
+      patch.assigned_agent_id = String(req.body.assigned_agent_id);
+      patch.assigned_at = new Date().toISOString();
+    }
+    if (req.body.assign_to_me === true) {
+      patch.assigned_agent_id = actorId;
+      patch.assigned_at = new Date().toISOString();
+    }
+    if (req.body.increment_attempts === true) patch.call_attempts = Number(existing.call_attempts || 0) + 1;
+    const { data, error } = await supabaseAdmin.from('leads').update(patch).eq('id', leadId).select('*').maybeSingle();
+    if (error) throw error;
+    res.json({ item: data });
+  } catch (e) {
+    res.status(500).json({ error: 'lead_update_failed', detail: fmtErr(e) });
+  }
 });
 
 app.get('/api/admin/logs/summary', async (req, res) => {

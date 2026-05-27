@@ -333,6 +333,67 @@ export async function updateErrorLogResolved(id: string, resolved: boolean, user
   });
 }
 
+export type LeadItem = {
+  id: string;
+  organization_id?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone: string;
+  email?: string | null;
+  state?: string | null;
+  debt_amount?: number | string | null;
+  lead_type?: string | null;
+  opt_in_source?: string | null;
+  ip_address?: string | null;
+  tcpa_consent?: boolean | null;
+  tcpa_timestamp?: string | null;
+  status?: string | null;
+  assigned_agent_id?: string | null;
+  assigned_at?: string | null;
+  contacted_at?: string | null;
+  transferred_at?: string | null;
+  call_attempts?: number | null;
+  notes?: string | null;
+  source?: string | null;
+  source_lead_id?: string | null;
+  raw_payload?: Record<string, any> | null;
+  received_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export async function getLeads(params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value !== undefined && value !== null && value !== '') q.set(key, String(value));
+  }
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/leads${suffix}`, {
+    headers: { 'x-user-id': userId || '' },
+    cache: 'no-store',
+  }) as { items: LeadItem[]; limit: number; offset: number };
+}
+
+export async function getLeadsSummary(params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value !== undefined && value !== null && value !== '') q.set(key, String(value));
+  }
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/leads/summary${suffix}`, {
+    headers: { 'x-user-id': userId || '' },
+    cache: 'no-store',
+  });
+}
+
+export async function updateLead(leadId: string, patch: Record<string, any>, userId?: string) {
+  return await fetchJson(`/api/leads/${encodeURIComponent(leadId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify(patch),
+  }) as { item: LeadItem };
+}
+
 export async function listMightyCallSyncJobs(params?: { orgId?: string; status?: string; limit?: number }, userId?: string) {
   const q = new URLSearchParams();
   if (params?.orgId) q.set('orgId', params.orgId);
