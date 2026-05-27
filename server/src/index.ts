@@ -4617,7 +4617,7 @@ app.get('/api/leads/summary', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
     const rows = data || [];
-    const contacted = rows.filter((row: any) => row.contacted_at || row.status === 'contacted' || row.status === 'qualified' || row.status === 'transferred').length;
+    const contacted = rows.filter((row: any) => row.contacted_at || row.status === 'accepted' || row.status === 'contacted' || row.status === 'qualified' || row.status === 'transferred').length;
     const transferred = rows.filter((row: any) => row.transferred_at || row.status === 'transferred').length;
     res.json({
       total_today: rows.length,
@@ -4674,11 +4674,11 @@ app.patch('/api/leads/:leadId', async (req, res) => {
     const { data: existing } = await supabaseAdmin.from('leads').select('organization_id, call_attempts').eq('id', leadId).maybeSingle();
     if (!existing) return res.status(404).json({ error: 'lead_not_found' });
     if (!(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, existing.organization_id))) return res.status(403).json({ error: 'forbidden' });
-    const allowedStatuses = ['new', 'contacted', 'qualified', 'transferred', 'not_interested', 'no_answer', 'callback'];
+    const allowedStatuses = ['new', 'accepted', 'declined', 'contacted', 'qualified', 'transferred', 'not_interested', 'no_answer', 'callback'];
     const patch: any = {};
     if (req.body.status && allowedStatuses.includes(String(req.body.status))) {
       patch.status = String(req.body.status);
-      if (patch.status === 'contacted') patch.contacted_at = new Date().toISOString();
+      if (patch.status === 'accepted' || patch.status === 'contacted') patch.contacted_at = new Date().toISOString();
       if (patch.status === 'transferred') patch.transferred_at = new Date().toISOString();
     }
     if (req.body.notes !== undefined) patch.notes = String(req.body.notes || '').slice(0, 5000);

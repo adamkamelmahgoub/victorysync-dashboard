@@ -30,6 +30,8 @@ type OrgMember = {
 
 const statusOptions = [
   'new',
+  'accepted',
+  'declined',
   'contacted',
   'qualified',
   'transferred',
@@ -40,9 +42,18 @@ const statusOptions = [
 
 // ─── audio ───────────────────────────────────────────────────────────────────
 
-function playLeadBeep() {
+let leadAudioContext: AudioContext | null = null;
+
+async function playLeadBeep() {
   try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtor) return false;
+    const ctx = leadAudioContext || new AudioCtor();
+    leadAudioContext = ctx;
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    if (ctx.state !== 'running') return false;
     const beep = (freq: number, start: number, duration: number) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -59,8 +70,9 @@ function playLeadBeep() {
     beep(880, 0, 0.18);
     beep(1100, 0.22, 0.18);
     beep(880, 0.44, 0.28);
+    return true;
   } catch {
-    // audio not available
+    return false;
   }
 }
 
@@ -120,10 +132,14 @@ function maskPhone(phone: string, revealed: boolean) {
 }
 
 function statusTone(status?: string | null): 'neutral' | 'success' | 'warning' | 'info' {
-  if (status === 'transferred' || status === 'qualified') return 'success';
+  if (status === 'accepted' || status === 'transferred' || status === 'qualified') return 'success';
   if (status === 'contacted' || status === 'callback') return 'warning';
   if (status === 'new') return 'info';
   return 'neutral';
+}
+
+function isLeadAcknowledged(lead?: LeadItem | null) {
+  return ['accepted', 'declined', 'contacted', 'qualified', 'transferred', 'not_interested', 'no_answer', 'callback'].includes(String(lead?.status || ''));
 }
 
 // ─── component ───────────────────────────────────────────────────────────────
@@ -190,6 +206,7 @@ export default function LeadsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<LeadItem | null>(null);
   const [latestLead, setLatestLead] = useState<LeadItem | null>(null);
+  const [soundBlocked, setSoundBlocked] = useState(false);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const [revealedPhones, setRevealedPhones] = useState<Set<string>>(new Set());
 
@@ -254,8 +271,6 @@ export default function LeadsPage() {
         window.setTimeout(() => setHighlightedIds((prev) => {
           const next = new Set(prev); next.delete(lead.id); return next;
         }), 5000);
-        // 🔔 loud beep alert
-        playLeadBeep();
         toast.push(`New lead received — ${leadName(lead)}${lead.state ? ` from ${lead.state}` : ''}`, 'success');
         postLog('/api/logs/activity', {
           event_type: 'notification',
@@ -270,6 +285,10 @@ export default function LeadsPage() {
         const lead = payload.new as LeadItem;
         setLeads((prev) => prev.map((item) => item.id === lead.id ? lead : item));
         setSelectedLead((current) => current?.id === lead.id ? lead : current);
+        setLatestLead((current) => {
+          if (current?.id !== lead.id) return current;
+          return isLeadAcknowledged(lead) ? null : lead;
+        });
       })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
@@ -281,12 +300,42 @@ export default function LeadsPage() {
     const result = await updateLead(lead.id, patch, user.id);
     setLeads((prev) => prev.map((item) => item.id === lead.id ? result.item : item));
     setSelectedLead(result.item);
+    setLatestLead((current) => {
+      if (current?.id !== lead.id) return current;
+      return isLeadAcknowledged(result.item) ? null : result.item;
+    });
   };
 
   const onCallLead = async (lead: LeadItem) => {
-    await updateSelected(lead, { assign_to_me: true, increment_attempts: true });
+    await updateSelected(lead, { status: 'accepted', assign_to_me: true, increment_attempts: true });
     window.location.href = `tel:${lead.phone}`;
   };
+
+  const acceptLead = async (lead: LeadItem) => {
+    await updateSelected(lead, { status: 'accepted', assign_to_me: true });
+  };
+
+  const declineLead = async (lead: LeadItem) => {
+    await updateSelected(lead, { status: 'declined' });
+  };
+
+  const activeAlertLead = latestLead && !isLeadAcknowledged(latestLead) ? latestLead : null;
+
+  useEffect(() => {
+    if (!activeAlertLead) return;
+    let cancelled = false;
+    const beep = () => {
+      void playLeadBeep().then((ok) => {
+        if (!cancelled) setSoundBlocked(!ok);
+      });
+    };
+    beep();
+    const id = window.setInterval(beep, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [activeAlertLead?.id]);
 
   // ── visibility settings save ───────────────────────────────────────────────
   const saveVisibility = async (next: LeadsVisibility) => {
@@ -342,20 +391,29 @@ export default function LeadsPage() {
       }
     >
       {/* ── new lead alert banner ── */}
-      {latestLead && (
+      {activeAlertLead && (
         <div className="mb-5 rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.08] p-4 shadow-[0_16px_38px_rgba(2,6,23,0.18)]">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-sm font-semibold text-emerald-100">🔔 New lead just came in</div>
+              <div className="text-sm font-semibold text-emerald-100">New lead needs acceptance</div>
               <div className="mt-1 text-sm text-emerald-200/80">
-                {leadName(latestLead)}, {latestLead.state || 'Unknown state'}, {formatMoney(latestLead.debt_amount)} debt
-                {latestLead.trusted_id && <span className="ml-2 text-emerald-300/70">· TID: {latestLead.trusted_id.slice(0, 16)}…</span>}
+                {leadName(activeAlertLead)}, {activeAlertLead.state || 'Unknown state'}, {formatMoney(activeAlertLead.debt_amount)} debt
+                {activeAlertLead.trusted_id && <span className="ml-2 text-emerald-300/70">· TID: {activeAlertLead.trusted_id.slice(0, 16)}…</span>}
               </div>
+              {soundBlocked && (
+                <div className="mt-2 text-xs text-amber-200">
+                  Browser audio is blocked until this tab is interacted with.
+                  <button className="ml-2 underline" onClick={() => void playLeadBeep().then((ok) => setSoundBlocked(!ok))}>
+                    Enable sound
+                  </button>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
-              <button className="vs-button-primary" onClick={() => void onCallLead(latestLead)} data-log="Call newest lead">Call Now</button>
-              <button className="vs-button-secondary" onClick={() => setSelectedLead(latestLead)}>View Details</button>
-              <button className="vs-button-secondary" onClick={() => setLatestLead(null)} data-log="Dismiss new lead banner">Dismiss</button>
+              <button className="vs-button-primary" onClick={() => void acceptLead(activeAlertLead)} data-log="Accept newest lead">Accept</button>
+              <button className="vs-button-secondary" onClick={() => void onCallLead(activeAlertLead)} data-log="Call newest lead">Call Now</button>
+              <button className="vs-button-secondary" onClick={() => setSelectedLead(activeAlertLead)}>View Details</button>
+              <button className="vs-button-secondary" onClick={() => void declineLead(activeAlertLead)} data-log="Decline newest lead">Decline</button>
             </div>
           </div>
         </div>
@@ -498,9 +556,14 @@ export default function LeadsPage() {
                           >Call</button>
                           <button
                             className="vs-button-secondary"
-                            onClick={(e) => { e.stopPropagation(); void updateSelected(lead, { assign_to_me: true }); }}
+                            onClick={(e) => { e.stopPropagation(); void acceptLead(lead); }}
                             data-log="Assign lead to me"
-                          >Assign Me</button>
+                          >Accept</button>
+                          <button
+                            className="vs-button-secondary"
+                            onClick={(e) => { e.stopPropagation(); void declineLead(lead); }}
+                            data-log="Decline lead"
+                          >Decline</button>
                         </div>
                       </td>
                     </tr>
@@ -659,6 +722,12 @@ export default function LeadsPage() {
                 </button>
                 <button className="vs-button-secondary" onClick={() => void updateSelected(selectedLead, { assign_to_me: true })}>
                   Assign to Me
+                </button>
+                <button className="vs-button-secondary" onClick={() => void acceptLead(selectedLead)}>
+                  Accept
+                </button>
+                <button className="vs-button-secondary" onClick={() => void declineLead(selectedLead)}>
+                  Decline
                 </button>
                 <button className="vs-button-secondary" onClick={() => void updateSelected(selectedLead, { status: 'transferred' })}>
                   Mark Transferred
