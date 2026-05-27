@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_BASE_URL, buildApiUrl } from '../config';
 import { fetchJson } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,10 +18,12 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
+  const hasLoadedOnce = useRef(false);
+  const requestInFlight = useRef(false);
 
   useEffect(() => {
     fetchMetrics();
-    const id = window.setInterval(fetchMetrics, 15_000);
+    const id = window.setInterval(() => fetchMetrics({ silent: true }), 15_000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line
   }, [orgId, user?.id]);
@@ -42,8 +44,11 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
     return totalCalls > 0 ? Math.round((answeredCalls / totalCalls) * 100) : 0;
   }
 
-  async function fetchMetrics() {
-    setLoading(true);
+  async function fetchMetrics(options?: { silent?: boolean }) {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    const silent = options?.silent === true || hasLoadedOnce.current;
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const baseUrl = API_BASE_URL || window.location.origin;
@@ -106,11 +111,13 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
         delta_pp,
         assignedPhones,
       });
+      hasLoadedOnce.current = true;
     } catch (err: any) {
       console.error('Error fetching dashboard metrics:', err);
       setError(err?.message ?? 'Failed to fetch metrics');
     } finally {
-      setLoading(false);
+      requestInFlight.current = false;
+      if (!silent) setLoading(false);
     }
   }
 
