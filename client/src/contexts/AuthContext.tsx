@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabaseClient";
 import { buildApiUrl } from "../config";
+import { postLog } from "../lib/logging";
 
 type AuthContextValue = {
   user: User | null;
@@ -235,6 +236,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   const signOut = async () => {
     try {
+      postLog('/api/logs/auth', { event_type: 'logout', email: user?.email || null });
       await supabase.auth.signOut();
       setUser(null);
       setOrgs([]);

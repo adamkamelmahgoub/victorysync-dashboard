@@ -30,6 +30,8 @@ function NavButton({
   return (
     <button
       onClick={onClick}
+      data-log={`Navigate ${item.label}`}
+      data-log-type="navigation_click"
       className={`group flex w-full items-center justify-between rounded-2xl px-3.5 py-3 text-left text-sm transition ${
         active
           ? 'bg-white/[0.055] text-white shadow-[0_10px_28px_rgba(2,6,23,0.18)]'
@@ -81,6 +83,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Billing', path: '/admin/billing' },
             { label: 'Diagnostics', path: '/admin/diagnostics' },
             { label: 'Operations', path: '/admin/operations' },
+            { label: 'Logs', path: '/admin/logs' },
           ],
         },
       ]

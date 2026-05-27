@@ -307,6 +307,32 @@ export async function sendSmsMessage(params: { orgId: string; from: string; to: 
   });
 }
 
+export async function getAdminLogs(type: string, params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value !== undefined && value !== null && value !== '') q.set(key, String(value));
+  }
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/admin/logs/${encodeURIComponent(type)}${suffix}`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function getAdminLogsSummary(params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value !== undefined && value !== null && value !== '') q.set(key, String(value));
+  }
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/admin/logs/summary${suffix}`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function updateErrorLogResolved(id: string, resolved: boolean, userId?: string) {
+  return await fetchJson(`/api/admin/logs/errors/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ resolved }),
+  });
+}
+
 export async function listMightyCallSyncJobs(params?: { orgId?: string; status?: string; limit?: number }, userId?: string) {
   const q = new URLSearchParams();
   if (params?.orgId) q.set('orgId', params.orgId);

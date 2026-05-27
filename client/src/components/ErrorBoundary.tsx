@@ -1,4 +1,5 @@
 import React from 'react';
+import { logClientError } from '../lib/logging';
 
 type Props = { children: React.ReactNode };
 
@@ -15,9 +16,12 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: any, info: any) {
-    // Log for dev so we can see stacktraces in console
-    // eslint-disable-next-line no-console
-    console.error('[ErrorBoundary] Caught error', error, info);
+    logClientError({
+      error_type: 'react_error',
+      error_message: error?.message || String(error || 'React render error'),
+      error_stack: `${error?.stack || ''}\n${info?.componentStack || ''}`.trim(),
+      endpoint: window.location.pathname,
+    });
   }
 
   render() {
@@ -34,10 +38,6 @@ export default class ErrorBoundary extends React.Component<Props, State> {
               >
                 Reload
               </button>
-            </div>
-            <div className="mt-3 text-xs text-slate-400">
-              {/* show basic error message */}
-              <pre className="text-left text-[10px] max-w-prose overflow-auto whitespace-pre-wrap">{String(this.state.error)}</pre>
             </div>
           </div>
         </main>

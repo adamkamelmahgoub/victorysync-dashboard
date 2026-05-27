@@ -75,6 +75,19 @@ import {
   enforceAuthenticatedApi,
   validateAndSanitizeApiInput,
 } from './security/apiSecurity';
+import {
+  activityLogSchema,
+  apiLogSchema,
+  authLogSchema,
+  baseLogRow,
+  createApiLoggerMiddleware,
+  errorLogSchema,
+  getRequestIpHash,
+  insertLogSafely,
+  isAdminLogViewer,
+  pageViewLogSchema,
+  stripSensitiveFields,
+} from './security/adminLogging';
 
 const DEFAULT_MIGHTYCALL_HISTORY_START = '2020-01-01';
 installConsoleRedaction();
@@ -4268,11 +4281,170 @@ app.use('/api', apiKeyAuthMiddleware as any);
 app.use('/api', createSupabaseSessionMiddleware(supabaseAdmin) as any);
 app.use('/api', validateAndSanitizeApiInput as any);
 app.use('/api', createApiRateLimitMiddleware(supabaseAdmin) as any);
+app.use('/api', createApiLoggerMiddleware(supabaseAdmin) as any);
 app.get('/api/csrf-token', enforceAuthenticatedApi as any, (req, res) => {
   res.json({ csrfToken: createCsrfToken(String(req.actorId || '')) });
 });
 app.use('/api', enforceAuthenticatedApi as any);
 app.use('/api', csrfProtection as any);
+
+app.post('/api/logs/activity', async (req, res) => {
+  try {
+    const parsed = activityLogSchema.safeParse(req.body || {});
+    if (parsed.success) {
+      await insertLogSafely(supabaseAdmin, 'activity_logs', {
+        ...(await baseLogRow(supabaseAdmin, req)),
+        ...parsed.data,
+        metadata: stripSensitiveFields(parsed.data.metadata || {}),
+      });
+    }
+  } catch {}
+  res.json({ ok: true });
+});
+
+app.post('/api/logs/pageview', async (req, res) => {
+  try {
+    const parsed = pageViewLogSchema.safeParse(req.body || {});
+    if (parsed.success) {
+      await insertLogSafely(supabaseAdmin, 'page_view_logs', {
+        ...(await baseLogRow(supabaseAdmin, req)),
+        ...parsed.data,
+      });
+    }
+  } catch {}
+  res.json({ ok: true });
+});
+
+app.post('/api/logs/error', async (req, res) => {
+  try {
+    const parsed = errorLogSchema.safeParse(req.body || {});
+    if (parsed.success) {
+      await insertLogSafely(supabaseAdmin, 'error_logs', {
+        ...(await baseLogRow(supabaseAdmin, req)),
+        ...parsed.data,
+        request_payload: stripSensitiveFields(parsed.data.request_payload || null),
+      });
+    }
+  } catch {}
+  res.json({ ok: true });
+});
+
+app.post('/api/logs/api', async (req, res) => {
+  try {
+    const parsed = apiLogSchema.safeParse(req.body || {});
+    if (parsed.success) {
+      await insertLogSafely(supabaseAdmin, 'api_logs', {
+        ...(await baseLogRow(supabaseAdmin, req)),
+        ...parsed.data,
+      });
+    }
+  } catch {}
+  res.json({ ok: true });
+});
+
+app.post('/api/logs/auth', async (req, res) => {
+  try {
+    const parsed = authLogSchema.safeParse(req.body || {});
+    if (parsed.success) {
+      await insertLogSafely(supabaseAdmin, 'auth_logs', {
+        ...(await baseLogRow(supabaseAdmin, req)),
+        ...parsed.data,
+      });
+    }
+  } catch {}
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/logs/summary', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    const orgId = String(req.query.organization_id || req.query.org_id || '').trim() || null;
+    if (!(await isAdminLogViewer(supabaseAdmin, actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    const now = Date.now();
+    const today = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    const hourAgo = new Date(now - 60 * 60 * 1000).toISOString();
+    const activeSince = new Date(now - 30 * 60 * 1000).toISOString();
+    const orgFilter = (query: any) => orgId ? query.eq('organization_id', orgId) : query;
+    const [activityToday, activeUsers, unresolvedErrors, apiHour, failedLogins] = await Promise.all([
+      orgFilter(supabaseAdmin.from('activity_logs').select('id', { count: 'exact', head: true }).gte('created_at', today)),
+      orgFilter(supabaseAdmin.from('activity_logs').select('user_id').gte('created_at', activeSince)),
+      orgFilter(supabaseAdmin.from('error_logs').select('id', { count: 'exact', head: true }).eq('resolved', false)),
+      orgFilter(supabaseAdmin.from('api_logs').select('response_time_ms').gte('created_at', hourAgo).limit(1000)),
+      orgFilter(supabaseAdmin.from('auth_logs').select('id', { count: 'exact', head: true }).eq('event_type', 'login_failed').gte('created_at', hourAgo)),
+    ]);
+    const activeUserCount = new Set((activeUsers.data || []).map((row: any) => row.user_id).filter(Boolean)).size;
+    const responseRows = apiHour.data || [];
+    const avgResponseTime = responseRows.length
+      ? Math.round(responseRows.reduce((sum: number, row: any) => sum + Number(row.response_time_ms || 0), 0) / responseRows.length)
+      : 0;
+    res.json({
+      total_events_today: activityToday.count || 0,
+      active_users_now: activeUserCount,
+      unresolved_errors: unresolvedErrors.count || 0,
+      avg_api_response_time_ms: avgResponseTime,
+      failed_logins_last_hour: failedLogins.count || 0,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'admin_logs_summary_failed', detail: fmtErr(e) });
+  }
+});
+
+app.get('/api/admin/logs/:type', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    const type = String(req.params.type || '');
+    const tableByType: Record<string, string> = {
+      activity: 'activity_logs',
+      pageviews: 'page_view_logs',
+      errors: 'error_logs',
+      api: 'api_logs',
+      auth: 'auth_logs',
+    };
+    const table = tableByType[type];
+    if (!table) return res.status(404).json({ error: 'unknown_log_type' });
+    const orgId = String(req.query.organization_id || req.query.org_id || '').trim() || null;
+    if (!(await isAdminLogViewer(supabaseAdmin, actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+    const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
+    let query = supabaseAdmin.from(table).select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+    if (orgId) query = query.eq('organization_id', orgId);
+    if (req.query.start_date) query = query.gte('created_at', String(req.query.start_date));
+    if (req.query.end_date) query = query.lte('created_at', String(req.query.end_date));
+    if (req.query.event_type && table !== 'api_logs') query = query.eq('event_type', String(req.query.event_type));
+    if (req.query.resolved !== undefined && table === 'error_logs') query = query.eq('resolved', String(req.query.resolved) === 'true');
+    if (req.query.search) {
+      const search = String(req.query.search).replace(/[%_,]/g, '').slice(0, 100);
+      if (table === 'activity_logs') query = query.or(`event_name.ilike.%${search}%,page.ilike.%${search}%`);
+      if (table === 'page_view_logs') query = query.or(`page.ilike.%${search}%,page_title.ilike.%${search}%`);
+      if (table === 'error_logs') query = query.or(`error_message.ilike.%${search}%,endpoint.ilike.%${search}%`);
+      if (table === 'api_logs') query = query.ilike('endpoint', `%${search}%`);
+      if (table === 'auth_logs') query = query.ilike('email', `%${search}%`);
+    }
+    const { data, error, count } = await query;
+    if (error) throw error;
+    res.json({ items: data || [], count: count || 0, limit, offset });
+  } catch (e) {
+    res.status(500).json({ error: 'admin_logs_fetch_failed', detail: fmtErr(e) });
+  }
+});
+
+app.patch('/api/admin/logs/errors/:id', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    if (!(await isAdminLogViewer(supabaseAdmin, actorId))) return res.status(403).json({ error: 'forbidden' });
+    const resolved = req.body?.resolved !== false;
+    const { data, error } = await supabaseAdmin
+      .from('error_logs')
+      .update({ resolved })
+      .eq('id', String(req.params.id))
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
+    res.json({ item: data });
+  } catch (e) {
+    res.status(500).json({ error: 'admin_log_update_failed', detail: fmtErr(e) });
+  }
+});
 
 // Using centralized Supabase client from `src/lib/supabaseClient`
 
@@ -4459,6 +4631,15 @@ app.post('/api/auth/login', async (req, res) => {
 
     if (lockout?.locked_until && Date.parse(lockout.locked_until) > now) {
       const retryAfter = Math.max(1, Math.ceil((Date.parse(lockout.locked_until) - now) / 1000));
+      await insertLogSafely(supabaseAdmin, 'auth_logs', {
+        user_id: null,
+        organization_id: null,
+        event_type: 'account_locked',
+        email,
+        ip_address: getRequestIpHash(req as any),
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+        failure_reason: 'ip_lockout_active',
+      });
       res.setHeader('Retry-After', String(retryAfter));
       return res.status(429).json({ error: 'Too many requests. Please wait.' });
     }
@@ -4489,6 +4670,15 @@ app.post('/api/auth/login', async (req, res) => {
         locked_until: lockedUntil,
         updated_at: new Date(now).toISOString(),
       }, { onConflict: 'ip_address' });
+      await insertLogSafely(supabaseAdmin, 'auth_logs', {
+        user_id: null,
+        organization_id: null,
+        event_type: failedCount >= 5 ? 'account_locked' : 'login_failed',
+        email,
+        ip_address: getRequestIpHash(req as any),
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+        failure_reason: authJson?.error_description || authJson?.msg || 'invalid_credentials',
+      });
       if (failedCount >= 5) {
         res.setHeader('Retry-After', '1800');
         return res.status(429).json({ error: 'Too many requests. Please wait.' });
@@ -4497,6 +4687,14 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     await supabaseAdmin.from('auth_lockouts').delete().eq('ip_address', ipAddress);
+    await insertLogSafely(supabaseAdmin, 'auth_logs', {
+      user_id: authJson?.user?.id || null,
+      organization_id: null,
+      event_type: 'login_success',
+      email,
+      ip_address: getRequestIpHash(req as any),
+      user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+    });
     return res.json({
       session: {
         access_token: authJson.access_token,
@@ -9058,7 +9256,18 @@ app.post('/api/auth/validate-invite', async (req, res) => {
       .order('invited_at', { ascending: false });
     if (error) throw error;
     const match = (invites || []).find((inv: any) => computeInviteCode(inv) === code);
-    if (!match) return res.status(404).json({ error: 'invite_not_found_or_invalid_code' });
+    if (!match) {
+      await insertLogSafely(supabaseAdmin, 'auth_logs', {
+        user_id: null,
+        organization_id: org_id,
+        event_type: 'access_code_failed',
+        email: normalized,
+        ip_address: getRequestIpHash(req as any),
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+        failure_reason: 'invite_not_found_or_invalid_code',
+      });
+      return res.status(404).json({ error: 'invite_not_found_or_invalid_code' });
+    }
 
     const { data: org } = await supabaseAdmin
       .from('organizations')
@@ -9075,6 +9284,14 @@ app.post('/api/auth/validate-invite', async (req, res) => {
         email: match.email,
         role: match.role,
       }
+    });
+    await insertLogSafely(supabaseAdmin, 'auth_logs', {
+      user_id: null,
+      organization_id: org_id,
+      event_type: 'access_code_used',
+      email: normalized,
+      ip_address: getRequestIpHash(req as any),
+      user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
     });
   } catch (e: any) {
     console.error('validate_invite_failed:', fmtErr(e));
@@ -9132,6 +9349,14 @@ app.post('/api/auth/signup-with-invite', async (req, res) => {
 
     // Consume invite after successful signup.
     try { await supabaseAdmin.from('org_invites').delete().eq('id', invite.id); } catch {}
+    await insertLogSafely(supabaseAdmin, 'auth_logs', {
+      user_id: userId,
+      organization_id: org_id,
+      event_type: 'signup',
+      email: normalized,
+      ip_address: getRequestIpHash(req as any),
+      user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+    });
 
     res.status(201).json({
       success: true,

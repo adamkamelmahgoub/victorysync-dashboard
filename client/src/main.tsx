@@ -33,6 +33,7 @@ import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
 import OrgManagePage from './pages/OrgManagePage';
 import OrgAdminRoute from './components/OrgAdminRoute';
 import ErrorBoundary from "./components/ErrorBoundary";
+import LoggingProvider from "./components/LoggingProvider";
 import { SettingsPage } from "./pages/SettingsPage";
 import { NumbersPage } from "./pages/NumbersPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -48,6 +49,7 @@ import { APIKeysPage } from "./pages/APIKeysPage";
 import BillingPage from "./pages/BillingPage";
 import LiveStatusPage from "./pages/LiveStatusPage";
 import AdminDiagnosticsPage from "./pages/admin/AdminDiagnosticsPage";
+import AdminLogsPage from "./pages/admin/AdminLogsPage";
 import { installAuthenticatedFetch } from "./lib/installAuthenticatedFetch";
 import { installConsoleRedaction } from "./lib/redactConsole";
 
@@ -112,7 +114,7 @@ function AdminRoute({ children }: { children: JSX.Element }) {
     );
   }
   // In dev preview mode, allow access regardless of the authenticated user's role
-  if (!user || previewRole !== "platform_admin") {
+  if (!user || !["platform_admin", "admin", "super_admin"].includes(String(previewRole || ""))) {
     const adminToClient: Record<string, string> = {
       '/admin/reports': '/reports',
       '/admin/recordings': '/recordings',
@@ -123,6 +125,7 @@ function AdminRoute({ children }: { children: JSX.Element }) {
       '/admin/orgs': '/dashboard',
       '/admin/users': '/dashboard',
       '/admin/invites': '/dashboard',
+      '/admin/logs': '/dashboard',
       '/admin': '/dashboard',
     };
     const fallback = adminToClient[location.pathname] || '/dashboard';
@@ -321,6 +324,14 @@ function AppRouter() {
         }
       />
       <Route
+        path="/admin/logs"
+        element={
+          <AdminRoute>
+            <AdminLogsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
         path="/admin/api-keys"
         element={
           <AdminRoute>
@@ -400,6 +411,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
         <OrgProvider>
           <BrowserRouter>
             <ErrorBoundary>
+              <LoggingProvider />
               {/* ToastProvider provides a simple global toast UI */}
               <ToastProvider>
                 <AppRouter />
