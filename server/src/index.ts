@@ -5221,17 +5221,29 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(429).json({ error: 'Too many requests. Please wait.' });
     }
 
-    const supabaseUrl = process.env.SUPABASE_URL || '';
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
-    if (!supabaseUrl || !anonKey) return res.status(500).json({ error: 'auth_not_configured' });
+	    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+	    const authKey =
+	      process.env.SUPABASE_ANON_KEY ||
+	      process.env.VITE_SUPABASE_ANON_KEY ||
+	      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+	      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+	      process.env.SUPABASE_SERVICE_KEY ||
+	      '';
+	    if (!supabaseUrl || !authKey) {
+	      console.error('[auth/login] Supabase auth config missing:', {
+	        supabaseUrl: !!supabaseUrl,
+	        authKey: !!authKey,
+	      });
+	      return res.status(500).json({ error: 'auth_not_configured' });
+	    }
 
-    const authResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=password`, {
-      method: 'POST',
-      headers: {
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-        'Content-Type': 'application/json',
-      },
+	    const authResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=password`, {
+	      method: 'POST',
+	      headers: {
+	        apikey: authKey,
+	        Authorization: `Bearer ${authKey}`,
+	        'Content-Type': 'application/json',
+	      },
       body: JSON.stringify({ email, password }),
     });
     const authJson: any = await authResponse.json().catch(() => ({}));
