@@ -114,199 +114,246 @@ export const LoginPage: FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-stretch bg-gradient-to-b from-slate-900 to-slate-950 text-white">
-      <div className="hidden md:flex md:flex-1 items-center justify-center bg-gradient-to-br from-blue-600 to-cyan-600 p-12">
-        <div className="max-w-md text-center">
-          <div className="w-20 h-20 mx-auto rounded-lg bg-white/10 flex items-center justify-center mb-6">
-            <span className="text-white font-bold text-2xl">VS</span>
-          </div>
-          <h2 className="text-3xl font-bold mb-2">VictorySync</h2>
-          <p className="text-slate-100/90">Invite-code onboarding for secure organization access.</p>
-        </div>
-      </div>
-
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-lg">
-          <div className="bg-slate-900/80 rounded-2xl p-8 shadow-xl ring-1 ring-slate-800">
-            <div className="flex items-center justify-between mb-6">
+    <main className="min-h-screen bg-[#030711] text-white">
+      <div className="grid min-h-screen lg:grid-cols-[1.08fr_0.92fr]">
+        <section className="relative hidden overflow-hidden border-r border-white/[0.06] bg-[#07111f] lg:flex">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(6,182,212,0.18),transparent_30%),radial-gradient(circle_at_82%_8%,rgba(16,185,129,0.16),transparent_26%),linear-gradient(145deg,rgba(3,7,18,0.05),rgba(3,7,18,0.78))]" />
+          <div className="relative flex w-full flex-col justify-between p-12 xl:p-16">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 shadow-[0_18px_45px_rgba(6,182,212,0.12)]">
+                <span className="text-base font-black tracking-wide text-cyan-100">VS</span>
+              </div>
               <div>
-                <p className="text-xs font-semibold tracking-widest text-emerald-400 uppercase">VictorySync</p>
-                <h1 className="mt-1 text-2xl font-semibold text-slate-50">
-                  {mode === "signin" ? "Sign in" : "Sign up with invite"}
-                </h1>
+                <div className="text-sm font-semibold tracking-[0.18em] text-cyan-100">VictorySync</div>
+                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Operations Hub</div>
               </div>
             </div>
 
-            <div className="mb-5 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("signin");
-                  resetMessages();
-                }}
-                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                  mode === "signin" ? "bg-cyan-600 text-white" : "bg-slate-800 text-slate-300"
-                }`}
-              >
-                Sign in
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("signup");
-                  resetMessages();
-                }}
-                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                  mode === "signup" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-300"
-                }`}
-              >
-                Sign up
-              </button>
+            <div className="max-w-2xl">
+              <div className="mb-5 inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-100">
+                Secure Client Portal
+              </div>
+              <h2 className="text-5xl font-black leading-[1.02] tracking-normal text-white xl:text-6xl">
+                Live operations, calls, leads, and client reporting in one command center.
+              </h2>
+              <p className="mt-6 max-w-xl text-base leading-7 text-slate-300">
+                Sign in to monitor MightyCall activity, manage lead intake, review recordings, and keep every client workspace accountable.
+              </p>
+
+              <div className="mt-10 grid max-w-xl grid-cols-3 gap-3">
+                <div className="rounded-2xl border border-white/[0.07] bg-white/[0.035] p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">Access</div>
+                  <div className="mt-3 text-sm font-semibold text-slate-100">RBAC secured</div>
+                </div>
+                <div className="rounded-2xl border border-white/[0.07] bg-white/[0.035] p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">Data</div>
+                  <div className="mt-3 text-sm font-semibold text-slate-100">Org isolated</div>
+                </div>
+                <div className="rounded-2xl border border-white/[0.07] bg-white/[0.035] p-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">Status</div>
+                  <div className="mt-3 text-sm font-semibold text-emerald-200">Live sync</div>
+                </div>
+              </div>
             </div>
 
-            {mode === "signin" ? (
-              <form onSubmit={handleSignIn} className="space-y-5">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Email</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="********"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500"
-                    required
-                  />
-                </div>
-
-                {error && (
-                  <div className="rounded-lg bg-rose-500/10 border border-rose-500/20 p-3 text-sm text-rose-400">
-                    {error}
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 disabled:opacity-50 px-6 py-3 text-sm font-semibold text-slate-900 transition-colors"
-                  >
-                    {loading ? "Signing in..." : "Sign in"}
-                  </button>
-                  <div className="text-xs text-slate-400">Need invite access? Contact your admin.</div>
-                </div>
-              </form>
-            ) : (
-              <form onSubmit={handleSignUp} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Full name (optional)</label>
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Your name"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Email (must match invite)</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="owner-or-member@example.com"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">Organization ID</label>
-                    <input
-                      type="text"
-                      value={orgId}
-                      onChange={(e) => setOrgId(e.target.value)}
-                      placeholder="UUID"
-                      className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">Invite code</label>
-                    <input
-                      type="text"
-                      value={inviteCode}
-                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                      placeholder="ABCDE-12345"
-                      className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="At least 8 characters"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Confirm password</label>
-                  <input
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Re-enter password"
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-slate-50 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
-                    required
-                  />
-                </div>
-
-                {error && (
-                  <div className="rounded-lg bg-rose-500/10 border border-rose-500/20 p-3 text-sm text-rose-400">
-                    {error}
-                  </div>
-                )}
-                {success && (
-                  <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 text-sm text-emerald-300">
-                    {success}
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between pt-1">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 disabled:opacity-50 px-6 py-3 text-sm font-semibold text-slate-900 transition-colors"
-                  >
-                    {loading ? "Creating account..." : "Create account"}
-                  </button>
-                  <div className="text-xs text-slate-400">Invite code required</div>
-                </div>
-              </form>
-            )}
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>Multi-tenant operations platform</span>
+              <span>dashboard.victorysync.com</span>
+            </div>
           </div>
-        </div>
+        </section>
+
+        <section className="flex min-h-screen items-center justify-center px-5 py-8 sm:px-8">
+          <div className="w-full max-w-[460px]">
+            <div className="mb-8 flex items-center gap-3 lg:hidden">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10">
+                <span className="text-sm font-black text-cyan-100">VS</span>
+              </div>
+              <div>
+                <div className="text-sm font-semibold tracking-[0.16em] text-cyan-100">VictorySync</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Operations Hub</div>
+              </div>
+            </div>
+
+            <div className="rounded-[28px] border border-white/[0.07] bg-slate-950/72 p-6 shadow-[0_28px_70px_rgba(0,0,0,0.32)] sm:p-8">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.22em] text-cyan-300">Account Access</div>
+                <h1 className="mt-3 text-3xl font-black tracking-normal text-white">
+                  {mode === "signin" ? "Welcome back" : "Join your workspace"}
+                </h1>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  {mode === "signin"
+                    ? "Use your VictorySync credentials to enter the operations dashboard."
+                    : "Create your account with the invite details provided by your administrator."}
+                </p>
+              </div>
+
+              <div className="mt-7 grid grid-cols-2 rounded-2xl border border-white/[0.06] bg-white/[0.035] p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("signin");
+                    resetMessages();
+                  }}
+                  className={`rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                    mode === "signin" ? "bg-cyan-500 text-slate-950 shadow-[0_10px_24px_rgba(6,182,212,0.18)]" : "text-slate-400 hover:text-slate-100"
+                  }`}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("signup");
+                    resetMessages();
+                  }}
+                  className={`rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                    mode === "signup" ? "bg-emerald-400 text-slate-950 shadow-[0_10px_24px_rgba(16,185,129,0.16)]" : "text-slate-400 hover:text-slate-100"
+                  }`}
+                >
+                  Sign up
+                </button>
+              </div>
+
+              {mode === "signin" ? (
+                <form onSubmit={handleSignIn} className="mt-7 space-y-5">
+                  <Field label="Email">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-slate-50 placeholder-slate-600 outline-none transition focus:border-cyan-300/50 focus:bg-white/[0.055]"
+                      required
+                    />
+                  </Field>
+
+                  <Field label="Password">
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-slate-50 placeholder-slate-600 outline-none transition focus:border-cyan-300/50 focus:bg-white/[0.055]"
+                      required
+                    />
+                  </Field>
+
+                  {error && <Message tone="error">{error}</Message>}
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full rounded-2xl bg-cyan-400 px-5 py-3.5 text-sm font-black uppercase tracking-[0.14em] text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loading ? "Signing in..." : "Enter Dashboard"}
+                  </button>
+                  <p className="text-center text-xs text-slate-500">Need access? Ask your VictorySync administrator for an invite.</p>
+                </form>
+              ) : (
+                <form onSubmit={handleSignUp} className="mt-7 space-y-4">
+                  <Field label="Full name">
+                    <input
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="Your name"
+                      className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-slate-50 placeholder-slate-600 outline-none transition focus:border-emerald-300/50 focus:bg-white/[0.055]"
+                    />
+                  </Field>
+
+                  <Field label="Email">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="owner-or-member@example.com"
+                      className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-slate-50 placeholder-slate-600 outline-none transition focus:border-emerald-300/50 focus:bg-white/[0.055]"
+                      required
+                    />
+                  </Field>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Field label="Organization ID">
+                      <input
+                        type="text"
+                        value={orgId}
+                        onChange={(e) => setOrgId(e.target.value)}
+                        placeholder="UUID"
+                        className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-slate-50 placeholder-slate-600 outline-none transition focus:border-emerald-300/50 focus:bg-white/[0.055]"
+                        required
+                      />
+                    </Field>
+                    <Field label="Invite code">
+                      <input
+                        type="text"
+                        value={inviteCode}
+                        onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                        placeholder="ABCDE-12345"
+                        className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-slate-50 placeholder-slate-600 outline-none transition focus:border-emerald-300/50 focus:bg-white/[0.055]"
+                        required
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label="Password">
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="At least 8 characters"
+                      className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-slate-50 placeholder-slate-600 outline-none transition focus:border-emerald-300/50 focus:bg-white/[0.055]"
+                      required
+                    />
+                  </Field>
+
+                  <Field label="Confirm password">
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter password"
+                      className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-sm text-slate-50 placeholder-slate-600 outline-none transition focus:border-emerald-300/50 focus:bg-white/[0.055]"
+                      required
+                    />
+                  </Field>
+
+                  {error && <Message tone="error">{error}</Message>}
+                  {success && <Message tone="success">{success}</Message>}
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full rounded-2xl bg-emerald-400 px-5 py-3.5 text-sm font-black uppercase tracking-[0.14em] text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loading ? "Creating account..." : "Create Account"}
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 };
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Message({ tone, children }: { tone: "error" | "success"; children: React.ReactNode }) {
+  const classes = tone === "error"
+    ? "border-rose-300/20 bg-rose-400/10 text-rose-200"
+    : "border-emerald-300/20 bg-emerald-400/10 text-emerald-200";
+  return (
+    <div className={`rounded-2xl border px-4 py-3 text-sm ${classes}`}>
+      {children}
+    </div>
+  );
+}
