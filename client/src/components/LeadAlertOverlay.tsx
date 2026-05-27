@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { LeadItem, updateLead } from '../lib/apiClient';
+import { playLeadAlarmSequence } from '../lib/leadAlarm';
 import { postLog } from '../lib/logging';
 import { supabase } from '../lib/supabaseClient';
-
-let leadAudioContext: AudioContext | null = null;
 
 function leadName(lead: LeadItem) {
   return `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Unknown lead';
@@ -25,42 +25,10 @@ function isAcknowledged(lead?: LeadItem | null) {
   return ['accepted', 'declined', 'contacted', 'qualified', 'transferred', 'not_interested', 'no_answer', 'callback'].includes(String(lead?.status || ''));
 }
 
-async function playLeadAlarm() {
-  try {
-    const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtor) return false;
-    const ctx = leadAudioContext || new AudioCtor();
-    leadAudioContext = ctx;
-    if (ctx.state === 'suspended') await ctx.resume();
-    if (ctx.state !== 'running') return false;
-
-    const beep = (freq: number, start: number, duration: number) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = freq;
-      osc.type = 'square';
-      gain.gain.setValueAtTime(0.001, ctx.currentTime + start);
-      gain.gain.exponentialRampToValueAtTime(1, ctx.currentTime + start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
-      osc.start(ctx.currentTime + start);
-      osc.stop(ctx.currentTime + start + duration + 0.04);
-    };
-
-    beep(700, 0, 0.14);
-    beep(1450, 0.16, 0.16);
-    beep(700, 0.34, 0.14);
-    beep(1450, 0.5, 0.22);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export default function LeadAlertOverlay() {
   const { user, orgs, globalRole } = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   const [queue, setQueue] = useState<LeadItem[]>([]);
   const [soundBlocked, setSoundBlocked] = useState(false);
   const activeLead = queue[0] || null;
@@ -78,7 +46,7 @@ export default function LeadAlertOverlay() {
   useEffect(() => {
     if (!user?.id) return;
     const unlock = () => {
-      void playLeadAlarm().then((ok) => setSoundBlocked(!ok));
+      void playLeadAlarmSequence().then((ok) => setSoundBlocked(!ok));
     };
     window.addEventListener('pointerdown', unlock, { once: true });
     window.addEventListener('keydown', unlock, { once: true });
@@ -139,7 +107,7 @@ export default function LeadAlertOverlay() {
     if (!activeLead) return;
     let cancelled = false;
     const alarm = () => {
-      void playLeadAlarm().then((ok) => {
+      void playLeadAlarmSequence().then((ok) => {
         if (!cancelled) setSoundBlocked(!ok);
       });
     };
@@ -164,6 +132,9 @@ export default function LeadAlertOverlay() {
         element: 'global-lead-alert-overlay',
         metadata: { lead_id: leadId, status },
       });
+      if (status === 'accepted') {
+        navigate(`/dashboard/leads?lead_id=${encodeURIComponent(leadId)}`);
+      }
     } catch {
       setQueue((prev) => [activeLead, ...prev.filter((item) => item.id !== leadId)]);
       toast.push(`Failed to ${status} lead`, 'error');
@@ -201,7 +172,7 @@ export default function LeadAlertOverlay() {
         {soundBlocked && (
           <div className="mt-6 rounded-2xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-center text-sm text-amber-100">
             Browser sound is blocked until this tab is interacted with.
-            <button className="ml-2 font-semibold underline" onClick={() => void playLeadAlarm().then((ok) => setSoundBlocked(!ok))}>
+            <button className="ml-2 font-semibold underline" onClick={() => void playLeadAlarmSequence().then((ok) => setSoundBlocked(!ok))}>
               Enable alarm
             </button>
           </div>

@@ -14,6 +14,7 @@ import {
 } from '../lib/apiClient';
 import { postLog } from '../lib/logging';
 import { supabase } from '../lib/supabaseClient';
+import { useLocation } from 'react-router-dom';
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,7 @@ function statusTone(status?: string | null): 'neutral' | 'success' | 'warning' |
 export default function LeadsPage() {
   const { user, selectedOrgId, orgs, globalRole } = useAuth();
   const toast = useToast();
+  const location = useLocation();
 
   const isAdmin = ['platform_admin', 'admin', 'super_admin'].includes(String(globalRole || ''));
 
@@ -169,6 +171,7 @@ export default function LeadsPage() {
   const [selectedLead, setSelectedLead] = useState<LeadItem | null>(null);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const [revealedPhones, setRevealedPhones] = useState<Set<string>>(new Set());
+  const focusedLeadId = useMemo(() => new URLSearchParams(location.search).get('lead_id'), [location.search]);
 
   // ── filters ────────────────────────────────────────────────────────────────
   const [status, setStatus] = useState('');
@@ -216,6 +219,12 @@ export default function LeadsPage() {
     const id = window.setInterval(() => void loadLeads(), 10_000);
     return () => window.clearInterval(id);
   }, [loadLeads]);
+
+  useEffect(() => {
+    if (!focusedLeadId) return;
+    const lead = leads.find((item) => item.id === focusedLeadId);
+    if (lead) setSelectedLead(lead);
+  }, [focusedLeadId, leads]);
 
   // ── realtime subscription ──────────────────────────────────────────────────
   useEffect(() => {
@@ -287,13 +296,6 @@ export default function LeadsPage() {
     ['Transfer rate', `${summary?.transfer_rate_pct ?? 0}%`, 'Transferred / contacted'],
   ];
 
-  const activeAlertLead: LeadItem | null = null;
-  const soundBlocked = false;
-  const setSoundBlocked = (_blocked: boolean) => {};
-  const playLeadBeep = async () => false;
-  const acceptLead = async (_lead: LeadItem) => {};
-  const declineLead = async (_lead: LeadItem) => {};
-
   // ── access denied ──────────────────────────────────────────────────────────
   if (!hasAccess) {
     return (
@@ -322,35 +324,6 @@ export default function LeadsPage() {
         </button>
       }
     >
-      {/* ── new lead alert banner ── */}
-      {activeAlertLead && (
-        <div className="mb-5 rounded-3xl border border-emerald-400/20 bg-emerald-400/[0.08] p-4 shadow-[0_16px_38px_rgba(2,6,23,0.18)]">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-sm font-semibold text-emerald-100">New lead needs acceptance</div>
-              <div className="mt-1 text-sm text-emerald-200/80">
-                {leadName(activeAlertLead)}, {activeAlertLead.state || 'Unknown state'}, {formatMoney(activeAlertLead.debt_amount)} debt
-                {activeAlertLead.trusted_id && <span className="ml-2 text-emerald-300/70">· TID: {activeAlertLead.trusted_id.slice(0, 16)}…</span>}
-              </div>
-              {soundBlocked && (
-                <div className="mt-2 text-xs text-amber-200">
-                  Browser audio is blocked until this tab is interacted with.
-                  <button className="ml-2 underline" onClick={() => void playLeadBeep().then((ok) => setSoundBlocked(!ok))}>
-                    Enable sound
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <button className="vs-button-primary" onClick={() => void acceptLead(activeAlertLead)} data-log="Accept newest lead">Accept</button>
-              <button className="vs-button-secondary" onClick={() => void onCallLead(activeAlertLead)} data-log="Call newest lead">Call Now</button>
-              <button className="vs-button-secondary" onClick={() => setSelectedLead(activeAlertLead)}>View Details</button>
-              <button className="vs-button-secondary" onClick={() => void declineLead(activeAlertLead)} data-log="Decline newest lead">Decline</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── KPI cards ── */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         {statCards.map(([label, value, hint], index) => (

@@ -3,6 +3,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
 import { buildApiUrl } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
+import {
+  getSelectedLeadAlarmIds,
+  LEAD_ALARM_OPTIONS,
+  LeadAlarmId,
+  playLeadAlarmSequence,
+  setSelectedLeadAlarmIds,
+} from '../lib/leadAlarm';
 export default function UserSettingsPage() {
   const { user, selectedOrgId, refreshProfile } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -18,6 +25,7 @@ export default function UserSettingsPage() {
   const [generatingKey, setGeneratingKey] = useState(false);
   const [newKeyLabel, setNewKeyLabel] = useState('');
   const [showNewKeyPlaintext, setShowNewKeyPlaintext] = useState<string | null>(null);
+  const [leadAlarmIds, setLeadAlarmIds] = useState<LeadAlarmId[]>([]);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -37,6 +45,10 @@ export default function UserSettingsPage() {
       // loadApiKeys(); // TODO: user_api_keys table needs migration in production
     }
   }, [user, selectedOrgId]);
+
+  useEffect(() => {
+    setLeadAlarmIds(getSelectedLeadAlarmIds());
+  }, []);
 
   const fetchProfile = async () => {
     if (!user) return;
@@ -147,6 +159,15 @@ export default function UserSettingsPage() {
     navigator.clipboard.writeText(text);
     setMessage('Copied to clipboard!');
     setTimeout(() => setMessage(null), 2000);
+  };
+
+  const toggleLeadAlarm = (id: LeadAlarmId) => {
+    setLeadAlarmIds((current) => {
+      const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
+      const saved = next.length ? next : [id];
+      setSelectedLeadAlarmIds(saved);
+      return saved;
+    });
   };
 
   const handleProfileChange = (field: string, value: string) => {
@@ -350,6 +371,51 @@ export default function UserSettingsPage() {
               </button>
             </div>
           </div>
+        </div>
+
+        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Lead Alarm</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Choose one or more sounds for incoming lead alerts on this device.
+              </p>
+            </div>
+            <button
+              className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-500"
+              onClick={() => void playLeadAlarmSequence(leadAlarmIds)}
+              data-log="Preview lead alarm"
+            >
+              Preview Alarm
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            {LEAD_ALARM_OPTIONS.map((option) => (
+              <label
+                key={option.id}
+                className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition ${
+                  leadAlarmIds.includes(option.id)
+                    ? 'border-rose-400/50 bg-rose-400/10'
+                    : 'border-slate-700 bg-slate-800/40 hover:border-slate-600'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-800 text-rose-500"
+                  checked={leadAlarmIds.includes(option.id)}
+                  onChange={() => toggleLeadAlarm(option.id)}
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-100">{option.name}</span>
+                  <span className="mt-1 block text-xs text-slate-400">{option.description}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="mt-4 text-xs text-slate-500">
+            Browsers may require one click or keypress before they allow alarm audio.
+          </p>
         </div>
 
         {/* Profile Picture */}
