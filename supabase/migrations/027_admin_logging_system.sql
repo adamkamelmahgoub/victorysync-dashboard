@@ -105,7 +105,7 @@ as $$
     select 1
     from public.profiles p
     where p.id = auth.uid()
-      and p.global_role in ('admin', 'super_admin', 'platform_admin')
+      and p.global_role::text in ('admin', 'super_admin', 'platform_admin')
   )
   or (
     target_org_id is not null
@@ -114,7 +114,7 @@ as $$
       from public.org_users ou
       where ou.user_id = auth.uid()
         and ou.org_id = target_org_id
-        and ou.role in ('admin', 'super_admin', 'org_admin')
+        and ou.role::text in ('admin', 'super_admin', 'org_admin')
     )
   );
 $$;
@@ -130,7 +130,7 @@ using (
   or exists (
     select 1 from public.profiles p
     where p.id = auth.uid()
-      and p.global_role in ('super_admin', 'platform_admin')
+      and p.global_role::text in ('super_admin', 'platform_admin')
   )
 );
 
@@ -143,7 +143,7 @@ using (
   or exists (
     select 1 from public.profiles p
     where p.id = auth.uid()
-      and p.global_role in ('super_admin', 'platform_admin')
+      and p.global_role::text in ('super_admin', 'platform_admin')
   )
 );
 
@@ -156,7 +156,7 @@ using (
   or exists (
     select 1 from public.profiles p
     where p.id = auth.uid()
-      and p.global_role in ('super_admin', 'platform_admin')
+      and p.global_role::text in ('super_admin', 'platform_admin')
   )
 );
 
@@ -169,7 +169,7 @@ using (
   or exists (
     select 1 from public.profiles p
     where p.id = auth.uid()
-      and p.global_role in ('super_admin', 'platform_admin')
+      and p.global_role::text in ('super_admin', 'platform_admin')
   )
 );
 
@@ -182,7 +182,7 @@ using (
   or exists (
     select 1 from public.profiles p
     where p.id = auth.uid()
-      and p.global_role in ('super_admin', 'platform_admin')
+      and p.global_role::text in ('super_admin', 'platform_admin')
   )
 );
 
