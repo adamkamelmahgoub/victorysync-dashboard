@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BrowserRouter,
@@ -14,46 +14,43 @@ import { OrgProvider, useOrg } from "./contexts/OrgContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import DashboardNewV3 from "./pages/DashboardNewV3";
 import { LoginPage } from "./pages/LoginPage";
-import { AdminUsersPage } from "./pages/admin/AdminUsersPage";
-import AdminOrgsPage from "./pages/admin/AdminOrgsPage";
-import { AdminOrgOverviewPage } from "./pages/admin/AdminOrgOverviewPage";
-import AdminApiKeysPage from "./pages/admin/AdminApiKeysPage";
-import AdminMightyCallPage from "./pages/admin/AdminMightyCallPage";
-import { OrgDashboardPage } from "./pages/admin/OrgDashboardPage";
-import { AdminOperationsPage } from "./pages/admin/AdminOperationsPage";
-import AdminSupportPage from "./pages/admin/AdminSupportPage";
-import AdminNumberChangeRequestsPage from "./pages/admin/AdminNumberChangeRequestsPage";
-import AdminReportsPage from "./pages/admin/AdminReportsPage";
-import AdminRecordingsPage from "./pages/admin/AdminRecordingsPage";
-import AdminAgentsManagementPage from "./pages/admin/AdminAgentsManagementPage";
-import AdminInviteCodesPage from "./pages/admin/AdminInviteCodesPage";
-import { AdminBillingPage } from "./pages/admin/AdminBillingPage";
-import { AdminBillingPageV2 } from "./pages/admin/AdminBillingPageV2";
-import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
-import OrgManagePage from './pages/OrgManagePage';
 import OrgAdminRoute from './components/OrgAdminRoute';
 import ErrorBoundary from "./components/ErrorBoundary";
 import LoggingProvider from "./components/LoggingProvider";
 import LeadAlertOverlay from "./components/LeadAlertOverlay";
-import { SettingsPage } from "./pages/SettingsPage";
-import { NumbersPage } from "./pages/NumbersPage";
-import { ReportsPage } from "./pages/ReportsPage";
-import ReportsPageEnhanced from "./pages/ReportsPageEnhanced";
-import ReportPage from "./pages/ReportPage";
-import { RecordingsPage } from "./pages/RecordingsPage";
-import UserSettingsPage from "./pages/UserSettingsPage";
-import { SMSPage } from "./pages/SMSPage";
-import { SupportPage } from "./pages/SupportPage";
-import { TeamPage } from "./pages/TeamPage";
-import { DebugAuthPage } from "./pages/DebugAuthPage";
-import { APIKeysPage } from "./pages/APIKeysPage";
-import BillingPage from "./pages/BillingPage";
-import LiveStatusPage from "./pages/LiveStatusPage";
-import LeadsPage from "./pages/LeadsPage";
-import AdminDiagnosticsPage from "./pages/admin/AdminDiagnosticsPage";
-import AdminLogsPage from "./pages/admin/AdminLogsPage";
 import { installAuthenticatedFetch } from "./lib/installAuthenticatedFetch";
 import { installConsoleRedaction } from "./lib/redactConsole";
+
+const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
+const AdminOrgsPage = lazy(() => import("./pages/admin/AdminOrgsPage"));
+const AdminOrgOverviewPage = lazy(() => import("./pages/admin/AdminOrgOverviewPage").then((m) => ({ default: m.AdminOrgOverviewPage })));
+const AdminApiKeysPage = lazy(() => import("./pages/admin/AdminApiKeysPage"));
+const AdminMightyCallPage = lazy(() => import("./pages/admin/AdminMightyCallPage"));
+const OrgDashboardPage = lazy(() => import("./pages/admin/OrgDashboardPage").then((m) => ({ default: m.OrgDashboardPage })));
+const AdminOperationsPage = lazy(() => import("./pages/admin/AdminOperationsPage").then((m) => ({ default: m.AdminOperationsPage })));
+const AdminSupportPage = lazy(() => import("./pages/admin/AdminSupportPage"));
+const AdminNumberChangeRequestsPage = lazy(() => import("./pages/admin/AdminNumberChangeRequestsPage"));
+const AdminRecordingsPage = lazy(() => import("./pages/admin/AdminRecordingsPage"));
+const AdminAgentsManagementPage = lazy(() => import("./pages/admin/AdminAgentsManagementPage"));
+const AdminInviteCodesPage = lazy(() => import("./pages/admin/AdminInviteCodesPage"));
+const AdminBillingPageV2 = lazy(() => import("./pages/admin/AdminBillingPageV2").then((m) => ({ default: m.AdminBillingPageV2 })));
+const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage"));
+const AdminDiagnosticsPage = lazy(() => import("./pages/admin/AdminDiagnosticsPage"));
+const AdminLogsPage = lazy(() => import("./pages/admin/AdminLogsPage"));
+const OrgManagePage = lazy(() => import("./pages/OrgManagePage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const NumbersPage = lazy(() => import("./pages/NumbersPage").then((m) => ({ default: m.NumbersPage })));
+const ReportPage = lazy(() => import("./pages/ReportPage"));
+const RecordingsPage = lazy(() => import("./pages/RecordingsPage").then((m) => ({ default: m.RecordingsPage })));
+const UserSettingsPage = lazy(() => import("./pages/UserSettingsPage"));
+const SMSPage = lazy(() => import("./pages/SMSPage").then((m) => ({ default: m.SMSPage })));
+const SupportPage = lazy(() => import("./pages/SupportPage").then((m) => ({ default: m.SupportPage })));
+const TeamPage = lazy(() => import("./pages/TeamPage").then((m) => ({ default: m.TeamPage })));
+const DebugAuthPage = lazy(() => import("./pages/DebugAuthPage").then((m) => ({ default: m.DebugAuthPage })));
+const APIKeysPage = lazy(() => import("./pages/APIKeysPage").then((m) => ({ default: m.APIKeysPage })));
+const BillingPage = lazy(() => import("./pages/BillingPage"));
+const LiveStatusPage = lazy(() => import("./pages/LiveStatusPage"));
+const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 
 declare global {
   interface Window {
@@ -139,16 +136,17 @@ function AdminRoute({ children }: { children: JSX.Element }) {
 
 function AppRouter() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <DashboardNewV3 />
-          </ProtectedRoute>
-        }
-      />
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">Loading...</div>}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <DashboardNewV3 />
+            </ProtectedRoute>
+          }
+        />
       <Route
         path="/dashboard"
         element={
@@ -409,8 +407,9 @@ function AppRouter() {
           </AdminRoute>
         }
       />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 

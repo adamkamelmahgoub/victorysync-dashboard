@@ -87,31 +87,30 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       const answer_rate_yesterday = answerRate(yesterdayOverview);
       const delta_pp = answer_rate_today - answer_rate_yesterday;
 
-      let assignedPhones: Array<{ id: string; number: string; label?: string | null }> = [];
-      try {
-        const numbersPath = orgId
-          ? `/api/reports/numbers?org_id=${encodeURIComponent(orgId)}&start_date=${today}&end_date=${today}&_fresh=${Date.now()}`
-          : `/api/reports/numbers?start_date=${today}&end_date=${today}&_fresh=${Date.now()}`;
-        const numbersData = await fetchJson(buildApiUrl(numbersPath), { headers, cache: 'no-store' });
-        assignedPhones = (numbersData.numbers || []).map((row: any) => ({
-          id: row.id || row.phone_number_id || row.number,
-          number: row.number || row.phone_number || row.business_number,
-          label: row.label || row.organization_name || null,
-        })).filter((row: any) => row.number);
-      } catch (e) {
-        console.warn('Failed to fetch assigned phones:', e);
-      }
-
-      setMetrics({
+      setMetrics((current) => ({
         total_calls_today: totalCalls,
         answered_calls_today: answeredCalls,
         answer_rate_today,
         avg_wait_seconds_today: Number(overview.avg_wait_seconds || 0),
         answer_rate_yesterday,
         delta_pp,
-        assignedPhones,
-      });
+        assignedPhones: current?.assignedPhones || [],
+      }));
       hasLoadedOnce.current = true;
+
+      const numbersPath = orgId
+        ? `/api/reports/numbers?org_id=${encodeURIComponent(orgId)}&start_date=${today}&end_date=${today}&_fresh=${Date.now()}`
+        : `/api/reports/numbers?start_date=${today}&end_date=${today}&_fresh=${Date.now()}`;
+      void fetchJson(buildApiUrl(numbersPath), { headers, cache: 'no-store' })
+        .then((numbersData) => {
+          const assignedPhones = (numbersData.numbers || []).map((row: any) => ({
+            id: row.id || row.phone_number_id || row.number,
+            number: row.number || row.phone_number || row.business_number,
+            label: row.label || row.organization_name || null,
+          })).filter((row: any) => row.number);
+          setMetrics((current) => current ? { ...current, assignedPhones } : current);
+        })
+        .catch((e) => console.warn('Failed to fetch assigned phones:', e));
     } catch (err: any) {
       console.error('Error fetching dashboard metrics:', err);
       setError(err?.message ?? 'Failed to fetch metrics');
