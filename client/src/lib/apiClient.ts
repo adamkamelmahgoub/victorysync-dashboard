@@ -358,10 +358,29 @@ export type LeadItem = {
   notes?: string | null;
   source?: string | null;
   source_lead_id?: string | null;
+  lead_source_id?: string | null;
+  campaign_id?: string | null;
+  campaign_name?: string | null;
   raw_payload?: Record<string, any> | null;
   received_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+export type LeadSourceItem = {
+  id: string;
+  source_name: string;
+  source_label?: string | null;
+  campaign_id?: string | null;
+  campaign_name?: string | null;
+  organization_id: string;
+  lead_type?: string | null;
+  description?: string | null;
+  routing_priority?: number | null;
+  active?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  organizations?: { id: string; name: string } | null;
 };
 
 export async function getLeads(params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
@@ -394,6 +413,34 @@ export async function updateLead(leadId: string, patch: Record<string, any>, use
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify(patch),
   }) as { item: LeadItem };
+}
+
+export async function getLeadSources(params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value !== undefined && value !== null && value !== '') q.set(key, String(value));
+  }
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/leads/sources${suffix}`, {
+    headers: { 'x-user-id': userId || '' },
+    cache: 'no-store',
+  }) as { items: LeadSourceItem[] };
+}
+
+export async function createLeadSource(payload: Partial<LeadSourceItem>, userId?: string) {
+  return await fetchJson('/api/leads/sources', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify(payload),
+  }) as { item: LeadSourceItem };
+}
+
+export async function updateLeadSource(sourceId: string, patch: Partial<LeadSourceItem>, userId?: string) {
+  return await fetchJson(`/api/leads/sources/${encodeURIComponent(sourceId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify(patch),
+  }) as { item: LeadSourceItem };
 }
 
 export type LeadsVisibility = { agents: boolean; clients: boolean };

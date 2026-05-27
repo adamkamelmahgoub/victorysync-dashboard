@@ -4469,20 +4469,41 @@ function parseLeadNumber(value: any) {
   return Number.isFinite(num) ? num : null;
 }
 
-async function resolveLeadOrganization(body: any, sourceName: string, _leadType: string | null) {
+async function resolveLeadSource(body: any, sourceName: string, leadType: string | null) {
   const campaignId = String(pickLeadValue(body, ['campaign_id', 'campaignId', 'campaign', 'cid']) || '').trim();
+  const cleanLeadType = String(leadType || '').trim();
   let query = supabaseAdmin
     .from('lead_sources')
-    .select('organization_id, lead_type')
+    .select('id, organization_id, lead_type, campaign_id, campaign_name, source_label, routing_priority')
     .eq('source_name', sourceName)
     .eq('active', true)
-    .limit(1);
+    .order('routing_priority', { ascending: true })
+    .order('created_at', { ascending: false })
+    .limit(20);
   if (campaignId) query = query.eq('campaign_id', campaignId);
   try {
-    const { data } = await query.maybeSingle();
-    return data?.organization_id || process.env.VICTORYSYNC_DEFAULT_ORG_ID || null;
+    const { data } = await query;
+    const rows = data || [];
+    const exactType = cleanLeadType
+      ? rows.find((row: any) => String(row.lead_type || '').toLowerCase() === cleanLeadType.toLowerCase())
+      : null;
+    const anyType = rows.find((row: any) => !row.lead_type) || rows[0] || null;
+    const selected = exactType || anyType;
+    return {
+      id: selected?.id || null,
+      organization_id: selected?.organization_id || process.env.VICTORYSYNC_DEFAULT_ORG_ID || null,
+      campaign_id: campaignId || selected?.campaign_id || null,
+      campaign_name: selected?.campaign_name || selected?.source_label || null,
+      lead_type: selected?.lead_type || cleanLeadType || null,
+    };
   } catch {
-    return process.env.VICTORYSYNC_DEFAULT_ORG_ID || null;
+    return {
+      id: null,
+      organization_id: process.env.VICTORYSYNC_DEFAULT_ORG_ID || null,
+      campaign_id: campaignId || null,
+      campaign_name: null,
+      lead_type: cleanLeadType || null,
+    };
   }
 }
 
@@ -4494,6 +4515,8 @@ function mapMcGrawLead(body: any) {
   const rawTimestamp = pickLeadValue(body, ['timestamp', 'created_at', 'tcpa_timestamp', 'consent_timestamp']);
   const timestamp = rawTimestamp && !Number.isNaN(Date.parse(String(rawTimestamp))) ? new Date(String(rawTimestamp)).toISOString() : null;
   const leadType = String(pickLeadValue(body, ['lead_type', 'vertical']) || 'debt_relief').trim() || 'debt_relief';
+  const campaignId = pickLeadValue(body, ['campaign_id', 'campaignId', 'campaign', 'cid']);
+  const campaignName = pickLeadValue(body, ['campaign_name', 'campaignName', 'campaign_title']);
   return {
     first_name: firstName ? String(firstName).trim() : null,
     last_name: lastName ? String(lastName).trim() : null,
@@ -4508,6 +4531,8 @@ function mapMcGrawLead(body: any) {
     tcpa_timestamp: timestamp,
     source: 'mcgrawnow',
     source_lead_id: pickLeadValue(body, ['lead_id', 'source_lead_id', 'id']) ? String(pickLeadValue(body, ['lead_id', 'source_lead_id', 'id'])).trim() : null,
+    campaign_id: campaignId ? String(campaignId).trim().slice(0, 200) : null,
+    campaign_name: campaignName ? String(campaignName).trim().slice(0, 300) : null,
     trusted_id: pickLeadValue(body, ['trusted_id', 'trustedId', 'trusted_form_id']) ? String(pickLeadValue(body, ['trusted_id', 'trustedId', 'trusted_form_id'])).trim().slice(0, 500) : null,
     form_number: pickLeadValue(body, ['form_number', 'formNumber', 'form_id', 'formId']) ? String(pickLeadValue(body, ['form_number', 'formNumber', 'form_id', 'formId'])).trim().slice(0, 200) : null,
     raw_payload: stripSensitiveFields(body),
@@ -4540,7 +4565,8 @@ app.post('/api/leads/inbound', async (req, res) => {
     }
 
     const mapped = mapMcGrawLead(req.body || {});
-    const organizationId = await resolveLeadOrganization(req.body || {}, 'mcgrawnow', mapped.lead_type);
+    const leadSource = await resolveLeadSource(req.body || {}, 'mcgrawnow', mapped.lead_type);
+    const organizationId = leadSource.organization_id;
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const { data: duplicate } = await supabaseAdmin
       .from('leads')
@@ -4567,6 +4593,10 @@ app.post('/api/leads/inbound', async (req, res) => {
       .insert({
         ...mapped,
         organization_id: organizationId,
+        lead_source_id: leadSource.id,
+        campaign_id: mapped.campaign_id || leadSource.campaign_id,
+        campaign_name: mapped.campaign_name || leadSource.campaign_name,
+        lead_type: mapped.lead_type || leadSource.lead_type || 'debt_relief',
       })
       .select('id, first_name, state, debt_amount, organization_id')
       .maybeSingle();
@@ -4606,7 +4636,7 @@ app.get('/api/leads/summary', async (req, res) => {
     const actorIsPlatformAdmin = await isPlatformAdmin(actorId);
     if (orgId && !actorIsPlatformAdmin && !(await isOrgMember(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
     const today = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
-    let query = supabaseAdmin.from('leads').select('id, status, contacted_at, transferred_at').gte('received_at', today).limit(5000);
+    let query = supabaseAdmin.from('leads').select('id, status, contacted_at, transferred_at, lead_type, campaign_id, source').gte('received_at', today).limit(5000);
     if (orgId) query = query.eq('organization_id', orgId);
     if (!orgId && !actorIsPlatformAdmin) {
       const { data: memberships } = await supabaseAdmin.from('org_users').select('org_id').eq('user_id', actorId);
@@ -4614,6 +4644,9 @@ app.get('/api/leads/summary', async (req, res) => {
       if (orgIds.length === 0) return res.json({ total_today: 0, new_leads: 0, contacted_today: 0, transferred_today: 0, contact_rate_pct: 0, transfer_rate_pct: 0 });
       query = query.in('organization_id', orgIds);
     }
+    if (req.query.lead_type) query = query.eq('lead_type', String(req.query.lead_type));
+    if (req.query.campaign_id) query = query.eq('campaign_id', String(req.query.campaign_id));
+    if (req.query.source) query = query.eq('source', String(req.query.source));
     const { data, error } = await query;
     if (error) throw error;
     const rows = data || [];
@@ -4652,6 +4685,9 @@ app.get('/api/leads', async (req, res) => {
     if (req.query.status) query = query.eq('status', String(req.query.status));
     if (req.query.state) query = query.eq('state', String(req.query.state).toUpperCase());
     if (req.query.agent_id) query = query.eq('assigned_agent_id', String(req.query.agent_id));
+    if (req.query.lead_type) query = query.eq('lead_type', String(req.query.lead_type));
+    if (req.query.campaign_id) query = query.eq('campaign_id', String(req.query.campaign_id));
+    if (req.query.source) query = query.eq('source', String(req.query.source));
     if (req.query.start_date) query = query.gte('received_at', String(req.query.start_date));
     if (req.query.end_date) query = query.lte('received_at', String(req.query.end_date));
     if (req.query.search) {
@@ -4663,6 +4699,103 @@ app.get('/api/leads', async (req, res) => {
     res.json({ items: data || [], count: count || 0, limit, offset });
   } catch (e) {
     res.status(500).json({ error: 'leads_fetch_failed', detail: fmtErr(e) });
+  }
+});
+
+const leadSourceSchema = z.object({
+  source_name: z.string().trim().min(1).max(100).default('mcgrawnow'),
+  source_label: z.string().trim().max(200).optional().nullable(),
+  campaign_id: z.string().trim().max(200).optional().nullable(),
+  campaign_name: z.string().trim().max(300).optional().nullable(),
+  organization_id: z.string().uuid(),
+  lead_type: z.string().trim().max(100).optional().nullable(),
+  description: z.string().trim().max(1000).optional().nullable(),
+  routing_priority: z.coerce.number().int().min(1).max(10000).optional(),
+  active: z.boolean().optional(),
+});
+
+function cleanLeadSourcePayload(input: z.infer<typeof leadSourceSchema>) {
+  return {
+    source_name: input.source_name || 'mcgrawnow',
+    source_label: input.source_label || null,
+    campaign_id: input.campaign_id || null,
+    campaign_name: input.campaign_name || null,
+    organization_id: input.organization_id,
+    lead_type: input.lead_type || null,
+    description: input.description || null,
+    routing_priority: input.routing_priority || 100,
+    active: input.active !== false,
+  };
+}
+
+app.get('/api/leads/sources', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    const orgId = String(req.query.organization_id || req.query.org_id || '').trim() || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const actorIsPlatformAdmin = await isPlatformAdmin(actorId);
+    if (orgId && !actorIsPlatformAdmin && !(await isOrgAdmin(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+
+    let query = supabaseAdmin
+      .from('lead_sources')
+      .select('*, organizations:organization_id(id, name)')
+      .order('active', { ascending: false })
+      .order('routing_priority', { ascending: true })
+      .order('created_at', { ascending: false });
+
+    if (orgId) query = query.eq('organization_id', orgId);
+    if (!orgId && !actorIsPlatformAdmin) {
+      const { data: memberships } = await supabaseAdmin.from('org_users').select('org_id').eq('user_id', actorId);
+      const orgIds = Array.from(new Set((memberships || []).map((row: any) => String(row.org_id || '')).filter(Boolean)));
+      if (orgIds.length === 0) return res.json({ items: [] });
+      query = query.in('organization_id', orgIds);
+    }
+    const { data, error } = await query.limit(500);
+    if (error) throw error;
+    res.json({ items: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: 'lead_sources_fetch_failed', detail: fmtErr(e) });
+  }
+});
+
+app.post('/api/leads/sources', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const parsed = leadSourceSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_lead_source', issues: parsed.error.issues });
+    const payload = cleanLeadSourcePayload(parsed.data);
+    if (!(await isPlatformAdmin(actorId)) && !(await isOrgAdmin(actorId, payload.organization_id))) return res.status(403).json({ error: 'forbidden' });
+    const { data, error } = await supabaseAdmin.from('lead_sources').insert(payload).select('*, organizations:organization_id(id, name)').maybeSingle();
+    if (error) throw error;
+    res.json({ item: data });
+  } catch (e) {
+    res.status(500).json({ error: 'lead_source_create_failed', detail: fmtErr(e) });
+  }
+});
+
+app.patch('/api/leads/sources/:sourceId', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const sourceId = String(req.params.sourceId || '');
+    const { data: existing } = await supabaseAdmin.from('lead_sources').select('organization_id').eq('id', sourceId).maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'lead_source_not_found' });
+    if (!(await isPlatformAdmin(actorId)) && !(await isOrgAdmin(actorId, existing.organization_id))) return res.status(403).json({ error: 'forbidden' });
+    const parsed = leadSourceSchema.partial().safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_lead_source', issues: parsed.error.issues });
+    const patch: any = {};
+    for (const [key, value] of Object.entries(parsed.data)) {
+      patch[key] = value === '' ? null : value;
+    }
+    if (patch.organization_id && patch.organization_id !== existing.organization_id && !(await isPlatformAdmin(actorId))) {
+      return res.status(403).json({ error: 'forbidden_org_change' });
+    }
+    const { data, error } = await supabaseAdmin.from('lead_sources').update(patch).eq('id', sourceId).select('*, organizations:organization_id(id, name)').maybeSingle();
+    if (error) throw error;
+    res.json({ item: data });
+  } catch (e) {
+    res.status(500).json({ error: 'lead_source_update_failed', detail: fmtErr(e) });
   }
 });
 

@@ -6,10 +6,14 @@ import { useToast } from '../contexts/ToastContext';
 import {
   getLeads,
   getLeadsSummary,
+  getLeadSources,
   getOrgMembers,
+  createLeadSource,
   LeadItem,
+  LeadSourceItem,
   LeadsVisibility,
   updateLead,
+  updateLeadSource,
   updateLeadsVisibility,
 } from '../lib/apiClient';
 import { postLog } from '../lib/logging';
@@ -146,12 +150,45 @@ export default function LeadsPage() {
 
   // ── org members (for agent assignment) ────────────────────────────────────
   const [members, setMembers] = useState<OrgMember[]>([]);
+  const [leadSources, setLeadSources] = useState<LeadSourceItem[]>([]);
+  const [savingLeadSource, setSavingLeadSource] = useState(false);
+  const [leadSourceForm, setLeadSourceForm] = useState({
+    source_name: 'mcgrawnow',
+    source_label: '',
+    campaign_id: '',
+    campaign_name: '',
+    organization_id: selectedOrgId || '',
+    lead_type: 'debt_relief',
+    description: '',
+    routing_priority: 100,
+    active: true,
+  });
   useEffect(() => {
     if (!selectedOrgId || !user?.id) return;
     getOrgMembers(selectedOrgId, user.id)
       .then((result: any) => setMembers(result?.data || result?.members || result || []))
       .catch(() => {});
   }, [selectedOrgId, user?.id]);
+
+  const loadLeadSources = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const result = await getLeadSources(isAdmin && !selectedOrgId ? {} : { organization_id: selectedOrgId || undefined }, user.id);
+      setLeadSources(result.items || []);
+    } catch {
+      setLeadSources([]);
+    }
+  }, [isAdmin, selectedOrgId, user?.id]);
+
+  useEffect(() => {
+    if (selectedOrgId) {
+      setLeadSourceForm((form) => ({ ...form, organization_id: form.organization_id || selectedOrgId }));
+    }
+  }, [selectedOrgId]);
+
+  useEffect(() => {
+    if (isAdmin) void loadLeadSources();
+  }, [isAdmin, loadLeadSources]);
 
   const memberById = useMemo(() => {
     const map: Record<string, OrgMember> = {};
@@ -162,6 +199,64 @@ export default function LeadsPage() {
   function memberLabel(m: OrgMember) {
     return m.full_name || m.email || m.user_id.slice(0, 8);
   }
+
+  const leadTypeOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const source of leadSources) if (source.lead_type) values.add(source.lead_type);
+    values.add('debt_relief');
+    values.add('solar');
+    values.add('insurance');
+    values.add('home_services');
+    return Array.from(values).sort();
+  }, [leadSources]);
+
+  const campaignOptions = useMemo(() => {
+    const values = new Map<string, string>();
+    for (const source of leadSources) {
+      if (source.campaign_id) values.set(source.campaign_id, source.campaign_name || source.campaign_id);
+    }
+    return Array.from(values.entries()).map(([id, name]) => ({ id, name }));
+  }, [leadSources]);
+
+  const saveLeadSource = async () => {
+    if (!user?.id) return;
+    if (!leadSourceForm.organization_id) {
+      toast.push('Choose a client organization for this campaign', 'error');
+      return;
+    }
+    setSavingLeadSource(true);
+    try {
+      await createLeadSource({
+        ...leadSourceForm,
+        source_label: leadSourceForm.source_label || leadSourceForm.campaign_name || leadSourceForm.campaign_id || 'McGraw Now',
+      }, user.id);
+      toast.push('Lead campaign route saved', 'success');
+      setLeadSourceForm((form) => ({
+        ...form,
+        source_label: '',
+        campaign_id: '',
+        campaign_name: '',
+        description: '',
+        routing_priority: 100,
+        active: true,
+      }));
+      await loadLeadSources();
+    } catch (e: any) {
+      toast.push(e?.message || 'Failed to save lead campaign route', 'error');
+    } finally {
+      setSavingLeadSource(false);
+    }
+  };
+
+  const toggleLeadSourceActive = async (source: LeadSourceItem) => {
+    if (!user?.id) return;
+    try {
+      await updateLeadSource(source.id, { active: !source.active }, user.id);
+      await loadLeadSources();
+    } catch (e: any) {
+      toast.push(e?.message || 'Failed to update lead campaign route', 'error');
+    }
+  };
 
   // ── leads state ────────────────────────────────────────────────────────────
   const [leads, setLeads] = useState<LeadItem[]>([]);
@@ -180,6 +275,8 @@ export default function LeadsPage() {
   const [customEnd, setCustomEnd] = useState('');
   const [stateFilter, setStateFilter] = useState('');
   const [agentFilter, setAgentFilter] = useState('');
+  const [leadTypeFilter, setLeadTypeFilter] = useState('');
+  const [campaignFilter, setCampaignFilter] = useState('');
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState(selectedOrgId || '');
 
@@ -190,10 +287,12 @@ export default function LeadsPage() {
     status: status || undefined,
     state: stateFilter || undefined,
     agent_id: agentFilter || undefined,
+    lead_type: leadTypeFilter || undefined,
+    campaign_id: campaignFilter || undefined,
     search: search || undefined,
     limit: '100',
     ...dateParams(range, customStart, customEnd),
-  }), [agentFilter, customEnd, customStart, orgFilter, range, search, stateFilter, status]);
+  }), [agentFilter, campaignFilter, customEnd, customStart, leadTypeFilter, orgFilter, range, search, stateFilter, status]);
 
   // ── data loading ───────────────────────────────────────────────────────────
   const loadLeads = useCallback(async () => {
@@ -203,7 +302,11 @@ export default function LeadsPage() {
     try {
       const [leadResult, summaryResult] = await Promise.all([
         getLeads(queryParams, user.id),
-        getLeadsSummary({ organization_id: orgFilter || undefined }, user.id),
+        getLeadsSummary({
+          organization_id: orgFilter || undefined,
+          lead_type: leadTypeFilter || undefined,
+          campaign_id: campaignFilter || undefined,
+        }, user.id),
       ]);
       setLeads(leadResult.items || []);
       setSummary(summaryResult);
@@ -212,7 +315,7 @@ export default function LeadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [orgFilter, queryParams, user?.id]);
+  }, [campaignFilter, leadTypeFilter, orgFilter, queryParams, user?.id]);
 
   useEffect(() => {
     void loadLeads();
@@ -346,6 +449,14 @@ export default function LeadsPage() {
               {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
             </select>
           )}
+          <select className="vs-input" value={leadTypeFilter} onChange={(e) => setLeadTypeFilter(e.target.value)}>
+            <option value="">All lead types</option>
+            {leadTypeOptions.map((item) => <option key={item} value={item}>{item.replace(/_/g, ' ')}</option>)}
+          </select>
+          <select className="vs-input" value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)}>
+            <option value="">All campaigns</option>
+            {campaignOptions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
           <select className="vs-input" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All statuses</option>
             {statusOptions.map((item) => <option key={item} value={item}>{item.replace(/_/g, ' ')}</option>)}
@@ -375,7 +486,7 @@ export default function LeadsPage() {
           <button className="vs-button-primary" onClick={() => void loadLeads()}>Apply</button>
           <button className="vs-button-secondary" onClick={() => {
             setStatus(''); setRange('today'); setCustomStart(''); setCustomEnd('');
-            setStateFilter(''); setAgentFilter(''); setSearch('');
+            setStateFilter(''); setAgentFilter(''); setLeadTypeFilter(''); setCampaignFilter(''); setSearch('');
           }}>Reset</button>
         </div>
       </SectionCard>
@@ -399,6 +510,8 @@ export default function LeadsPage() {
                 <tr>
                   <th className="px-5 py-3">Received</th>
                   <th className="px-5 py-3">Name</th>
+                  <th className="px-5 py-3">Campaign</th>
+                  <th className="px-5 py-3">Type</th>
                   <th className="px-5 py-3">Phone</th>
                   <th className="px-5 py-3">State</th>
                   <th className="px-5 py-3">Debt</th>
@@ -427,6 +540,10 @@ export default function LeadsPage() {
                     >
                       <td className="px-5 py-4 text-slate-300">{formatTimeAgo(lead.received_at)}</td>
                       <td className="px-5 py-4 font-medium text-white">{leadName(lead)}</td>
+                      <td className="px-5 py-4 text-slate-300">
+                        {lead.campaign_name || lead.campaign_id || lead.opt_in_source || '-'}
+                      </td>
+                      <td className="px-5 py-4 text-slate-300">{String(lead.lead_type || '-').replace(/_/g, ' ')}</td>
                       <td className="px-5 py-4 text-slate-300">
                         <span>{maskPhone(lead.phone, revealed || isAdmin)}</span>
                         {!isAdmin && !revealed && (
@@ -474,6 +591,117 @@ export default function LeadsPage() {
           </div>
         )}
       </SectionCard>
+
+      {isAdmin && (
+        <SectionCard
+          title="Campaign & Lead Type Routing"
+          description="Route McGraw Now campaigns and lead verticals to the correct client organization."
+          className="mt-5"
+          contentClassName="p-4"
+        >
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <input
+              className="vs-input"
+              value={leadSourceForm.source_name}
+              onChange={(e) => setLeadSourceForm((form) => ({ ...form, source_name: e.target.value }))}
+              placeholder="Source"
+            />
+            <input
+              className="vs-input"
+              value={leadSourceForm.campaign_id}
+              onChange={(e) => setLeadSourceForm((form) => ({ ...form, campaign_id: e.target.value }))}
+              placeholder="Campaign ID"
+            />
+            <input
+              className="vs-input"
+              value={leadSourceForm.campaign_name}
+              onChange={(e) => setLeadSourceForm((form) => ({ ...form, campaign_name: e.target.value }))}
+              placeholder="Campaign name"
+            />
+            <input
+              className="vs-input"
+              value={leadSourceForm.lead_type}
+              onChange={(e) => setLeadSourceForm((form) => ({ ...form, lead_type: e.target.value }))}
+              placeholder="Lead type"
+            />
+            <select
+              className="vs-input"
+              value={leadSourceForm.organization_id}
+              onChange={(e) => setLeadSourceForm((form) => ({ ...form, organization_id: e.target.value }))}
+            >
+              <option value="">Choose client</option>
+              {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
+            </select>
+            <input
+              className="vs-input"
+              type="number"
+              min={1}
+              value={leadSourceForm.routing_priority}
+              onChange={(e) => setLeadSourceForm((form) => ({ ...form, routing_priority: Number(e.target.value || 100) }))}
+              placeholder="Priority"
+            />
+            <input
+              className="vs-input xl:col-span-4"
+              value={leadSourceForm.description}
+              onChange={(e) => setLeadSourceForm((form) => ({ ...form, description: e.target.value }))}
+              placeholder="Internal notes"
+            />
+            <label className="flex items-center gap-3 rounded-xl border border-white/[0.04] bg-white/[0.025] px-4 py-2 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={leadSourceForm.active}
+                onChange={(e) => setLeadSourceForm((form) => ({ ...form, active: e.target.checked }))}
+              />
+              Active
+            </label>
+            <button className="vs-button-primary" disabled={savingLeadSource} onClick={() => void saveLeadSource()}>
+              {savingLeadSource ? 'Saving...' : 'Add Route'}
+            </button>
+          </div>
+
+          <div className="mt-5 overflow-x-auto rounded-2xl border border-white/[0.04]">
+            <table className="min-w-full text-left text-sm">
+              <thead className="border-b border-white/[0.04] text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Source</th>
+                  <th className="px-4 py-3">Campaign</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Client</th>
+                  <th className="px-4 py-3">Priority</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.035]">
+                {leadSources.length === 0 ? (
+                  <tr><td className="px-4 py-5 text-slate-400" colSpan={7}>No campaign routes configured yet.</td></tr>
+                ) : leadSources.map((source) => (
+                  <tr key={source.id}>
+                    <td className="px-4 py-3 text-slate-300">{source.source_label || source.source_name}</td>
+                    <td className="px-4 py-3 text-slate-300">
+                      <div className="font-medium text-slate-100">{source.campaign_name || source.campaign_id || 'Any campaign'}</div>
+                      {source.campaign_id && <div className="text-xs text-slate-500">{source.campaign_id}</div>}
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">{source.lead_type || 'Any type'}</td>
+                    <td className="px-4 py-3 text-slate-300">{source.organizations?.name || source.organization_id}</td>
+                    <td className="px-4 py-3 text-slate-300">{source.routing_priority ?? 100}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge tone={source.active ? 'success' : 'neutral'}>
+                        {source.active ? 'Active' : 'Inactive'}
+                      </StatusBadge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button className="vs-button-secondary" onClick={() => void toggleLeadSourceActive(source)}>
+                        {source.active ? 'Disable' : 'Enable'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
 
       {/* ── visibility settings (admin only) ── */}
       {isAdmin && selectedOrgId && (
@@ -544,6 +772,8 @@ export default function LeadsPage() {
               <Info label="Email" value={selectedLead.email || '-'} />
               <Info label="State" value={selectedLead.state || '-'} />
               <Info label="Debt" value={formatMoney(selectedLead.debt_amount)} />
+              <Info label="Campaign" value={selectedLead.campaign_name || selectedLead.campaign_id || '-'} />
+              <Info label="Lead Type" value={String(selectedLead.lead_type || '-').replace(/_/g, ' ')} />
               <Info label="TCPA Consent" value={selectedLead.tcpa_consent ? 'Yes' : 'No'} />
               <Info label="TCPA Timestamp" value={selectedLead.tcpa_timestamp ? new Date(selectedLead.tcpa_timestamp).toLocaleString() : '-'} />
               <Info label="Received" value={selectedLead.received_at ? new Date(selectedLead.received_at).toLocaleString() : '-'} />
