@@ -60,16 +60,17 @@ async function playLeadBeep() {
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.frequency.value = freq;
-      osc.type = 'sine';
+      osc.type = 'square';
       gain.gain.setValueAtTime(0.001, ctx.currentTime + start);
-      gain.gain.exponentialRampToValueAtTime(0.6, ctx.currentTime + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.95, ctx.currentTime + start + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
       osc.start(ctx.currentTime + start);
       osc.stop(ctx.currentTime + start + duration + 0.05);
     };
-    beep(880, 0, 0.18);
-    beep(1100, 0.22, 0.18);
-    beep(880, 0.44, 0.28);
+    beep(740, 0, 0.16);
+    beep(1280, 0.18, 0.16);
+    beep(740, 0.36, 0.16);
+    beep(1280, 0.54, 0.22);
     return true;
   } catch {
     return false;
@@ -330,7 +331,7 @@ export default function LeadsPage() {
       });
     };
     beep();
-    const id = window.setInterval(beep, 2500);
+    const id = window.setInterval(beep, 1200);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -556,14 +557,9 @@ export default function LeadsPage() {
                           >Call</button>
                           <button
                             className="vs-button-secondary"
-                            onClick={(e) => { e.stopPropagation(); void acceptLead(lead); }}
+                            onClick={(e) => { e.stopPropagation(); void updateSelected(lead, { assign_to_me: true }); }}
                             data-log="Assign lead to me"
-                          >Accept</button>
-                          <button
-                            className="vs-button-secondary"
-                            onClick={(e) => { e.stopPropagation(); void declineLead(lead); }}
-                            data-log="Decline lead"
-                          >Decline</button>
+                          >Assign Me</button>
                         </div>
                       </td>
                     </tr>
@@ -722,12 +718,6 @@ export default function LeadsPage() {
                 </button>
                 <button className="vs-button-secondary" onClick={() => void updateSelected(selectedLead, { assign_to_me: true })}>
                   Assign to Me
-                </button>
-                <button className="vs-button-secondary" onClick={() => void acceptLead(selectedLead)}>
-                  Accept
-                </button>
-                <button className="vs-button-secondary" onClick={() => void declineLead(selectedLead)}>
-                  Decline
                 </button>
                 <button className="vs-button-secondary" onClick={() => void updateSelected(selectedLead, { status: 'transferred' })}>
                   Mark Transferred
