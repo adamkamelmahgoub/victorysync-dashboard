@@ -1,8 +1,8 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = 'https://edsyhtlaqwiicxlzorca.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkc3lodGxhcXdpaWN4bHpvcmNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTA1OTI3OTgsImV4cCI6MTcwNTIxMjc5OH0.dNBa0tFlDVhZNVgWWPWP3w8Fg8RN9v3tpNRPGcxYMfA';
-const serviceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkc3lodGxhcXdpaWN4bHpvcmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTY4OTU5Mjc5OCwiZXhwIjoyMDA1MTUyNzk4fQ.M3ydD7jXGhHsJW2YaVRLPM-SoozNAY9p4K_JhM2hJVo';
+const supabaseUrl = 'https://your-project.supabase.co';
+const supabaseKey = 'REDACTED_JWT_DO_NOT_USE';
+const serviceKey = 'REDACTED_JWT_DO_NOT_USE';
 
 async function test() {
   const supabase = createClient(supabaseUrl, serviceKey);

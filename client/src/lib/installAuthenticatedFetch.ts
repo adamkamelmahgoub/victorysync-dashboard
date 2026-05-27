@@ -2,6 +2,7 @@ import { API_BASE_URL } from "../config";
 import { supabase } from "./supabaseClient";
 
 let installed = false;
+let csrfTokenCache: { token: string; fetchedAt: number } | null = null;
 
 function shouldAttachAuth(input: RequestInfo | URL): boolean {
   const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -24,6 +25,19 @@ export function installAuthenticatedFetch() {
   installed = true;
 
   const originalFetch = window.fetch.bind(window);
+
+  async function getCsrfToken(headers: Headers): Promise<string | null> {
+    if (csrfTokenCache && Date.now() - csrfTokenCache.fetchedAt < 10 * 60 * 1000) {
+      return csrfTokenCache.token;
+    }
+    const url = `${API_BASE_URL.replace(/\/$/, "")}/api/csrf-token`;
+    const response = await originalFetch(url, { headers, cache: "no-store" }).catch(() => null);
+    if (!response?.ok) return null;
+    const json = await response.json().catch(() => null);
+    const token = typeof json?.csrfToken === "string" ? json.csrfToken : null;
+    if (token) csrfTokenCache = { token, fetchedAt: Date.now() };
+    return token;
+  }
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     if (!shouldAttachAuth(input)) {
@@ -49,6 +63,12 @@ export function installAuthenticatedFetch() {
       }
     } catch (err) {
       console.warn("[auth-fetch] Failed to resolve session for API request", err);
+    }
+
+    const method = String(init?.method || request.method || "GET").toUpperCase();
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(method) && !headers.has("x-csrf-token")) {
+      const token = await getCsrfToken(headers);
+      if (token) headers.set("x-csrf-token", token);
     }
 
     return originalFetch(input, { ...init, headers });

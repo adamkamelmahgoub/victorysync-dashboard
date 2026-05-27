@@ -27,6 +27,7 @@
 
 // server/src/index.ts
 import { FRONTEND_ORIGIN, getEnvironmentHealth } from './config/env';
+import { installConsoleRedaction } from './security/redactConsole';
 import express from "express";
 import cors from "cors";
 import fetch from 'node-fetch';
@@ -66,8 +67,17 @@ import { getMembershipDriftDetails, getMembershipDriftSummary } from './lib/memb
 import { getSchemaHealth } from './lib/schemaHealth';
 import { normalizeMightyCallJournalActivity, normalizeMightyCallStatusActivity } from './lib/mightycallNormalizer';
 import { getMightyCallStatusByExtension } from './services/mightycallLiveStatus';
+import {
+  createApiRateLimitMiddleware,
+  createCsrfToken,
+  createSupabaseSessionMiddleware,
+  csrfProtection,
+  enforceAuthenticatedApi,
+  validateAndSanitizeApiInput,
+} from './security/apiSecurity';
 
 const DEFAULT_MIGHTYCALL_HISTORY_START = '2020-01-01';
+installConsoleRedaction();
 
 // Extend Express Request interface to include apiKeyScope
 declare global {
@@ -4220,24 +4230,6 @@ app.use('/api', (_req, res, next) => {
   next();
 });
 
-const apiRateBuckets = new Map<string, { count: number; resetAt: number }>();
-app.use('/api', (req, res, next) => {
-  const now = Date.now();
-  const windowMs = 60_000;
-  const maxRequests = process.env.NODE_ENV === 'production' ? 300 : 1200;
-  const key = String(req.ip || req.socket.remoteAddress || 'unknown');
-  const current = apiRateBuckets.get(key);
-  if (!current || current.resetAt <= now) {
-    apiRateBuckets.set(key, { count: 1, resetAt: now + windowMs });
-    return next();
-  }
-  current.count += 1;
-  if (current.count > maxRequests) {
-    res.setHeader('Retry-After', String(Math.ceil((current.resetAt - now) / 1000)));
-    return res.status(429).json({ error: 'rate_limited' });
-  }
-  return next();
-});
 // Disable ETag generation for API responses to avoid conditional GET returning 304
 app.disable('etag');
 
@@ -4273,6 +4265,14 @@ app.use('/api', (_req, res, next) => {
 });
 // Apply API key middleware early so endpoints can detect org-scoped or platform keys
 app.use('/api', apiKeyAuthMiddleware as any);
+app.use('/api', createSupabaseSessionMiddleware(supabaseAdmin) as any);
+app.use('/api', validateAndSanitizeApiInput as any);
+app.use('/api', createApiRateLimitMiddleware(supabaseAdmin) as any);
+app.get('/api/csrf-token', enforceAuthenticatedApi as any, (req, res) => {
+  res.json({ csrfToken: createCsrfToken(String(req.actorId || '')) });
+});
+app.use('/api', enforceAuthenticatedApi as any);
+app.use('/api', csrfProtection as any);
 
 // Using centralized Supabase client from `src/lib/supabaseClient`
 
@@ -4441,6 +4441,76 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
     error: 'mightycall_webhooks_disabled',
     detail: 'VictorySync now uses MightyCall API-only polling and sync. Configure /api/mightycall/sync or backend polling instead.',
   });
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const ipAddress = String(req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    if (!email || !password || !email.includes('@')) return res.status(400).json({ error: 'invalid_credentials' });
+
+    const now = Date.now();
+    const { data: lockout } = await supabaseAdmin
+      .from('auth_lockouts')
+      .select('ip_address, failed_count, locked_until, updated_at')
+      .eq('ip_address', ipAddress)
+      .maybeSingle();
+
+    if (lockout?.locked_until && Date.parse(lockout.locked_until) > now) {
+      const retryAfter = Math.max(1, Math.ceil((Date.parse(lockout.locked_until) - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfter));
+      return res.status(429).json({ error: 'Too many requests. Please wait.' });
+    }
+
+    const supabaseUrl = process.env.SUPABASE_URL || '';
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+    if (!supabaseUrl || !anonKey) return res.status(500).json({ error: 'auth_not_configured' });
+
+    const authResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, password }),
+    });
+    const authJson: any = await authResponse.json().catch(() => ({}));
+
+    if (!authResponse.ok) {
+      const lastUpdated = lockout?.updated_at ? Date.parse(lockout.updated_at) : 0;
+      const withinWindow = lastUpdated && (now - lastUpdated) <= 10 * 60 * 1000;
+      const failedCount = (withinWindow ? Number(lockout?.failed_count || 0) : 0) + 1;
+      const lockedUntil = failedCount >= 5 ? new Date(now + 30 * 60 * 1000).toISOString() : new Date(0).toISOString();
+      await supabaseAdmin.from('auth_lockouts').upsert({
+        ip_address: ipAddress,
+        failed_count: failedCount,
+        locked_until: lockedUntil,
+        updated_at: new Date(now).toISOString(),
+      }, { onConflict: 'ip_address' });
+      if (failedCount >= 5) {
+        res.setHeader('Retry-After', '1800');
+        return res.status(429).json({ error: 'Too many requests. Please wait.' });
+      }
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
+
+    await supabaseAdmin.from('auth_lockouts').delete().eq('ip_address', ipAddress);
+    return res.json({
+      session: {
+        access_token: authJson.access_token,
+        refresh_token: authJson.refresh_token,
+        expires_in: authJson.expires_in,
+        token_type: authJson.token_type,
+        user: authJson.user,
+      },
+      user: authJson.user,
+    });
+  } catch (e) {
+    console.error('auth_login_failed:', fmtErr(e));
+    return res.status(500).json({ error: 'auth_login_failed' });
+  }
 });
 
 // Resolve authenticated actor from a Supabase bearer token.

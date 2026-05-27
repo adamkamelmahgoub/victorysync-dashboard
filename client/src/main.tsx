@@ -49,6 +49,7 @@ import BillingPage from "./pages/BillingPage";
 import LiveStatusPage from "./pages/LiveStatusPage";
 import AdminDiagnosticsPage from "./pages/admin/AdminDiagnosticsPage";
 import { installAuthenticatedFetch } from "./lib/installAuthenticatedFetch";
+import { installConsoleRedaction } from "./lib/redactConsole";
 
 declare global {
   interface Window {
@@ -72,6 +73,7 @@ if ((import.meta as any).env && (import.meta as any).env.VITE_DEBUG_API === 'tru
   });
 }
 
+installConsoleRedaction();
 installAuthenticatedFetch();
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {

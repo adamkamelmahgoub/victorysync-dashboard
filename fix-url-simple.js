@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PROJECT_NAME = 'victorysync-dashboard-server';
-const CORRECT_SUPABASE_URL = 'https://edsyhtlaqwiicxlzorca.supabase.co';
+const CORRECT_SUPABASE_URL = 'https://your-project.supabase.co';
 
 console.log('\n🔧 Fixing SUPABASE_URL in Vercel\n');
 
@@ -71,7 +71,7 @@ npx vercel env add SUPABASE_URL production < $null 2>&1
   console.log('   3. Click Settings → Environment Variables');
   console.log('   4. Set Production scope');
   console.log('   5. Edit SUPABASE_URL:');
-  console.log(`      FROM: https://edsyhtlaqwilcxlorzca.supabase.co (wrong)`);
+  console.log(`      FROM: https://your-project.supabase.co (wrong)`);
   console.log(`      TO:   ${CORRECT_SUPABASE_URL} (correct)`);
   console.log('   6. Save and Redeploy\n');
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = 'https://edsyhtlaqwiicxlzorca.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkc3lodGxhcXdpaWN4bHpvcmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDI1MjMyNCwiZXhwIjoyMDc1ODI4MzI0fQ.KIy2lcVVHHqKVrMrVxgffxPQ8RaM90C5N6EMcKbKGqk';
+const supabaseUrl = 'https://your-project.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'REDACTED_JWT_DO_NOT_USE';
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { persistSession: false }

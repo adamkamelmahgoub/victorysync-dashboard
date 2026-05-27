@@ -1,8 +1,8 @@
 const { createClient } = require('@supabase/supabase-js');
 
 const sb = createClient(
-  'https://kwbewtfrvqfedatmxhpz.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxYmV3dGZydnFmZWRhdG1kaHBaIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzE3MDI2NzUsImV4cCI6MjA0NzI3ODY3NX0.kKALnIQrQP_L2YnKWnZLvOKk9Y6jNDT6J36YmwbdZjo'
+  'https://your-project.supabase.co',
+  'REDACTED_JWT_DO_NOT_USE'
 );
 
 async function check() {

@@ -4,6 +4,8 @@ import { supabase } from "./supabaseClient";
 
 type Json = any;
 type FetchJsonInit = RequestInit & { timeoutMs?: number };
+const readCache = new Map<string, { expiresAt: number; value: Json }>();
+const READ_CACHE_TTL_MS = 30_000;
 
 function shouldAttachBrowserAuth(url: string): boolean {
   if (typeof window === "undefined") return false;
@@ -41,6 +43,12 @@ async function withBrowserAuthHeaders(url: string, init?: FetchJsonInit): Promis
 export async function fetchJson(path: string, init?: FetchJsonInit) {
   const url = path.startsWith("http") ? path : buildApiUrl(path);
   const requestInit = await withBrowserAuthHeaders(url, init);
+  const method = String(requestInit?.method || "GET").toUpperCase();
+  const cacheableRead = method === "GET" && /\/api\/(dashboard|kpi|client-metrics|reports|calls|recordings|sms)/.test(url);
+  if (cacheableRead) {
+    const cached = readCache.get(url);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+  }
   // Use a generous timeout to avoid indefinite fetch hangs in the browser
   // 15s gives the backend time to process requests, while still catching hangs
   const timeoutMs = requestInit?.timeoutMs ?? 15000; // 15s default
@@ -99,7 +107,9 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
     throw err;
   }
   if (res.status === 204) return null as any;
-  return res.json() as Promise<Json>;
+  const json = await res.json() as Json;
+  if (cacheableRead) readCache.set(url, { value: json, expiresAt: Date.now() + READ_CACHE_TTL_MS });
+  return json;
 }
 
 export type Metrics = {

@@ -145,24 +145,37 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     password: string
   ): Promise<{ error?: string }> => {
     try {
-      console.log('[AuthContext] Attempting sign in for:', email);
-      // guard against the Supabase client hanging by adding an explicit timeout
+      // Authenticate through the API so rate limiting and account lockout are enforced server-side.
       const timeoutMs = 10000; // 10s
-      const signInPromise = supabase.auth.signInWithPassword({ email, password });
+      const signInPromise = fetch(buildApiUrl('/api/auth/login'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      }).then(async (response) => {
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          return { error: { message: json?.error || 'Sign in failed' } };
+        }
+        if (json?.session?.access_token && json?.session?.refresh_token) {
+          const setSession = await supabase.auth.setSession({
+            access_token: json.session.access_token,
+            refresh_token: json.session.refresh_token,
+          });
+          if (setSession.error) return { error: setSession.error };
+          return { data: setSession.data };
+        }
+        return { error: { message: 'Sign in did not return a session' } };
+      });
       const res: any = await Promise.race([
         signInPromise,
         new Promise((_, reject) => setTimeout(() => reject(new Error('sign-in timeout')), timeoutMs)),
       ]);
-      console.log('[AuthContext] Sign in response:', res);
-
       if (res?.error) {
-        console.error('[AuthContext] Auth error:', res.error);
         return { error: res.error?.message ?? String(res.error) };
       }
 
       const data = res?.data;
       if (data && data.user) {
-        console.log('[AuthContext] Sign in successful, setting user:', data.user.email);
         setUser(data.user);
         const role = data.user.user_metadata?.global_role ?? null;
         setGlobalRole(role);

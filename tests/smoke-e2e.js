@@ -14,7 +14,7 @@ const https = require('https');
 const http = require('http');
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:4000';
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://edsyhtlaqwiicxlzorca.supabase.co';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://your-project.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 const TEST_EMAIL = `test-${Date.now()}@example.com`;
 const TEST_PASSWORD = 'TempPassword123!';

@@ -12,7 +12,7 @@ const testOrgId = 'd6b7bbde-54bb-4782-989d-cf9093f8cadf'; // Test Client org
 const victoryOrgId = 'cfbaf78a-3caa-4cb2-a367-d3b3eb161ba1'; // VictorySync org
 
 // Test token for test@test.com
-const testToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZWNlMThkZC04YTNjLTQ5NTAtOTdhNi1kN2VlYWJlMjZlNGEiLCJlbWFpbCI6InRlc3RAdGVzdC5jb20iLCJlbWFpbF9jb25maXJtZWQiOnRydWUsImFwcCI6eyJyb2xlIjoidXNlciJ9LCJpc3MiOiJodHRwczpcXC9cXC9icGpwbXFmdmd3dWpzbXJjY2VubC5zdXBhYmFzZS5jbyIsImF1ZCI6ImF1dGhlbnRpY2F0ZWQiLCJpYXQiOjE3MzI5Mjc5NzAsImV4cCI6MTczMjkzMTU3MH0.VjKYVxAkNCKYrIh2z5N8DhIbYo6l1HJKKJWKlhIUEzM';
+const testToken = 'REDACTED_JWT_DO_NOT_USE';
 
 const BASE_URL = 'http://localhost:4000';
 

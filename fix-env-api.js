@@ -28,7 +28,7 @@ if (!token) {
   }
 }
 
-const correctValue = 'https://edsyhtlaqwiicxlzorca.supabase.co';
+const correctValue = 'https://your-project.supabase.co';
 
 function makeRequest(method, pathname, body = null) {
   return new Promise((resolve, reject) => {

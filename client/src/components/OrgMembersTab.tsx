@@ -28,8 +28,6 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
   const [inviteRole, setInviteRole] = useState('agent');
   const [inviting, setInviting] = useState(false);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
-  const [lastInviteAttempt, setLastInviteAttempt] = useState<string | null>(null);
-  const [lastInviteResult, setLastInviteResult] = useState<string | null>(null);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, string>>({});
   const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
   const [permEditorFor, setPermEditorFor] = useState<string | null>(null);
@@ -74,11 +72,6 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
-    // Debug logging to help diagnose "button does nothing" issues
-    // eslint-disable-next-line no-console
-    console.debug('[OrgMembersTab] handleInvite start', { isOrgAdmin, apiUnavailable, inviteEmail });
-    setLastInviteAttempt(JSON.stringify({ ts: new Date().toISOString(), isOrgAdmin, apiUnavailable, inviteEmail }));
-    setLastInviteResult(null);
     setInviting(true);
     setError(null);
     // When adminCheckDone is true, the check completed and we should disallow non-admins.
@@ -94,12 +87,10 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
           ? `Invite code for ${inviteEmail}: ${code}`
           : `Invited ${inviteEmail} as ${inviteRole}`;
         setInviteSuccess(msg);
-        setLastInviteResult(msg);
       }
     } catch (e: any) {
       const emsg = e?.message || 'Failed to invite user';
       setError(emsg);
-      setLastInviteResult(`error: ${emsg}`);
     }
     setInviteEmail('');
     setInviteRole('agent');
@@ -270,10 +261,6 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
         {error && <div className="text-rose-400 mb-2">{error}</div>}
         {inviteSuccess && <div className="text-emerald-300 mb-2">{inviteSuccess}</div>}
       </div>
-
-      <div className="text-xs text-gray-500 mb-2">Debug: isOrgAdmin={String(isOrgAdmin)}, adminCheckDone={String(adminCheckDone)}, apiUnavailable={String(apiUnavailable)}, inviting={String(inviting)}, inviteEmail={String(inviteEmail)}, inviteDisabled={String(inviteDisabled)}</div>
-      {lastInviteAttempt && <div className="text-sm text-gray-400 mb-1">Last invite attempt: {lastInviteAttempt}</div>}
-      {lastInviteResult && <div className="text-sm text-gray-300 mb-2">Last invite result: {lastInviteResult}</div>}
 
       {loading ? (
         <div className="py-6 text-center text-sm text-gray-400">Loading members...</div>

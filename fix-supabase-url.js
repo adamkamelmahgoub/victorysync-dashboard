@@ -61,7 +61,7 @@ async function fixEnv() {
   console.log(`📋 Project ID: ${PROJECT_ID}`);
   console.log(`📋 Team ID: ${TEAM_ID}\n`);
 
-  const correctValue = 'https://edsyhtlaqwiicxlzorca.supabase.co';
+  const correctValue = 'https://your-project.supabase.co';
 
   if (!process.env.VERCEL_TOKEN) {
     console.log('⚠️  VERCEL_TOKEN not set. Using Vercel CLI authenticated session...\n');

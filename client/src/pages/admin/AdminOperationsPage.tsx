@@ -434,8 +434,8 @@ export function AdminOperationsPage() {
               <div className="vs-surface-muted p-4 text-sm text-slate-300">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Environment</div>
                 <div className="mt-3 space-y-2">
-                  <div>Supabase: {String(!!productionHealth.env?.required?.SUPABASE_URL && !!productionHealth.env?.required?.SUPABASE_SERVICE_KEY)}</div>
-                  <div>MightyCall: {String(!!productionHealth.env?.required?.MIGHTYCALL_API_KEY && !!productionHealth.env?.required?.MIGHTYCALL_USER_KEY)}</div>
+                  <div>Supabase server config: {String(Object.values(productionHealth.env?.required || {}).slice(0, 2).every(Boolean))}</div>
+                  <div>MightyCall server config: {String(Object.values(productionHealth.env?.required || {}).slice(2, 4).every(Boolean))}</div>
                   <div>Integrations key: {String(!!productionHealth.env?.optional?.INTEGRATIONS_KEY)}</div>
                   <div>Restricted CORS origin set: {String(!!productionHealth.env?.optional?.FRONTEND_ORIGIN)}</div>
                 </div>

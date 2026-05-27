@@ -9,7 +9,7 @@ const { execSync } = require('child_process');
 
 const projectName = 'victorysync-dashboard-server';
 const envVarName = 'SUPABASE_URL';
-const correctValue = 'https://edsyhtlaqwiicxlzorca.supabase.co';
+const correctValue = 'https://your-project.supabase.co';
 const environment = 'production';
 
 console.log(`\n🔧 Fixing ${envVarName} in Vercel...`);

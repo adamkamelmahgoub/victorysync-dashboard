@@ -5,8 +5,8 @@ const userId = 'a5f6f998-5ed5-4c0c-88ac-9f27d677697a';
 const orgId = 'cfbaf78a-3caa-4cb2-a367-d3b3eb161ba1';
 
 const supabase = createClient(
-  'https://edsyhtlaqwiicxlzorca.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkc3lodGxhcXdpaWN4bHpvcmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDI1MjMyNCwiZXhwIjoyMDc1ODI4MzI0fQ.KIy2lcVVHHqKVrMrVxgffxPQ8RaM90C5N6EMcKbKGqk',
+  'https://your-project.supabase.co',
+  'REDACTED_JWT_DO_NOT_USE',
   { auth: { persistSession: false } }
 );
 

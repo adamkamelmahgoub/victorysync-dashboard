@@ -8,7 +8,7 @@
 const { createClient } = require('@supabase/supabase-js');
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpbW84ZXN2amVsYWljaHlyZHZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk0NzI0MDcsImV4cCI6MTc2MTA0ODQwN30.DmLVdZ2i4gRLRnHpS5sGu-DslX7t2hNMfFq1m1LkFWQ';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'REDACTED_JWT_DO_NOT_USE';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

@@ -1,7 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const supabaseAdmin = createClient(
-  'https://bdlsouuybfzrcsgwazjb.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJkbHNvdXV5YmZ6cmNzZ3dhemp0LnN1cGFiYXNlLmNvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTcwMjMyMzAwMCwiZXhwIjoxNzM0MTAwNDAwfQ.uJQ51qhxLxYBLVVR4PvG8QbzkkWTQd5KzKqgSGNpfvI',
+  'https://your-project.supabase.co',
+  'REDACTED_JWT_DO_NOT_USE',
   { auth: { persistSession: false } }
 );
 
