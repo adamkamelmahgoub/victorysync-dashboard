@@ -492,7 +492,7 @@ export default function LeadsPage() {
       </SectionCard>
 
       {/* ── leads table ── */}
-      <SectionCard title="Live Leads" description="New rows appear automatically via Supabase Realtime." className="mt-5" contentClassName="p-0">
+      <SectionCard title="Live Leads" description="New rows appear automatically as leads arrive." className="mt-5" contentClassName="p-0">
         {error && (
           <div className="m-5 rounded-2xl border border-rose-400/20 bg-rose-400/[0.08] px-4 py-3 text-sm text-rose-200">{error}</div>
         )}

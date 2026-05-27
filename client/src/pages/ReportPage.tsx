@@ -261,7 +261,7 @@ export default function ReportPage() {
     <PageLayout
       eyebrow="Reporting"
       title="Reports"
-      description={`Real MightyCall reporting from local synced data. Last sync: ${fmtDate(overview.latest_sync?.finished_at || overview.latest_sync?.started_at)}`}
+      description={`Real reporting from synced source data. Last sync: ${fmtDate(overview.latest_sync?.finished_at || overview.latest_sync?.started_at)}`}
       actions={actions}
     >
       <div className="space-y-5">
@@ -326,7 +326,7 @@ export default function ReportPage() {
             <ReportTable rows={numbers} columns={['number', 'label', 'org_id', 'calls', 'answered', 'missed', 'sms', 'transfers', 'recordings']} loading={loading} />
           </SectionCard>
         ) : (
-          <SectionCard title={`${tabLabels.find((tab) => tab.id === activeTab)?.label} report`} description="Rows are normalized from real MightyCall/Supabase records only." contentClassName="p-0">
+          <SectionCard title={`${tabLabels.find((tab) => tab.id === activeTab)?.label} report`} description="Rows are normalized from real source records only." contentClassName="p-0">
             <ReportTable rows={rows} loading={loading} tab={activeTab} onOpenRecording={openRecording} />
           </SectionCard>
         )}

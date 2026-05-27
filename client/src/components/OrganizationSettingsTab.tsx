@@ -93,7 +93,7 @@ export default function OrganizationSettingsTab({ orgId, isOrgAdmin, adminCheckD
             setError(null);
             return;
           } catch (supErr:any) {
-            throw new Error((supErr && supErr.message) || 'Failed to update org (supabase fallback)');
+            throw new Error((supErr && supErr.message) || 'Failed to update organization');
           }
         }
         throw new Error(detail || 'Failed to update org');

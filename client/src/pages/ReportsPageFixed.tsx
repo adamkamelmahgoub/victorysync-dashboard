@@ -66,7 +66,7 @@ export function ReportsPage() {
   const handleSync = async () => {
     if (!selectedOrgId || !user) return setMessage('No org selected');
     setSyncing(true);
-    setMessage('Syncing reports from MightyCall...');
+    setMessage('Syncing reports...');
     try {
       const result: any = await triggerMightyCallReportsSync(selectedOrgId, undefined, undefined, user.id);
       if (result.error) {

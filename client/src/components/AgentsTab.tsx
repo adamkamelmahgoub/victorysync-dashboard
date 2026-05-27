@@ -107,7 +107,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       setLiveStatusByUserId(nextMap);
       setRefreshedAt(json.refreshed_at || new Date().toISOString());
     } catch (e: any) {
-      setLiveError(e?.message || 'Failed to load live MightyCall agent status');
+      setLiveError(e?.message || 'Failed to load live agent status');
     } finally {
       setLiveLoading(false);
     }
@@ -125,14 +125,14 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       setExtensionOptions(nextOptions);
       setExtensionsAudit((json.hidden_extensions || []) as ExtensionOption[]);
       if (!json.live_fetch_ok) {
-        setExtensionsError(json.live_fetch_error || 'MightyCall live extensions could not be loaded');
+        setExtensionsError(json.live_fetch_error || 'Live extensions could not be loaded');
       } else if (!liveOptions.length && fallbackOptions.length) {
-        setExtensionsInfo('MightyCall returned no live extensions for this org, so saved org extensions are shown instead.');
+        setExtensionsInfo('No live extensions were returned for this organization, so saved extensions are shown instead.');
       } else if (!liveOptions.length) {
-        setExtensionsError('MightyCall returned no live extensions for this org.');
+        setExtensionsError('No live extensions were returned for this organization.');
       }
     } catch (e: any) {
-      setExtensionsError(e?.message || 'Failed to load MightyCall extensions');
+      setExtensionsError(e?.message || 'Failed to load extensions');
     } finally {
       setExtensionsLoading(false);
     }
@@ -179,7 +179,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
         <h2 className="text-lg font-bold">Agents & Extensions</h2>
         <div className="flex items-center gap-3">
           <div className="text-sm text-gray-400">
-            {liveLoading ? 'Refreshing live MightyCall status...' : `Live status ${refreshedAt ? `updated ${fmtDateTime(refreshedAt)}` : 'not loaded yet'}`}
+            {liveLoading ? 'Refreshing live status...' : `Live status ${refreshedAt ? `updated ${fmtDateTime(refreshedAt)}` : 'not loaded yet'}`}
           </div>
           <button
             className="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded"
@@ -206,7 +206,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       {extensionsInfo && <div className="text-cyan-300 mb-2">{extensionsInfo}</div>}
       {!extensionsError && extensionsAudit.length > 0 && (
         <div className="text-xs text-slate-400 mb-2">
-          Hidden {extensionsAudit.length} stale saved extension{extensionsAudit.length === 1 ? '' : 's'} that are not currently live in MightyCall.
+          Hidden {extensionsAudit.length} stale saved extension{extensionsAudit.length === 1 ? '' : 's'} that are not currently live.
         </div>
       )}
       {loading ? (

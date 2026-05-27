@@ -91,6 +91,7 @@ body {
 }
 
 :root[data-theme='light'] .text-white,
+:root[data-theme='light'] .text-slate-50,
 :root[data-theme='light'] .text-slate-100,
 :root[data-theme='light'] .text-slate-200,
 :root[data-theme='light'] .text-slate-300 {
@@ -119,6 +120,17 @@ body {
 :root[data-theme='light'] .ring-slate-700 {
   border-color: rgba(148, 163, 184, 0.22) !important;
   --tw-ring-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+:root[data-theme='light'] [class*="border-white"] {
+  border-color: rgba(148, 163, 184, 0.2) !important;
+}
+
+:root[data-theme='light'] .bg-slate-950,
+:root[data-theme='light'] .bg-slate-950\/70,
+:root[data-theme='light'] .bg-slate-950\/72,
+:root[data-theme='light'] .bg-slate-950\/80 {
+  background: rgba(255, 255, 255, 0.94) !important;
 }
 
 :root[data-theme='light'] aside,

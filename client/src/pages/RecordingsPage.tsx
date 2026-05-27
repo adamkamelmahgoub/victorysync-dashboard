@@ -93,7 +93,7 @@ export function RecordingsPage() {
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Failed to sync recordings');
       await fetchRecordings(true);
     } catch (e: any) {
-      setError(e?.message || 'Failed to sync recent MightyCall recordings');
+      setError(e?.message || 'Failed to sync recent recordings');
     } finally {
       setSyncing(false);
     }
@@ -273,7 +273,7 @@ export function RecordingsPage() {
 		                <option value="outbound">Outbound</option>
 		              </select>
 		            </div>
-	            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">{syncing ? 'Syncing recent MightyCall recordings...' : 'Scope: assigned numbers only'}</div>
+	            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">{syncing ? 'Syncing recent recordings...' : 'Scope: assigned numbers only'}</div>
           </div>
         </SectionCard>
 

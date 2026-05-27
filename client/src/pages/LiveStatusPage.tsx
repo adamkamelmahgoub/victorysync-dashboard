@@ -345,7 +345,7 @@ const LiveStatusPage: FC = () => {
           </div>
         )}
 
-        <SectionCard title="Real-time roster" description="Live agent presence from MightyCall, grouped for quick operational scanning.">
+        <SectionCard title="Real-time roster" description="Live agent presence grouped for quick operational scanning.">
           {loading && items.length === 0 ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               {Array.from({ length: 4 }).map((_, idx) => (

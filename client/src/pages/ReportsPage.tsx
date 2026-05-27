@@ -84,7 +84,7 @@ export function ReportsPage() {
     const orgIdToUse = activeOrgId || selectedOrgId;
     if (!orgIdToUse || !user) return setMessage('No org selected');
     setSyncing(true);
-    setMessage('Syncing reports from MightyCall...');
+    setMessage('Syncing reports...');
     try {
       const result: any = await triggerMightyCallReportsSync(orgIdToUse, undefined, undefined, user.id);
       if (result.error) {

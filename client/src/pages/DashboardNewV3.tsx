@@ -267,7 +267,7 @@ const DashboardNewV3: FC = () => {
                       </StatusBadge>
                       <StatusBadge tone="success">{availableCount} available</StatusBadge>
                     </div>
-                    <div className="mt-3 text-sm text-slate-400">Active agent presence pulled from MightyCall.</div>
+                    <div className="mt-3 text-sm text-slate-400">Active agent presence pulled from the connected phone system.</div>
                   </div>
 
                   <div className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
@@ -300,7 +300,7 @@ const DashboardNewV3: FC = () => {
             <SectionCard
               title="Live agent roster"
               description={selectedOrgId
-                ? 'Real-time roster presence from MightyCall for the selected organization.'
+                ? 'Real-time roster presence for the selected organization.'
                 : 'Select an organization to review real-time agent activity.'}
               actions={(
                 <button
@@ -341,7 +341,7 @@ const DashboardNewV3: FC = () => {
                 <EmptyStatePanel
                   title={liveLoading ? 'Loading live activity' : 'No live roster activity yet'}
                   description={liveLoading
-                    ? 'VictorySync is polling MightyCall for current call presence and agent availability.'
+                    ? 'VictorySync is checking current call presence and agent availability.'
                     : 'No agents or live call activity were returned for this organization yet.'}
                 />
               ) : (
@@ -399,10 +399,10 @@ const DashboardNewV3: FC = () => {
                 </div>
                 <div className="vs-surface-muted p-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-200">MightyCall sync</span>
+                    <span className="text-sm font-medium text-slate-200">Phone sync</span>
                     <StatusBadge tone={liveError ? 'warning' : 'info'}>{liveError ? 'Review' : 'Connected'}</StatusBadge>
                   </div>
-                  <p className="mt-3 text-sm text-slate-400">Live roster and imported extensions depend on MightyCall presence data.</p>
+                  <p className="mt-3 text-sm text-slate-400">Live roster and imported extensions depend on connected phone presence data.</p>
                 </div>
                 <div className="vs-surface-muted p-4">
                   <div className="flex items-center justify-between">

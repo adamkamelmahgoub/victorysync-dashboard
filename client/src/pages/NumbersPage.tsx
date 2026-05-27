@@ -201,7 +201,7 @@ const NumbersPage: FC = () => {
   const handleSync = async () => {
     if (!userId) return;
     setSyncing(true);
-    setMessage('Syncing phone numbers from MightyCall...');
+    setMessage('Syncing phone numbers...');
     try {
       let result: any;
       if (selectedOrgId) {
@@ -210,7 +210,7 @@ const NumbersPage: FC = () => {
         result = await triggerMightyCallPhoneNumberSync(userId);
       }
       const count = result.records_processed ?? result.records_synced ?? result.synced ?? result.upserted ?? 0;
-      setMessage(`Synced ${count} phone numbers from MightyCall`);
+      setMessage(`Synced ${count} phone numbers`);
       await fetchNumbers();
     } catch (err: any) {
       setMessage(err?.message || 'Sync failed');
@@ -267,7 +267,7 @@ const NumbersPage: FC = () => {
     <PageLayout
       eyebrow="Phone operations"
       title="Phone numbers"
-      description="Sync every available MightyCall number, review recordings by number, and keep number change requests organized."
+      description="Sync every available number, review recordings by number, and keep number change requests organized."
       actions={
         <button onClick={handleSync} disabled={syncing} className="vs-button-primary">
           {syncing ? 'Syncing numbers...' : 'Sync all available numbers'}
@@ -284,7 +284,7 @@ const NumbersPage: FC = () => {
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[360px,1fr]">
           <div className="space-y-6">
-            <SectionCard title="Sync inventory" description="Pull the latest MightyCall numbers into the workspace inventory.">
+            <SectionCard title="Sync inventory" description="Pull the latest numbers into the workspace inventory.">
               <div className="space-y-4">
                 <button onClick={handleSync} disabled={syncing} className="vs-button-primary w-full">
                   {syncing ? 'Syncing...' : 'Refresh number inventory'}
@@ -338,7 +338,7 @@ const NumbersPage: FC = () => {
               ) : numbers.length === 0 ? (
                 <EmptyStatePanel
                   title="No phone numbers yet"
-                  description="Sync MightyCall numbers to populate the workspace inventory and unlock recordings by number."
+                  description="Sync phone numbers to populate the workspace inventory and unlock recordings by number."
                 />
               ) : (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -362,7 +362,7 @@ const NumbersPage: FC = () => {
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <div className="truncate text-xl font-semibold text-white">{value}</div>
-                            <div className="mt-2 text-sm text-slate-400">{item.label || item.provider || orgName || 'MightyCall inventory'}</div>
+                            <div className="mt-2 text-sm text-slate-400">{item.label || item.provider || orgName || 'Phone inventory'}</div>
                             {orgName && <div className="mt-1 text-xs text-slate-500">{orgName}</div>}
                           </div>
                           <StatusBadge tone={active ? 'success' : 'warning'}>
