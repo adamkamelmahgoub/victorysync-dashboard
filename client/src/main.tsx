@@ -135,8 +135,15 @@ function AdminRoute({ children }: { children: JSX.Element }) {
 }
 
 function FeatureRoute({ featureKey, children }: { featureKey: string; children: JSX.Element }) {
-  const { globalRole, featureAccess } = useAuth();
+  const { globalRole, featureAccess, featureAccessLoaded } = useAuth();
   const isAdmin = ["platform_admin", "admin", "super_admin"].includes(String(globalRole || ""));
+  if (!isAdmin && !featureAccessLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">
+        Loading...
+      </div>
+    );
+  }
   if (!isAdmin && featureAccess[featureKey] === false) {
     return <Navigate to="/dashboard" replace />;
   }

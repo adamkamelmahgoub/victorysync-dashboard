@@ -70,18 +70,48 @@ export async function saveOrgFeatureConfig(orgId: string, features: Array<{ feat
   return getOrgFeatureConfig(orgId);
 }
 
-export async function getUserFeatureAccess(userId: string, orgId: string | null) {
-  if (!orgId) return defaultAccess();
+async function resolveFeatureOrgForUser(userId: string, orgId: string | null) {
+  if (orgId) return orgId;
 
-  const membership = await getCanonicalMembership(orgId, userId);
-  if (!membership) return defaultAccess();
+  const { data: profile } = await supabaseAdmin
+    .from('profiles')
+    .select('global_role')
+    .eq('id', userId)
+    .maybeSingle();
+  if (['platform_admin', 'admin', 'super_admin'].includes(String(profile?.global_role || ''))) {
+    return null;
+  }
+
+  const { data: orgUser } = await supabaseAdmin
+    .from('org_users')
+    .select('org_id')
+    .eq('user_id', userId)
+    .limit(1)
+    .maybeSingle();
+  if (orgUser?.org_id) return orgUser.org_id;
+
+  const { data: orgMember } = await supabaseAdmin
+    .from('org_members')
+    .select('org_id')
+    .eq('user_id', userId)
+    .limit(1)
+    .maybeSingle();
+  return orgMember?.org_id || null;
+}
+
+export async function getUserFeatureAccess(userId: string, orgId: string | null) {
+  const resolvedOrgId = await resolveFeatureOrgForUser(userId, orgId);
+  if (!resolvedOrgId) return defaultAccess();
+
+  const membership = await getCanonicalMembership(resolvedOrgId, userId);
+  if (!membership) return Object.fromEntries(FEATURE_DEFINITIONS.map((feature) => [feature.key, feature.key === 'dashboard'])) as Record<FeatureKey, boolean>;
 
   const [orgConfig, overridesRes] = await Promise.all([
-    getOrgFeatureConfig(orgId),
+    getOrgFeatureConfig(resolvedOrgId),
     supabaseAdmin
       .from('user_feature_access')
       .select('feature_key, enabled')
-      .eq('org_id', orgId)
+      .eq('org_id', resolvedOrgId)
       .eq('user_id', userId),
   ]);
 
@@ -94,7 +124,63 @@ export async function getUserFeatureAccess(userId: string, orgId: string | null)
     );
   }
   for (const [key, enabled] of overrides) {
-    if (isKnownFeatureKey(String(key))) access[key as FeatureKey] = Boolean(enabled);
+    if (!isKnownFeatureKey(String(key))) continue;
+    const orgFeature = orgConfig.find((feature) => feature.key === key);
+    if (orgFeature?.enabled === false) {
+      access[key as FeatureKey] = false;
+    } else {
+      access[key as FeatureKey] = Boolean(enabled);
+    }
   }
   return access;
+}
+
+export async function getUserFeatureOverrides(orgId: string, userId: string) {
+  const access = await getUserFeatureAccess(userId, orgId);
+  const { data, error } = await supabaseAdmin
+    .from('user_feature_access')
+    .select('feature_key, enabled, updated_at')
+    .eq('org_id', orgId)
+    .eq('user_id', userId);
+  if (error && !String(error.message || '').includes('Could not find the table')) throw error;
+  const overrides = new Map((data || []).map((row: any) => [row.feature_key, row]));
+
+  return FEATURE_DEFINITIONS.map((feature) => ({
+    ...feature,
+    effective_enabled: access[feature.key],
+    override_enabled: overrides.has(feature.key) ? Boolean((overrides.get(feature.key) as any).enabled) : null,
+    updated_at: (overrides.get(feature.key) as any)?.updated_at || null,
+  }));
+}
+
+export async function saveUserFeatureOverrides(orgId: string, userId: string, features: Array<{ feature_key: string; enabled: boolean | null }>) {
+  const deletes = features.filter((feature) => feature.enabled === null && isKnownFeatureKey(feature.feature_key));
+  const upserts = features
+    .filter((feature) => feature.enabled !== null && isKnownFeatureKey(feature.feature_key))
+    .map((feature) => ({
+      org_id: orgId,
+      user_id: userId,
+      feature_key: feature.feature_key,
+      enabled: Boolean(feature.enabled),
+      updated_at: new Date().toISOString(),
+    }));
+
+  for (const row of deletes) {
+    const { error } = await supabaseAdmin
+      .from('user_feature_access')
+      .delete()
+      .eq('org_id', orgId)
+      .eq('user_id', userId)
+      .eq('feature_key', row.feature_key);
+    if (error) throw error;
+  }
+
+  if (upserts.length) {
+    const { error } = await supabaseAdmin
+      .from('user_feature_access')
+      .upsert(upserts, { onConflict: 'org_id,user_id,feature_key' });
+    if (error) throw error;
+  }
+
+  return getUserFeatureOverrides(orgId, userId);
 }

@@ -66,7 +66,7 @@ import { Readable } from 'stream';
 import { writeAuditLog } from './lib/audit';
 import { getMembershipDriftDetails, getMembershipDriftSummary } from './lib/memberships';
 import { getSchemaHealth, getSecurityPolicyHealth } from './lib/schemaHealth';
-import { FEATURE_DEFINITIONS, getOrgFeatureConfig, getUserFeatureAccess, saveOrgFeatureConfig } from './lib/featureAccess';
+import { FEATURE_DEFINITIONS, getOrgFeatureConfig, getUserFeatureAccess, getUserFeatureOverrides, saveOrgFeatureConfig, saveUserFeatureOverrides, type FeatureKey } from './lib/featureAccess';
 import { normalizeMightyCallJournalActivity, normalizeMightyCallStatusActivity } from './lib/mightycallNormalizer';
 import { getMightyCallStatusByExtension } from './services/mightycallLiveStatus';
 import {
@@ -4403,6 +4403,48 @@ app.get('/api/csrf-token', enforceAuthenticatedApi as any, (req, res) => {
   res.json({ csrfToken: createCsrfToken(String(req.actorId || '')) });
 });
 app.use('/api', enforceAuthenticatedApi as any);
+
+function featureKeyForApiPath(pathname: string): FeatureKey | null {
+  if (pathname.startsWith('/admin') || pathname.startsWith('/logs') || pathname === '/me/features' || pathname === '/csrf-token') return null;
+  if (pathname.startsWith('/live-status')) return 'live_status';
+  if (pathname.startsWith('/reports') || pathname.startsWith('/calls/')) return 'reports';
+  if (pathname.startsWith('/recordings')) return 'recordings';
+  if (pathname.startsWith('/sms')) return 'sms';
+  if (pathname.startsWith('/leads')) return pathname === '/leads/inbound' ? null : 'leads';
+  if (pathname.startsWith('/phone-numbers') || pathname.includes('/phone-numbers')) return 'numbers';
+  if (pathname.startsWith('/org-api-keys') || pathname.includes('/api-keys')) return 'api_keys';
+  if (pathname.startsWith('/billing')) return 'billing';
+  if (pathname.startsWith('/support')) return 'support';
+  return null;
+}
+
+app.use('/api', async (req, res, next) => {
+  try {
+    const featureKey = featureKeyForApiPath(req.path);
+    if (!featureKey) return next();
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (await isPlatformAdmin(String(actorId))) return next();
+
+    const orgId = typeof req.query.org_id === 'string'
+      ? req.query.org_id
+      : typeof req.query.orgId === 'string'
+        ? req.query.orgId
+        : typeof req.body?.org_id === 'string'
+          ? req.body.org_id
+          : typeof req.body?.orgId === 'string'
+            ? req.body.orgId
+            : null;
+    const access = await getUserFeatureAccess(String(actorId), orgId);
+    if (access[featureKey] === false) {
+      return res.status(403).json({ error: 'feature_disabled', feature: featureKey });
+    }
+    next();
+  } catch (err: any) {
+    console.error('feature_access_check_failed:', fmtErr(err));
+    res.status(500).json({ error: 'feature_access_check_failed' });
+  }
+});
 app.use('/api', csrfProtection as any);
 
 app.post('/api/logs/activity', async (req, res) => {
@@ -5042,6 +5084,48 @@ app.put('/api/admin/orgs/:orgId/features', async (req, res) => {
   } catch (err: any) {
     console.error('org_features_save_failed:', fmtErr(err));
     res.status(500).json({ error: 'org_features_save_failed', detail: fmtErr(err) });
+  }
+});
+
+app.get('/api/admin/orgs/:orgId/users/:targetUserId/features', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const orgId = String(req.params.orgId);
+    const targetUserId = String(req.params.targetUserId);
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    res.json({ org_id: orgId, user_id: targetUserId, features: await getUserFeatureOverrides(orgId, targetUserId), definitions: FEATURE_DEFINITIONS });
+  } catch (err: any) {
+    console.error('user_feature_overrides_fetch_failed:', fmtErr(err));
+    res.status(500).json({ error: 'user_feature_overrides_fetch_failed', detail: fmtErr(err) });
+  }
+});
+
+app.put('/api/admin/orgs/:orgId/users/:targetUserId/features', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const orgId = String(req.params.orgId);
+    const targetUserId = String(req.params.targetUserId);
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    const parsed = z.object({
+      features: z.array(z.object({
+        feature_key: z.string().min(1).max(80),
+        enabled: z.boolean().nullable(),
+      })).max(50),
+    }).safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_user_features_payload' });
+    const features = await saveUserFeatureOverrides(orgId, targetUserId, parsed.data.features);
+    await writeAuditLog({
+      actor_id: String(actorId),
+      org_id: orgId,
+      action: 'user_feature_access.updated',
+      entity_type: 'user',
+      entity_id: targetUserId,
+      metadata: { feature_count: features.length },
+    });
+    res.json({ org_id: orgId, user_id: targetUserId, features });
+  } catch (err: any) {
+    console.error('user_feature_overrides_save_failed:', fmtErr(err));
+    res.status(500).json({ error: 'user_feature_overrides_save_failed', detail: fmtErr(err) });
   }
 });
 

@@ -12,6 +12,7 @@ type AuthContextValue = {
   loading: boolean;
   globalRole: string | null;
   featureAccess: Record<string, boolean>;
+  featureAccessLoaded: boolean;
   profile: { full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null;
   refreshProfile: () => Promise<void>;
   refreshFeatures: () => Promise<void>;
@@ -50,16 +51,20 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [globalRole, setGlobalRole] = useState<string | null>(null);
   const [featureAccess, setFeatureAccess] = useState<Record<string, boolean>>({});
+  const [featureAccessLoaded, setFeatureAccessLoaded] = useState(false);
   const [profile, setProfile] = useState<{ full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null>(null);
 
   const loadFeatures = async (nextUser: User | null = user, orgId: string | null = selectedOrgId) => {
     if (!nextUser) {
       setFeatureAccess({});
+      setFeatureAccessLoaded(true);
       return;
     }
+    setFeatureAccessLoaded(false);
     const suffix = orgId ? `?org_id=${encodeURIComponent(orgId)}` : '';
     const data = await fetchJsonWithTimeout(buildApiUrl(`/api/me/features${suffix}`), { headers: { 'x-user-id': nextUser.id } }, 5000);
-    if (data?.features) setFeatureAccess(data.features);
+    setFeatureAccess(data?.features || {});
+    setFeatureAccessLoaded(true);
   };
 
   useEffect(() => {
@@ -91,7 +96,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
           void loadFeatures(nextUser, null);
         } else {
           const metadataOrgId = (nextUser.user_metadata as any)?.org_id || null;
-          const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : null;
+          const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : (list[0]?.id || null);
           setSelectedOrgId(assignedOrgId);
           void loadFeatures(nextUser, assignedOrgId);
         }
@@ -137,6 +142,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
           setSelectedOrgId(null);
           setGlobalRole(null);
           setFeatureAccess({});
+          setFeatureAccessLoaded(true);
           setProfile(null);
           setLoading(false);
         }
@@ -235,7 +241,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
               void loadFeatures(data.user, null);
             } else {
               const metadataOrgId = (data.user.user_metadata as any)?.org_id || null;
-              const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : null;
+              const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : (list[0]?.id || null);
               setSelectedOrgId(assignedOrgId);
               void loadFeatures(data.user, assignedOrgId);
             }
@@ -266,6 +272,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       setSelectedOrgId(null);
       setGlobalRole(null);
       setFeatureAccess({});
+      setFeatureAccessLoaded(true);
       setProfile(null);
     } catch (err) {
       console.error("Sign out error:", err);
@@ -310,7 +317,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, globalRole, featureAccess, profile, refreshProfile, refreshFeatures, signIn, signOut, setSelectedOrgId }}>
+    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, globalRole, featureAccess, featureAccessLoaded, profile, refreshProfile, refreshFeatures, signIn, signOut, setSelectedOrgId }}>
       {children}
     </AuthContext.Provider>
   );

@@ -52,7 +52,7 @@ function NavButton({
 
 export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const navigate = useNavigate();
-  const { signOut, user, selectedOrgId, orgs, profile, featureAccess } = useAuth();
+  const { signOut, user, selectedOrgId, orgs, profile, featureAccess, featureAccessLoaded } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -201,7 +201,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           <div key={group.label} className="mb-5">
             <div className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{group.label}</div>
             <div className="space-y-1.5">
-              {group.items.filter((item) => isAdmin || !item.featureKey || featureAccess[item.featureKey] !== false).map((item) => (
+              {group.items.filter((item) => isAdmin || !item.featureKey || (featureAccessLoaded && featureAccess[item.featureKey] !== false)).map((item) => (
                 <NavButton key={item.path} item={item} currentPath={currentPath} onClick={() => navigateTo(item.path)} />
               ))}
             </div>

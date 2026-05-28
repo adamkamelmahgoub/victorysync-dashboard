@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { PageLayout } from '../../components/PageLayout';
 import { useToast } from '../../contexts/ToastContext';
 import { buildApiUrl } from '../../config';
-import { getOrgFeatures, getProductionHealth, saveOrgFeatures } from '../../lib/apiClient';
+import { getOrgFeatures, getProductionHealth, getUserFeatureOverrides, saveOrgFeatures, saveUserFeatureOverrides } from '../../lib/apiClient';
 import { MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 import { useNavigate } from 'react-router-dom';
 
@@ -85,6 +85,9 @@ export function AdminOperationsPage() {
   const [featureRows, setFeatureRows] = useState<Array<{ feature_key: string; label: string; enabled: boolean; visible_to_roles: string[] }>>([]);
   const [featuresLoading, setFeaturesLoading] = useState(false);
   const [featuresSaving, setFeaturesSaving] = useState(false);
+  const [userFeatureRows, setUserFeatureRows] = useState<Array<{ feature_key: string; label: string; effective_enabled: boolean; override_enabled: boolean | null }>>([]);
+  const [userFeaturesLoading, setUserFeaturesLoading] = useState(false);
+  const [userFeaturesSaving, setUserFeaturesSaving] = useState(false);
 
   // All Users
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -219,6 +222,48 @@ export function AdminOperationsPage() {
       if (toast?.push) toast.push(err?.message || 'Failed to save feature access', 'error');
     } finally {
       setFeaturesSaving(false);
+    }
+  };
+
+  const loadSelectedUserFeatures = async (targetUserId: string) => {
+    if (!selectedOrg || !user?.id) return;
+    try {
+      setUserFeaturesLoading(true);
+      const data = await getUserFeatureOverrides(selectedOrg.id, targetUserId, user.id);
+      setUserFeatureRows((data.features || []).map((row: any) => ({
+        feature_key: row.key || row.feature_key,
+        label: row.label || row.feature_key,
+        effective_enabled: Boolean(row.effective_enabled),
+        override_enabled: typeof row.override_enabled === 'boolean' ? row.override_enabled : null,
+      })));
+    } catch (err: any) {
+      if (toast?.push) toast.push(err?.message || 'Failed to load user feature overrides', 'error');
+    } finally {
+      setUserFeaturesLoading(false);
+    }
+  };
+
+  const saveSelectedUserFeatures = async () => {
+    if (!selectedOrg || !selectedUser || !user?.id) return;
+    try {
+      setUserFeaturesSaving(true);
+      const data = await saveUserFeatureOverrides(
+        selectedOrg.id,
+        selectedUser.id,
+        userFeatureRows.map((row) => ({ feature_key: row.feature_key, enabled: row.override_enabled })),
+        user.id
+      );
+      setUserFeatureRows((data.features || []).map((row: any) => ({
+        feature_key: row.key || row.feature_key,
+        label: row.label || row.feature_key,
+        effective_enabled: Boolean(row.effective_enabled),
+        override_enabled: typeof row.override_enabled === 'boolean' ? row.override_enabled : null,
+      })));
+      if (toast?.push) toast.push('User feature overrides saved', 'success');
+    } catch (err: any) {
+      if (toast?.push) toast.push(err?.message || 'Failed to save user feature overrides', 'error');
+    } finally {
+      setUserFeaturesSaving(false);
     }
   };
 
@@ -895,6 +940,7 @@ export function AdminOperationsPage() {
                                 onClick={() => {
                                   setSelectedUser(u);
                                   loadUserApiKeys(u.id);
+                                  loadSelectedUserFeatures(u.id);
                                 }}
                                 className={`w-full flex flex-col items-start rounded-lg p-3 transition text-left text-sm font-medium ${
                                   selectedUser?.id === u.id
@@ -912,6 +958,49 @@ export function AdminOperationsPage() {
                           {selectedUser && (
                             <div className="space-y-4">
                               <h4 className="font-semibold text-sm border-b border-slate-700 pb-2 mb-3">{selectedUser.email} Details</h4>
+
+                              <div className="space-y-3 rounded-xl border border-slate-700/50 bg-slate-800/20 p-4">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <div>
+                                    <h4 className="font-semibold text-sm">User Feature Overrides</h4>
+                                    <p className="mt-1 text-xs text-slate-400">Use inherit for org defaults, or force allow/deny for this user.</p>
+                                  </div>
+                                  <button
+                                    className="vs-button-secondary"
+                                    onClick={() => void saveSelectedUserFeatures()}
+                                    disabled={userFeaturesSaving || userFeaturesLoading}
+                                  >
+                                    {userFeaturesSaving ? 'Saving...' : 'Save Overrides'}
+                                  </button>
+                                </div>
+                                {userFeaturesLoading ? (
+                                  <div className="text-xs text-slate-400">Loading feature overrides...</div>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {userFeatureRows.map((feature) => (
+                                      <div key={feature.feature_key} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700/40 bg-slate-900/30 p-3">
+                                        <div>
+                                          <div className="text-sm font-medium text-slate-200">{feature.label}</div>
+                                          <div className="text-xs text-slate-500">Effective: {feature.effective_enabled ? 'enabled' : 'disabled'}</div>
+                                        </div>
+                                        <select
+                                          className="vs-input max-w-[180px]"
+                                          value={feature.override_enabled === null ? 'inherit' : feature.override_enabled ? 'allow' : 'deny'}
+                                          onChange={(event) => setUserFeatureRows((rows) => rows.map((row) => {
+                                            if (row.feature_key !== feature.feature_key) return row;
+                                            const value = event.target.value;
+                                            return { ...row, override_enabled: value === 'inherit' ? null : value === 'allow' };
+                                          }))}
+                                        >
+                                          <option value="inherit">Inherit org</option>
+                                          <option value="allow">Force allow</option>
+                                          <option value="deny">Force deny</option>
+                                        </select>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
 
                               {/* API Key Generation Toggle */}
                               <div className="flex items-center justify-between">

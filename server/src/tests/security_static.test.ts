@@ -71,7 +71,10 @@ test('feature access is database-backed and enforced in client routing', () => {
   assert.match(migration, /alter table public\.org_feature_access enable row level security/);
   assert.match(server, /app\.get\('\/api\/me\/features'/);
   assert.match(server, /app\.put\('\/api\/admin\/orgs\/:orgId\/features'/);
+  assert.match(server, /featureKeyForApiPath/);
+  assert.match(server, /feature_disabled/);
   assert.match(router, /function FeatureRoute/);
+  assert.match(router, /featureAccessLoaded/);
   assert.match(sidebar, /featureAccess\[item\.featureKey\] !== false/);
 });
 

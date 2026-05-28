@@ -569,6 +569,25 @@ export async function saveOrgFeatures(
   });
 }
 
+export async function getUserFeatureOverrides(orgId: string, targetUserId: string, userId?: string) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/users/${encodeURIComponent(targetUserId)}/features`, {
+    headers: { 'x-user-id': userId || '' },
+  });
+}
+
+export async function saveUserFeatureOverrides(
+  orgId: string,
+  targetUserId: string,
+  features: Array<{ feature_key: string; enabled: boolean | null }>,
+  userId?: string
+) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/users/${encodeURIComponent(targetUserId)}/features`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ features }),
+  });
+}
+
 export async function getMembershipDrift(userId?: string, limit = 100) {
   return await fetchJson(`/api/admin/membership-drift?limit=${encodeURIComponent(String(limit))}`, {
     headers: { 'x-user-id': userId || '' }
