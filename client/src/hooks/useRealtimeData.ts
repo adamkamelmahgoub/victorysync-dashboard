@@ -25,7 +25,6 @@ export function useRealtimeData<T>(options: SubscriptionOptions) {
           table: options.table,
         },
         (payload) => {
-          console.log('[Realtime] INSERT', options.table, payload.new);
           setData((prev) => [...prev, payload.new as T]);
           options.onInsert?.(payload.new);
         }
@@ -38,7 +37,6 @@ export function useRealtimeData<T>(options: SubscriptionOptions) {
           table: options.table,
         },
         (payload) => {
-          console.log('[Realtime] UPDATE', options.table, payload.new);
           setData((prev) =>
             prev.map((item: any) =>
               item.id === payload.new.id ? (payload.new as T) : item
@@ -55,7 +53,6 @@ export function useRealtimeData<T>(options: SubscriptionOptions) {
           table: options.table,
         },
         (payload) => {
-          console.log('[Realtime] DELETE', options.table, payload.old);
           setData((prev) =>
             prev.filter((item: any) => item.id !== payload.old.id)
           );

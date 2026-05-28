@@ -27,7 +27,6 @@ export function useRealtimeSubscription(
           filter: `org_id=eq.${orgId}`
         },
         (payload) => {
-          console.log(`[Realtime] ${tableName} INSERT:`, payload.new);
           onInsert?.(payload.new);
         }
       )
@@ -40,7 +39,6 @@ export function useRealtimeSubscription(
           filter: `org_id=eq.${orgId}`
         },
         (payload) => {
-          console.log(`[Realtime] ${tableName} UPDATE:`, payload.new);
           onUpdate?.(payload.new);
         }
       )
@@ -53,13 +51,10 @@ export function useRealtimeSubscription(
           filter: `org_id=eq.${orgId}`
         },
         (payload) => {
-          console.log(`[Realtime] ${tableName} DELETE:`, payload.old);
           onDelete?.(payload.old);
         }
       )
-      .subscribe((status) => {
-        console.log(`[Realtime] ${tableName} subscription status:`, status);
-      });
+      .subscribe();
 
     return () => {
       subscription.unsubscribe();
@@ -93,7 +88,6 @@ export function useRealtimeMultiSubscription(
             filter: `org_id=eq.${orgId}`
           },
           (payload) => {
-            console.log(`[Realtime] ${table} INSERT`);
             onDataChange?.(table, 'INSERT', payload.new);
           }
         )
@@ -106,7 +100,6 @@ export function useRealtimeMultiSubscription(
             filter: `org_id=eq.${orgId}`
           },
           (payload) => {
-            console.log(`[Realtime] ${table} UPDATE`);
             onDataChange?.(table, 'UPDATE', payload.new);
           }
         )
@@ -119,15 +112,12 @@ export function useRealtimeMultiSubscription(
             filter: `org_id=eq.${orgId}`
           },
           (payload) => {
-            console.log(`[Realtime] ${table} DELETE`);
             onDataChange?.(table, 'DELETE', payload.old);
           }
         );
     });
 
-    channel.subscribe((status) => {
-      console.log(`[Realtime] Multi-table subscription status:`, status);
-    });
+    channel.subscribe();
 
     return () => {
       channel.unsubscribe();

@@ -112,9 +112,9 @@ export function DebugAuthPage() {
           </pre>
         </div>
 
-        {/* Supabase URL */}
+        {/* Backend URL */}
         <div className="bg-slate-800 rounded-lg p-6">
-          <h2 className="text-xl font-semibold mb-4">Supabase Configuration</h2>
+          <h2 className="text-xl font-semibold mb-4">Backend Configuration</h2>
           <div className="bg-slate-900 p-4 rounded text-sm">
             <strong>URL:</strong> {supabaseUrl}
           </div>

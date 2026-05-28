@@ -99,23 +99,38 @@ body {
 }
 
 :root[data-theme='light'] .text-slate-400,
-:root[data-theme='light'] .text-slate-500 {
+:root[data-theme='light'] .text-slate-500,
+:root[data-theme='light'] .text-slate-600 {
   color: #64748b !important;
+}
+
+:root[data-theme='light'] .placeholder-slate-400::placeholder,
+:root[data-theme='light'] .placeholder-slate-500::placeholder,
+:root[data-theme='light'] .placeholder-slate-600::placeholder {
+  color: #94a3b8 !important;
 }
 
 :root[data-theme='light'] .bg-slate-900\/80,
 :root[data-theme='light'] .bg-slate-900\/95,
+:root[data-theme='light'] .bg-slate-900\/60,
 :root[data-theme='light'] .bg-slate-900,
+:root[data-theme='light'] .bg-slate-800,
 :root[data-theme='light'] .bg-slate-800\/50,
 :root[data-theme='light'] .bg-slate-800\/30,
 :root[data-theme='light'] .bg-slate-800\/20,
-:root[data-theme='light'] .bg-slate-800\/70 {
+:root[data-theme='light'] .bg-slate-800\/40,
+:root[data-theme='light'] .bg-slate-800\/60,
+:root[data-theme='light'] .bg-slate-800\/70,
+:root[data-theme='light'] .bg-slate-700,
+:root[data-theme='light'] .bg-slate-700\/50 {
   background: rgba(255, 255, 255, 0.88) !important;
 }
 
 :root[data-theme='light'] .border-slate-700,
 :root[data-theme='light'] .border-slate-700\/50,
 :root[data-theme='light'] .border-slate-700\/30,
+:root[data-theme='light'] .border-slate-800,
+:root[data-theme='light'] .border-slate-800\/50,
 :root[data-theme='light'] .ring-slate-800,
 :root[data-theme='light'] .ring-slate-700 {
   border-color: rgba(148, 163, 184, 0.22) !important;
@@ -127,10 +142,58 @@ body {
 }
 
 :root[data-theme='light'] .bg-slate-950,
+:root[data-theme='light'] .bg-slate-950\/40,
+:root[data-theme='light'] .bg-slate-950\/50,
+:root[data-theme='light'] .bg-slate-950\/60,
 :root[data-theme='light'] .bg-slate-950\/70,
 :root[data-theme='light'] .bg-slate-950\/72,
-:root[data-theme='light'] .bg-slate-950\/80 {
+:root[data-theme='light'] .bg-slate-950\/80,
+:root[data-theme='light'] .bg-black\/20,
+:root[data-theme='light'] .bg-black\/30,
+:root[data-theme='light'] .bg-black\/40 {
   background: rgba(255, 255, 255, 0.94) !important;
+}
+
+:root[data-theme='light'] [class*="bg-white/["] {
+  background: rgba(255, 255, 255, 0.76) !important;
+}
+
+:root[data-theme='light'] [class*="bg-white\\/\\["] {
+  background: rgba(255, 255, 255, 0.76) !important;
+}
+
+:root[data-theme='light'] .hover\:bg-white\/\[0\.04\]:hover,
+:root[data-theme='light'] .hover\:bg-white\/\[0\.05\]:hover,
+:root[data-theme='light'] .hover\:bg-slate-800\/30:hover,
+:root[data-theme='light'] .hover\:bg-slate-800\/50:hover {
+  background: rgba(226, 232, 240, 0.78) !important;
+}
+
+:root[data-theme='light'] select,
+:root[data-theme='light'] input,
+:root[data-theme='light'] textarea {
+  color-scheme: light;
+}
+
+:root[data-theme='light'] input,
+:root[data-theme='light'] select,
+:root[data-theme='light'] textarea {
+  background-color: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+}
+
+:root[data-theme='light'] table {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] thead,
+:root[data-theme='light'] tbody tr:hover {
+  background: rgba(241, 245, 249, 0.82) !important;
+}
+
+:root[data-theme='light'] .shadow-\[0_24px_80px_rgba\(2\,8\,23\,0\.45\)\],
+:root[data-theme='light'] .shadow-\[0_28px_70px_rgba\(0\,0\,0\,0\.32\)\] {
+  box-shadow: 0 20px 55px rgba(15, 23, 42, 0.12) !important;
 }
 
 :root[data-theme='light'] aside,

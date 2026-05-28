@@ -109,7 +109,7 @@ export function PhoneAssignmentsPage() {
               ) : phones.length === 0 ? (
                 <div className="p-8 text-center">
                   <p className="text-slate-400">No phone numbers available.</p>
-                  <p className="text-sm text-slate-500 mt-2">Sync phone numbers from MightyCall first using the admin panel.</p>
+                  <p className="text-sm text-slate-500 mt-2">Sync phone numbers from the admin panel first.</p>
                 </div>
               ) : (
                 <>

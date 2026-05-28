@@ -62,9 +62,6 @@ export async function fetchMightyCallPhoneNumbers(): Promise<MightyCallPhoneNumb
       throw new Error('Failed to parse phonenumbers response');
     }
 
-    // Log raw response for debugging
-    console.log('[MightyCall sync] raw phonenumbers response:', JSON.stringify(json, null, 2));
-
     if (!res.ok) {
       console.error('[MightyCall] phonenumbers request failed', { url, status, body: json });
       throw new Error(`MightyCall phonenumbers request failed (status ${status})`);

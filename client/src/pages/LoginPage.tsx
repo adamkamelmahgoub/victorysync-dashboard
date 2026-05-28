@@ -1,4 +1,4 @@
-import type { FC, ReactNode } from "react";
+import type { FC, FormEvent, ReactNode } from "react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -29,7 +29,7 @@ export const LoginPage: FC = () => {
     setSuccess(null);
   };
 
-  const handleSignIn = async (e: React.FormEvent) => {
+  const handleSignIn = async (e: FormEvent) => {
     e.preventDefault();
     resetMessages();
     setLoading(true);
@@ -44,7 +44,7 @@ export const LoginPage: FC = () => {
     }
   };
 
-  const handleSignUp = async (e: React.FormEvent) => {
+  const handleSignUp = async (e: FormEvent) => {
     e.preventDefault();
     resetMessages();
 

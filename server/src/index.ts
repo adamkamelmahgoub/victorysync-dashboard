@@ -119,19 +119,39 @@ function fmtErr(e: any): string {
 
 const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
 const IS_DEBUG = LOG_LEVEL === 'debug' || LOG_LEVEL === 'verbose' || LOG_LEVEL === 'trace';
+const SENSITIVE_LOG_KEY = /(token|secret|password|authorization|api[_-]?key|service[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token)/i;
+const SENSITIVE_ID_KEY = /(^id$|user[_-]?id|org[_-]?id|actor[_-]?id|request[_-]?id|api[_-]?scope|org[_-]?scope)/i;
+const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
+const JWT_PATTERN = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+
+function redactLogValue(value: any, key = ''): any {
+  if (SENSITIVE_LOG_KEY.test(key)) return '[redacted]';
+  if (SENSITIVE_ID_KEY.test(key)) return value ? '[redacted-id]' : value;
+  if (typeof value === 'string') {
+    return value
+      .replace(JWT_PATTERN, '[redacted-jwt]')
+      .replace(UUID_PATTERN, '[redacted-id]')
+      .slice(0, 500);
+  }
+  if (Array.isArray(value)) return value.slice(0, 20).map((next) => redactLogValue(next, key));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([nextKey, next]) => [nextKey, redactLogValue(next, nextKey)]));
+  }
+  return value;
+}
 
 function logDebug(event: string, meta: Record<string, any> = {}) {
   if (!IS_DEBUG) return;
-  console.log(JSON.stringify({ level: 'debug', event, ts: new Date().toISOString(), ...meta }));
+  console.log(JSON.stringify(redactLogValue({ level: 'debug', event, ts: new Date().toISOString(), ...meta })));
 }
 
 function logStructured(level: 'info' | 'warn' | 'error', event: string, meta: Record<string, any> = {}) {
-  const payload = {
+  const payload = redactLogValue({
     level,
     event,
     ts: new Date().toISOString(),
     ...meta,
-  };
+  });
   const line = JSON.stringify(payload);
   if (level === 'error') console.error(line);
   else if (level === 'warn') console.warn(line);
@@ -289,7 +309,9 @@ function normalizeEmail(v: any): string {
 }
 
 function inviteCodeSecret(): string {
-  return String(process.env.INVITE_CODE_SECRET || process.env.SUPABASE_SERVICE_KEY || 'victorysync-invite-dev');
+  const secret = process.env.INVITE_CODE_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'victorysync-invite-dev');
+  if (!secret) throw new Error('invite_code_secret_not_configured');
+  return String(secret);
 }
 
 function computeInviteCode(inv: { id: string; org_id: string; email: string; role: string }): string {
@@ -3871,10 +3893,7 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
         null as any
       );
       if (!status) {
-        console.warn('[live-status] MightyCall status fetch timed out or returned empty payload', {
-          orgId,
-          extension,
-        });
+        logDebug('live_status.fetch.empty', { extension });
         await upsertAgentLiveStatusRow({
           orgId,
           extension,
@@ -3888,11 +3907,10 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
         });
         return;
       }
-      console.log('[live-status] Raw MightyCall status response', {
-        orgId,
+      logDebug('live_status.fetch.normalized', {
         extension,
-        rawStatus: status.rawStatus,
-        normalizedStatus: status.normalizedStatus,
+        raw_status: status.rawStatus,
+        normalized_status: status.normalizedStatus,
       });
 
       const normalizedStatus = normalizeAgentLiveEventStatus(status.normalizedStatus);
@@ -3900,16 +3918,7 @@ async function refreshAgentLiveStatusForOrg(orgId: string) {
       const direction = status.direction || null;
       const counterpartNumber = status.counterpartNumber || null;
 
-      console.log('[live-status] Agent/org mapping result', {
-        orgId,
-        extension,
-      });
-      console.log('[live-status] Normalized status result', {
-        orgId,
-        extension,
-        normalizedStatus,
-      });
-      console.log('[live-status] Upserting live MightyCall status only', { orgId, extension });
+      logDebug('live_status.upsert', { extension, normalized_status: normalizedStatus });
 
       await upsertAgentLiveStatusRow({
         orgId,
@@ -8711,13 +8720,8 @@ app.get('/api/live-status', async (req, res) => {
       .filter(Boolean)
       .sort()
       .slice(-1)[0] || new Date().toISOString();
-    console.log('[live-status] UI payload source', {
+    logDebug('live_status.response', {
       source: 'mightycall_user_status_by_extension',
-      org_ids: orgIds,
-      item_count: items.length,
-    });
-    console.log('[live-status] Returning live status payload to frontend', {
-      org_ids: orgIds,
       item_count: items.length,
       on_call: items.filter((item: any) => !!item.on_call).length,
       available: items.filter((item: any) => !item.on_call).length,
@@ -8824,13 +8828,8 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
       .filter(Boolean)
       .sort()
       .slice(-1)[0] || new Date().toISOString();
-    console.log('[live-status] UI payload source', {
+    logDebug('org_live_status.response', {
       source: 'mightycall_user_status_by_extension',
-      org_id: orgId,
-      item_count: items.length,
-    });
-    console.log('[live-status] Returning live status payload to frontend', {
-      org_id: orgId,
       item_count: items.length,
       on_call: items.filter((item: any) => !!item.on_call).length,
       available: items.filter((item: any) => !item.on_call).length,

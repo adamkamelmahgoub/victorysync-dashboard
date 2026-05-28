@@ -71,6 +71,10 @@ function getIp(req: Request) {
   return forwarded || req.ip || req.socket.remoteAddress || 'unknown';
 }
 
+function hashIp(ip: string) {
+  return crypto.createHash('sha256').update(ip).digest('hex');
+}
+
 function bearerToken(req: Request) {
   const header = String(req.headers.authorization || '');
   return header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : null;
@@ -121,7 +125,7 @@ function getLimiter(rule: LimitRule) {
 async function logRateLimitViolation(supabaseAdmin: SupabaseAdmin, req: Request) {
   try {
     await supabaseAdmin.from('rate_limit_violations').insert({
-      ip_address: getIp(req),
+      ip_address: hashIp(getIp(req)),
       endpoint: `${req.method.toUpperCase()} ${req.originalUrl || req.path}`,
       user_id: (req as any).actorId || null,
       timestamp: new Date().toISOString(),
@@ -241,7 +245,8 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction) 
   if (isPublicRoute(req) || (req as any).apiKeyScope) return next();
   const token = String(req.header('x-csrf-token') || '');
   const actor = String((req as any).actorId || '');
-  const secret = process.env.CSRF_SECRET || process.env.SUPABASE_SERVICE_KEY || 'victorysync-csrf-dev';
+  const secret = process.env.CSRF_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'victorysync-csrf-dev');
+  if (!secret) return res.status(500).json({ error: 'csrf_not_configured' });
   const expected = actor
     ? crypto.createHmac('sha256', secret).update(`${actor}:${new Date().toISOString().slice(0, 10)}`).digest('hex')
     : '';
@@ -252,6 +257,7 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction) 
 }
 
 export function createCsrfToken(actorId: string) {
-  const secret = process.env.CSRF_SECRET || process.env.SUPABASE_SERVICE_KEY || 'victorysync-csrf-dev';
+  const secret = process.env.CSRF_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'victorysync-csrf-dev');
+  if (!secret) throw new Error('csrf_not_configured');
   return crypto.createHmac('sha256', secret).update(`${actorId}:${new Date().toISOString().slice(0, 10)}`).digest('hex');
 }
