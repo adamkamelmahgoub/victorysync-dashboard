@@ -8,7 +8,7 @@ interface SidebarProps {
   currentPath: string;
 }
 
-type NavItem = { label: string; path: string; badge?: string };
+type NavItem = { label: string; path: string; badge?: string; featureKey?: string };
 type NavGroup = { label: string; items: NavItem[] };
 
 function isActivePath(currentPath: string, itemPath: string) {
@@ -52,7 +52,7 @@ function NavButton({
 
 export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const navigate = useNavigate();
-  const { signOut, user, selectedOrgId, orgs, profile } = useAuth();
+  const { signOut, user, selectedOrgId, orgs, profile, featureAccess } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -62,18 +62,18 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Overview',
           items: [
             { label: 'Dashboard', path: '/' },
-            { label: 'Live Status', path: '/live-status', badge: 'Live' },
+            { label: 'Live Status', path: '/live-status', badge: 'Live', featureKey: 'live_status' },
           ],
         },
         {
           label: 'Operations',
           items: [
-            { label: 'Phone Numbers', path: '/numbers' },
-            { label: 'Leads', path: '/dashboard/leads', badge: 'Live' },
+            { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
+            { label: 'Leads', path: '/dashboard/leads', badge: 'Live', featureKey: 'leads' },
             { label: 'Agent Management', path: '/admin/agents-management' },
             { label: 'Reports', path: '/admin/reports' },
             { label: 'Recordings', path: '/admin/recordings' },
-            { label: 'SMS', path: '/sms' },
+            { label: 'SMS', path: '/sms', featureKey: 'sms' },
           ],
         },
         {
@@ -93,19 +93,19 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Overview',
           items: [
             { label: 'Dashboard', path: '/' },
-            { label: 'Live Status', path: '/live-status', badge: 'Live' },
+            { label: 'Live Status', path: '/live-status', badge: 'Live', featureKey: 'live_status' },
           ],
         },
         {
           label: 'Workspace',
           items: [
-            { label: 'Phone Numbers', path: '/numbers' },
-            { label: 'Leads', path: '/dashboard/leads', badge: 'Live' },
-            { label: 'Reports', path: '/reports' },
-            { label: 'Recordings', path: '/recordings' },
-            { label: 'SMS', path: '/sms' },
-            { label: 'Support', path: '/support' },
-            { label: 'Billing', path: '/billing' },
+            { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
+            { label: 'Leads', path: '/dashboard/leads', badge: 'Live', featureKey: 'leads' },
+            { label: 'Reports', path: '/reports', featureKey: 'reports' },
+            { label: 'Recordings', path: '/recordings', featureKey: 'recordings' },
+            { label: 'SMS', path: '/sms', featureKey: 'sms' },
+            { label: 'Support', path: '/support', featureKey: 'support' },
+            { label: 'Billing', path: '/billing', featureKey: 'billing' },
           ],
         },
       ];
@@ -201,7 +201,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           <div key={group.label} className="mb-5">
             <div className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{group.label}</div>
             <div className="space-y-1.5">
-              {group.items.map((item) => (
+              {group.items.filter((item) => isAdmin || !item.featureKey || featureAccess[item.featureKey] !== false).map((item) => (
                 <NavButton key={item.path} item={item} currentPath={currentPath} onClick={() => navigateTo(item.path)} />
               ))}
             </div>

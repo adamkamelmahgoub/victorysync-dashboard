@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { PageLayout } from '../../components/PageLayout';
 import { useToast } from '../../contexts/ToastContext';
 import { buildApiUrl } from '../../config';
-import { getProductionHealth } from '../../lib/apiClient';
+import { getOrgFeatures, getProductionHealth, saveOrgFeatures } from '../../lib/apiClient';
 import { MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 import { useNavigate } from 'react-router-dom';
 
@@ -57,7 +57,7 @@ export function AdminOperationsPage() {
     }
   })();
 
-  const [activeTab, setActiveTab] = useState<'details' | 'members' | 'phones' | 'users'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'features' | 'members' | 'phones' | 'users'>('details');
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +82,9 @@ export function AdminOperationsPage() {
   const [savingPhones, setSavingPhones] = useState(false);
   const [productionHealth, setProductionHealth] = useState<any | null>(null);
   const [exportingBackup, setExportingBackup] = useState(false);
+  const [featureRows, setFeatureRows] = useState<Array<{ feature_key: string; label: string; enabled: boolean; visible_to_roles: string[] }>>([]);
+  const [featuresLoading, setFeaturesLoading] = useState(false);
+  const [featuresSaving, setFeaturesSaving] = useState(false);
 
   // All Users
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -109,6 +112,7 @@ export function AdminOperationsPage() {
   useEffect(() => {
     if (selectedOrg) {
       loadOrgDetails();
+      loadOrgFeatures();
       resetPhoneSelection();
     }
   }, [selectedOrg?.id]);
@@ -171,6 +175,61 @@ export function AdminOperationsPage() {
     } catch (err) {
       console.error('Load production health error:', err);
     }
+  };
+
+  const loadOrgFeatures = async () => {
+    if (!selectedOrg || !user?.id) return;
+    try {
+      setFeaturesLoading(true);
+      const data = await getOrgFeatures(selectedOrg.id, user.id);
+      setFeatureRows((data.features || []).map((row: any) => ({
+        feature_key: row.key || row.feature_key,
+        label: row.label || row.feature_key,
+        enabled: Boolean(row.enabled),
+        visible_to_roles: Array.isArray(row.visible_to_roles) ? row.visible_to_roles : ['org_admin', 'org_manager', 'agent'],
+      })));
+    } catch (err: any) {
+      if (toast?.push) toast.push(err?.message || 'Failed to load feature access', 'error');
+    } finally {
+      setFeaturesLoading(false);
+    }
+  };
+
+  const saveFeatureRows = async () => {
+    if (!selectedOrg || !user?.id) return;
+    try {
+      setFeaturesSaving(true);
+      const data = await saveOrgFeatures(
+        selectedOrg.id,
+        featureRows.map((row) => ({
+          feature_key: row.feature_key,
+          enabled: row.enabled,
+          visible_to_roles: row.visible_to_roles,
+        })),
+        user.id
+      );
+      setFeatureRows((data.features || []).map((row: any) => ({
+        feature_key: row.key || row.feature_key,
+        label: row.label || row.feature_key,
+        enabled: Boolean(row.enabled),
+        visible_to_roles: Array.isArray(row.visible_to_roles) ? row.visible_to_roles : ['org_admin', 'org_manager', 'agent'],
+      })));
+      if (toast?.push) toast.push('Feature access saved', 'success');
+    } catch (err: any) {
+      if (toast?.push) toast.push(err?.message || 'Failed to save feature access', 'error');
+    } finally {
+      setFeaturesSaving(false);
+    }
+  };
+
+  const toggleFeatureRole = (featureKey: string, role: string) => {
+    setFeatureRows((rows) => rows.map((row) => {
+      if (row.feature_key !== featureKey) return row;
+      const current = new Set(row.visible_to_roles || []);
+      if (current.has(role)) current.delete(role);
+      else current.add(role);
+      return { ...row, visible_to_roles: Array.from(current) };
+    }));
   };
 
   const handleExportBackup = async (orgId?: string | null) => {
@@ -408,8 +467,9 @@ export function AdminOperationsPage() {
               </div>
             }
           >
-            <div className="grid gap-4 lg:grid-cols-4">
+            <div className="grid gap-4 lg:grid-cols-5">
               <MetricStatCard label="Schema" value={productionHealth.schema?.ok ? 'Healthy' : 'Drift'} accent={productionHealth.schema?.ok ? 'emerald' : 'amber'} hint={`${productionHealth.schema?.missing_tables?.length || 0} missing tables`} />
+              <MetricStatCard label="RLS / Storage" value={productionHealth.security?.ok ? 'Healthy' : 'Review'} accent={productionHealth.security?.ok ? 'emerald' : 'amber'} hint={`${productionHealth.security?.missing_rls?.length || 0} RLS gaps`} />
               <MetricStatCard label="Memberships" value={productionHealth.membership?.mismatched_records ? 'Drift' : 'Aligned'} accent={productionHealth.membership?.mismatched_records ? 'amber' : 'emerald'} hint={`${productionHealth.membership?.mismatched_records || 0} mismatches`} />
               <MetricStatCard label="Auth Users" value={String(productionHealth.auth_users_count || 0)} accent="neutral" hint="Current auth footprint" />
               <MetricStatCard label="Env" value={productionHealth.env?.ok ? 'Configured' : 'Missing'} accent={productionHealth.env?.ok ? 'emerald' : 'amber'} hint="Core environment status" />
@@ -438,6 +498,8 @@ export function AdminOperationsPage() {
                   <div>MightyCall server config: {String(Object.values(productionHealth.env?.required || {}).slice(2, 4).every(Boolean))}</div>
                   <div>Integrations key: {String(!!productionHealth.env?.optional?.INTEGRATIONS_KEY)}</div>
                   <div>Restricted CORS origin set: {String(!!productionHealth.env?.optional?.FRONTEND_ORIGIN)}</div>
+                  <div>Persistent rate limiting: {String(!!productionHealth.env?.optional?.UPSTASH_REDIS_REST_URL && !!productionHealth.env?.optional?.UPSTASH_REDIS_REST_TOKEN)}</div>
+                  <div>CSRF secret: {String(!!productionHealth.env?.optional?.CSRF_SECRET)}</div>
                 </div>
               </div>
               <div className="vs-surface-muted p-4 text-sm text-slate-300">
@@ -583,7 +645,7 @@ export function AdminOperationsPage() {
 
                 {/* Tabs */}
                 <div className="border-b border-slate-700 px-5 flex gap-8">
-                  {['details', 'members', 'phones', 'users'].map((tab) => (
+                  {['details', 'features', 'members', 'phones', 'users'].map((tab) => (
                     <button
                       key={tab}
                       onClick={() => {
@@ -602,6 +664,7 @@ export function AdminOperationsPage() {
                       }`}
                     >
                       {tab === 'details' && 'Details'}
+                      {tab === 'features' && 'Feature Access'}
                       {tab === 'members' && 'Members'}
                       {tab === 'phones' && 'Phone Numbers'}
                       {tab === 'users' && 'Users'}
@@ -630,6 +693,63 @@ export function AdminOperationsPage() {
                           </div>
                         </div>
                       </div>
+                    </div>
+                  ) : activeTab === 'features' ? (
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="font-semibold text-sm">Client Feature Access</h3>
+                          <p className="mt-1 text-xs text-slate-400">
+                            Control which sections this client and its agents can see. Admins keep full platform access.
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button className="vs-button-secondary" onClick={() => void loadOrgFeatures()} disabled={featuresLoading}>
+                            Refresh
+                          </button>
+                          <button className="vs-button-primary" onClick={() => void saveFeatureRows()} disabled={featuresSaving || featuresLoading}>
+                            {featuresSaving ? 'Saving...' : 'Save Access'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {featuresLoading ? (
+                        <div className="text-xs text-slate-400 text-center py-8">Loading feature access...</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {featureRows.map((feature) => (
+                            <div key={feature.feature_key} className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-slate-100">{feature.label}</div>
+                                  <div className="mt-1 text-xs text-slate-500">{feature.feature_key}</div>
+                                </div>
+                                <label className="flex items-center gap-2 text-xs text-slate-300">
+                                  <input
+                                    type="checkbox"
+                                    checked={feature.enabled}
+                                    onChange={(event) => setFeatureRows((rows) => rows.map((row) => row.feature_key === feature.feature_key ? { ...row, enabled: event.target.checked } : row))}
+                                  />
+                                  Enabled
+                                </label>
+                              </div>
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                {['org_admin', 'org_manager', 'agent'].map((role) => (
+                                  <label key={role} className="flex items-center gap-2 rounded-full border border-slate-700/70 px-3 py-2 text-xs text-slate-300">
+                                    <input
+                                      type="checkbox"
+                                      checked={(feature.visible_to_roles || []).includes(role)}
+                                      onChange={() => toggleFeatureRole(feature.feature_key, role)}
+                                      disabled={!feature.enabled}
+                                    />
+                                    {role.replace('org_', '').replace('_', ' ')}
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : activeTab === 'members' ? (
                     <div className="space-y-3">

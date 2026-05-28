@@ -134,6 +134,15 @@ function AdminRoute({ children }: { children: JSX.Element }) {
   return children;
 }
 
+function FeatureRoute({ featureKey, children }: { featureKey: string; children: JSX.Element }) {
+  const { globalRole, featureAccess } = useAuth();
+  const isAdmin = ["platform_admin", "admin", "super_admin"].includes(String(globalRole || ""));
+  if (!isAdmin && featureAccess[featureKey] === false) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return children;
+}
+
 function AppRouter() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">Loading...</div>}>
@@ -159,7 +168,7 @@ function AppRouter() {
         path="/dashboard/leads"
         element={
           <ProtectedRoute>
-            <LeadsPage />
+            <FeatureRoute featureKey="leads"><LeadsPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -167,7 +176,7 @@ function AppRouter() {
         path="/live-status"
         element={
           <ProtectedRoute>
-            <LiveStatusPage />
+            <FeatureRoute featureKey="live_status"><LiveStatusPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -183,7 +192,7 @@ function AppRouter() {
         path="/numbers"
         element={
           <ProtectedRoute>
-            <NumbersPage />
+            <FeatureRoute featureKey="numbers"><NumbersPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -191,7 +200,7 @@ function AppRouter() {
         path="/reports"
         element={
           <ProtectedRoute>
-            <ReportPage />
+            <FeatureRoute featureKey="reports"><ReportPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -199,7 +208,7 @@ function AppRouter() {
         path="/api-keys"
         element={
           <ProtectedRoute>
-            <APIKeysPage />
+            <FeatureRoute featureKey="api_keys"><APIKeysPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -215,7 +224,7 @@ function AppRouter() {
         path="/recordings"
         element={
           <ProtectedRoute>
-            <RecordingsPage />
+            <FeatureRoute featureKey="recordings"><RecordingsPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -223,7 +232,7 @@ function AppRouter() {
         path="/sms"
         element={
           <ProtectedRoute>
-            <SMSPage />
+            <FeatureRoute featureKey="sms"><SMSPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -231,7 +240,7 @@ function AppRouter() {
         path="/support"
         element={
           <ProtectedRoute>
-            <SupportPage />
+            <FeatureRoute featureKey="support"><SupportPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -239,7 +248,7 @@ function AppRouter() {
         path="/billing"
         element={
           <ProtectedRoute>
-            <BillingPage />
+            <FeatureRoute featureKey="billing"><BillingPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -247,7 +256,7 @@ function AppRouter() {
         path="/team"
         element={
           <ProtectedRoute>
-            <TeamPage />
+            <FeatureRoute featureKey="team"><TeamPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />

@@ -52,8 +52,9 @@ export default function AdminDiagnosticsPage() {
             <div className="text-sm text-slate-400">{loading ? 'Loading diagnostics...' : 'No production data available.'}</div>
           ) : (
             <div className="space-y-4">
-              <div className="grid gap-4 lg:grid-cols-4">
+              <div className="grid gap-4 lg:grid-cols-5">
                 <MetricStatCard label="Schema" value={productionHealth.schema?.ok ? 'Healthy' : 'Drift'} accent={productionHealth.schema?.ok ? 'emerald' : 'amber'} hint={`${productionHealth.schema?.missing_tables?.length || 0} missing tables`} />
+                <MetricStatCard label="RLS / Storage" value={productionHealth.security?.ok ? 'Healthy' : 'Review'} accent={productionHealth.security?.ok ? 'emerald' : 'amber'} hint={`${productionHealth.security?.missing_rls?.length || 0} RLS gaps`} />
                 <MetricStatCard label="Memberships" value={membershipDrift && (membershipDrift.org_users_only || membershipDrift.org_members_only || membershipDrift.mismatched_records) ? 'Drift' : 'Aligned'} accent={membershipDrift && (membershipDrift.org_users_only || membershipDrift.org_members_only || membershipDrift.mismatched_records) ? 'amber' : 'emerald'} hint={`${membershipDrift?.org_users_only || 0} org_users-only rows`} />
                 <MetricStatCard label="Auth Users" value={String(productionHealth.auth_users_count || 0)} accent="neutral" hint="Current authentication footprint" />
                 <MetricStatCard label="Environment" value={productionHealth.env?.ok ? 'Configured' : 'Missing'} accent={productionHealth.env?.ok ? 'emerald' : 'amber'} hint={`CORS restricted: ${productionHealth.env?.recommendations?.restrict_cors_origin ? 'no' : 'yes'}`} />
@@ -77,9 +78,24 @@ export default function AdminDiagnosticsPage() {
                   <div className="mt-3 space-y-2">
                     <div>Frontend origin restricted: {productionHealth.env?.recommendations?.restrict_cors_origin ? 'No' : 'Yes'}</div>
                     <div>Encrypted integration key present: {productionHealth.env?.recommendations?.encrypted_integrations_ready ? 'Yes' : 'No'}</div>
+                    <div>Persistent rate limit: {productionHealth.env?.recommendations?.persistent_rate_limit_ready ? 'Yes' : 'No'}</div>
+                    <div>CSRF secret: {productionHealth.env?.recommendations?.csrf_ready ? 'Yes' : 'No'}</div>
                     <div>Profile trigger: {productionHealth.schema?.profile_trigger_healthy ? 'Healthy' : productionHealth.schema?.profile_trigger_message || 'Needs migration'}</div>
                   </div>
                 </div>
+              </div>
+              <div className="vs-surface-muted p-4 text-sm text-slate-300">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Policy Verification</div>
+                <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                  <div>Missing RLS: {productionHealth.security?.missing_rls?.length ? productionHealth.security.missing_rls.join(', ') : 'None'}</div>
+                  <div>Missing policies: {productionHealth.security?.missing_policies?.length ? productionHealth.security.missing_policies.join(', ') : 'None'}</div>
+                  <div>Public buckets: {productionHealth.security?.public_buckets?.length ? productionHealth.security.public_buckets.join(', ') : 'None'}</div>
+                </div>
+                {(productionHealth.security?.table_error || productionHealth.security?.bucket_error) && (
+                  <div className="mt-3 text-amber-300">
+                    Apply migration 031 to enable live RLS/storage verification RPCs.
+                  </div>
+                )}
               </div>
             </div>
           )}

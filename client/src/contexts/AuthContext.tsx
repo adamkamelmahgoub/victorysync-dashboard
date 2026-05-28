@@ -11,8 +11,10 @@ type AuthContextValue = {
   selectedOrgId: string | null;
   loading: boolean;
   globalRole: string | null;
+  featureAccess: Record<string, boolean>;
   profile: { full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null;
   refreshProfile: () => Promise<void>;
+  refreshFeatures: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   setSelectedOrgId: (id: string | null) => void;
@@ -47,7 +49,18 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [globalRole, setGlobalRole] = useState<string | null>(null);
+  const [featureAccess, setFeatureAccess] = useState<Record<string, boolean>>({});
   const [profile, setProfile] = useState<{ full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null>(null);
+
+  const loadFeatures = async (nextUser: User | null = user, orgId: string | null = selectedOrgId) => {
+    if (!nextUser) {
+      setFeatureAccess({});
+      return;
+    }
+    const suffix = orgId ? `?org_id=${encodeURIComponent(orgId)}` : '';
+    const data = await fetchJsonWithTimeout(buildApiUrl(`/api/me/features${suffix}`), { headers: { 'x-user-id': nextUser.id } }, 5000);
+    if (data?.features) setFeatureAccess(data.features);
+  };
 
   useEffect(() => {
     const hydrateUserContext = async (nextUser: User) => {
@@ -75,10 +88,12 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         const resolvedRole = profileData?.profile?.global_role ?? nextUser.user_metadata?.global_role ?? null;
         if (resolvedRole === 'platform_admin') {
           setSelectedOrgId(null);
+          void loadFeatures(nextUser, null);
         } else {
           const metadataOrgId = (nextUser.user_metadata as any)?.org_id || null;
           const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : null;
           setSelectedOrgId(assignedOrgId);
+          void loadFeatures(nextUser, assignedOrgId);
         }
       }
     };
@@ -121,6 +136,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
           setOrgs([]);
           setSelectedOrgId(null);
           setGlobalRole(null);
+          setFeatureAccess({});
           setProfile(null);
           setLoading(false);
         }
@@ -140,6 +156,11 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       // nothing to clear
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    void loadFeatures(user, selectedOrgId);
+  }, [user?.id, selectedOrgId]);
 
   const signIn = async (
     email: string,
@@ -211,10 +232,12 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
             setOrgs(list);
             if (data.user.user_metadata?.global_role === 'platform_admin') {
               setSelectedOrgId(null);
+              void loadFeatures(data.user, null);
             } else {
               const metadataOrgId = (data.user.user_metadata as any)?.org_id || null;
               const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : null;
               setSelectedOrgId(assignedOrgId);
+              void loadFeatures(data.user, assignedOrgId);
             }
           }
         } catch (e) {
@@ -242,6 +265,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       setOrgs([]);
       setSelectedOrgId(null);
       setGlobalRole(null);
+      setFeatureAccess({});
       setProfile(null);
     } catch (err) {
       console.error("Sign out error:", err);
@@ -275,13 +299,18 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || '' }));
         setOrgs(list);
       }
+      await loadFeatures(user, selectedOrgId);
     } catch (e) {
       console.warn('[AuthContext] Failed to refresh profile:', e);
     }
   };
 
+  const refreshFeatures = async () => {
+    await loadFeatures(user, selectedOrgId);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, globalRole, profile, refreshProfile, signIn, signOut, setSelectedOrgId }}>
+    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, globalRole, featureAccess, profile, refreshProfile, refreshFeatures, signIn, signOut, setSelectedOrgId }}>
       {children}
     </AuthContext.Provider>
   );

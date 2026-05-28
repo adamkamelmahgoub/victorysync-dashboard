@@ -65,7 +65,8 @@ import { startMightyCallPolling } from './mightycall/sync';
 import { Readable } from 'stream';
 import { writeAuditLog } from './lib/audit';
 import { getMembershipDriftDetails, getMembershipDriftSummary } from './lib/memberships';
-import { getSchemaHealth } from './lib/schemaHealth';
+import { getSchemaHealth, getSecurityPolicyHealth } from './lib/schemaHealth';
+import { FEATURE_DEFINITIONS, getOrgFeatureConfig, getUserFeatureAccess, saveOrgFeatureConfig } from './lib/featureAccess';
 import { normalizeMightyCallJournalActivity, normalizeMightyCallStatusActivity } from './lib/mightycallNormalizer';
 import { getMightyCallStatusByExtension } from './services/mightycallLiveStatus';
 import {
@@ -180,8 +181,11 @@ setInterval(() => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 async function getProductionReadinessSnapshot() {
-  const schema = await getSchemaHealth();
-  const membership = await getMembershipDriftSummary();
+  const [schema, security, membership] = await Promise.all([
+    getSchemaHealth(),
+    getSecurityPolicyHealth(),
+    getMembershipDriftSummary(),
+  ]);
   const env = getEnvironmentHealth();
   let authUsersCount = 0;
   try {
@@ -190,12 +194,25 @@ async function getProductionReadinessSnapshot() {
   } catch {}
 
   return {
-    ok: env.ok && schema.ok && membership.mismatched_records === 0 && membership.org_members_only === 0,
+    ok: env.ok && schema.ok && security.ok && membership.mismatched_records === 0 && membership.org_members_only === 0,
     checked_at: new Date().toISOString(),
     env,
     auth_users_count: authUsersCount,
     schema,
+    security,
     membership,
+    api: {
+      rate_limit: {
+        persistent: Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN),
+        production_memory_override: process.env.ALLOW_IN_MEMORY_RATE_LIMIT_PRODUCTION === 'true',
+      },
+      csrf: {
+        configured: Boolean(process.env.CSRF_SECRET),
+      },
+      legacy_webhooks: {
+        enabled: process.env.ENABLE_LEGACY_WEBHOOKS === 'true',
+      },
+    },
   };
 }
 
@@ -4959,6 +4976,72 @@ app.get('/api/admin/schema-health', async (req, res) => {
   } catch (err: any) {
     console.error('schema_health_failed:', fmtErr(err));
     res.status(500).json({ error: 'schema_health_failed', detail: fmtErr(err) });
+  }
+});
+
+app.get('/api/admin/security-policy-health', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    res.json(await getSecurityPolicyHealth());
+  } catch (err: any) {
+    console.error('security_policy_health_failed:', fmtErr(err));
+    res.status(500).json({ error: 'security_policy_health_failed', detail: fmtErr(err) });
+  }
+});
+
+app.get('/api/me/features', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const requestedOrgId = typeof req.query.org_id === 'string' ? req.query.org_id : null;
+    const orgId = requestedOrgId || null;
+    const features = await getUserFeatureAccess(String(actorId), orgId);
+    res.json({ features, definitions: FEATURE_DEFINITIONS, org_id: orgId });
+  } catch (err: any) {
+    console.error('user_features_failed:', fmtErr(err));
+    res.status(500).json({ error: 'user_features_failed', detail: fmtErr(err) });
+  }
+});
+
+app.get('/api/admin/orgs/:orgId/features', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const orgId = String(req.params.orgId);
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    res.json({ org_id: orgId, features: await getOrgFeatureConfig(orgId), definitions: FEATURE_DEFINITIONS });
+  } catch (err: any) {
+    console.error('org_features_fetch_failed:', fmtErr(err));
+    res.status(500).json({ error: 'org_features_fetch_failed', detail: fmtErr(err) });
+  }
+});
+
+app.put('/api/admin/orgs/:orgId/features', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    const orgId = String(req.params.orgId);
+    if (!actorId || !(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    const parsed = z.object({
+      features: z.array(z.object({
+        feature_key: z.string().min(1).max(80),
+        enabled: z.boolean(),
+        visible_to_roles: z.array(z.string().min(1).max(80)).optional(),
+      })).max(50),
+    }).safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_features_payload' });
+    const features = await saveOrgFeatureConfig(orgId, parsed.data.features);
+    await writeAuditLog({
+      actor_id: String(actorId),
+      org_id: orgId,
+      action: 'org_feature_access.updated',
+      entity_type: 'organization',
+      entity_id: orgId,
+      metadata: { feature_count: features.length },
+    });
+    res.json({ org_id: orgId, features });
+  } catch (err: any) {
+    console.error('org_features_save_failed:', fmtErr(err));
+    res.status(500).json({ error: 'org_features_save_failed', detail: fmtErr(err) });
   }
 });
 

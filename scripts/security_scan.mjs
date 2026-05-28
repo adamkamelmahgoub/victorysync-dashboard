@@ -25,7 +25,7 @@ const checks = [
     id: 'live-secret-example',
     severity: 'medium',
     pattern: /sk_live_[A-Za-z0-9]+/g,
-    allow: (file, match) => ['API_REFERENCE.md', 'SECURITY_AUDIT.md'].some((allowed) => file.endsWith(allowed)) && match === 'sk_live_1234567890abcdef',
+    allow: (file, match) => ['API_REFERENCE.md', 'SECURITY_AUDIT.md', 'scripts/security_scan.mjs'].some((allowed) => file.endsWith(allowed)) && match === 'sk_live_1234567890abcdef',
     message: 'Possible live payment/API key.',
   },
   {

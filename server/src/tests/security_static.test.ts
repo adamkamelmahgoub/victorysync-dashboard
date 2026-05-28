@@ -60,3 +60,28 @@ test('debug auth page is admin-only in the router', () => {
   const source = readFileSync(join(repoRoot, 'client', 'src', 'main.tsx'), 'utf8');
   assert.match(source, /path="\/debug-auth"[\s\S]*?<AdminRoute>[\s\S]*?<DebugAuthPage \/>[\s\S]*?<\/AdminRoute>/);
 });
+
+test('feature access is database-backed and enforced in client routing', () => {
+  const migration = readFileSync(join(repoRoot, 'supabase', 'migrations', '031_feature_access_and_security_verification.sql'), 'utf8');
+  const server = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+  const router = readFileSync(join(repoRoot, 'client', 'src', 'main.tsx'), 'utf8');
+  const sidebar = readFileSync(join(repoRoot, 'client', 'src', 'components', 'Sidebar.tsx'), 'utf8');
+
+  assert.match(migration, /create table if not exists public\.org_feature_access/);
+  assert.match(migration, /alter table public\.org_feature_access enable row level security/);
+  assert.match(server, /app\.get\('\/api\/me\/features'/);
+  assert.match(server, /app\.put\('\/api\/admin\/orgs\/:orgId\/features'/);
+  assert.match(router, /function FeatureRoute/);
+  assert.match(sidebar, /featureAccess\[item\.featureKey\] !== false/);
+});
+
+test('production diagnostics include live RLS and storage verification', () => {
+  const migration = readFileSync(join(repoRoot, 'supabase', 'migrations', '031_feature_access_and_security_verification.sql'), 'utf8');
+  const schemaHealth = readFileSync(join(process.cwd(), 'src', 'lib', 'schemaHealth.ts'), 'utf8');
+  const server = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+
+  assert.match(migration, /security_table_rls_status/);
+  assert.match(migration, /security_storage_bucket_status/);
+  assert.match(schemaHealth, /getSecurityPolicyHealth/);
+  assert.match(server, /security-policy-health/);
+});

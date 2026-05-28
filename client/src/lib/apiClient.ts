@@ -542,6 +542,33 @@ export async function getSchemaHealth(userId?: string) {
   return await fetchJson(`/api/admin/schema-health`, { headers: { 'x-user-id': userId || '' } });
 }
 
+export async function getSecurityPolicyHealth(userId?: string) {
+  return await fetchJson(`/api/admin/security-policy-health`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function getMyFeatures(orgId?: string | null, userId?: string) {
+  const suffix = orgId ? `?org_id=${encodeURIComponent(orgId)}` : '';
+  return await fetchJson(`/api/me/features${suffix}`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function getOrgFeatures(orgId: string, userId?: string) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/features`, {
+    headers: { 'x-user-id': userId || '' },
+  });
+}
+
+export async function saveOrgFeatures(
+  orgId: string,
+  features: Array<{ feature_key: string; enabled: boolean; visible_to_roles?: string[] }>,
+  userId?: string
+) {
+  return await fetchJson(`/api/admin/orgs/${encodeURIComponent(orgId)}/features`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ features }),
+  });
+}
+
 export async function getMembershipDrift(userId?: string, limit = 100) {
   return await fetchJson(`/api/admin/membership-drift?limit=${encodeURIComponent(String(limit))}`, {
     headers: { 'x-user-id': userId || '' }

@@ -100,15 +100,30 @@ export function getEnvironmentHealth() {
     INTEGRATIONS_KEY: !!INTEGRATIONS_KEY,
     FRONTEND_ORIGIN: !!FRONTEND_ORIGIN,
     MIGHTYCALL_BASE_URL: !!MIGHTYCALL_BASE_URL,
+    UPSTASH_REDIS_REST_URL: !!process.env.UPSTASH_REDIS_REST_URL,
+    UPSTASH_REDIS_REST_TOKEN: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+    CSRF_SECRET: !!process.env.CSRF_SECRET,
+    INVITE_CODE_SECRET: !!process.env.INVITE_CODE_SECRET,
+    VICTORYSYNC_DEFAULT_ORG_ID: !!process.env.VICTORYSYNC_DEFAULT_ORG_ID,
+    MCGRAWNOW_WEBHOOK_SECRET: !!process.env.MCGRAWNOW_WEBHOOK_SECRET,
   };
 
   return {
-    ok: Object.values(required).every(Boolean),
+    ok: Object.values(required).every(Boolean) &&
+      (process.env.NODE_ENV !== 'production' || Boolean(
+        process.env.UPSTASH_REDIS_REST_URL &&
+        process.env.UPSTASH_REDIS_REST_TOKEN &&
+        process.env.CSRF_SECRET &&
+        FRONTEND_ORIGIN
+      )),
     required,
     optional,
     recommendations: {
       restrict_cors_origin: !FRONTEND_ORIGIN,
       encrypted_integrations_ready: !!INTEGRATIONS_KEY,
+      persistent_rate_limit_ready: !!process.env.UPSTASH_REDIS_REST_URL && !!process.env.UPSTASH_REDIS_REST_TOKEN,
+      csrf_ready: !!process.env.CSRF_SECRET,
+      lead_intake_ready: !!process.env.MCGRAWNOW_WEBHOOK_SECRET && !!process.env.VICTORYSYNC_DEFAULT_ORG_ID,
     },
     checked_at: new Date().toISOString(),
   };

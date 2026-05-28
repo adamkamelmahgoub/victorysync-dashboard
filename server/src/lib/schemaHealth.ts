@@ -34,6 +34,8 @@ export async function getSchemaHealth() {
     'integration_sync_jobs',
     'audit_logs',
     'org_integrations',
+    'org_feature_access',
+    'user_feature_access',
   ];
 
   const criticalColumns: Array<{ table: string; column: string }> = [
@@ -86,6 +88,71 @@ export async function getSchemaHealth() {
     missing_columns: missingColumns,
     profile_trigger_healthy: profileTriggerHealthy,
     profile_trigger_message: profileTriggerMessage,
+    checked_at: new Date().toISOString(),
+  };
+}
+
+export async function getSecurityPolicyHealth() {
+  const orgScopedTables = new Set([
+    'organizations',
+    'org_users',
+    'org_members',
+    'phone_numbers',
+    'org_phone_numbers',
+    'calls',
+    'mightycall_reports',
+    'mightycall_recordings',
+    'mightycall_sms_messages',
+    'call_transfers',
+    'live_agent_presence',
+    'agent_live_status',
+    'leads',
+    'lead_sources',
+    'org_integrations',
+    'support_tickets',
+    'org_feature_access',
+    'user_feature_access',
+  ]);
+
+  let tableStatus: any[] = [];
+  let tableError: string | null = null;
+  try {
+    const { data, error } = await supabaseAdmin.rpc('security_table_rls_status');
+    if (error) throw error;
+    tableStatus = data || [];
+  } catch (err: any) {
+    tableError = err?.message || String(err);
+  }
+
+  let bucketStatus: any[] = [];
+  let bucketError: string | null = null;
+  try {
+    const { data, error } = await supabaseAdmin.rpc('security_storage_bucket_status');
+    if (error) throw error;
+    bucketStatus = data || [];
+  } catch (err: any) {
+    bucketError = err?.message || String(err);
+  }
+
+  const missingRls = tableStatus
+    .filter((row) => orgScopedTables.has(row.table_name) && !row.rls_enabled)
+    .map((row) => row.table_name);
+  const missingPolicies = tableStatus
+    .filter((row) => orgScopedTables.has(row.table_name) && Number(row.policy_count || 0) === 0)
+    .map((row) => row.table_name);
+  const publicBuckets = bucketStatus
+    .filter((row) => row.public === true)
+    .map((row) => row.name || row.id);
+
+  return {
+    ok: !tableError && !bucketError && missingRls.length === 0 && missingPolicies.length === 0,
+    table_status: tableStatus,
+    bucket_status: bucketStatus,
+    missing_rls: missingRls,
+    missing_policies: missingPolicies,
+    public_buckets: publicBuckets,
+    table_error: tableError,
+    bucket_error: bucketError,
     checked_at: new Date().toISOString(),
   };
 }
