@@ -254,9 +254,9 @@ function AppRouter() {
       <Route
         path="/debug-auth"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <DebugAuthPage />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route

@@ -2,6 +2,8 @@
 
 Audit date: 2026-05-28
 
+Latest follow-up pass: 2026-05-28
+
 ## Fixed In This Pass
 
 - Hardened light mode readability across the app by forcing dark Tailwind surfaces, tables, inputs, placeholders, borders, hover rows, and low-opacity cards into readable light-theme colors.
@@ -13,6 +15,10 @@ Audit date: 2026-05-28
 - Removed the production fallback that used the service key as the invite-code signing secret. Production now requires `INVITE_CODE_SECRET`.
 - Removed the wildcard `Access-Control-Allow-Origin: *` header from the Vercel API rewrite.
 - Removed `VITE_SUPABASE_SERVICE_ROLE_KEY` support from local server scripts so service-role credentials are not encouraged under frontend-style env names.
+- Admin-locked `/debug-auth`; it is no longer available to ordinary authenticated users.
+- Made the legacy webhook route public-session bypass opt-in with `ENABLE_LEGACY_WEBHOOKS=true`.
+- Made production API rate limiting require persistent Redis by default. `ALLOW_IN_MEMORY_RATE_LIMIT_PRODUCTION=true` is an emergency override only.
+- Added `npm run security:scan` for repeatable static checks around committed secrets, frontend private env names, wildcard CORS, and raw realtime payload logging.
 
 ## Verified
 
@@ -25,14 +31,16 @@ Audit date: 2026-05-28
 - API rate limiting, CSRF middleware, input sanitation, and API request logging exist in `server/src/security/apiSecurity.ts` and `server/src/index.ts`.
 - Client build passed: `npm run --prefix client build`.
 - Server TypeScript build passed: `npm run --prefix server build`.
+- Follow-up static scan passed: `npm run security:scan`.
+- Server test suite passed: `npm run --prefix server test`.
 
 ## Remaining High Priority Work
 
 1. Verify live database RLS, not just migration files.
    Run a live query against `pg_tables`/`pg_policies` to confirm every production table has RLS enabled and correct org-scoped policies. Migration files show broad coverage, but only the live database can prove this.
 
-2. Remove or admin-lock `/debug-auth` in production.
-   It is currently an authenticated route, but it displays authentication/config diagnostics. Keep it admin-only or disable it outside development.
+2. Keep `/debug-auth` admin-only.
+   This is now admin-routed in the frontend; any backend diagnostic endpoints should follow the same rule.
 
 3. Eliminate direct client database fallbacks.
    Some client components still import the browser database client directly. RLS should protect this, but production-grade posture is cleaner when client pages use server API routes for privileged and multi-tenant data.
@@ -40,14 +48,14 @@ Audit date: 2026-05-28
 4. Finish endpoint-by-endpoint Zod validation.
    A global sanitizer exists, but high-risk mutating endpoints should have strict schemas that reject unknown fields and validate roles/org ownership explicitly.
 
-5. Make Upstash mandatory in production.
-   The rate limiter falls back to in-memory buckets when Upstash is missing. That is fine for local dev, but serverless production needs `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+5. Keep Upstash mandatory in production.
+   The rate limiter now fails closed in production if Upstash is missing, unless `ALLOW_IN_MEMORY_RATE_LIMIT_PRODUCTION=true` is explicitly set.
 
 6. Tighten CSP.
    Current CSP still allows `'unsafe-inline'` for scripts/styles. Move toward nonces or hashes once the frontend is ready.
 
-7. Review public API bypass list.
-   `publicApiRoutes` still includes the legacy phone-system webhook path. If the app is API-only, remove or disable unused webhook endpoints to reduce attack surface.
+7. Keep the legacy webhook disabled unless truly needed.
+   The route is no longer public by default. Only set `ENABLE_LEGACY_WEBHOOKS=true` if you intentionally restore that integration.
 
 8. Confirm log retention is active in production.
    Logging tables and retention migrations exist, but production should verify `pg_cron` is installed and scheduled cleanup jobs are running.

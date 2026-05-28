@@ -24,6 +24,7 @@ const redis = upstashUrl && upstashToken
 
 const limiterCache = new Map<string, Ratelimit>();
 const memoryBuckets = new Map<string, { count: number; resetAt: number }>();
+const allowProductionMemoryRateLimit = process.env.ALLOW_IN_MEMORY_RATE_LIMIT_PRODUCTION === 'true';
 
 const publicApiRoutes = [
   /^\/auth\/login$/,
@@ -33,7 +34,7 @@ const publicApiRoutes = [
   /^\/auth\/signup-with-invite$/,
   /^\/access-code\/verify$/,
   /^\/leads\/inbound$/,
-  /^\/webhooks\/mightycall$/,
+  ...(process.env.ENABLE_LEGACY_WEBHOOKS === 'true' ? [/^\/webhooks\/mightycall$/] : []),
 ];
 
 const requestObject = z.record(z.string(), z.any());
@@ -137,6 +138,10 @@ async function logRateLimitViolation(supabaseAdmin: SupabaseAdmin, req: Request)
 
 export function createApiRateLimitMiddleware(supabaseAdmin: SupabaseAdmin) {
   return async function apiRateLimit(req: Request, res: Response, next: NextFunction) {
+    if (!redis && process.env.NODE_ENV === 'production' && !allowProductionMemoryRateLimit) {
+      return res.status(503).json({ error: 'rate_limit_not_configured' });
+    }
+
     const rule = resolveLimitRule(req);
     const identity = rule.keyBy === 'ip'
       ? getIp(req)

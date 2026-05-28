@@ -43,3 +43,20 @@ test('mcgraw now lead intake is external-key protected and duplicate aware', () 
   assert.match(migration, /alter table public\.leads enable row level security/);
   assert.match(migration, /alter publication supabase_realtime add table public\.leads/);
 });
+
+test('legacy webhook public bypass is opt-in only', () => {
+  const apiSecurity = readFileSync(join(process.cwd(), 'src', 'security', 'apiSecurity.ts'), 'utf8');
+  assert.match(apiSecurity, /ENABLE_LEGACY_WEBHOOKS === 'true'/);
+  assert.doesNotMatch(apiSecurity, /\n\s*\/\^\\\/webhooks\\\/mightycall\\\$\/,\n/);
+});
+
+test('production rate limiting requires persistent redis unless explicitly bypassed', () => {
+  const apiSecurity = readFileSync(join(process.cwd(), 'src', 'security', 'apiSecurity.ts'), 'utf8');
+  assert.match(apiSecurity, /ALLOW_IN_MEMORY_RATE_LIMIT_PRODUCTION/);
+  assert.match(apiSecurity, /rate_limit_not_configured/);
+});
+
+test('debug auth page is admin-only in the router', () => {
+  const source = readFileSync(join(repoRoot, 'client', 'src', 'main.tsx'), 'utf8');
+  assert.match(source, /path="\/debug-auth"[\s\S]*?<AdminRoute>[\s\S]*?<DebugAuthPage \/>[\s\S]*?<\/AdminRoute>/);
+});
