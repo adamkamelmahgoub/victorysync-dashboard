@@ -209,8 +209,7 @@ export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
             const response = await fetch('/api/org/recover', {
               method: 'POST',
               headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+                'Content-Type': 'application/json'
               },
               body: JSON.stringify({ orgId: membership.org_id })
             });

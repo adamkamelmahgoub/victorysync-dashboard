@@ -1,11 +1,13 @@
 import React, { FC, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import { useOrg } from "../contexts/OrgContext";
 import { supabase } from "../lib/supabaseClient";
 import { PageLayout } from "../components/PageLayout";
 
 export const SettingsPage: FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { org, isAdmin, refresh } = useOrg();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -53,7 +55,7 @@ export const SettingsPage: FC = () => {
       // Log audit
       await supabase.from('audit_logs').insert({
         org_id: org.id,
-        user_id: (await supabase.auth.getUser()).data.user?.id,
+        user_id: user?.id || null,
         action: 'update_org_settings',
         entity_type: 'organization',
         entity_id: org.id,

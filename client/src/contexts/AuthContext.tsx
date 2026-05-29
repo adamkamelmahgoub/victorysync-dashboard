@@ -1,12 +1,21 @@
 import type { FC, ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
-import type { User } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabaseClient";
+import {
+  useAuth as useClerkAuth,
+  useClerk,
+  useUser as useClerkUser,
+} from "@clerk/react";
 import { buildApiUrl } from "../config";
 import { postLog } from "../lib/logging";
 
+type AppUser = {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, any>;
+};
+
 type AuthContextValue = {
-  user: User | null;
+  user: AppUser | null;
   orgs: Array<{ id: string; name: string; logo_url?: string | null }>;
   selectedOrgId: string | null;
   loading: boolean;
@@ -20,6 +29,13 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   setSelectedOrgId: (id: string | null) => void;
 };
+
+declare global {
+  interface Window {
+    __victorysyncGetClerkToken?: () => Promise<string | null>;
+    __victorysyncClerkUserId?: string | null;
+  }
+}
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -45,7 +61,10 @@ async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs =
 }
 
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const { isLoaded, isSignedIn, getToken, userId: clerkUserId } = useClerkAuth();
+  const { user: clerkUser } = useClerkUser();
+  const clerk = useClerk();
+  const [user, setUser] = useState<AppUser | null>(null);
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string; logo_url?: string | null }>>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,219 +73,126 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [featureAccessLoaded, setFeatureAccessLoaded] = useState(false);
   const [profile, setProfile] = useState<{ full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null>(null);
 
-  const loadFeatures = async (nextUser: User | null = user, orgId: string | null = selectedOrgId) => {
+  useEffect(() => {
+    window.__victorysyncGetClerkToken = async () => getToken();
+    window.__victorysyncClerkUserId = clerkUserId || null;
+    return () => {
+      window.__victorysyncGetClerkToken = undefined;
+      window.__victorysyncClerkUserId = null;
+    };
+  }, [getToken, clerkUserId]);
+
+  const loadFeatures = async (nextUser: AppUser | null = user, orgId: string | null = selectedOrgId) => {
     if (!nextUser) {
       setFeatureAccess({});
       setFeatureAccessLoaded(true);
       return;
     }
     setFeatureAccessLoaded(false);
-    const suffix = orgId ? `?org_id=${encodeURIComponent(orgId)}` : '';
-    const data = await fetchJsonWithTimeout(buildApiUrl(`/api/me/features${suffix}`), { headers: { 'x-user-id': nextUser.id } }, 5000);
+    const suffix = orgId ? `?org_id=${encodeURIComponent(orgId)}` : "";
+    const data = await fetchJsonWithTimeout(buildApiUrl(`/api/me/features${suffix}`), undefined, 5000);
     setFeatureAccess(data?.features || {});
     setFeatureAccessLoaded(true);
   };
 
-  useEffect(() => {
-    const hydrateUserContext = async (nextUser: User) => {
-      const [profileData, orgsData] = await Promise.all([
-        fetchJsonWithTimeout(buildApiUrl('/api/user/profile'), { headers: { 'x-user-id': nextUser.id } }),
-        fetchJsonWithTimeout(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': nextUser.id } }),
-      ]);
+  const hydrateUserContext = async () => {
+    const [profileData, orgsData] = await Promise.all([
+      fetchJsonWithTimeout(buildApiUrl("/api/user/profile")),
+      fetchJsonWithTimeout(buildApiUrl("/api/user/orgs")),
+    ]);
 
-      if (profileData?.profile) {
-        setGlobalRole(profileData.profile.global_role ?? null);
-      }
-
-      if (profileData?.user) {
-        setProfile({
-          full_name: profileData.user.full_name || '',
-          phone_number: profileData.user.phone_number || '',
-          profile_pic_url: profileData.user.profile_pic_url || '',
-          theme: profileData.user.theme || 'dark',
-        });
-      }
-
-      if (orgsData) {
-        const list = (orgsData.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || '' }));
-        setOrgs(list);
-        const resolvedRole = profileData?.profile?.global_role ?? nextUser.user_metadata?.global_role ?? null;
-        if (resolvedRole === 'platform_admin') {
-          setSelectedOrgId(null);
-          void loadFeatures(nextUser, null);
-        } else {
-          const metadataOrgId = (nextUser.user_metadata as any)?.org_id || null;
-          const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : (list[0]?.id || null);
-          setSelectedOrgId(assignedOrgId);
-          void loadFeatures(nextUser, assignedOrgId);
+    const internalUser: AppUser | null = profileData?.user?.id
+      ? {
+          id: profileData.user.id,
+          email: profileData.user.email || clerkUser?.primaryEmailAddress?.emailAddress || null,
+          user_metadata: {
+            global_role: profileData?.profile?.global_role ?? null,
+            org_id: null,
+          },
         }
-      }
-    };
+      : null;
 
-    // Check current session on mount, but timeout to avoid infinite loading
-    const initializeAuth = async () => {
-      try {
-        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 5000));
-        const getSessionPromise = supabase.auth.getSession();
-
-        const r: any = await Promise.race([getSessionPromise, timeoutPromise]);
-        if (r && r.timeout) {
-          console.warn('[AuthContext] getSession timed out after 5000ms');
-        } else if (r && r.data && r.data.session?.user) {
-          const nextUser = r.data.session.user;
-          setUser(nextUser);
-          setLoading(false);
-          void hydrateUserContext(nextUser);
-          return;
-        }
-      } catch (error) {
-        console.error("Error initializing auth:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    initializeAuth();
-
-    // Subscribe to auth changes
-    let subscription: any = null;
-    try {
-      const sub = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          setLoading(false);
-          void hydrateUserContext(session.user);
-        } else {
-          setUser(null);
-          setOrgs([]);
-          setSelectedOrgId(null);
-          setGlobalRole(null);
-          setFeatureAccess({});
-          setFeatureAccessLoaded(true);
-          setProfile(null);
-          setLoading(false);
-        }
-      });
-      subscription = sub.data?.subscription || sub;
-    } catch (e) {
-      console.warn('Auth subscription failed to initialize:', e);
-      subscription = null;
+    if (!internalUser) {
+      setUser(null);
+      setOrgs([]);
+      setSelectedOrgId(null);
+      setGlobalRole(null);
+      setFeatureAccess({});
+      setFeatureAccessLoaded(true);
+      setProfile(null);
+      return;
     }
 
+    setUser(internalUser);
+    setGlobalRole(profileData?.profile?.global_role ?? null);
+
+    if (profileData?.user) {
+      setProfile({
+        full_name: profileData.user.full_name || "",
+        phone_number: profileData.user.phone_number || "",
+        profile_pic_url: profileData.user.profile_pic_url || "",
+        theme: profileData.user.theme || "dark",
+      });
+    }
+
+    const list = (orgsData?.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || "" }));
+    setOrgs(list);
+
+    const resolvedRole = profileData?.profile?.global_role ?? null;
+    if (resolvedRole === "platform_admin") {
+      setSelectedOrgId(null);
+      void loadFeatures(internalUser, null);
+    } else {
+      const assignedOrgId = list[0]?.id || null;
+      setSelectedOrgId(assignedOrgId);
+      void loadFeatures(internalUser, assignedOrgId);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    if (!isSignedIn) {
+      setUser(null);
+      setOrgs([]);
+      setSelectedOrgId(null);
+      setGlobalRole(null);
+      setFeatureAccess({});
+      setFeatureAccessLoaded(true);
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    hydrateUserContext()
+      .catch((error) => {
+        console.error("Error initializing Clerk auth:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
     return () => {
-      try {
-        subscription?.unsubscribe?.();
-      } catch (e) {
-        // ignore
-      }
-      // nothing to clear
+      cancelled = true;
     };
-  }, []);
+  }, [isLoaded, isSignedIn, clerkUserId]);
 
   useEffect(() => {
     if (!user) return;
     void loadFeatures(user, selectedOrgId);
   }, [user?.id, selectedOrgId]);
 
-  const signIn = async (
-    email: string,
-    password: string
-  ): Promise<{ error?: string }> => {
-    try {
-      // Authenticate through the API so rate limiting and account lockout are enforced server-side.
-      const timeoutMs = 10000; // 10s
-      const signInPromise = fetch(buildApiUrl('/api/auth/login'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      }).then(async (response) => {
-        const json = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          return { error: { message: json?.error || 'Sign in failed' } };
-        }
-        if (json?.session?.access_token && json?.session?.refresh_token) {
-          const setSession = await supabase.auth.setSession({
-            access_token: json.session.access_token,
-            refresh_token: json.session.refresh_token,
-          });
-          if (setSession.error) return { error: setSession.error };
-          return { data: setSession.data };
-        }
-        return { error: { message: 'Sign in did not return a session' } };
-      });
-      const res: any = await Promise.race([
-        signInPromise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('sign-in timeout')), timeoutMs)),
-      ]);
-      if (res?.error) {
-        return { error: res.error?.message ?? String(res.error) };
-      }
-
-      const data = res?.data;
-      if (data && data.user) {
-        setUser(data.user);
-        const role = data.user.user_metadata?.global_role ?? null;
-        setGlobalRole(role);
-
-        // Fetch profile from backend to get canonical global_role
-        try {
-          const profileRes = await fetch(buildApiUrl('/api/user/profile'), {
-            headers: { 'x-user-id': data.user.id }
-          });
-          if (profileRes.ok) {
-            const profileData = await profileRes.json();
-            if (profileData.profile) setGlobalRole(profileData.profile.global_role ?? null);
-            if (profileData.user) {
-              setProfile({
-                full_name: profileData.user.full_name || '',
-                phone_number: profileData.user.phone_number || '',
-                profile_pic_url: profileData.user.profile_pic_url || '',
-                theme: profileData.user.theme || 'dark',
-              });
-            }
-          }
-        } catch (profileErr) {
-          console.warn('[AuthContext] Failed to fetch profile:', profileErr);
-        }
-
-        // Fetch orgs for user
-        try {
-          const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': data.user.id } });
-          if (orgsRes.ok) {
-            const j = await orgsRes.json();
-            const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || '' }));
-            setOrgs(list);
-            if (data.user.user_metadata?.global_role === 'platform_admin') {
-              setSelectedOrgId(null);
-              void loadFeatures(data.user, null);
-            } else {
-              const metadataOrgId = (data.user.user_metadata as any)?.org_id || null;
-              const assignedOrgId = metadataOrgId && list.some((o: any) => o.id === metadataOrgId) ? metadataOrgId : (list[0]?.id || null);
-              setSelectedOrgId(assignedOrgId);
-              void loadFeatures(data.user, assignedOrgId);
-            }
-          }
-        } catch (e) {
-          console.warn('[AuthContext] Failed to fetch orgs:', e);
-        }
-      }
-
-      if (!data || !data.user) {
-        console.warn('[AuthContext] Sign in returned no user object');
-        return { error: 'Sign in did not return a user' };
-      }
-
-      return {};
-    } catch (err: any) {
-      console.error('[AuthContext] Sign in exception:', err);
-      return { error: err?.message ?? 'Sign in failed' };
-    }
+  const signIn = async (): Promise<{ error?: string }> => {
+    clerk.openSignIn({ redirectUrl: "/dashboard" });
+    return {};
   };
 
   const signOut = async () => {
     try {
-      postLog('/api/logs/auth', { event_type: 'logout', email: user?.email || null });
-      await supabase.auth.signOut();
+      postLog("/api/logs/auth", { event_type: "logout", email: user?.email || null });
+      await clerk.signOut({ redirectUrl: "/login" });
       setUser(null);
       setOrgs([]);
       setSelectedOrgId(null);
@@ -282,33 +208,10 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const refreshProfile = async () => {
     try {
       if (!user) return;
-      // Fetch latest user profile from backend which has global_role from database
-      const response = await fetch(buildApiUrl(`/api/user/profile${selectedOrgId ? `?org_id=${encodeURIComponent(selectedOrgId)}` : ''}`), {
-        headers: { 'x-user-id': user.id }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.profile) {
-          setGlobalRole(data.profile.global_role ?? null);
-        }
-        if (data.user) {
-          setProfile({
-            full_name: data.user.full_name || '',
-            phone_number: data.user.phone_number || '',
-            profile_pic_url: data.user.profile_pic_url || '',
-            theme: data.user.theme || 'dark',
-          });
-        }
-      }
-      const orgsRes = await fetch(buildApiUrl('/api/user/orgs'), { headers: { 'x-user-id': user.id } });
-      if (orgsRes.ok) {
-        const j = await orgsRes.json();
-        const list = (j.orgs || []).map((o: any) => ({ id: o.id, name: o.name, logo_url: o.logo_url || '' }));
-        setOrgs(list);
-      }
+      await hydrateUserContext();
       await loadFeatures(user, selectedOrgId);
     } catch (e) {
-      console.warn('[AuthContext] Failed to refresh profile:', e);
+      console.warn("[AuthContext] Failed to refresh profile:", e);
     }
   };
 

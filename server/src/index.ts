@@ -71,8 +71,8 @@ import { normalizeMightyCallJournalActivity, normalizeMightyCallStatusActivity }
 import { getMightyCallStatusByExtension } from './services/mightycallLiveStatus';
 import {
   createApiRateLimitMiddleware,
+  createClerkSessionMiddleware,
   createCsrfToken,
-  createSupabaseSessionMiddleware,
   csrfProtection,
   enforceAuthenticatedApi,
   validateAndSanitizeApiInput,
@@ -100,6 +100,8 @@ declare global {
     interface Request {
       requestId?: string;
       actorId?: string | null;
+      clerkUser?: any;
+      clerkUserId?: string | null;
       isPlatformAdmin?: boolean;
       apiKeyScope?: {
         scope: 'platform' | 'org';
@@ -4395,7 +4397,7 @@ app.use('/api', (_req, res, next) => {
 });
 // Apply API key middleware early so endpoints can detect org-scoped or platform keys
 app.use('/api', apiKeyAuthMiddleware as any);
-app.use('/api', createSupabaseSessionMiddleware(supabaseAdmin) as any);
+app.use('/api', createClerkSessionMiddleware(supabaseAdmin) as any);
 app.use('/api', validateAndSanitizeApiInput as any);
 app.use('/api', createApiRateLimitMiddleware(supabaseAdmin) as any);
 app.use('/api', createApiLoggerMiddleware(supabaseAdmin) as any);
@@ -5366,6 +5368,8 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
+  return res.status(410).json({ error: 'supabase_auth_disabled', provider: 'clerk' });
+  /*
   try {
     const ipAddress = String(req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
     if (!checkRateLimit(`auth_login:${ipAddress}`, 20, 60_000)) {
@@ -5474,63 +5478,7 @@ app.post('/api/auth/login', async (req, res) => {
     console.error('auth_login_failed:', fmtErr(e));
     return res.status(500).json({ error: 'auth_login_failed' });
   }
-});
-
-// Resolve authenticated actor from a Supabase bearer token.
-// In production, only a valid Supabase bearer token or API key is accepted.
-// In non-production, x-user-id and x-dev-bypass are still allowed for local testing.
-app.use('/api', async (req, res, next) => {
-  try {
-    let actor: string | null = null;
-    const incomingUserId = req.header('x-user-id') || null;
-    const authorization = String(req.header('authorization') || '');
-    const bearer = authorization.toLowerCase().startsWith('bearer ')
-      ? authorization.slice(7).trim()
-      : null;
-
-    if (bearer && !(req as any).apiKeyScope) {
-      try {
-        const { data, error } = await supabaseAdmin.auth.getUser(bearer);
-        if (!error && data?.user?.id) {
-          actor = data.user.id;
-          req.headers['x-user-id'] = actor;
-        } else if (error) {
-          console.warn('[auth] bearer verification failed:', fmtErr(error));
-        }
-      } catch (authErr) {
-        console.warn('[auth] bearer verification failed:', fmtErr(authErr));
-      }
-    }
-
-    if (!actor && process.env.NODE_ENV !== 'production') {
-      if (req.header('x-dev-bypass') === 'true') {
-        actor = process.env.DEV_BYPASS_USER_ID || 'a5f6f998-5ed5-4c0c-88ac-9f27d677697a';
-        req.headers['x-user-id'] = actor;
-        console.log('[DEV BYPASS] Allowing request without auth:', req.method, req.path);
-      } else {
-        actor = incomingUserId;
-      }
-    }
-
-    if (!actor && process.env.NODE_ENV === 'production' && incomingUserId) {
-      delete req.headers['x-user-id'];
-    }
-
-    (req as any).actorId = actor;
-    if (actor) {
-      try {
-        (req as any).isPlatformAdmin = await isPlatformAdmin(actor);
-      } catch (e) {
-        (req as any).isPlatformAdmin = false;
-      }
-    } else {
-      (req as any).isPlatformAdmin = false;
-    }
-  } catch (e) {
-    (req as any).actorId = null;
-    (req as any).isPlatformAdmin = false;
-  }
-  next();
+  */
 });
 
 // GET /api/client-metrics?org_id=...
@@ -6659,6 +6607,42 @@ app.get('/api/user/profile', async (req, res) => {
   try {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    if (req.clerkUser) {
+      const clerkUser = req.clerkUser;
+      const email = clerkUser.primaryEmailAddress?.emailAddress || '';
+      const fullName = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ');
+      const { data: profile, error } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, full_name, global_role')
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) throw error;
+
+      const selectedOrgId = req.query.org_id as string | undefined;
+      let organization: any = null;
+      if (selectedOrgId) {
+        const { data: orgRow } = await supabaseAdmin
+          .from('organizations')
+          .select('id, name, logo_url')
+          .eq('id', selectedOrgId)
+          .maybeSingle();
+        organization = orgRow || null;
+      }
+
+      return res.json({
+        user: {
+          id: userId,
+          email: profile?.email || email,
+          full_name: profile?.full_name || fullName || '',
+          phone_number: '',
+          profile_pic_url: clerkUser.imageUrl || '',
+          theme: 'dark'
+        },
+        profile: { id: userId, global_role: profile?.global_role || null },
+        organization
+      });
+    }
 
     // Source of truth: auth user metadata via Admin API.
     const { data: authUserData, error: authUserErr } = await supabaseAdmin.auth.admin.getUserById(userId);
@@ -10101,6 +10085,8 @@ app.post('/api/auth/validate-invite', async (req, res) => {
 
 // POST /api/auth/signup-with-invite - create account only when invite code matches email+org
 app.post('/api/auth/signup-with-invite', async (req, res) => {
+  return res.status(410).json({ error: 'supabase_auth_disabled', provider: 'clerk' });
+  /*
   try {
     const { email, password, orgId, inviteCode, fullName } = req.body || {};
     const normalized = normalizeEmail(email);
@@ -10171,6 +10157,7 @@ app.post('/api/auth/signup-with-invite', async (req, res) => {
     console.error('signup_with_invite_failed:', fmtErr(e));
     res.status(500).json({ error: 'signup_with_invite_failed', detail: fmtErr(e) ?? 'unknown_error' });
   }
+  */
 });
 
 // PATCH /api/orgs/:orgId/members/:userId - update org member role (org-admin only)

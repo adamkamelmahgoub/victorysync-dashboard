@@ -1,5 +1,6 @@
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
+import { ClerkProvider } from "@clerk/react";
 import {
   BrowserRouter,
   Routes,
@@ -76,6 +77,12 @@ if ((import.meta as any).env && (import.meta as any).env.VITE_DEBUG_API === 'tru
 
 installConsoleRedaction();
 installAuthenticatedFetch();
+
+const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+if (!clerkPublishableKey) {
+  throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY");
+}
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { user, loading: authLoading } = useAuth();
@@ -431,21 +438,23 @@ function AppRouter() {
 
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
-    <AuthProvider>
-      <ThemeProvider>
-        <OrgProvider>
-          <BrowserRouter>
-            <ErrorBoundary>
-              <LoggingProvider />
-              {/* ToastProvider provides a simple global toast UI */}
-              <ToastProvider>
-                <LeadAlertOverlay />
-                <AppRouter />
-              </ToastProvider>
-            </ErrorBoundary>
-          </BrowserRouter>
-        </OrgProvider>
-      </ThemeProvider>
-    </AuthProvider>
+    <ClerkProvider publishableKey={clerkPublishableKey} afterSignOutUrl="/login">
+      <AuthProvider>
+        <ThemeProvider>
+          <OrgProvider>
+            <BrowserRouter>
+              <ErrorBoundary>
+                <LoggingProvider />
+                {/* ToastProvider provides a simple global toast UI */}
+                <ToastProvider>
+                  <LeadAlertOverlay />
+                  <AppRouter />
+                </ToastProvider>
+              </ErrorBoundary>
+            </BrowserRouter>
+          </OrgProvider>
+        </ThemeProvider>
+      </AuthProvider>
+    </ClerkProvider>
   </StrictMode>
 );

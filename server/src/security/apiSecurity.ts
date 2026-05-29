@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { createClerkClient, verifyToken } from '@clerk/backend';
 import crypto from 'crypto';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
@@ -178,16 +179,63 @@ export function createApiRateLimitMiddleware(supabaseAdmin: SupabaseAdmin) {
   };
 }
 
-export function createSupabaseSessionMiddleware(supabaseAdmin: SupabaseAdmin) {
-  return async function resolveSupabaseSession(req: Request, _res: Response, next: NextFunction) {
+function getClerkClient() {
+  const secretKey = process.env.CLERK_SECRET_KEY || '';
+  if (!secretKey) return null;
+  return createClerkClient({ secretKey });
+}
+
+async function resolveClerkActorId(supabaseAdmin: SupabaseAdmin, clerkUserId: string) {
+  const clerk = getClerkClient();
+  if (!clerk) return null;
+
+  const clerkUser = await clerk.users.getUser(clerkUserId);
+  const externalId = clerkUser.externalId || null;
+  const email = clerkUser.primaryEmailAddress?.emailAddress?.trim().toLowerCase() || null;
+
+  if (externalId) {
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', externalId)
+      .maybeSingle();
+    if (data?.id) {
+      return { actorId: String(data.id), clerkUser };
+    }
+  }
+
+  if (email) {
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .ilike('email', email)
+      .maybeSingle();
+    if (data?.id) {
+      return { actorId: String(data.id), clerkUser };
+    }
+  }
+
+  return { actorId: null, clerkUser };
+}
+
+export function createClerkSessionMiddleware(supabaseAdmin: SupabaseAdmin) {
+  return async function resolveClerkSession(req: Request, _res: Response, next: NextFunction) {
     try {
       let actor: string | null = null;
       const token = bearerToken(req);
+
       if (token && !(req as any).apiKeyScope) {
-        const { data, error } = await supabaseAdmin.auth.getUser(token);
-        if (!error && data?.user?.id) {
-          actor = data.user.id;
-          req.headers['x-user-id'] = actor;
+        const secretKey = process.env.CLERK_SECRET_KEY || '';
+        if (secretKey) {
+          const payload = await verifyToken(token, { secretKey });
+          const clerkUserId = typeof payload.sub === 'string' ? payload.sub : null;
+          if (clerkUserId) {
+            const resolved = await resolveClerkActorId(supabaseAdmin, clerkUserId);
+            actor = resolved?.actorId || null;
+            (req as any).clerkUser = resolved?.clerkUser || null;
+            (req as any).clerkUserId = clerkUserId;
+            if (actor) req.headers['x-user-id'] = actor;
+          }
         }
       }
 
@@ -205,7 +253,8 @@ export function createSupabaseSessionMiddleware(supabaseAdmin: SupabaseAdmin) {
       }
 
       (req as any).actorId = actor;
-    } catch {
+    } catch (err) {
+      console.warn('[auth] Clerk bearer verification failed:', err instanceof Error ? err.message : String(err));
       (req as any).actorId = null;
     }
     next();

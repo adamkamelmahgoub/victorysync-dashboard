@@ -1,5 +1,4 @@
 import { API_BASE_URL } from "../config";
-import { supabase } from "./supabaseClient";
 
 let installed = false;
 let csrfTokenCache: { token: string; fetchedAt: number } | null = null;
@@ -48,10 +47,8 @@ export function installAuthenticatedFetch() {
     const headers = new Headers(request.headers);
 
     try {
-      const { data } = await supabase.auth.getSession();
-      const session = data.session;
-      const accessToken = session?.access_token || null;
-      const userId = session?.user?.id || null;
+      const accessToken = await window.__victorysyncGetClerkToken?.();
+      const userId = window.__victorysyncClerkUserId || null;
 
       if (accessToken && !headers.has("Authorization")) {
         headers.set("Authorization", `Bearer ${accessToken}`);
