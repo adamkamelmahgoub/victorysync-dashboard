@@ -161,14 +161,16 @@ const LiveStatusPage: FC = () => {
 
   const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
 
-  const load = async () => {
+  const load = async (forceLoadingState = false) => {
     if (!user?.id) return;
     if (liveRequestInFlight.current && Date.now() - lastLiveRequestStartedAt.current < 10000) return;
     liveRequestInFlight.current = true;
     lastLiveRequestStartedAt.current = Date.now();
     const requestSeq = ++liveRequestSeq.current;
     try {
-      setLoading(true);
+      // Only show loading spinner on first load (no data yet) or when explicitly forced.
+      // Background refreshes should never clear existing data with a spinner.
+      if (forceLoadingState || items.length === 0) setLoading(true);
       setError(null);
       const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
       if (requestSeq !== liveRequestSeq.current) return;
@@ -237,21 +239,17 @@ const LiveStatusPage: FC = () => {
     };
   }, [activeOrgId, user?.id]);
 
-  // Polling fallback — slower when SSE is live, faster when not
+  // Polling fallback — slower when SSE is live, faster when not.
+  // Removed focus/visibilitychange listeners: they triggered load() immediately on
+  // tab-switch which set loading=true, cleared existing data, and showed "Stale"
+  // for a moment before the fresh data arrived. The interval + SSE is sufficient.
   useEffect(() => {
     load();
     const intervalId = window.setInterval(() => {
       if (document.visibilityState === 'visible') load();
-    }, sseConnected ? 3000 : 1000);
-    const onFocus = () => {
-      if (document.visibilityState === 'visible') load();
-    };
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('visibilitychange', onFocus);
+    }, sseConnected ? 30_000 : 5_000);
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('visibilitychange', onFocus);
     };
   }, [user?.id, activeOrgId, sseConnected]);
 

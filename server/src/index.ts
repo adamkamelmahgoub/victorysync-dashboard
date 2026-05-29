@@ -2706,7 +2706,9 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
     email: identity?.email || null,
     role: 'agent',
     extension: resolvedExtension || null,
-    display_name: identity?.display_name || null,
+    // MightCall extension name takes priority — it reflects what's assigned in MightCall,
+    // not whatever the user's dashboard profile is named.
+    display_name: row?.agent_name || identity?.display_name || null,
     on_call: effectiveOnCall,
     direction: effectiveDirection,
     from_number: row?.from_number || null,
@@ -10327,6 +10329,60 @@ app.post('/api/auth/validate-invite', async (req, res) => {
   } catch (e: any) {
     console.error('validate_invite_failed:', fmtErr(e));
     res.status(500).json({ error: 'validate_invite_failed', detail: fmtErr(e) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/auth/validate-invite-by-email - OAuth users: validate invite code by email only (no orgId needed).
+// Also assigns org membership for the authenticated user so they can access the dashboard.
+app.post('/api/auth/validate-invite-by-email', async (req, res) => {
+  try {
+    const actorId = (req as any).actorId as string | null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { email, inviteCode } = req.body || {};
+    const normalized = normalizeEmail(email);
+    const code = String(inviteCode || '').trim().toUpperCase();
+    if (!normalized || !code) return res.status(400).json({ error: 'missing_required_fields' });
+
+    // Find invite across all orgs for this email
+    const { data: invites, error } = await supabaseAdmin
+      .from('org_invites')
+      .select('id, org_id, email, role, invited_at')
+      .eq('email', normalized)
+      .order('invited_at', { ascending: false });
+    if (error) throw error;
+    const invite = (invites || []).find((inv: any) => computeInviteCode(inv) === code);
+    if (!invite) {
+      return res.status(404).json({ error: 'invite_not_found_or_invalid_code', detail: 'No invite found for that email and code combination.' });
+    }
+
+    const org_id = invite.org_id;
+    const role = invite.role || 'agent';
+
+    // Assign org membership for this authenticated (OAuth) user
+    const membership = { org_id, user_id: actorId, role };
+    const { error: memberErr } = await supabaseAdmin.from('org_users').upsert(membership, { onConflict: 'org_id,user_id' });
+    if (memberErr) throw memberErr;
+    try { await supabaseAdmin.from('org_members').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
+    try { await supabaseAdmin.from('organization_members').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
+
+    // Consume invite after successful assignment
+    try { await supabaseAdmin.from('org_invites').delete().eq('id', invite.id); } catch {}
+
+    await insertLogSafely(supabaseAdmin, 'auth_logs', {
+      user_id: actorId,
+      organization_id: org_id,
+      event_type: 'oauth_invite_accepted',
+      email: normalized,
+      ip_address: getRequestIpHash(req as any),
+      user_agent: String(req.headers['user-agent'] || '').slice(0, 1000),
+    });
+
+    const { data: org } = await supabaseAdmin.from('organizations').select('id, name').eq('id', org_id).maybeSingle();
+    res.json({ success: true, org_id, org_name: (org as any)?.name || null, role });
+  } catch (e: any) {
+    console.error('validate_invite_by_email_failed:', fmtErr(e));
+    res.status(500).json({ error: 'validate_invite_by_email_failed', detail: fmtErr(e) ?? 'unknown_error' });
   }
 });
 

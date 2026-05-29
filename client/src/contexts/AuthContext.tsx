@@ -143,8 +143,12 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       }
     });
 
-    // Listen for sign-in / sign-out
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    // Listen for sign-in / sign-out.
+    // Skip TOKEN_REFRESHED and INITIAL_SESSION — those fire on every tab-focus/token
+    // renewal and must NOT trigger a setLoading(true) or re-hydration (that's what
+    // caused the "Loading…" flash every time the user switched apps).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') return;
       if (session?.user) {
         setLoading(true);
         hydrateUserContext()
