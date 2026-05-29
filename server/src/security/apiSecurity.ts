@@ -102,6 +102,9 @@ function resolveLimitRule(req: Request): LimitRule {
   if (method === 'POST' && path === '/auth/reset-password') return { name: 'auth-reset-password', requests: 3, window: '1 m', keyBy: 'ip' };
   if (method === 'POST' && path === '/access-code/verify') return { name: 'access-code-verify', requests: 5, window: '10 m', keyBy: 'ip' };
   if (method === 'POST' && path === '/leads/inbound') return { name: 'leads-inbound', requests: 500, window: '1 m', keyBy: 'ip' };
+  if (method === 'POST' && path === '/leads/upload') return { name: 'leads-upload', requests: 10, window: '1 m', keyBy: 'user' };
+  if (method === 'GET' && path === '/leads/uploads') return { name: 'leads-uploads-list', requests: 30, window: '1 m', keyBy: 'user' };
+  if (method === 'PATCH' && path.startsWith('/admin/users/') && path.endsWith('/upload-permission')) return { name: 'admin-upload-perm', requests: 60, window: '1 m', keyBy: 'user' };
   if (method === 'GET' && path.startsWith('/dashboard/')) return { name: 'dashboard-read', requests: 60, window: '1 m', keyBy: 'user' };
   if (method === 'GET' && path.startsWith('/kpi/')) return { name: 'kpi-read', requests: 30, window: '1 m', keyBy: 'user' };
   if (method === 'POST') return { name: 'post-default', requests: 20, window: '1 m', keyBy: 'user' };
@@ -324,6 +327,17 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction) 
     ? crypto.createHmac('sha256', secret).update(`${actor}:${new Date().toISOString().slice(0, 10)}`).digest('hex')
     : '';
   if (!actor || token !== expected) {
+    return res.status(403).json({ error: 'csrf_validation_failed' });
+  }
+  next();
+}
+
+export function createCsrfToken(actorId: string) {
+  const secret = process.env.CSRF_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'victorysync-csrf-dev');
+  if (!secret) throw new Error('csrf_not_configured');
+  return crypto.createHmac('sha256', secret).update(`${actorId}:${new Date().toISOString().slice(0, 10)}`).digest('hex');
+}
+ !== expected) {
     return res.status(403).json({ error: 'csrf_validation_failed' });
   }
   next();

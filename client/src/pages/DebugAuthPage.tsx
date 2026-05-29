@@ -106,8 +106,8 @@ export function DebugAuthPage() {
               id: user?.id,
               email: user?.email,
               role: (user?.user_metadata as any)?.role,
-              created_at: user?.created_at,
-              last_sign_in_at: user?.last_sign_in_at,
+              created_at: (user as any)?.created_at,
+              last_sign_in_at: (user as any)?.last_sign_in_at,
             }, null, 2)}
           </pre>
         </div>

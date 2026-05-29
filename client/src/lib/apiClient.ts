@@ -593,6 +593,44 @@ export async function getMembershipDrift(userId?: string, limit = 100) {
 }
 
 
+// ─── Lead uploads ─────────────────────────────────────────────────────────────
+
+export async function uploadLeadList(payload: {
+  rows: Record<string, any>[];
+  organization_id?: string | null;
+  assigned_agent_id?: string | null;
+  notify?: boolean;
+}, userId?: string) {
+  return await fetchJson('/api/leads/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify(payload),
+    timeoutMs: 60_000,
+  });
+}
+
+export async function getLeadUploads(params?: { organization_id?: string }, userId?: string) {
+  const q = new URLSearchParams();
+  if (params?.organization_id) q.set('organization_id', params.organization_id);
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/leads/uploads${suffix}`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function getUploadPermissions(orgId?: string, userId?: string) {
+  const q = new URLSearchParams();
+  if (orgId) q.set('org_id', orgId);
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return await fetchJson(`/api/admin/users/upload-permissions${suffix}`, { headers: { 'x-user-id': userId || '' } });
+}
+
+export async function setUploadPermission(targetUserId: string, can_upload_leads: boolean, userId?: string) {
+  return await fetchJson(`/api/admin/users/${encodeURIComponent(targetUserId)}/upload-permission`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ can_upload_leads }),
+  });
+}
+
 export async function getAdminAuditLogs(userId?: string, options?: { limit?: number; offset?: number; orgId?: string; action?: string }) {
   const q = new URLSearchParams();
   if (options?.limit) q.set('limit', String(options.limit));

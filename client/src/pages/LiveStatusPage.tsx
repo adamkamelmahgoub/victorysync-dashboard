@@ -1,6 +1,7 @@
-import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
+import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getLiveAgentStatus, refreshLiveAgentStatus } from '../lib/apiClient';
+import { supabase } from '../lib/supabaseClient';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
@@ -258,6 +259,44 @@ const LiveStatusPage: FC = () => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
+
+
+  // ── Supabase Realtime: instant update when agent_live_status row changes ──────
+  useEffect(() => {
+    if (!user?.id) return;
+    const channelName = activeOrgId
+      ? `live-status-org-${activeOrgId}`
+      : 'live-status-global';
+
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'agent_live_status',
+          ...(activeOrgId ? { filter: `org_id=eq.${activeOrgId}` } : {}),
+        },
+        (payload) => {
+          const updated = payload.new as LiveAgentStatus | null;
+          const removed = payload.old as Partial<LiveAgentStatus> | null;
+          if (payload.eventType === 'DELETE' && removed?.user_id) {
+            setItems((prev) => prev.filter((a) => a.user_id !== removed.user_id));
+            return;
+          }
+          if (!updated?.user_id) return;
+          setItems((prev) => {
+            const exists = prev.some((a) => a.user_id === updated.user_id);
+            if (exists) return prev.map((a) => a.user_id === updated.user_id ? { ...a, ...updated } : a);
+            return [...prev, updated as LiveAgentStatus];
+          });
+        },
+      )
+      .subscribe();
+
+    return () => { void supabase.removeChannel(channel); };
+  }, [activeOrgId, user?.id]);
 
   const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));
   const onCall = items.filter(isAgentOnCall).length;

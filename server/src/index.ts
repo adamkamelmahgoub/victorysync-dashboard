@@ -4346,8 +4346,17 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: '512kb' }));
-app.use(express.urlencoded({ extended: true, limit: '512kb' }));
+// Default body limit — tighter for most endpoints; lead upload gets its own parser below
+app.use((req, res, next) => {
+  if (req.path === '/api/leads/upload') return next(); // handled with larger limit below
+  express.json({ limit: '512kb' })(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.path === '/api/leads/upload') return next();
+  express.urlencoded({ extended: true, limit: '512kb' })(req, res, next);
+});
+// Larger limit only for lead list upload (up to 5000 rows ≈ 2MB JSON)
+app.use('/api/leads/upload', express.json({ limit: '4mb' }));
 app.use('/api', (_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -4899,6 +4908,213 @@ app.patch('/api/leads/:leadId', async (req, res) => {
     res.json({ item: data });
   } catch (e) {
     res.status(500).json({ error: 'lead_update_failed', detail: fmtErr(e) });
+  }
+});
+
+// ─── Lead List Uploads ────────────────────────────────────────────────────────
+// POST /api/leads/upload — bulk-insert a list of leads from a parsed CSV/JSON array.
+// Accepts: { rows: LeadRow[], organization_id?, assigned_agent_id?, notify?: boolean }
+// Auth: platform_admin, org admin, or any user with can_upload_leads = true
+app.post('/api/leads/upload', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || req.header('x-user-id') || '');
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { rows, organization_id, assigned_agent_id, notify = true } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: 'rows_required', detail: 'Provide a non-empty rows array.' });
+    }
+    if (rows.length > 5000) {
+      return res.status(400).json({ error: 'too_many_rows', detail: 'Maximum 5000 leads per upload.' });
+    }
+
+    // Authorization check
+    const isAdmin = await isPlatformAdmin(actorId);
+    let orgId = organization_id || null;
+    if (!isAdmin) {
+      // Check can_upload_leads on profile
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('can_upload_leads, global_role')
+        .eq('id', actorId)
+        .maybeSingle();
+      const canUpload = profile?.can_upload_leads === true;
+      if (!canUpload) return res.status(403).json({ error: 'upload_not_permitted', detail: 'Your account does not have lead upload permission.' });
+      // Non-admin must upload to their own org
+      if (!orgId) {
+        const { data: membership } = await supabaseAdmin
+          .from('org_members')
+          .select('org_id')
+          .eq('user_id', actorId)
+          .maybeSingle();
+        orgId = membership?.org_id || null;
+      } else {
+        // Verify they belong to that org
+        const { data: membership } = await supabaseAdmin
+          .from('org_members')
+          .select('org_id')
+          .eq('user_id', actorId)
+          .eq('org_id', orgId)
+          .maybeSingle();
+        if (!membership) return res.status(403).json({ error: 'forbidden_org' });
+      }
+    }
+
+    // Record the upload batch
+    const { data: uploadRecord, error: uploadErr } = await supabaseAdmin
+      .from('lead_list_uploads')
+      .insert({
+        uploaded_by: actorId,
+        organization_id: orgId,
+        assigned_agent_id: assigned_agent_id || null,
+        row_count: rows.length,
+        status: 'processing',
+        created_at: new Date().toISOString(),
+      })
+      .select('id')
+      .maybeSingle();
+    if (uploadErr) console.warn('[leads/upload] Failed to record batch:', fmtErr(uploadErr));
+    const uploadId = uploadRecord?.id || null;
+
+    // Normalize and insert rows in chunks of 200
+    const CHUNK = 200;
+    let inserted = 0;
+    let failed = 0;
+    const now = new Date().toISOString();
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK).map((row: any) => ({
+        organization_id: orgId,
+        assigned_agent_id: assigned_agent_id || row.assigned_agent_id || null,
+        lead_list_upload_id: uploadId,
+        source: row.source || 'manual_upload',
+        lead_type: row.lead_type || row.leadType || row['Lead Type'] || 'general',
+        first_name: String(row.first_name || row.firstName || row['First Name'] || '').slice(0, 100),
+        last_name: String(row.last_name || row.lastName || row['Last Name'] || '').slice(0, 100),
+        phone: String(row.phone || row.phone_number || row['Phone'] || row['Phone Number'] || '').replace(/\D/g, '').slice(0, 20),
+        email: String(row.email || row['Email'] || '').toLowerCase().slice(0, 255) || null,
+        state: String(row.state || row.State || '').toUpperCase().slice(0, 10) || null,
+        city: String(row.city || row.City || '').slice(0, 100) || null,
+        zip_code: String(row.zip_code || row.zip || row.Zip || row['Zip Code'] || '').slice(0, 20) || null,
+        address: String(row.address || row.Address || '').slice(0, 300) || null,
+        debt_amount: parseFloat(row.debt_amount || row.debtAmount || row['Debt Amount'] || '0') || null,
+        campaign_id: String(row.campaign_id || row.campaignId || row['Campaign ID'] || '').slice(0, 100) || null,
+        campaign_name: String(row.campaign_name || row.campaignName || row['Campaign Name'] || '').slice(0, 200) || null,
+        notes: String(row.notes || row.Notes || '').slice(0, 2000) || null,
+        status: 'new',
+        received_at: now,
+        raw_payload: row,
+      })).filter((r: any) => r.phone || r.email); // must have at least phone or email
+
+      const { error: insertErr } = await supabaseAdmin.from('leads').insert(chunk);
+      if (insertErr) {
+        console.warn('[leads/upload] chunk insert failed:', fmtErr(insertErr));
+        failed += chunk.length;
+      } else {
+        inserted += chunk.length;
+      }
+    }
+
+    // Update batch record
+    if (uploadId) {
+      await supabaseAdmin.from('lead_list_uploads').update({
+        status: failed === 0 ? 'complete' : 'partial',
+        inserted_count: inserted,
+        failed_count: failed,
+        completed_at: new Date().toISOString(),
+      }).eq('id', uploadId);
+    }
+
+    return res.json({
+      ok: true,
+      upload_id: uploadId,
+      inserted,
+      failed,
+      total: rows.length,
+      notify,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'lead_upload_failed', detail: fmtErr(e) });
+  }
+});
+
+// GET /api/leads/uploads — list recent upload batches for this org
+app.get('/api/leads/uploads', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || req.header('x-user-id') || '');
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const isAdmin = await isPlatformAdmin(actorId);
+    const orgId = String(req.query.organization_id || req.query.org_id || '').trim() || null;
+    let query = supabaseAdmin
+      .from('lead_list_uploads')
+      .select('id, organization_id, uploaded_by, assigned_agent_id, row_count, inserted_count, failed_count, status, created_at, completed_at')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (!isAdmin) {
+      // Non-admin sees only their org's uploads
+      const { data: membership } = await supabaseAdmin
+        .from('org_members').select('org_id').eq('user_id', actorId).maybeSingle();
+      const userOrgId = membership?.org_id || null;
+      if (!userOrgId) return res.json({ items: [] });
+      query = query.eq('organization_id', userOrgId);
+    } else if (orgId) {
+      query = query.eq('organization_id', orgId);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ items: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: 'lead_uploads_fetch_failed', detail: fmtErr(e) });
+  }
+});
+
+// GET /api/admin/users/upload-permissions — list users with can_upload_leads flag
+app.get('/api/admin/users/upload-permissions', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || req.header('x-user-id') || '');
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    const orgId = String(req.query.org_id || '').trim() || null;
+    let query = supabaseAdmin
+      .from('profiles')
+      .select('id, email, full_name, global_role, can_upload_leads')
+      .order('full_name', { ascending: true })
+      .limit(200);
+    if (orgId) {
+      const { data: members } = await supabaseAdmin
+        .from('org_members').select('user_id').eq('org_id', orgId);
+      const ids = (members || []).map((m: any) => m.user_id).filter(Boolean);
+      if (ids.length === 0) return res.json({ items: [] });
+      query = query.in('id', ids);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ items: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: 'upload_permissions_fetch_failed', detail: fmtErr(e) });
+  }
+});
+
+// PATCH /api/admin/users/:userId/upload-permission — toggle can_upload_leads
+app.patch('/api/admin/users/:userId/upload-permission', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || req.header('x-user-id') || '');
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+    const { userId } = req.params;
+    const { can_upload_leads } = req.body;
+    if (typeof can_upload_leads !== 'boolean') {
+      return res.status(400).json({ error: 'can_upload_leads_required' });
+    }
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .update({ can_upload_leads })
+      .eq('id', userId)
+      .select('id, email, full_name, can_upload_leads')
+      .maybeSingle();
+    if (error) throw error;
+    res.json({ item: data });
+  } catch (e) {
+    res.status(500).json({ error: 'upload_permission_update_failed', detail: fmtErr(e) });
   }
 });
 
@@ -6659,7 +6875,37 @@ app.get('/api/user/profile', async (req, res) => {
     }
 
     const meta: any = authUser.user_metadata || {};
-    const globalRole = meta?.global_role || null;
+    const isOAuthUser = !!(authUser.app_metadata?.provider && authUser.app_metadata.provider !== 'email');
+    const oauthFullName = meta?.full_name || meta?.name || [meta?.given_name, meta?.family_name].filter(Boolean).join(' ') || '';
+    const oauthAvatarUrl = meta?.avatar_url || meta?.picture || '';
+
+    // Auto-create profiles row for OAuth users (Google, etc.) if missing
+    if (isOAuthUser) {
+      const { data: existing } = await supabaseAdmin
+        .from('profiles')
+        .select('id, global_role, can_upload_leads')
+        .eq('id', userId)
+        .maybeSingle();
+      if (!existing) {
+        await supabaseAdmin.from('profiles').upsert({
+          id: userId,
+          email: authUser.email || '',
+          full_name: oauthFullName,
+          global_role: null,
+          can_upload_leads: false,
+          created_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+      }
+    }
+
+    // Read profile row for RBAC data (may be null for brand-new users)
+    const { data: profileRow } = await supabaseAdmin
+      .from('profiles')
+      .select('id, global_role, can_upload_leads')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const globalRole = profileRow?.global_role || meta?.global_role || null;
     const selectedOrgId = req.query.org_id as string | undefined;
     let organization: any = null;
     if (selectedOrgId) {
@@ -6674,10 +6920,11 @@ app.get('/api/user/profile', async (req, res) => {
       user: {
         id: authUser.id,
         email: authUser.email,
-        full_name: meta?.full_name || '',
+        full_name: meta?.full_name || oauthFullName || '',
         phone_number: meta?.phone_number || '',
-        profile_pic_url: meta?.profile_pic_url || '',
-        theme: meta?.theme || 'dark'
+        profile_pic_url: meta?.profile_pic_url || oauthAvatarUrl || '',
+        theme: meta?.theme || 'dark',
+        can_upload_leads: profileRow?.can_upload_leads ?? false,
       },
       profile: { id: userId, global_role: globalRole },
       organization
@@ -10085,8 +10332,6 @@ app.post('/api/auth/validate-invite', async (req, res) => {
 
 // POST /api/auth/signup-with-invite - create account only when invite code matches email+org
 app.post('/api/auth/signup-with-invite', async (req, res) => {
-  return res.status(410).json({ error: 'supabase_auth_disabled', provider: 'clerk' });
-  /*
   try {
     const { email, password, orgId, inviteCode, fullName } = req.body || {};
     const normalized = normalizeEmail(email);
@@ -10157,7 +10402,6 @@ app.post('/api/auth/signup-with-invite', async (req, res) => {
     console.error('signup_with_invite_failed:', fmtErr(e));
     res.status(500).json({ error: 'signup_with_invite_failed', detail: fmtErr(e) ?? 'unknown_error' });
   }
-  */
 });
 
 // PATCH /api/orgs/:orgId/members/:userId - update org member role (org-admin only)
@@ -11758,10 +12002,11 @@ app.get("/api/calls/recent", async (req, res) => {
 
 // Alias route for older/alternate frontend paths: /s/recent -> /api/calls/recent
 app.get("/s/recent", async (req, res) => {
+  const actorId = (req as any).actorId;
+  if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
   try {
     // Reuse same query semantics as /api/calls/recent
     const orgId = req.query.org_id as string | undefined;
-    const actorId = req.header('x-user-id') || null;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
 
     console.log('[s/recent] Request:', { orgId, limit });
@@ -12071,9 +12316,10 @@ app.get("/api/calls/series", async (req, res) => {
 
 // Alias route for older/alternate frontend paths: /s/series -> /api/calls/series
 app.get("/s/series", async (req, res) => {
+  const actorId = (req as any).actorId;
+  if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
   try {
     const orgId = req.query.org_id as string | undefined;
-    const actorId = req.header('x-user-id') || null;
     const range = (req.query.range as string) || "day";
 
     console.log('[s/series] Request:', { orgId, range });
@@ -15570,8 +15816,12 @@ const server = app.listen(port, '0.0.0.0', () => {
   }
   startMightyCallPolling();
 
-  // Debug endpoint (also available during development) - provides lightweight health info
-  app.get('/debug/status', async (req, res) => {
+  // Debug endpoint - restricted to platform admins only
+  app.get('/api/debug/status', async (req, res) => {
+    const userId = (req as any).actorId;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+    const isAdmin = await isPlatformAdmin(userId).catch(() => false);
+    if (!isAdmin) return res.status(403).json({ error: 'forbidden' });
     try {
       const info: any = {
         uptime: process.uptime(),
@@ -16541,182 +16791,22 @@ app.get('/api/recordings', async (req, res) => {
 
     if (!orgId) return res.status(400).json({ error: 'org_id_required' });
 
-    // Check if user is platform admin
-    const isAdmin = await isPlatformAdmin(userId);
-    
-    // If non-admin, verify they're an org member FIRST
-    if (!isAdmin) {
-      const isMember = await isOrgMember(userId, orgId);
-      if (!isMember) {
-        return res.status(403).json({ error: 'forbidden', detail: 'not_org_member' });
-      }
-    }
-
-    // Fetch recordings with pagination (Supabase has 1000-row limit per query)
-    let allRecordings: any[] = [];
-    const pageSize = 1000;
-    let offset = 0;
-    let hasMore = true;
-
-    while (hasMore && allRecordings.length < limit) {
-      const remainingToFetch = limit - allRecordings.length;
-      const currentPageSize = Math.min(pageSize, remainingToFetch);
-
-      const { data: pageRecordings, error } = await supabaseAdmin
-        .from('mightycall_recordings')
-        .select('*')
-        .eq('org_id', orgId)
-        .order('recording_date', { ascending: false })
-        .range(offset, offset + currentPageSize - 1);
-
-      if (error) throw error;
-
-      if (!pageRecordings || pageRecordings.length === 0) {
-        hasMore = false;
-      } else {
-        allRecordings = allRecordings.concat(pageRecordings);
-        if (pageRecordings.length < currentPageSize) {
-          hasMore = false;
-        }
-        offset += pageSize;
-      }
-    }
-
-    const recordings = allRecordings;
-
-    // Fetch calls to enrich recordings with phone numbers
-    const recordingIds = (recordings || []).map((r: any) => r.call_id).filter(Boolean);
-    let callsMap: any = {};
-    if (recordingIds.length > 0) {
-      try {
-        const { data: calls, error } = await supabaseAdmin
-          .from('calls')
-          .select('id, from_number, to_number, duration_seconds, started_at, ended_at')
-          .in('id', recordingIds);
-        
-        if (!error && calls) {
-          calls.forEach((call: any) => {
-            callsMap[call.id] = call;
-          });
-          console.debug(`[recordings_enrichment] Matched ${calls.length} calls from ${recordingIds.length} recording call_ids`);
-        } else {
-          console.debug(`[recordings_enrichment] Could not fetch calls data: ${error?.message || 'unknown error'}`);
-        }
-      } catch (e) {
-        console.debug(`[recordings_enrichment] Exception fetching calls: ${fmtErr(e)}`);
-      }
-    }
-
-    // Enrich with org data
-    const { data: org } = await supabaseAdmin
-      .from('organizations')
-      .select('id, name')
-      .eq('id', orgId)
-      .single();
-
-    // Enrich recordings with call data and filter by phone access
-    let enriched = (recordings || []).map((rec: any) => {
-      const callData = callsMap[rec.call_id] || {};
-      
-      // Extract phone numbers - try multiple sources (mightycall_recordings first, then calls table)
-      let fromNumber = rec.from_number || callData.from_number || null;
-      let toNumber = rec.to_number || callData.to_number || null;
-      
-      // Try metadata sources if primary sources are missing
-      const metadata = rec.metadata || {};
-      
-      // From number sources: businessNumber, caller_number, phone_number
-      if (!fromNumber) {
-        fromNumber =
-          (typeof metadata.businessNumber === 'string' ? metadata.businessNumber : metadata.businessNumber?.number) ||
-          metadata.caller_number ||
-          metadata.phone_number ||
-          rec.phone_number ||
-          null;
-      }
-      
-      // To number sources: called[0].phone, recipient, destination_number
-      if (!toNumber) {
-        if (metadata.called && Array.isArray(metadata.called) && metadata.called[0]) {
-          toNumber = metadata.called[0].phone || metadata.called[0].name || null;
-        }
-        if (!toNumber) {
-          toNumber = metadata.recipient || metadata.destination_number || rec.phone_number || null;
-        }
-      }
-      
-      // Calculate duration in seconds
-      const durationSeconds = callData.duration_seconds || rec.duration_seconds || 0;
-      
-      // Create a unique identifier for this recording
-      const rawRecordingDate = callData.started_at || rec.recording_date || rec.recorded_at || '';
-      const recordingDate = rawRecordingDate ? new Date(rawRecordingDate).toISOString().split('T')[0] : 'Unknown date';
-      const identifier = `${fromNumber || 'Unknown'} Ã¢â€ â€™ ${toNumber || 'Unknown'} (${durationSeconds}s, ${recordingDate})`;
-      
-      return {
-        ...rec,
-        org_name: org?.name || 'Unknown Org',
-        // Include call details
-        from_number: fromNumber,
-        to_number: toNumber,
-        duration: durationSeconds,
-        duration_formatted: `${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`,
-        call_started_at: callData.started_at || rec.recording_date || rec.recorded_at,
-        call_ended_at: callData.ended_at || rec.recording_date || rec.recorded_at,
-        direction: metadata.direction || 'Unknown',
-        // Add readable identifier for admins
-        identifier: identifier,
-        display_name: `${fromNumber || 'Unknown'} Ã¢â€ â€™ ${toNumber || 'Unknown'}`
-      };
-    });
-
-    // Apply phone access control for non-admins
-    if (!isAdmin) {
-      // Non-admin - check if they have assigned phones
-      const { numbers: allowedPhoneNumbers } = await getUserAssignedPhoneNumbers(orgId, userId);
-      
-      if (allowedPhoneNumbers && allowedPhoneNumbers.length > 0) {
-        // User has phone assignments - filter recordings to only assigned phones
-        enriched = enriched.filter((rec: any) => {
-          const fromMatch = rec.from_number && allowedPhoneNumbers.includes(rec.from_number);
-          const toMatch = rec.to_number && allowedPhoneNumbers.includes(rec.to_number);
-          return fromMatch || toMatch;
-        });
-      }
-      // If no assigned phones, user sees all org recordings (already verified as org member above)
-    }
-
-    res.json({ recordings: enriched });
-  } catch (err: any) {
-    console.error('recordings_fetch_failed:', fmtErr(err));
-    res.status(500).json({ error: 'recordings_fetch_failed', detail: fmtErr(err) ?? 'unknown_error' });
-  }
-});
-
-// ENHANCED: GET /api/recordings/filter - Filter recordings by date, phone, duration, direction
-app.get('/api/recordings/filter', async (req, res) => {
-  try {
-    const userId = req.header('x-user-id') || null;
-    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
-
-    const orgId = req.query.org_id as string;
-    if (!orgId) return res.status(400).json({ error: 'org_id_required' });
-
     // Get filter parameters
     const startDate = req.query.start_date as string;
     const endDate = req.query.end_date as string;
     const phoneNumber = req.query.phone_number as string;
     const direction = req.query.direction as string;
     const minDuration = parseInt(req.query.min_duration as string) || 0;
-    const limit = parseInt(req.query.limit as string) || 100;
 
-    // Check access
+    // Check if user is platform admin
     const isAdmin = await isPlatformAdmin(userId);
     let allowedPhoneNumbers: string[] | null = null;
+
+    // If non-admin, verify they're an org member FIRST
     if (!isAdmin) {
       const isMember = await isOrgMember(userId, orgId);
       if (!isMember) return res.status(403).json({ error: 'forbidden' });
-      
+
       const { numbers } = await getUserAssignedPhoneNumbers(orgId, userId);
       if (numbers.length > 0) {
         allowedPhoneNumbers = numbers;
@@ -16810,7 +16900,6 @@ if (process.env.SKIP_FATAL_SIGNAL_EXIT === 'true') {
     });
   });
 
-  // Handle SIGINT for graceful shutdown
   process.on('SIGINT', () => {
     console.log('[shutdown] SIGINT received, closing server...');
     server.close(() => {
@@ -16819,9 +16908,6 @@ if (process.env.SKIP_FATAL_SIGNAL_EXIT === 'true') {
     });
   });
 }
-
-// Log that we're fully ready
-console.log('[startup] *** ALL STARTUP CHECKS PASSED - Server is fully operational ***');
 
 // Log that we're fully ready
 console.log('[startup] *** ALL STARTUP CHECKS PASSED - Server is fully operational ***');

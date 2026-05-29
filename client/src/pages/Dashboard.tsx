@@ -220,7 +220,7 @@ export const Dashboard: FC = () => {
             )}
             {error && (
               <button
-                onClick={retry}
+                onClick={() => void retry()}
                 className="text-sm text-slate-300 hover:text-emerald-400 transition"
               >
                 Retry

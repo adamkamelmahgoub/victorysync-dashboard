@@ -15,6 +15,10 @@ import {
   updateLead,
   updateLeadSource,
   updateLeadsVisibility,
+  uploadLeadList,
+  getLeadUploads,
+  getUploadPermissions,
+  setUploadPermission,
 } from '../lib/apiClient';
 import { postLog } from '../lib/logging';
 import { supabase } from '../lib/supabaseClient';
@@ -46,6 +50,64 @@ const statusOptions = [
 ];
 
 // ─── audio ───────────────────────────────────────────────────────────────────
+
+function playUploadSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // Two-tone chime: G5 then C6
+    const freqs = [784, 1047];
+    let startTime = ctx.currentTime;
+    freqs.forEach((freq) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.3, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+      osc.start(startTime);
+      osc.stop(startTime + 0.35);
+      startTime += 0.22;
+    });
+  } catch { /* ignore — audio not available */ }
+}
+
+// ─── CSV parser (browser-side, no external deps) ─────────────────────────────
+
+function parseCSV(text: string): Record<string, string>[] {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  if (lines.length < 2) return [];
+  function splitRow(line: string): string[] {
+    const fields: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        fields.push(cur.trim()); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    fields.push(cur.trim());
+    return fields;
+  }
+  const headers = splitRow(lines[0]).map((h) => h.replace(/^"|"$/g, '').trim());
+  const rows: Record<string, string>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const values = splitRow(line);
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => { row[h] = (values[idx] || '').replace(/^"|"$/g, '').trim(); });
+    rows.push(row);
+  }
+  return rows;
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -124,6 +186,78 @@ export default function LeadsPage() {
     const org = orgs.find((o: any) => o.id === selectedOrgId);
     return (org as any)?.role || null;
   }, [selectedOrgId, orgs]);
+
+  // ── lead upload state ─────────────────────────────────────────────────────
+  const [uploadDragging, setUploadDragging] = useState(false);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+  const [uploadResult, setUploadResult] = useState<{ inserted: number; failed: number } | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<'all' | string>('all'); // agent user_id or 'all'
+  const [uploadHistory, setUploadHistory] = useState<any[]>([]);
+  const [uploadPermissions, setUploadPermissions] = useState<any[]>([]);
+  const [loadingUploadPerms, setLoadingUploadPerms] = useState(false);
+
+  const loadUploadHistory = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const result = await getLeadUploads(
+        { organization_id: selectedOrgId || undefined },
+        user.id,
+      );
+      setUploadHistory(result?.items || []);
+    } catch { setUploadHistory([]); }
+  }, [selectedOrgId, user?.id]);
+
+  const loadUploadPermissions = useCallback(async () => {
+    if (!user?.id || !isAdmin) return;
+    setLoadingUploadPerms(true);
+    try {
+      const result = await getUploadPermissions(selectedOrgId || undefined, user.id);
+      setUploadPermissions(result?.items || []);
+    } catch { setUploadPermissions([]); }
+    finally { setLoadingUploadPerms(false); }
+  }, [isAdmin, selectedOrgId, user?.id]);
+
+  useEffect(() => { void loadUploadHistory(); }, [loadUploadHistory]);
+  useEffect(() => { void loadUploadPermissions(); }, [loadUploadPermissions]);
+
+  const handleFileUpload = async (file: File) => {
+    if (!user?.id) return;
+    setUploadLoading(true);
+    setUploadResult(null);
+    setUploadFileName(file.name);
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (rows.length === 0) { toast.push('No rows found in file — check format.', 'error'); return; }
+      const result = await uploadLeadList({
+        rows,
+        organization_id: selectedOrgId || null,
+        assigned_agent_id: uploadTarget === 'all' ? null : uploadTarget,
+        notify: true,
+      }, user.id);
+      setUploadResult({ inserted: result.inserted, failed: result.failed });
+      playUploadSound();
+      toast.push(`✓ Uploaded ${result.inserted} leads${result.failed ? ` (${result.failed} skipped)` : ''}`, 'success');
+      void loadLeads();
+      void loadUploadHistory();
+    } catch (e: any) {
+      toast.push(e?.message || 'Upload failed', 'error');
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
+  const toggleUploadPermission = async (targetUser: any) => {
+    if (!user?.id) return;
+    try {
+      await setUploadPermission(targetUser.id, !targetUser.can_upload_leads, user.id);
+      toast.push(`Upload ${!targetUser.can_upload_leads ? 'enabled' : 'disabled'} for ${targetUser.full_name || targetUser.email}`, 'success');
+      void loadUploadPermissions();
+    } catch (e: any) {
+      toast.push(e?.message || 'Failed to update permission', 'error');
+    }
+  };
 
   // ── leads visibility settings ─────────────────────────────────────────────
   const [visibility, setVisibility] = useState<LeadsVisibility>({ agents: true, clients: true });
@@ -703,6 +837,152 @@ export default function LeadsPage() {
         </SectionCard>
       )}
 
+      {/* ── Lead List Upload (admin + users with can_upload_leads) ── */}
+      {(isAdmin || currentOrgRole === 'client') && (
+        <SectionCard
+          title="Upload Lead List"
+          description="Upload a CSV file to bulk-import leads. First row must be column headers."
+          className="mt-5"
+          contentClassName="p-4"
+        >
+          {/* Drag-and-drop zone */}
+          <div
+            className={`relative flex flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-10 text-center transition ${
+              uploadDragging ? 'border-cyan-400 bg-cyan-400/[0.06]' : 'border-white/[0.08] bg-white/[0.015]'
+            }`}
+            onDragOver={(e) => { e.preventDefault(); setUploadDragging(true); }}
+            onDragLeave={() => setUploadDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault(); setUploadDragging(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) void handleFileUpload(file);
+            }}
+          >
+            <div className="mb-3 text-3xl">📋</div>
+            <p className="text-sm font-medium text-slate-200">Drag &amp; drop a CSV file here</p>
+            <p className="mt-1 text-xs text-slate-500">or click to browse — max 5,000 rows</p>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              disabled={uploadLoading}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleFileUpload(file);
+                e.target.value = '';
+              }}
+            />
+          </div>
+
+          {/* Options row */}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            {isAdmin && (
+              <select
+                className="vs-input"
+                value={uploadTarget}
+                onChange={(e) => setUploadTarget(e.target.value)}
+              >
+                <option value="all">Assign to org (no specific agent)</option>
+                {members.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>{memberLabel(m)}</option>
+                ))}
+              </select>
+            )}
+            {uploadLoading && (
+              <span className="animate-pulse text-sm text-cyan-400">Uploading…</span>
+            )}
+          </div>
+
+          {/* Result */}
+          {uploadResult && (
+            <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] px-4 py-3 text-sm text-emerald-200">
+              ✓ <strong>{uploadResult.inserted}</strong> leads imported from <em>{uploadFileName}</em>
+              {uploadResult.failed > 0 && (
+                <span className="ml-2 text-yellow-300">({uploadResult.failed} skipped — missing phone &amp; email)</span>
+              )}
+            </div>
+          )}
+
+          {/* CSV format hint */}
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200">Accepted column names</summary>
+            <p className="mt-2 rounded-xl bg-black/20 p-3 font-mono text-xs text-slate-300">
+              first_name, last_name, phone, email, state, city, zip_code, address, debt_amount, campaign_id, campaign_name, lead_type, notes
+            </p>
+          </details>
+        </SectionCard>
+      )}
+
+      {/* ── Upload history ── */}
+      {(isAdmin || currentOrgRole === 'client') && uploadHistory.length > 0 && (
+        <SectionCard title="Recent Uploads" className="mt-5" contentClassName="p-0">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="border-b border-white/[0.04] text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">File rows</th>
+                  <th className="px-4 py-3">Imported</th>
+                  <th className="px-4 py-3">Skipped</th>
+                  <th className="px-4 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.03]">
+                {uploadHistory.map((u: any) => (
+                  <tr key={u.id}>
+                    <td className="px-4 py-3 text-slate-300">{u.created_at ? new Date(u.created_at).toLocaleString() : '-'}</td>
+                    <td className="px-4 py-3 text-slate-300">{u.row_count ?? '-'}</td>
+                    <td className="px-4 py-3 text-emerald-300">{u.inserted_count ?? 0}</td>
+                    <td className="px-4 py-3 text-yellow-300">{u.failed_count ?? 0}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge tone={u.status === 'complete' ? 'success' : u.status === 'partial' ? 'warning' : 'neutral'}>
+                        {u.status || 'unknown'}
+                      </StatusBadge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
+
+      {/* ── Upload permissions (admin only) ── */}
+      {isAdmin && (
+        <SectionCard
+          title="Upload Permissions"
+          description="Control which non-admin users can upload lead lists."
+          className="mt-5"
+          contentClassName="p-4"
+        >
+          {loadingUploadPerms ? (
+            <p className="text-sm text-slate-400">Loading…</p>
+          ) : uploadPermissions.length === 0 ? (
+            <p className="text-sm text-slate-400">No members found for selected org. Select an org to filter.</p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {uploadPermissions.map((u: any) => (
+                <label key={u.id} className="flex items-center justify-between rounded-xl border border-white/[0.04] bg-white/[0.025] px-4 py-3 cursor-pointer hover:bg-white/[0.04]">
+                  <div>
+                    <div className="text-sm font-medium text-slate-100">{u.full_name || u.email || u.id.slice(0, 8)}</div>
+                    <div className="text-xs text-slate-500">{u.email}{u.global_role ? ` · ${u.global_role}` : ''}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">{u.can_upload_leads ? 'Enabled' : 'Disabled'}</span>
+                    <button
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${u.can_upload_leads ? 'bg-cyan-500' : 'bg-slate-700'}`}
+                      onClick={() => void toggleUploadPermission(u)}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${u.can_upload_leads ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
+
       {/* ── visibility settings (admin only) ── */}
       {isAdmin && selectedOrgId && (
         <SectionCard
@@ -759,14 +1039,13 @@ export default function LeadsPage() {
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Lead detail</div>
                 <h2 className="mt-2 text-2xl font-semibold text-white">{leadName(selectedLead)}</h2>
                 <p className="mt-1 text-sm text-slate-400">
-                  {selectedLead.source || 'mcgrawnow'}
+                  {selectedLead.source || 'manual_upload'}
                   {selectedLead.source_lead_id ? ` · ${selectedLead.source_lead_id}` : ''}
                 </p>
               </div>
               <button className="vs-button-secondary" onClick={() => setSelectedLead(null)}>Close</button>
             </div>
 
-            {/* ── core fields ── */}
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               <Info label="Phone" value={selectedLead.phone} />
               <Info label="Email" value={selectedLead.email || '-'} />
@@ -780,7 +1059,6 @@ export default function LeadsPage() {
               <Info label="Call Attempts" value={String(selectedLead.call_attempts || 0)} />
             </div>
 
-            {/* ── compliance / tracking fields ── */}
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <Info label="Trusted ID" value={
                 selectedLead.trusted_id
@@ -796,7 +1074,6 @@ export default function LeadsPage() {
               <Info label="Opt-in Source" value={selectedLead.opt_in_source || '-'} />
             </div>
 
-            {/* ── status & notes ── */}
             <div className="mt-6 space-y-4">
               <label className="block">
                 <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-500">Status</span>
@@ -811,7 +1088,6 @@ export default function LeadsPage() {
                 </select>
               </label>
 
-              {/* ── assign to agent ── */}
               <label className="block">
                 <span className="mb-2 block text-xs uppercase tracking-[0.18em] text-slate-500">Assign to Agent</span>
                 <select
@@ -847,7 +1123,7 @@ export default function LeadsPage() {
               </label>
 
               <div className="flex flex-wrap gap-2">
-                <button className="vs-button-primary" onClick={() => void onCallLead(selectedLead)} data-log="Call lead from drawer">
+                <button className="vs-button-primary" onClick={() => void onCallLead(selectedLead)}>
                   Call Now
                 </button>
                 <button className="vs-button-secondary" onClick={() => void updateSelected(selectedLead, { assign_to_me: true })}>
@@ -859,7 +1135,6 @@ export default function LeadsPage() {
               </div>
             </div>
 
-            {/* ── raw payload (admin only) ── */}
             {isAdmin && (
               <details className="mt-6 rounded-3xl border border-white/[0.04] bg-white/[0.025] p-4">
                 <summary className="cursor-pointer text-sm font-semibold text-slate-200">Raw payload</summary>
