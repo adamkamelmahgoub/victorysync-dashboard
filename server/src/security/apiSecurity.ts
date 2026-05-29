@@ -225,16 +225,35 @@ export function createClerkSessionMiddleware(supabaseAdmin: SupabaseAdmin) {
       const token = bearerToken(req);
 
       if (token && !(req as any).apiKeyScope) {
+        // Try Clerk JWT verification first
         const secretKey = process.env.CLERK_SECRET_KEY || '';
         if (secretKey) {
-          const payload = await verifyToken(token, { secretKey });
-          const clerkUserId = typeof payload.sub === 'string' ? payload.sub : null;
-          if (clerkUserId) {
-            const resolved = await resolveClerkActorId(supabaseAdmin, clerkUserId);
-            actor = resolved?.actorId || null;
-            (req as any).clerkUser = resolved?.clerkUser || null;
-            (req as any).clerkUserId = clerkUserId;
-            if (actor) req.headers['x-user-id'] = actor;
+          try {
+            const payload = await verifyToken(token, { secretKey });
+            const clerkUserId = typeof payload.sub === 'string' ? payload.sub : null;
+            if (clerkUserId) {
+              const resolved = await resolveClerkActorId(supabaseAdmin, clerkUserId);
+              actor = resolved?.actorId || null;
+              (req as any).clerkUser = resolved?.clerkUser || null;
+              (req as any).clerkUserId = clerkUserId;
+              if (actor) req.headers['x-user-id'] = actor;
+            }
+          } catch {
+            // Clerk verification failed — fall through to Supabase
+          }
+        }
+
+        // Fall back to Supabase JWT verification
+        if (!actor) {
+          try {
+            const { data } = await (supabaseAdmin.auth as any).getUser(token);
+            const supabaseUser = data?.user;
+            if (supabaseUser?.id) {
+              actor = String(supabaseUser.id);
+              req.headers['x-user-id'] = actor;
+            }
+          } catch {
+            // Supabase verification also failed
           }
         }
       }
@@ -254,7 +273,7 @@ export function createClerkSessionMiddleware(supabaseAdmin: SupabaseAdmin) {
 
       (req as any).actorId = actor;
     } catch (err) {
-      console.warn('[auth] Clerk bearer verification failed:', err instanceof Error ? err.message : String(err));
+      console.warn('[auth] Session verification failed:', err instanceof Error ? err.message : String(err));
       (req as any).actorId = null;
     }
     next();

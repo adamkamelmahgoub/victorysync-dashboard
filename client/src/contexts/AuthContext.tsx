@@ -1,10 +1,6 @@
 import type { FC, ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
-import {
-  useAuth as useClerkAuth,
-  useClerk,
-  useUser as useClerkUser,
-} from "@clerk/react";
+import { supabase } from "../lib/supabaseClient";
 import { buildApiUrl } from "../config";
 import { postLog } from "../lib/logging";
 
@@ -30,13 +26,6 @@ type AuthContextValue = {
   setSelectedOrgId: (id: string | null) => void;
 };
 
-declare global {
-  interface Window {
-    __victorysyncGetClerkToken?: () => Promise<string | null>;
-    __victorysyncClerkUserId?: string | null;
-  }
-}
-
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs = 8000) {
@@ -61,9 +50,6 @@ async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs =
 }
 
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { isLoaded, isSignedIn, getToken, userId: clerkUserId } = useClerkAuth();
-  const { user: clerkUser } = useClerkUser();
-  const clerk = useClerk();
   const [user, setUser] = useState<AppUser | null>(null);
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string; logo_url?: string | null }>>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
@@ -73,14 +59,15 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [featureAccessLoaded, setFeatureAccessLoaded] = useState(false);
   const [profile, setProfile] = useState<{ full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null>(null);
 
-  useEffect(() => {
-    window.__victorysyncGetClerkToken = async () => getToken();
-    window.__victorysyncClerkUserId = clerkUserId || null;
-    return () => {
-      window.__victorysyncGetClerkToken = undefined;
-      window.__victorysyncClerkUserId = null;
-    };
-  }, [getToken, clerkUserId]);
+  const resetAuthState = () => {
+    setUser(null);
+    setOrgs([]);
+    setSelectedOrgId(null);
+    setGlobalRole(null);
+    setFeatureAccess({});
+    setFeatureAccessLoaded(true);
+    setProfile(null);
+  };
 
   const loadFeatures = async (nextUser: AppUser | null = user, orgId: string | null = selectedOrgId) => {
     if (!nextUser) {
@@ -104,7 +91,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     const internalUser: AppUser | null = profileData?.user?.id
       ? {
           id: profileData.user.id,
-          email: profileData.user.email || clerkUser?.primaryEmailAddress?.emailAddress || null,
+          email: profileData.user.email || null,
           user_metadata: {
             global_role: profileData?.profile?.global_role ?? null,
             org_id: null,
@@ -113,13 +100,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       : null;
 
     if (!internalUser) {
-      setUser(null);
-      setOrgs([]);
-      setSelectedOrgId(null);
-      setGlobalRole(null);
-      setFeatureAccess({});
-      setFeatureAccessLoaded(true);
-      setProfile(null);
+      resetAuthState();
       return;
     }
 
@@ -150,56 +131,49 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   useEffect(() => {
-    if (!isLoaded) return;
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setLoading(true);
+        hydrateUserContext()
+          .catch((err) => console.error("Error initializing auth:", err))
+          .finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
+    });
 
-    if (!isSignedIn) {
-      setUser(null);
-      setOrgs([]);
-      setSelectedOrgId(null);
-      setGlobalRole(null);
-      setFeatureAccess({});
-      setFeatureAccessLoaded(true);
-      setProfile(null);
-      setLoading(false);
-      return;
-    }
+    // Listen for sign-in / sign-out
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setLoading(true);
+        hydrateUserContext()
+          .catch((err) => console.error("Error on auth state change:", err))
+          .finally(() => setLoading(false));
+      } else {
+        resetAuthState();
+        setLoading(false);
+      }
+    });
 
-    let cancelled = false;
-    setLoading(true);
-    hydrateUserContext()
-      .catch((error) => {
-        console.error("Error initializing Clerk auth:", error);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLoaded, isSignedIn, clerkUserId]);
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!user) return;
     void loadFeatures(user, selectedOrgId);
   }, [user?.id, selectedOrgId]);
 
-  const signIn = async (): Promise<{ error?: string }> => {
-    clerk.openSignIn({ redirectUrl: "/dashboard" });
+  const signIn = async (email: string, password: string): Promise<{ error?: string }> => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { error: error.message };
     return {};
   };
 
   const signOut = async () => {
     try {
       postLog("/api/logs/auth", { event_type: "logout", email: user?.email || null });
-      await clerk.signOut({ redirectUrl: "/login" });
-      setUser(null);
-      setOrgs([]);
-      setSelectedOrgId(null);
-      setGlobalRole(null);
-      setFeatureAccess({});
-      setFeatureAccessLoaded(true);
-      setProfile(null);
+      await supabase.auth.signOut();
     } catch (err) {
       console.error("Sign out error:", err);
     }

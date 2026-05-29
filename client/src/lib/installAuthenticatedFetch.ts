@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../config";
+import { supabase } from "./supabaseClient";
 
 let installed = false;
 let csrfTokenCache: { token: string; fetchedAt: number } | null = null;
@@ -47,16 +48,14 @@ export function installAuthenticatedFetch() {
     const headers = new Headers(request.headers);
 
     try {
-      const accessToken = await window.__victorysyncGetClerkToken?.();
-      const userId = window.__victorysyncClerkUserId || null;
+      const { data: { session } } = await supabase.auth.getSession();
 
-      if (accessToken && !headers.has("Authorization")) {
-        headers.set("Authorization", `Bearer ${accessToken}`);
+      if (session?.access_token && !headers.has("Authorization")) {
+        headers.set("Authorization", `Bearer ${session.access_token}`);
       }
 
-      if (userId && !headers.has("x-user-id")) {
-        // Kept for temporary backward compatibility while the API is migrated away from this header.
-        headers.set("x-user-id", userId);
+      if (session?.user?.id && !headers.has("x-user-id")) {
+        headers.set("x-user-id", session.user.id);
       }
     } catch (err) {
       console.warn("[auth-fetch] Failed to resolve session for API request", err);
