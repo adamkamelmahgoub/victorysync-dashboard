@@ -337,14 +337,3 @@ export function createCsrfToken(actorId: string) {
   if (!secret) throw new Error('csrf_not_configured');
   return crypto.createHmac('sha256', secret).update(`${actorId}:${new Date().toISOString().slice(0, 10)}`).digest('hex');
 }
- !== expected) {
-    return res.status(403).json({ error: 'csrf_validation_failed' });
-  }
-  next();
-}
-
-export function createCsrfToken(actorId: string) {
-  const secret = process.env.CSRF_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'victorysync-csrf-dev');
-  if (!secret) throw new Error('csrf_not_configured');
-  return crypto.createHmac('sha256', secret).update(`${actorId}:${new Date().toISOString().slice(0, 10)}`).digest('hex');
-}
