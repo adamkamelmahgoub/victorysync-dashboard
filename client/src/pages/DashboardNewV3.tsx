@@ -53,13 +53,13 @@ function formatDateTime(value?: string | null) {
 const WorkflowCard: FC<WorkflowCardProps> = ({ title, description, actionLabel, onClick }) => (
   <button
     onClick={onClick}
-    className="flex h-full flex-col justify-between rounded-3xl border border-white/8 bg-white/[0.025] p-5 text-left transition hover:border-cyan-400/20 hover:bg-white/[0.045]"
+    className="flex h-full flex-col justify-between rounded-lg border border-[#2b2b2b] bg-[#191919] p-4 text-left transition hover:border-[#3a3a3a] hover:bg-[#202020]"
   >
     <div>
       <div className="text-sm font-semibold text-white">{title}</div>
       <p className="mt-2 text-sm leading-6 text-slate-400">{description}</p>
     </div>
-    <div className="mt-6 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-200/85">{actionLabel}</div>
+    <div className="mt-5 text-[11px] font-semibold uppercase text-sky-300">{actionLabel}</div>
   </button>
 );
 
@@ -173,26 +173,25 @@ const DashboardNewV3: FC = () => {
 
   const headerMeta = (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Workspace</div>
-        <div className="mt-2 text-sm font-medium text-slate-200">{orgName}</div>
+      <div className="rounded-md border border-[#2b2b2b] bg-[#181818] px-3 py-2">
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Workspace</div>
+        <div className="mt-1 text-sm font-medium text-slate-200">{orgName}</div>
       </div>
-      <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Last live sync</div>
-        <div className="mt-2 text-sm font-medium text-slate-200">{liveRefreshedAt ? formatDateTime(liveRefreshedAt) : 'Waiting for first refresh'}</div>
+      <div className="rounded-md border border-[#2b2b2b] bg-[#181818] px-3 py-2">
+        <div className="text-[11px] font-semibold uppercase text-slate-500">Last live sync</div>
+        <div className="mt-1 text-sm font-medium text-slate-200">{liveRefreshedAt ? formatDateTime(liveRefreshedAt) : 'Waiting for first refresh'}</div>
       </div>
     </div>
   );
 
   return (
     <PageLayout
-      eyebrow="Operations overview"
-      title="Executive dashboard"
-      description="A high-trust view of live call performance, agent coverage, and the operational workflows your team needs most."
+      title="Dashboard"
+      description="Company Overview"
       actions={headerActions}
       meta={headerMeta}
     >
-      <div className="space-y-6">
+      <div className="space-y-5">
         {error && (
           <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             {error}
@@ -201,19 +200,19 @@ const DashboardNewV3: FC = () => {
 
         {loading ? (
           <>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
               {Array.from({ length: 4 }).map((_, idx) => (
                 <LoadingSkeleton key={idx} className="h-36" />
               ))}
             </div>
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.5fr,1fr]">
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.5fr,1fr]">
               <LoadingSkeleton className="h-[360px]" />
               <LoadingSkeleton className="h-[360px]" />
             </div>
           </>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
               <MetricStatCard
                 label="Total Calls"
                 value={total}
@@ -239,13 +238,13 @@ const DashboardNewV3: FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.45fr,1fr]">
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.45fr,1fr]">
               <SectionCard
                 title="Operational snapshot"
                 description="Today’s performance in the context of client coverage and service pressure."
                 className="h-full"
               >
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="rounded-3xl border border-white/8 bg-white/[0.025] p-5">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Call handling</div>
                     <div className="mt-4 flex items-end justify-between gap-4">

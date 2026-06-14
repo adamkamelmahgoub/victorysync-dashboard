@@ -3,21 +3,21 @@
 @tailwind utilities;
 
 :root {
-  --vs-bg: #0d0d0e;
-  --vs-bg-alt: #111112;
-  --vs-sidebar: #1d1d1f;
-  --vs-surface: #18191a;
-  --vs-surface-2: #151617;
-  --vs-surface-3: #202124;
-  --vs-border: rgba(255, 255, 255, 0.075);
-  --vs-border-strong: rgba(255, 255, 255, 0.13);
+  --vs-bg: #111111;
+  --vs-bg-alt: #131313;
+  --vs-sidebar: #1f1f1f;
+  --vs-surface: #191919;
+  --vs-surface-2: #161616;
+  --vs-surface-3: #242424;
+  --vs-border: #2b2b2b;
+  --vs-border-strong: #3a3a3a;
   --vs-text: #f5f7fb;
   --vs-muted: #a8b0bd;
-  --vs-brand-primary: #0ea5e9;
-  --vs-brand-secondary: #20c7b6;
-  --vs-brand-accent: #f58b20;
+  --vs-brand-primary: #0f6fa6;
+  --vs-brand-secondary: #1fb9a7;
+  --vs-brand-accent: #ff8a1d;
   --vs-shadow: none;
-  --vs-input-bg: #111214;
+  --vs-input-bg: #121212;
   --vs-radius: 8px;
   color-scheme: dark;
 }
@@ -37,7 +37,9 @@
 body {
   @apply antialiased;
   color: var(--vs-text);
-  background: var(--vs-bg);
+  background:
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(180deg, #121212 0%, #101010 100%);
   font-feature-settings: "tnum" 1, "cv02" 1, "cv03" 1, "cv04" 1;
 }
 
@@ -81,7 +83,7 @@ body {
 }
 
 .vs-button-primary {
-  background: #0f7cc1;
+  background: #0f6fa6;
   @apply px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50;
   border-radius: var(--vs-radius);
   box-shadow: none;
@@ -108,7 +110,7 @@ table {
 }
 
 thead {
-  background: #161719;
+  background: #171717;
 }
 
 tbody tr {
@@ -125,12 +127,12 @@ tbody tr:hover {
 }
 
 ::-webkit-scrollbar-track {
-  background: #101112;
+  background: #111111;
 }
 
 ::-webkit-scrollbar-thumb {
   background: #4b5563;
-  border: 3px solid #101112;
+  border: 3px solid #111111;
   border-radius: 999px;
 }
 
@@ -153,7 +155,7 @@ tbody tr:hover {
 .bg-slate-950\/70,
 .bg-slate-950\/72,
 .bg-slate-950\/80 {
-  background-color: #0d0d0e !important;
+  background-color: #111111 !important;
 }
 
 .bg-slate-900,
@@ -163,7 +165,7 @@ tbody tr:hover {
 .bg-slate-900\/70,
 .bg-slate-900\/80,
 .bg-slate-900\/95 {
-  background-color: #18191a !important;
+  background-color: #191919 !important;
 }
 
 .bg-slate-800,
@@ -174,7 +176,7 @@ tbody tr:hover {
 .bg-slate-800\/60,
 .bg-slate-800\/70,
 .bg-slate-800\/80 {
-  background-color: #202124 !important;
+  background-color: #242424 !important;
 }
 
 .border-slate-700,

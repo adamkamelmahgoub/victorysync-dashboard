@@ -14,9 +14,10 @@ interface PageLayoutProps {
 }
 
 export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, actions, meta, children }) => {
-  const { globalRole } = useAuth();
+  const { globalRole, selectedOrgId, orgs } = useAuth();
   const location = useLocation();
   const isAdmin = globalRole === 'platform_admin';
+  const selectedOrgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
 
   const defaultMeta = (
     <div className="rounded-md border border-white/[0.075] bg-white/[0.035] px-3 py-2 text-left xl:text-right">
@@ -26,10 +27,27 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   );
 
   return (
-    <div className="flex min-h-screen bg-[#0d0d0e] text-white">
+    <div className="flex min-h-screen bg-[#111111] text-white">
       <Sidebar isAdmin={isAdmin} currentPath={location.pathname} />
 
-      <main className="flex-1 overflow-auto pt-14 lg:ml-60 lg:pt-0">
+      <main className="flex-1 overflow-auto pt-14 lg:ml-[212px] lg:pt-0">
+        <div className="sticky top-14 z-50 flex h-12 items-center justify-between border-b border-[#2b2b2b] bg-[#111111]/95 px-4 backdrop-blur lg:top-0 lg:px-5">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              aria-label="Toggle navigation"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-[#2b2b2b] bg-[#181818] text-slate-300"
+            >
+              =
+            </button>
+            <div className="flex h-8 items-center gap-2 rounded-md border border-[#2b2b2b] bg-[#181818] px-3 text-sm text-slate-200">
+              <span className="text-slate-500">Workspace</span>
+              <span className="max-w-[220px] truncate font-medium">{selectedOrgName}</span>
+            </div>
+          </div>
+          <div className="h-8 w-8 rounded-md border border-[#2b2b2b] bg-[#181818]" />
+        </div>
+
         <DashboardShellHeader
           eyebrow={eyebrow}
           title={title}
