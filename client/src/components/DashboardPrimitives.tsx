@@ -18,18 +18,18 @@ export function DashboardShellHeader({
   meta?: ReactNode;
 }) {
   return (
-    <header className="sticky top-16 z-40 border-b border-white/[0.02] bg-[rgba(2,6,23,0.88)] backdrop-blur-xl lg:top-0">
-      <div className="px-4 py-5 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+    <header className="sticky top-14 z-40 border-b border-white/[0.075] bg-[#111112]/95 backdrop-blur lg:top-0">
+      <div className="px-4 py-4 sm:px-5 lg:px-6">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
             {eyebrow && (
-              <div className="inline-flex items-center rounded-full bg-cyan-400/[0.07] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-200/90">
+              <div className="inline-flex items-center rounded-md border border-white/[0.075] bg-white/[0.035] px-2.5 py-1 text-[11px] font-semibold uppercase text-slate-300">
                 {eyebrow}
               </div>
             )}
-            <h1 className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-white sm:text-[2rem]">{title}</h1>
+            <h1 className="mt-2 text-2xl font-semibold text-white sm:text-[1.7rem]">{title}</h1>
             {description && (
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400 sm:text-[15px]">{description}</p>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">{description}</p>
             )}
           </div>
 
@@ -61,7 +61,7 @@ export function SectionCard({
   return (
     <section className={cx('vs-surface overflow-hidden', className)}>
       {(title || actions) && (
-        <div className="flex flex-col gap-3 border-b border-white/[0.02] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-white/[0.075] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             {title && <h2 className="text-base font-semibold text-white">{title}</h2>}
             {description && <p className="mt-1 text-sm text-slate-400">{description}</p>}
@@ -86,17 +86,17 @@ export function MetricStatCard({
   accent?: 'neutral' | 'cyan' | 'emerald' | 'amber';
 }) {
   const tones = {
-    neutral: 'border-transparent bg-white/[0.022]',
-    cyan: 'border-transparent bg-cyan-400/[0.04]',
-    emerald: 'border-transparent bg-emerald-400/[0.04]',
-    amber: 'border-transparent bg-amber-400/[0.04]',
+    neutral: 'border-white/[0.075] bg-[#18191a]',
+    cyan: 'border-sky-400/15 bg-[#18191a]',
+    emerald: 'border-emerald-400/15 bg-[#18191a]',
+    amber: 'border-orange-400/15 bg-[#18191a]',
   };
 
   return (
-    <div className={cx('rounded-3xl border border-white/[0.02] p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)]', tones[accent])}>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{label}</div>
-      <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-white">{value}</div>
-      {hint && <div className="mt-3 text-sm text-slate-400">{hint}</div>}
+    <div className={cx('rounded-lg border p-5', tones[accent])}>
+      <div className="text-[12px] font-medium text-slate-400">{label}</div>
+      <div className="mt-5 text-2xl font-semibold text-white">{value}</div>
+      {hint && <div className="mt-2 text-xs text-slate-400">{hint}</div>}
     </div>
   );
 }
@@ -132,7 +132,7 @@ export function EmptyStatePanel({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-3xl border border-dashed border-white/[0.02] bg-white/[0.02] px-6 py-10 text-center">
+    <div className="rounded-lg border border-dashed border-white/[0.075] bg-white/[0.025] px-6 py-10 text-center">
       <div className="text-base font-semibold text-white">{title}</div>
       <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-400">{description}</p>
       {action && <div className="mt-4 flex justify-center">{action}</div>}
@@ -145,5 +145,5 @@ export function LoadingSkeleton({
 }: {
   className?: string;
 }) {
-  return <div className={cx('animate-pulse rounded-2xl bg-white/[0.06]', className)} />;
+  return <div className={cx('animate-pulse rounded-lg bg-white/[0.06]', className)} />;
 }

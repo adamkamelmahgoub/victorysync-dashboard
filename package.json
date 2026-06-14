@@ -9,7 +9,7 @@
     "server:test": "npm run test --workspace=server",
     "client:test": "npm run build --workspace=client",
     "test:e2e": "node tests/smoke-e2e.js",
-    "security:scan": "node scripts/security_scan.mjs"
+    "security:scan": "node scripts/security_scan.mjs && node scripts/security_endpoint_audit.mjs"
   },
   "workspaces": [
     "server",

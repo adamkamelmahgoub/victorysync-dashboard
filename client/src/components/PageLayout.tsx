@@ -19,17 +19,17 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   const isAdmin = globalRole === 'platform_admin';
 
   const defaultMeta = (
-    <div className="rounded-2xl border border-white/[0.03] bg-white/[0.03] px-4 py-3 text-left xl:text-right">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Today</div>
-      <div className="mt-2 text-sm font-medium text-slate-200">{new Date().toLocaleDateString()}</div>
+    <div className="rounded-md border border-white/[0.075] bg-white/[0.035] px-3 py-2 text-left xl:text-right">
+      <div className="text-[11px] font-semibold uppercase text-slate-500">Today</div>
+      <div className="mt-1 text-sm font-medium text-slate-200">{new Date().toLocaleDateString()}</div>
     </div>
   );
 
   return (
-    <div className="flex min-h-screen text-white">
+    <div className="flex min-h-screen bg-[#0d0d0e] text-white">
       <Sidebar isAdmin={isAdmin} currentPath={location.pathname} />
 
-      <main className="flex-1 overflow-auto pt-16 lg:ml-72 lg:pt-0">
+      <main className="flex-1 overflow-auto pt-14 lg:ml-60 lg:pt-0">
         <DashboardShellHeader
           eyebrow={eyebrow}
           title={title}
@@ -38,7 +38,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
           meta={meta || defaultMeta}
         />
 
-        <div className="px-4 py-5 sm:px-6 lg:px-8 lg:py-6">
+        <div className="px-4 py-5 sm:px-5 lg:px-6 lg:py-6">
           {children}
         </div>
       </main>
