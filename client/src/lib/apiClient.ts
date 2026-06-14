@@ -381,6 +381,15 @@ export type LeadSourceItem = {
   organizations?: { id: string; name: string } | null;
 };
 
+export type LeadActivityItem = {
+  id: string;
+  action: string;
+  actor_id?: string | null;
+  org_id?: string | null;
+  metadata?: Record<string, any> | null;
+  created_at?: string | null;
+};
+
 export async function getLeads(params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
   const q = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {
@@ -411,6 +420,13 @@ export async function updateLead(leadId: string, patch: Record<string, any>, use
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify(patch),
   }) as { item: LeadItem };
+}
+
+export async function getLeadActivity(leadId: string, userId?: string) {
+  return await fetchJson(`/api/leads/${encodeURIComponent(leadId)}/activity`, {
+    headers: { 'x-user-id': userId || '' },
+    cache: 'no-store',
+  }) as { items: LeadActivityItem[] };
 }
 
 export async function getLeadSources(params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {

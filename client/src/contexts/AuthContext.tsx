@@ -1,5 +1,5 @@
 import type { FC, ReactNode } from "react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { buildApiUrl } from "../config";
 import { postLog } from "../lib/logging";
@@ -58,6 +58,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [featureAccess, setFeatureAccess] = useState<Record<string, boolean>>({});
   const [featureAccessLoaded, setFeatureAccessLoaded] = useState(false);
   const [profile, setProfile] = useState<{ full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
 
   const resetAuthState = () => {
     setUser(null);
@@ -104,6 +105,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       return;
     }
 
+    currentUserIdRef.current = internalUser.id;
     setUser(internalUser);
     setGlobalRole(profileData?.profile?.global_role ?? null);
 
@@ -150,12 +152,18 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') return;
       if (session?.user) {
+        const sameUser = currentUserIdRef.current === session.user.id;
+        if (sameUser) {
+          void hydrateUserContext().catch((err) => console.error("Error refreshing auth context:", err));
+          return;
+        }
         setLoading(true);
         hydrateUserContext()
           .catch((err) => console.error("Error on auth state change:", err))
           .finally(() => setLoading(false));
       } else {
         resetAuthState();
+        currentUserIdRef.current = null;
         setLoading(false);
       }
     });

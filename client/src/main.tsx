@@ -184,6 +184,14 @@ function AppRouter() {
         }
       />
       <Route
+        path="/leads"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="leads"><LeadsPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/live-status"
         element={
           <ProtectedRoute>

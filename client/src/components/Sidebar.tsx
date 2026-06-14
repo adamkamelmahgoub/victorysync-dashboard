@@ -69,7 +69,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Operations',
           items: [
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
-            { label: 'Leads', path: '/dashboard/leads', badge: 'Live', featureKey: 'leads' },
+            { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
             { label: 'Agent Management', path: '/admin/agents-management' },
             { label: 'Reports', path: '/admin/reports' },
             { label: 'Recordings', path: '/admin/recordings' },
@@ -100,7 +100,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Workspace',
           items: [
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
-            { label: 'Leads', path: '/dashboard/leads', badge: 'Live', featureKey: 'leads' },
+            { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
             { label: 'Reports', path: '/reports', featureKey: 'reports' },
             { label: 'Recordings', path: '/recordings', featureKey: 'recordings' },
             { label: 'SMS', path: '/sms', featureKey: 'sms' },

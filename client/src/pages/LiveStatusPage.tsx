@@ -1,6 +1,7 @@
 import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getLiveAgentStatus, refreshLiveAgentStatus } from '../lib/apiClient';
+import { buildApiUrl } from '../config';
 import { supabase } from '../lib/supabaseClient';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
@@ -158,10 +159,15 @@ const LiveStatusPage: FC = () => {
   const liveRequestInFlight = useRef(false);
   const lastLiveRequestStartedAt = useRef(0);
   const esRef = useRef<EventSource | null>(null);
+  const itemCountRef = useRef(0);
 
   const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
 
-  const load = async (forceLoadingState = false) => {
+  useEffect(() => {
+    itemCountRef.current = items.length;
+  }, [items.length]);
+
+  const load = useCallback(async (forceLoadingState = false) => {
     if (!user?.id) return;
     if (liveRequestInFlight.current && Date.now() - lastLiveRequestStartedAt.current < 10000) return;
     liveRequestInFlight.current = true;
@@ -170,7 +176,7 @@ const LiveStatusPage: FC = () => {
     try {
       // Only show loading spinner on first load (no data yet) or when explicitly forced.
       // Background refreshes should never clear existing data with a spinner.
-      if (forceLoadingState || items.length === 0) setLoading(true);
+      if (forceLoadingState || itemCountRef.current === 0) setLoading(true);
       setError(null);
       const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
       if (requestSeq !== liveRequestSeq.current) return;
@@ -183,7 +189,7 @@ const LiveStatusPage: FC = () => {
       liveRequestInFlight.current = false;
       if (requestSeq === liveRequestSeq.current) setLoading(false);
     }
-  };
+  }, [activeOrgId, user?.id]);
 
   // SSE: real-time stream with auto-reconnect
   useEffect(() => {
@@ -195,7 +201,7 @@ const LiveStatusPage: FC = () => {
       if (esRef.current) { esRef.current.close(); esRef.current = null; }
       let es: EventSource;
       try {
-        es = new EventSource(`/api/orgs/${encodeURIComponent(activeOrgId)}/live-status/stream?userId=${encodeURIComponent(user.id)}`);
+        es = new EventSource(buildApiUrl(`/api/orgs/${encodeURIComponent(activeOrgId)}/live-status/stream?userId=${encodeURIComponent(user.id)}`));
       } catch { return; }
       esRef.current = es;
       es.onopen = () => {
@@ -251,7 +257,7 @@ const LiveStatusPage: FC = () => {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [user?.id, activeOrgId, sseConnected]);
+  }, [load, sseConnected]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -305,8 +311,14 @@ const LiveStatusPage: FC = () => {
     if (!user?.id) return;
     try {
       setSyncing(true);
-      await refreshLiveAgentStatus(activeOrgId, user.id);
-      await load();
+      const result = await refreshLiveAgentStatus(activeOrgId, user.id);
+      if (Array.isArray(result?.items)) {
+        setItems(result.items as LiveAgentStatus[]);
+        setRefreshedAt(result.refreshed_at || new Date().toISOString());
+        setError(null);
+      } else {
+        await load();
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to force live refresh');
     } finally {

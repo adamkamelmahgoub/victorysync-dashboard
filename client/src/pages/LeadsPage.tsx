@@ -5,11 +5,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import {
   getLeads,
+  getLeadActivity,
   getLeadsSummary,
   getLeadSources,
   getOrgMembers,
   createLeadSource,
   LeadItem,
+  LeadActivityItem,
   LeadSourceItem,
   LeadsVisibility,
   updateLead,
@@ -33,6 +35,24 @@ type OrgMember = {
   email?: string | null;
   full_name?: string | null;
   role?: string | null;
+};
+
+type SavedLeadView = {
+  id: string;
+  name: string;
+  filters: {
+    status: string;
+    range: DateRange;
+    customStart: string;
+    customEnd: string;
+    stateFilter: string;
+    agentFilter: string;
+    leadTypeFilter: string;
+    campaignFilter: string;
+    sourceFilter: string;
+    search: string;
+    orgFilter: string;
+  };
 };
 
 // ─── constants ───────────────────────────────────────────────────────────────
@@ -169,6 +189,18 @@ function statusTone(status?: string | null): 'neutral' | 'success' | 'warning' |
   if (status === 'contacted' || status === 'callback') return 'warning';
   if (status === 'new') return 'info';
   return 'neutral';
+}
+
+function csvEscape(value: unknown) {
+  const text = String(value ?? '');
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function activityLabel(activity: LeadActivityItem) {
+  const action = String(activity.action || '').replace(/_/g, ' ');
+  const status = activity.metadata?.patch?.status || activity.metadata?.status;
+  if (status) return `${action} - ${String(status).replace(/_/g, ' ')}`;
+  return action || 'Lead activity';
 }
 
 // ─── component ───────────────────────────────────────────────────────────────
@@ -352,6 +384,84 @@ export default function LeadsPage() {
     return Array.from(values.entries()).map(([id, name]) => ({ id, name }));
   }, [leadSources]);
 
+  const sourceOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const source of leadSources) if (source.source_name) values.add(source.source_name);
+    for (const lead of leads) if (lead.source) values.add(lead.source);
+    values.add('manual_upload');
+    values.add('mcgrawnow');
+    return Array.from(values).sort();
+  }, [leadSources, leads]);
+
+  const persistSavedViews = useCallback((views: SavedLeadView[]) => {
+    setSavedViews(views);
+    localStorage.setItem(savedViewsKey, JSON.stringify(views));
+  }, [savedViewsKey]);
+
+  const saveCurrentView = () => {
+    const name = savedViewName.trim();
+    if (!name) {
+      toast.push('Name this view first', 'error');
+      return;
+    }
+    const nextView: SavedLeadView = {
+      id: `${Date.now()}`,
+      name,
+      filters: currentViewFilters,
+    };
+    persistSavedViews([nextView, ...savedViews.filter((view) => view.name.toLowerCase() !== name.toLowerCase())].slice(0, 12));
+    setSavedViewName('');
+    toast.push('Lead view saved', 'success');
+  };
+
+  const applySavedView = (view: SavedLeadView) => {
+    setStatus(view.filters.status);
+    setRange(view.filters.range);
+    setCustomStart(view.filters.customStart);
+    setCustomEnd(view.filters.customEnd);
+    setStateFilter(view.filters.stateFilter);
+    setAgentFilter(view.filters.agentFilter);
+    setLeadTypeFilter(view.filters.leadTypeFilter);
+    setCampaignFilter(view.filters.campaignFilter);
+    setSourceFilter(view.filters.sourceFilter);
+    setSearch(view.filters.search);
+    setOrgFilter(view.filters.orgFilter);
+    toast.push(`Applied ${view.name}`, 'success');
+  };
+
+  const deleteSavedView = (viewId: string) => {
+    persistSavedViews(savedViews.filter((view) => view.id !== viewId));
+  };
+
+  const exportLeadsCsv = () => {
+    const headers = ['received_at', 'source', 'campaign', 'lead_type', 'first_name', 'last_name', 'phone', 'email', 'state', 'debt_amount', 'status', 'assigned_agent', 'call_attempts'];
+    const rows = leads.map((lead) => {
+      const agent = lead.assigned_agent_id ? memberById[lead.assigned_agent_id] : null;
+      return [
+        lead.received_at || '',
+        lead.source || '',
+        lead.campaign_name || lead.campaign_id || '',
+        lead.lead_type || '',
+        lead.first_name || '',
+        lead.last_name || '',
+        isAdmin || revealedPhones.has(lead.id) ? lead.phone : maskPhone(lead.phone, false),
+        lead.email || '',
+        lead.state || '',
+        lead.debt_amount || '',
+        lead.status || 'new',
+        agent ? memberLabel(agent) : lead.assigned_agent_id || '',
+        lead.call_attempts || 0,
+      ].map(csvEscape).join(',');
+    });
+    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `victorysync-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const saveLeadSource = async () => {
     if (!user?.id) return;
     if (!leadSourceForm.organization_id) {
@@ -398,9 +508,14 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<LeadItem | null>(null);
+  const [leadActivity, setLeadActivity] = useState<LeadActivityItem[]>([]);
+  const [loadingLeadActivity, setLoadingLeadActivity] = useState(false);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const [revealedPhones, setRevealedPhones] = useState<Set<string>>(new Set());
   const focusedLeadId = useMemo(() => new URLSearchParams(location.search).get('lead_id'), [location.search]);
+  const savedViewsKey = useMemo(() => `victorysync-lead-views:${user?.id || 'anonymous'}`, [user?.id]);
+  const [savedViews, setSavedViews] = useState<SavedLeadView[]>([]);
+  const [savedViewName, setSavedViewName] = useState('');
 
   // ── filters ────────────────────────────────────────────────────────────────
   const [status, setStatus] = useState('');
@@ -411,10 +526,34 @@ export default function LeadsPage() {
   const [agentFilter, setAgentFilter] = useState('');
   const [leadTypeFilter, setLeadTypeFilter] = useState('');
   const [campaignFilter, setCampaignFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
   const [search, setSearch] = useState('');
   const [orgFilter, setOrgFilter] = useState(selectedOrgId || '');
 
   useEffect(() => { setOrgFilter(selectedOrgId || ''); }, [selectedOrgId]);
+
+  useEffect(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(savedViewsKey) || '[]');
+      setSavedViews(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setSavedViews([]);
+    }
+  }, [savedViewsKey]);
+
+  const currentViewFilters = useMemo<SavedLeadView['filters']>(() => ({
+    status,
+    range,
+    customStart,
+    customEnd,
+    stateFilter,
+    agentFilter,
+    leadTypeFilter,
+    campaignFilter,
+    sourceFilter,
+    search,
+    orgFilter,
+  }), [agentFilter, campaignFilter, customEnd, customStart, leadTypeFilter, orgFilter, range, search, sourceFilter, stateFilter, status]);
 
   const queryParams = useMemo(() => ({
     organization_id: orgFilter || undefined,
@@ -423,10 +562,11 @@ export default function LeadsPage() {
     agent_id: agentFilter || undefined,
     lead_type: leadTypeFilter || undefined,
     campaign_id: campaignFilter || undefined,
+    source: sourceFilter || undefined,
     search: search || undefined,
     limit: '100',
     ...dateParams(range, customStart, customEnd),
-  }), [agentFilter, campaignFilter, customEnd, customStart, leadTypeFilter, orgFilter, range, search, stateFilter, status]);
+  }), [agentFilter, campaignFilter, customEnd, customStart, leadTypeFilter, orgFilter, range, search, sourceFilter, stateFilter, status]);
 
   // ── data loading ───────────────────────────────────────────────────────────
   const loadLeads = useCallback(async () => {
@@ -440,6 +580,7 @@ export default function LeadsPage() {
           organization_id: orgFilter || undefined,
           lead_type: leadTypeFilter || undefined,
           campaign_id: campaignFilter || undefined,
+          source: sourceFilter || undefined,
         }, user.id),
       ]);
       setLeads(leadResult.items || []);
@@ -449,7 +590,7 @@ export default function LeadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [campaignFilter, leadTypeFilter, orgFilter, queryParams, user?.id]);
+  }, [campaignFilter, leadTypeFilter, orgFilter, queryParams, sourceFilter, user?.id]);
 
   useEffect(() => {
     void loadLeads();
@@ -462,6 +603,26 @@ export default function LeadsPage() {
     const lead = leads.find((item) => item.id === focusedLeadId);
     if (lead) setSelectedLead(lead);
   }, [focusedLeadId, leads]);
+
+  useEffect(() => {
+    if (!selectedLead?.id || !user?.id) {
+      setLeadActivity([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingLeadActivity(true);
+    getLeadActivity(selectedLead.id, user.id)
+      .then((result) => {
+        if (!cancelled) setLeadActivity(result.items || []);
+      })
+      .catch(() => {
+        if (!cancelled) setLeadActivity([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingLeadActivity(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedLead?.id, user?.id]);
 
   // ── realtime subscription ──────────────────────────────────────────────────
   useEffect(() => {
@@ -480,7 +641,7 @@ export default function LeadsPage() {
         postLog('/api/logs/activity', {
           event_type: 'notification',
           event_name: 'New lead notification delivered',
-          page: '/dashboard/leads',
+          page: '/leads',
           element: 'new-lead-banner',
           metadata: { lead_id: lead.id, source: lead.source },
         });
@@ -552,9 +713,9 @@ export default function LeadsPage() {
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <PageLayout
-      eyebrow="Lead Intake"
+      eyebrow="Universal Lead Intake"
       title="Leads"
-      description="Live McGraw Now leads routed by campaign and organization."
+      description="Universal lead workspace for every source, campaign, organization, and assigned agent."
       actions={
         <button className="vs-button-secondary" onClick={() => void loadLeads()} disabled={loading}>
           {loading ? 'Refreshing…' : 'Refresh'}
@@ -576,6 +737,28 @@ export default function LeadsPage() {
 
       {/* ── filters ── */}
       <SectionCard title="Filters" className="mt-5" contentClassName="p-4">
+        <div className="mb-4 grid gap-3 xl:grid-cols-[1fr,auto]">
+          <div className="flex flex-wrap gap-2">
+            {savedViews.length === 0 ? (
+              <span className="text-sm text-slate-500">No saved views yet.</span>
+            ) : savedViews.map((view) => (
+              <span key={view.id} className="inline-flex items-center gap-2 rounded-full border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-xs text-slate-200">
+                <button onClick={() => applySavedView(view)} className="font-semibold text-cyan-200">{view.name}</button>
+                <button onClick={() => deleteSavedView(view.id)} className="text-slate-500 hover:text-rose-200" aria-label={`Delete ${view.name}`}>x</button>
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              className="vs-input min-w-[200px]"
+              value={savedViewName}
+              onChange={(e) => setSavedViewName(e.target.value)}
+              placeholder="View name"
+            />
+            <button className="vs-button-secondary" onClick={saveCurrentView}>Save View</button>
+            <button className="vs-button-secondary" onClick={exportLeadsCsv} disabled={leads.length === 0}>Export CSV</button>
+          </div>
+        </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-8">
           {isAdmin && (
             <select className="vs-input xl:col-span-2" value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
@@ -590,6 +773,10 @@ export default function LeadsPage() {
           <select className="vs-input" value={campaignFilter} onChange={(e) => setCampaignFilter(e.target.value)}>
             <option value="">All campaigns</option>
             {campaignOptions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <select className="vs-input" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+            <option value="">All sources</option>
+            {sourceOptions.map((item) => <option key={item} value={item}>{item.replace(/_/g, ' ')}</option>)}
           </select>
           <select className="vs-input" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All statuses</option>
@@ -618,10 +805,10 @@ export default function LeadsPage() {
           )}
           <input className="vs-input xl:col-span-2" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or phone" />
           <button className="vs-button-primary" onClick={() => void loadLeads()}>Apply</button>
-          <button className="vs-button-secondary" onClick={() => {
-            setStatus(''); setRange('today'); setCustomStart(''); setCustomEnd('');
-            setStateFilter(''); setAgentFilter(''); setLeadTypeFilter(''); setCampaignFilter(''); setSearch('');
-          }}>Reset</button>
+	          <button className="vs-button-secondary" onClick={() => {
+	            setStatus(''); setRange('today'); setCustomStart(''); setCustomEnd('');
+	            setStateFilter(''); setAgentFilter(''); setLeadTypeFilter(''); setCampaignFilter(''); setSourceFilter(''); setSearch('');
+	          }}>Reset</button>
         </div>
       </SectionCard>
 
@@ -642,8 +829,9 @@ export default function LeadsPage() {
             <table className="min-w-full text-left text-sm">
               <thead className="border-b border-white/[0.04] text-[11px] uppercase tracking-[0.18em] text-slate-500">
                 <tr>
-                  <th className="px-5 py-3">Received</th>
-                  <th className="px-5 py-3">Name</th>
+	                  <th className="px-5 py-3">Received</th>
+	                  <th className="px-5 py-3">Source</th>
+	                  <th className="px-5 py-3">Name</th>
                   <th className="px-5 py-3">Campaign</th>
                   <th className="px-5 py-3">Type</th>
                   <th className="px-5 py-3">Phone</th>
@@ -672,8 +860,9 @@ export default function LeadsPage() {
                           : 'hover:bg-white/[0.025]'
                       }`}
                     >
-                      <td className="px-5 py-4 text-slate-300">{formatTimeAgo(lead.received_at)}</td>
-                      <td className="px-5 py-4 font-medium text-white">{leadName(lead)}</td>
+	                      <td className="px-5 py-4 text-slate-300">{formatTimeAgo(lead.received_at)}</td>
+	                      <td className="px-5 py-4 text-slate-300">{String(lead.source || 'manual_upload').replace(/_/g, ' ')}</td>
+	                      <td className="px-5 py-4 font-medium text-white">{leadName(lead)}</td>
                       <td className="px-5 py-4 text-slate-300">
                         {lead.campaign_name || lead.campaign_id || lead.opt_in_source || '-'}
                       </td>
@@ -1122,20 +1311,40 @@ export default function LeadsPage() {
                 />
               </label>
 
-              <div className="flex flex-wrap gap-2">
-                <button className="vs-button-primary" onClick={() => void onCallLead(selectedLead)}>
-                  Call Now
-                </button>
+	              <div className="flex flex-wrap gap-2">
+	                <button className="vs-button-primary" onClick={() => void onCallLead(selectedLead)}>
+	                  Call Now
+	                </button>
                 <button className="vs-button-secondary" onClick={() => void updateSelected(selectedLead, { assign_to_me: true })}>
                   Assign to Me
                 </button>
                 <button className="vs-button-secondary" onClick={() => void updateSelected(selectedLead, { status: 'transferred' })}>
                   Mark Transferred
-                </button>
-              </div>
-            </div>
+	                </button>
+	              </div>
+	            </div>
 
-            {isAdmin && (
+	            <div className="mt-6 rounded-3xl border border-white/[0.04] bg-white/[0.025] p-4">
+	              <div className="flex items-center justify-between gap-3">
+	                <div className="text-sm font-semibold text-slate-200">Activity Trail</div>
+	                {loadingLeadActivity && <span className="text-xs text-slate-500">Loading...</span>}
+	              </div>
+	              <div className="mt-4 space-y-3">
+	                {leadActivity.length === 0 && !loadingLeadActivity ? (
+	                  <div className="text-sm text-slate-500">No tracked activity yet.</div>
+	                ) : leadActivity.map((activity) => (
+	                  <div key={activity.id} className="rounded-2xl border border-white/[0.035] bg-black/20 p-3">
+	                    <div className="text-sm font-medium text-slate-100">{activityLabel(activity)}</div>
+	                    <div className="mt-1 text-xs text-slate-500">
+	                      {activity.created_at ? new Date(activity.created_at).toLocaleString() : '-'}
+	                      {activity.actor_id ? ` - ${activity.actor_id.slice(0, 8)}` : ''}
+	                    </div>
+	                  </div>
+	                ))}
+	              </div>
+	            </div>
+
+	            {isAdmin && (
               <details className="mt-6 rounded-3xl border border-white/[0.04] bg-white/[0.025] p-4">
                 <summary className="cursor-pointer text-sm font-semibold text-slate-200">Raw payload</summary>
                 <pre className="mt-4 max-h-80 overflow-auto rounded-2xl bg-black/30 p-4 text-xs text-slate-300">

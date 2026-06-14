@@ -4681,14 +4681,25 @@ app.post('/api/leads/inbound', async (req, res) => {
       })
       .select('id, first_name, state, debt_amount, organization_id')
       .maybeSingle();
-    if (error) throw error;
+	    if (error) throw error;
+	    await writeAuditLog({
+	      action: 'lead_created',
+	      org_id: organizationId,
+	      entity_type: 'lead',
+	      entity_id: inserted?.id || null,
+	      metadata: {
+	        source: 'mcgrawnow',
+	        campaign_id: mapped.campaign_id || leadSource.campaign_id,
+	        lead_type: mapped.lead_type || leadSource.lead_type || 'debt_relief',
+	      },
+	    });
 
-    await insertLogSafely(supabaseAdmin, 'activity_logs', {
+	    await insertLogSafely(supabaseAdmin, 'activity_logs', {
       user_id: null,
       organization_id: organizationId,
       event_type: 'notification',
       event_name: 'New lead notification queued',
-      page: '/dashboard/leads',
+      page: '/leads',
       element: 'new-lead-banner',
       metadata: { lead_id: inserted?.id, source: 'mcgrawnow' },
       ip_address: getRequestIpHash(req as any),
@@ -4720,8 +4731,7 @@ app.get('/api/leads/summary', async (req, res) => {
     let query = supabaseAdmin.from('leads').select('id, status, contacted_at, transferred_at, lead_type, campaign_id, source').gte('received_at', today).limit(5000);
     if (orgId) query = query.eq('organization_id', orgId);
     if (!orgId && !actorIsPlatformAdmin) {
-      const { data: memberships } = await supabaseAdmin.from('org_users').select('org_id').eq('user_id', actorId);
-      const orgIds = Array.from(new Set((memberships || []).map((row: any) => String(row.org_id || '')).filter(Boolean)));
+      const orgIds = await getUserOrgIds(actorId);
       if (orgIds.length === 0) return res.json({ total_today: 0, new_leads: 0, contacted_today: 0, transferred_today: 0, contact_rate_pct: 0, transfer_rate_pct: 0 });
       query = query.in('organization_id', orgIds);
     }
@@ -4758,8 +4768,7 @@ app.get('/api/leads', async (req, res) => {
     let query = supabaseAdmin.from('leads').select('*', { count: 'exact' }).order('received_at', { ascending: false }).range(offset, offset + limit - 1);
     if (orgId) query = query.eq('organization_id', orgId);
     if (!orgId && !actorIsPlatformAdmin) {
-      const { data: memberships } = await supabaseAdmin.from('org_users').select('org_id').eq('user_id', actorId);
-      const orgIds = Array.from(new Set((memberships || []).map((row: any) => String(row.org_id || '')).filter(Boolean)));
+      const orgIds = await getUserOrgIds(actorId);
       if (orgIds.length === 0) return res.json({ items: [], count: 0, limit, offset });
       query = query.in('organization_id', orgIds);
     }
@@ -4826,8 +4835,7 @@ app.get('/api/leads/sources', async (req, res) => {
 
     if (orgId) query = query.eq('organization_id', orgId);
     if (!orgId && !actorIsPlatformAdmin) {
-      const { data: memberships } = await supabaseAdmin.from('org_users').select('org_id').eq('user_id', actorId);
-      const orgIds = Array.from(new Set((memberships || []).map((row: any) => String(row.org_id || '')).filter(Boolean)));
+      const orgIds = await getUserOrgIds(actorId);
       if (orgIds.length === 0) return res.json({ items: [] });
       query = query.in('organization_id', orgIds);
     }
@@ -4904,12 +4912,48 @@ app.patch('/api/leads/:leadId', async (req, res) => {
       patch.assigned_agent_id = actorId;
       patch.assigned_at = new Date().toISOString();
     }
-    if (req.body.increment_attempts === true) patch.call_attempts = Number(existing.call_attempts || 0) + 1;
-    const { data, error } = await supabaseAdmin.from('leads').update(patch).eq('id', leadId).select('*').maybeSingle();
+	    if (req.body.increment_attempts === true) patch.call_attempts = Number(existing.call_attempts || 0) + 1;
+	    const { data, error } = await supabaseAdmin.from('leads').update(patch).eq('id', leadId).select('*').maybeSingle();
+	    if (error) throw error;
+	    await writeAuditLog({
+	      actor_id: actorId,
+	      action: 'lead_updated',
+	      org_id: existing.organization_id,
+	      entity_type: 'lead',
+	      entity_id: leadId,
+	      metadata: { patch },
+	    });
+	    res.json({ item: data });
+	  } catch (e) {
+	    res.status(500).json({ error: 'lead_update_failed', detail: fmtErr(e) });
+	  }
+	});
+
+app.get('/api/leads/:leadId/activity', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const leadId = String(req.params.leadId || '');
+    const { data: existing } = await supabaseAdmin
+      .from('leads')
+      .select('organization_id')
+      .eq('id', leadId)
+      .maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'lead_not_found' });
+    if (!(await isPlatformAdmin(actorId)) && !(await isOrgMember(actorId, existing.organization_id))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const { data, error } = await supabaseAdmin
+      .from('audit_logs')
+      .select('id, actor_id, action, org_id, metadata, created_at')
+      .eq('entity_type', 'lead')
+      .eq('entity_id', leadId)
+      .order('created_at', { ascending: false })
+      .limit(50);
     if (error) throw error;
-    res.json({ item: data });
+    res.json({ items: data || [] });
   } catch (e) {
-    res.status(500).json({ error: 'lead_update_failed', detail: fmtErr(e) });
+    res.status(500).json({ error: 'lead_activity_failed', detail: fmtErr(e) });
   }
 });
 
@@ -4944,21 +4988,10 @@ app.post('/api/leads/upload', async (req, res) => {
       if (!canUpload) return res.status(403).json({ error: 'upload_not_permitted', detail: 'Your account does not have lead upload permission.' });
       // Non-admin must upload to their own org
       if (!orgId) {
-        const { data: membership } = await supabaseAdmin
-          .from('org_members')
-          .select('org_id')
-          .eq('user_id', actorId)
-          .maybeSingle();
-        orgId = membership?.org_id || null;
+        orgId = (await getUserOrgIds(actorId))[0] || null;
       } else {
         // Verify they belong to that org
-        const { data: membership } = await supabaseAdmin
-          .from('org_members')
-          .select('org_id')
-          .eq('user_id', actorId)
-          .eq('org_id', orgId)
-          .maybeSingle();
-        if (!membership) return res.status(403).json({ error: 'forbidden_org' });
+        if (!(await getUserOrgIds(actorId)).includes(orgId)) return res.status(403).json({ error: 'forbidden_org' });
       }
     }
 
@@ -5017,16 +5050,24 @@ app.post('/api/leads/upload', async (req, res) => {
     }
 
     // Update batch record
-    if (uploadId) {
-      await supabaseAdmin.from('lead_list_uploads').update({
-        status: failed === 0 ? 'complete' : 'partial',
-        inserted_count: inserted,
-        failed_count: failed,
-        completed_at: new Date().toISOString(),
-      }).eq('id', uploadId);
-    }
+	    if (uploadId) {
+	      await supabaseAdmin.from('lead_list_uploads').update({
+	        status: failed === 0 ? 'complete' : 'partial',
+	        inserted_count: inserted,
+	        failed_count: failed,
+	        completed_at: new Date().toISOString(),
+	      }).eq('id', uploadId);
+	    }
+	    await writeAuditLog({
+	      actor_id: actorId,
+	      action: 'lead_list_uploaded',
+	      org_id: orgId,
+	      entity_type: 'lead_list_upload',
+	      entity_id: uploadId,
+	      metadata: { inserted, failed, total: rows.length, assigned_agent_id: assigned_agent_id || null },
+	    });
 
-    return res.json({
+	    return res.json({
       ok: true,
       upload_id: uploadId,
       inserted,
@@ -5053,9 +5094,7 @@ app.get('/api/leads/uploads', async (req, res) => {
       .limit(50);
     if (!isAdmin) {
       // Non-admin sees only their org's uploads
-      const { data: membership } = await supabaseAdmin
-        .from('org_members').select('org_id').eq('user_id', actorId).maybeSingle();
-      const userOrgId = membership?.org_id || null;
+      const userOrgId = (await getUserOrgIds(actorId))[0] || null;
       if (!userOrgId) return res.json({ items: [] });
       query = query.eq('organization_id', userOrgId);
     } else if (orgId) {
@@ -5082,9 +5121,11 @@ app.get('/api/admin/users/upload-permissions', async (req, res) => {
       .order('full_name', { ascending: true })
       .limit(200);
     if (orgId) {
-      const { data: members } = await supabaseAdmin
-        .from('org_members').select('user_id').eq('org_id', orgId);
-      const ids = (members || []).map((m: any) => m.user_id).filter(Boolean);
+      const [{ data: orgMembers }, { data: orgUsers }] = await Promise.all([
+        supabaseAdmin.from('org_members').select('user_id').eq('org_id', orgId),
+        supabaseAdmin.from('org_users').select('user_id').eq('org_id', orgId),
+      ]);
+      const ids = Array.from(new Set([...(orgMembers || []), ...(orgUsers || [])].map((m: any) => m.user_id).filter(Boolean)));
       if (ids.length === 0) return res.json({ items: [] });
       query = query.in('id', ids);
     }
@@ -8132,13 +8173,7 @@ app.get('/api/orgs/:orgId/users/:userId/phone-assignments', async (req, res) => 
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
 
     // Check if user is org admin, org member, or platform admin
-    const isMember = !!(await supabaseAdmin
-      .from('org_users')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('user_id', actorId)
-      .maybeSingle()
-      .then(r => r.data));
+    const isMember = (await getUserOrgIds(actorId)).includes(orgId);
     const orgAdminCheck = await isOrgAdmin(actorId, orgId);
     const isPlatformAdminUser = await isPlatformAdmin(actorId);
 
@@ -8810,7 +8845,7 @@ app.get('/api/agents/live-status', async (req, res) => {
       });
     }
 
-    const items = agents.map((agent) => {
+		    const items = agents.map((agent) => {
       const key = `${agent.org_id}:${agent.mightycall_extension}`;
       const liveRow = statusByKey.get(key);
       if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
@@ -9408,9 +9443,21 @@ app.post('/api/live-status/sync', async (req, res) => {
 	        refreshed_at: null,
 	        stale: true,
 	      };
-	    });
+		    });
+		    for (const orgId of orgIds) {
+		      if (liveStatusSseClients.has(orgId) && liveStatusSseClients.get(orgId)!.size > 0) {
+		        try {
+		          const orgItems = items.filter((item: any) => item.org_id === orgId);
+		          broadcastSseEvent(orgId, {
+		            items: orgItems,
+		            refreshed_at: new Date().toISOString(),
+		            source: 'manual_sync_push',
+		          });
+		        } catch { /* best-effort SSE push */ }
+		      }
+		    }
 
-	    res.json({
+		    res.json({
 	      source: 'mightycall_user_status_by_extension',
 	      orgs_processed: orgIds.length,
 	      errors,

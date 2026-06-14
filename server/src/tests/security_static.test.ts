@@ -78,6 +78,19 @@ test('feature access is database-backed and enforced in client routing', () => {
   assert.match(sidebar, /featureAccess\[item\.featureKey\] !== false/);
 });
 
+test('leads endpoints use canonical organization membership lookup', () => {
+  const server = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+  const leadsBlock = server.slice(
+    server.indexOf("app.get('/api/leads/summary'"),
+    server.indexOf("app.get('/api/admin/logs/summary'"),
+  );
+
+  assert.match(leadsBlock, /await getUserOrgIds\(actorId\)/);
+  assert.match(leadsBlock, /isOrgMember\(actorId, orgId\)/);
+  assert.doesNotMatch(leadsBlock, /from\('org_users'\)\.select\('org_id'\)\.eq\('user_id', actorId\)/);
+  assert.doesNotMatch(leadsBlock, /from\('org_members'\)\s*\.select\('org_id'\)\s*\.eq\('user_id', actorId\)\s*\.maybeSingle/);
+});
+
 test('production diagnostics include live RLS and storage verification', () => {
   const migration = readFileSync(join(repoRoot, 'supabase', 'migrations', '031_feature_access_and_security_verification.sql'), 'utf8');
   const schemaHealth = readFileSync(join(process.cwd(), 'src', 'lib', 'schemaHealth.ts'), 'utf8');

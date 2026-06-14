@@ -1,4 +1,4 @@
-import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
+import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
@@ -74,57 +74,63 @@ const DashboardNewV3: FC = () => {
   const [liveRefreshedAt, setLiveRefreshedAt] = useState<string | null>(null);
   const liveRequestInFlight = useRef(false);
   const lastLiveRequestStartedAt = useRef(0);
+  const liveAgentsCountRef = useRef(0);
+
+  useEffect(() => {
+    liveAgentsCountRef.current = liveAgents.length;
+  }, [liveAgents.length]);
+
+  const activeOrgId = useMemo(
+    () => (isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null)),
+    [isAdmin, orgs, selectedOrgId],
+  );
+
+  const loadLiveAgents = useCallback(async (options?: { forceLoading?: boolean }) => {
+    const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
+
+    if (liveRequestInFlight.current && Date.now() - lastLiveRequestStartedAt.current < 10000) return;
+    if (!user?.id) {
+      setLiveAgents([]);
+      setLiveError(null);
+      setLiveRefreshedAt(null);
+      return;
+    }
+
+    liveRequestInFlight.current = true;
+    lastLiveRequestStartedAt.current = Date.now();
+    try {
+      const shouldShowLoading = options?.forceLoading || liveAgentsCountRef.current === 0;
+      if (shouldShowLoading) {
+        setLiveLoading(true);
+      }
+      setLiveError(null);
+      const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
+      setLiveAgents((json.items || []) as LiveAgentStatus[]);
+      setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
+    } catch (e: any) {
+      setLiveError(e?.message || 'Failed to load live agent status');
+    } finally {
+      liveRequestInFlight.current = false;
+      setLiveLoading(false);
+    }
+  }, [activeOrgId, isAdmin, orgs, selectedOrgId, user?.id]);
 
   useEffect(() => {
     let cancelled = false;
 
-    const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
-
-    const loadLiveAgents = async () => {
-      if (liveRequestInFlight.current && Date.now() - lastLiveRequestStartedAt.current < 10000) return;
-      if (!user?.id) {
-        if (!cancelled) {
-          setLiveAgents([]);
-          setLiveError(null);
-          setLiveRefreshedAt(null);
-        }
-        return;
-      }
-
-      liveRequestInFlight.current = true;
-      lastLiveRequestStartedAt.current = Date.now();
-      try {
-        if (!cancelled) {
-          setLiveLoading(true);
-          setLiveError(null);
-        }
-        const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
-        if (cancelled) return;
-        setLiveAgents((json.items || []) as LiveAgentStatus[]);
-        setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
-      } catch (e: any) {
-        if (cancelled) return;
-        setLiveError(e?.message || 'Failed to load live agent status');
-      } finally {
-        liveRequestInFlight.current = false;
-        if (!cancelled) setLiveLoading(false);
-      }
+    const safeLoad = async () => {
+      if (!cancelled) await loadLiveAgents();
     };
 
-    loadLiveAgents();
-    const intervalId = window.setInterval(loadLiveAgents, 2500);
-    const onFocus = () => {
-      if (document.visibilityState === 'visible') loadLiveAgents();
-    };
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('visibilitychange', onFocus);
+    void safeLoad();
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void safeLoad();
+    }, 10_000);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('visibilitychange', onFocus);
     };
-  }, [selectedOrgId, user?.id, isAdmin, orgs]);
+  }, [loadLiveAgents]);
 
   const orgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
   const answered = metrics?.answered_calls_today || 0;
@@ -306,18 +312,7 @@ const DashboardNewV3: FC = () => {
                 <button
                   onClick={async () => {
                     if (!selectedOrgId || !user?.id) return;
-                    try {
-                      setLiveLoading(true);
-                      setLiveError(null);
-                      const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
-                      const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
-                      setLiveAgents((json.items || []) as LiveAgentStatus[]);
-                      setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
-                    } catch (e: any) {
-                      setLiveError(e?.message || 'Failed to load live agent status');
-                    } finally {
-                      setLiveLoading(false);
-                    }
+                    await loadLiveAgents({ forceLoading: true });
                   }}
                   disabled={!selectedOrgId || liveLoading}
                   className="vs-button-secondary"
