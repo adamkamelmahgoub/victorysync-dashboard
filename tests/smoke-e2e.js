@@ -18,6 +18,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://your-project.supabase.
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 const TEST_EMAIL = `test-${Date.now()}@example.com`;
 const TEST_PASSWORD = 'TempPassword123!';
+const hasSupabaseConfig = Boolean(
+  SUPABASE_ANON_KEY &&
+  SUPABASE_URL &&
+  !SUPABASE_URL.includes('your-project.supabase.co')
+);
 
 let testUserId = null;
 let testOrgId = null;
@@ -67,6 +72,7 @@ function makeRequest(method, url, body = null, headers = {}) {
 // Test utilities
 let passCount = 0;
 let failCount = 0;
+let skipCount = 0;
 
 function test(name, fn) {
   return (async () => {
@@ -86,6 +92,11 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function skip(name, reason) {
+  console.log(`- ${name} (skipped: ${reason})`);
+  skipCount++;
+}
+
 // ========== Tests ==========
 
 async function runTests() {
@@ -97,74 +108,83 @@ async function runTests() {
     assert(res.status === 200 || res.status === 404, `health check returned ${res.status}`);
   });
 
-  // Test 2: Create user via Supabase
-  await test('Create test user in Supabase', async () => {
-    const res = await makeRequest('POST', `${SUPABASE_URL}/auth/v1/signup`, {
-      email: TEST_EMAIL,
-      password: TEST_PASSWORD,
-    }, {
-      apikey: SUPABASE_ANON_KEY,
-      'Content-Type': 'application/json',
-    });
-    if (res.status === 200 || res.status === 201) {
-      testUserId = res.body?.user?.id;
-      testAccessToken = res.body?.session?.access_token;
-      assert(testUserId, 'User ID not returned');
-    } else {
-      // User might already exist, try login
-      console.log(`  Note: Signup failed (${res.status}), attempting login...`);
-      const loginRes = await makeRequest('POST', `${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+  if (hasSupabaseConfig) {
+    // Test 2: Create user via Supabase
+    await test('Create test user in Supabase', async () => {
+      const res = await makeRequest('POST', `${SUPABASE_URL}/auth/v1/signup`, {
         email: TEST_EMAIL,
         password: TEST_PASSWORD,
       }, {
         apikey: SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json',
       });
-      assert(loginRes.status === 200, `Login failed: ${loginRes.status}`);
-      testUserId = loginRes.body?.user?.id;
-      testAccessToken = loginRes.body?.session?.access_token;
-    }
-  });
-
-  // Test 3: Fetch user profile via server
-  await test('GET /api/user/profile returns user profile', async () => {
-    assert(testUserId, 'test user not created');
-    const res = await makeRequest('GET', `${API_BASE}/api/user/profile`, null, {
-      'x-user-id': testUserId,
+      if (res.status === 200 || res.status === 201) {
+        testUserId = res.body?.user?.id;
+        testAccessToken = res.body?.session?.access_token;
+        assert(testUserId, 'User ID not returned');
+      } else {
+        // User might already exist, try login
+        console.log(`  Note: Signup failed (${res.status}), attempting login...`);
+        const loginRes = await makeRequest('POST', `${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+          email: TEST_EMAIL,
+          password: TEST_PASSWORD,
+        }, {
+          apikey: SUPABASE_ANON_KEY,
+        });
+        assert(loginRes.status === 200, `Login failed: ${loginRes.status}`);
+        testUserId = loginRes.body?.user?.id;
+        testAccessToken = loginRes.body?.session?.access_token;
+      }
     });
-    assert(res.status === 200, `GET /api/user/profile returned ${res.status}`);
-    assert(res.body?.profile?.id === testUserId, 'Profile ID mismatch');
-  });
 
-  // Test 4: Fetch user orgs
-  await test('GET /api/user/orgs returns org list', async () => {
-    assert(testUserId, 'test user not created');
-    const res = await makeRequest('GET', `${API_BASE}/api/user/orgs`, null, {
-      'x-user-id': testUserId,
+    // Test 3: Fetch user profile via server
+    await test('GET /api/user/profile returns user profile', async () => {
+      assert(testUserId, 'test user not created');
+      const res = await makeRequest('GET', `${API_BASE}/api/user/profile`, null, {
+        'x-user-id': testUserId,
+      });
+      assert(res.status === 200, `GET /api/user/profile returned ${res.status}`);
+      assert(res.body?.profile?.id === testUserId, 'Profile ID mismatch');
     });
-    assert(res.status === 200, `GET /api/user/orgs returned ${res.status}`);
-    assert(Array.isArray(res.body?.orgs), 'orgs is not an array');
-  });
 
-  // Test 5: Create an org via onboarding
-  await test('POST /api/user/onboard creates org for user', async () => {
-    assert(testUserId, 'test user not created');
-    const res = await makeRequest('POST', `${API_BASE}/api/user/onboard`, {}, {
-      'x-user-id': testUserId,
+    // Test 4: Fetch user orgs
+    await test('GET /api/user/orgs returns org list', async () => {
+      assert(testUserId, 'test user not created');
+      const res = await makeRequest('GET', `${API_BASE}/api/user/orgs`, null, {
+        'x-user-id': testUserId,
+      });
+      assert(res.status === 200, `GET /api/user/orgs returned ${res.status}`);
+      assert(Array.isArray(res.body?.orgs), 'orgs is not an array');
     });
-    assert(res.status === 200 || res.status === 201, `POST /api/user/onboard returned ${res.status}`);
-    testOrgId = res.body?.org?.id;
-    assert(testOrgId, 'Org ID not returned');
-  });
 
-  // Test 6: Get org integrations (should be empty initially)
-  await test('GET /api/admin/org/:orgId/integrations returns empty list', async () => {
-    assert(testOrgId, 'test org not created');
-    const res = await makeRequest('GET', `${API_BASE}/api/admin/orgs/${testOrgId}/integrations`, null, {
-      'x-user-id': testUserId,
+    // Test 5: Create an org via onboarding
+    await test('POST /api/user/onboard creates org for user', async () => {
+      assert(testUserId, 'test user not created');
+      const res = await makeRequest('POST', `${API_BASE}/api/user/onboard`, {}, {
+        'x-user-id': testUserId,
+      });
+      assert(res.status === 200 || res.status === 201, `POST /api/user/onboard returned ${res.status}`);
+      testOrgId = res.body?.org?.id;
+      assert(testOrgId, 'Org ID not returned');
     });
-    assert(res.status === 200 || res.status === 400, `GET integrations returned ${res.status}`);
-    // 400 is OK if endpoint doesn't exist; we just want to verify auth
-  });
+
+    // Test 6: Get org integrations (should be empty initially)
+    await test('GET /api/admin/org/:orgId/integrations returns empty list', async () => {
+      assert(testOrgId, 'test org not created');
+      const res = await makeRequest('GET', `${API_BASE}/api/admin/orgs/${testOrgId}/integrations`, null, {
+        'x-user-id': testUserId,
+      });
+      assert(res.status === 200 || res.status === 400, `GET integrations returned ${res.status}`);
+      // 400 is OK if endpoint doesn't exist; we just want to verify auth
+    });
+  } else {
+    const reason = 'set SUPABASE_URL and SUPABASE_ANON_KEY to run external auth checks';
+    skip('Create test user in Supabase', reason);
+    skip('GET /api/user/profile returns user profile', reason);
+    skip('GET /api/user/orgs returns org list', reason);
+    skip('POST /api/user/onboard creates org for user', reason);
+    skip('GET /api/admin/org/:orgId/integrations returns empty list', reason);
+  }
 
   // Test 7: Client metrics endpoint
   await test('GET /api/client-metrics returns metrics', async () => {
@@ -197,18 +217,22 @@ async function runTests() {
   });
 
   // Test 10: Edge Function deployment check
-  await test('MightyCall webhook Edge Function is deployed', async () => {
-    const res = await makeRequest('POST', `${SUPABASE_URL}/functions/v1/mightycall-webhook`, {
-      org_id: testOrgId || 'test',
-      event: 'ping',
-    }, {
-      'Authorization': 'Bearer invalid-token',
+  if (hasSupabaseConfig) {
+    await test('MightyCall webhook Edge Function is deployed', async () => {
+      const res = await makeRequest('POST', `${SUPABASE_URL}/functions/v1/mightycall-webhook`, {
+        org_id: testOrgId || 'test',
+        event: 'ping',
+      }, {
+        'Authorization': 'Bearer invalid-token',
+      });
+      // We expect 401 (auth failed) or 400 (bad org), not 404 (not found)
+      assert(res.status !== 404, `mightycall-webhook function not found (404)`);
     });
-    // We expect 401 (auth failed) or 400 (bad org), not 404 (not found)
-    assert(res.status !== 404, `mightycall-webhook function not found (404)`);
-  });
+  } else {
+    skip('MightyCall webhook Edge Function is deployed', 'set SUPABASE_URL and SUPABASE_ANON_KEY to run external function checks');
+  }
 
-  console.log(`\n📊 Results: ${passCount} passed, ${failCount} failed\n`);
+  console.log(`\nResults: ${passCount} passed, ${failCount} failed, ${skipCount} skipped\n`);
   return failCount === 0;
 }
 

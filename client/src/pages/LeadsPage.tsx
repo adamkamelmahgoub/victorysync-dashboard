@@ -384,84 +384,6 @@ export default function LeadsPage() {
     return Array.from(values.entries()).map(([id, name]) => ({ id, name }));
   }, [leadSources]);
 
-  const sourceOptions = useMemo(() => {
-    const values = new Set<string>();
-    for (const source of leadSources) if (source.source_name) values.add(source.source_name);
-    for (const lead of leads) if (lead.source) values.add(lead.source);
-    values.add('manual_upload');
-    values.add('mcgrawnow');
-    return Array.from(values).sort();
-  }, [leadSources, leads]);
-
-  const persistSavedViews = useCallback((views: SavedLeadView[]) => {
-    setSavedViews(views);
-    localStorage.setItem(savedViewsKey, JSON.stringify(views));
-  }, [savedViewsKey]);
-
-  const saveCurrentView = () => {
-    const name = savedViewName.trim();
-    if (!name) {
-      toast.push('Name this view first', 'error');
-      return;
-    }
-    const nextView: SavedLeadView = {
-      id: `${Date.now()}`,
-      name,
-      filters: currentViewFilters,
-    };
-    persistSavedViews([nextView, ...savedViews.filter((view) => view.name.toLowerCase() !== name.toLowerCase())].slice(0, 12));
-    setSavedViewName('');
-    toast.push('Lead view saved', 'success');
-  };
-
-  const applySavedView = (view: SavedLeadView) => {
-    setStatus(view.filters.status);
-    setRange(view.filters.range);
-    setCustomStart(view.filters.customStart);
-    setCustomEnd(view.filters.customEnd);
-    setStateFilter(view.filters.stateFilter);
-    setAgentFilter(view.filters.agentFilter);
-    setLeadTypeFilter(view.filters.leadTypeFilter);
-    setCampaignFilter(view.filters.campaignFilter);
-    setSourceFilter(view.filters.sourceFilter);
-    setSearch(view.filters.search);
-    setOrgFilter(view.filters.orgFilter);
-    toast.push(`Applied ${view.name}`, 'success');
-  };
-
-  const deleteSavedView = (viewId: string) => {
-    persistSavedViews(savedViews.filter((view) => view.id !== viewId));
-  };
-
-  const exportLeadsCsv = () => {
-    const headers = ['received_at', 'source', 'campaign', 'lead_type', 'first_name', 'last_name', 'phone', 'email', 'state', 'debt_amount', 'status', 'assigned_agent', 'call_attempts'];
-    const rows = leads.map((lead) => {
-      const agent = lead.assigned_agent_id ? memberById[lead.assigned_agent_id] : null;
-      return [
-        lead.received_at || '',
-        lead.source || '',
-        lead.campaign_name || lead.campaign_id || '',
-        lead.lead_type || '',
-        lead.first_name || '',
-        lead.last_name || '',
-        isAdmin || revealedPhones.has(lead.id) ? lead.phone : maskPhone(lead.phone, false),
-        lead.email || '',
-        lead.state || '',
-        lead.debt_amount || '',
-        lead.status || 'new',
-        agent ? memberLabel(agent) : lead.assigned_agent_id || '',
-        lead.call_attempts || 0,
-      ].map(csvEscape).join(',');
-    });
-    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `victorysync-leads-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   const saveLeadSource = async () => {
     if (!user?.id) return;
     if (!leadSourceForm.organization_id) {
@@ -554,6 +476,84 @@ export default function LeadsPage() {
     search,
     orgFilter,
   }), [agentFilter, campaignFilter, customEnd, customStart, leadTypeFilter, orgFilter, range, search, sourceFilter, stateFilter, status]);
+
+  const sourceOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const source of leadSources) if (source.source_name) values.add(source.source_name);
+    for (const lead of leads) if (lead.source) values.add(lead.source);
+    values.add('manual_upload');
+    values.add('mcgrawnow');
+    return Array.from(values).sort();
+  }, [leadSources, leads]);
+
+  const persistSavedViews = useCallback((views: SavedLeadView[]) => {
+    setSavedViews(views);
+    localStorage.setItem(savedViewsKey, JSON.stringify(views));
+  }, [savedViewsKey]);
+
+  const saveCurrentView = () => {
+    const name = savedViewName.trim();
+    if (!name) {
+      toast.push('Name this view first', 'error');
+      return;
+    }
+    const nextView: SavedLeadView = {
+      id: `${Date.now()}`,
+      name,
+      filters: currentViewFilters,
+    };
+    persistSavedViews([nextView, ...savedViews.filter((view) => view.name.toLowerCase() !== name.toLowerCase())].slice(0, 12));
+    setSavedViewName('');
+    toast.push('Lead view saved', 'success');
+  };
+
+  const applySavedView = (view: SavedLeadView) => {
+    setStatus(view.filters.status);
+    setRange(view.filters.range);
+    setCustomStart(view.filters.customStart);
+    setCustomEnd(view.filters.customEnd);
+    setStateFilter(view.filters.stateFilter);
+    setAgentFilter(view.filters.agentFilter);
+    setLeadTypeFilter(view.filters.leadTypeFilter);
+    setCampaignFilter(view.filters.campaignFilter);
+    setSourceFilter(view.filters.sourceFilter);
+    setSearch(view.filters.search);
+    setOrgFilter(view.filters.orgFilter);
+    toast.push(`Applied ${view.name}`, 'success');
+  };
+
+  const deleteSavedView = (viewId: string) => {
+    persistSavedViews(savedViews.filter((view) => view.id !== viewId));
+  };
+
+  const exportLeadsCsv = () => {
+    const headers = ['received_at', 'source', 'campaign', 'lead_type', 'first_name', 'last_name', 'phone', 'email', 'state', 'debt_amount', 'status', 'assigned_agent', 'call_attempts'];
+    const rows = leads.map((lead) => {
+      const agent = lead.assigned_agent_id ? memberById[lead.assigned_agent_id] : null;
+      return [
+        lead.received_at || '',
+        lead.source || '',
+        lead.campaign_name || lead.campaign_id || '',
+        lead.lead_type || '',
+        lead.first_name || '',
+        lead.last_name || '',
+        isAdmin || revealedPhones.has(lead.id) ? lead.phone : maskPhone(lead.phone, false),
+        lead.email || '',
+        lead.state || '',
+        lead.debt_amount || '',
+        lead.status || 'new',
+        agent ? memberLabel(agent) : lead.assigned_agent_id || '',
+        lead.call_attempts || 0,
+      ].map(csvEscape).join(',');
+    });
+    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `victorysync-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const queryParams = useMemo(() => ({
     organization_id: orgFilter || undefined,
