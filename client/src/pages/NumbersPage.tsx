@@ -31,6 +31,12 @@ type PhoneNumberItem = {
   org_id?: string | null;
   is_active?: boolean | null;
   isActive?: boolean | null;
+  call_volume?: number | null;
+  sms_volume?: number | null;
+  calls_this_period?: number | null;
+  sms_this_period?: number | null;
+  last_activity_at?: string | null;
+  last_activity?: string | null;
 };
 
 function normalizePhone(input?: string | null) {
@@ -57,6 +63,12 @@ function recordingDownloadUrl(recordingId: string) {
 
 function getPhoneValue(item?: PhoneNumberItem | null) {
   return item?.number || item?.phone_number || '';
+}
+
+function formatActivityDate(value?: string | null) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '-' : parsed.toLocaleString();
 }
 
 function matchesRecordingToPhone(recording: Recording, phone: PhoneNumberItem) {
@@ -368,6 +380,20 @@ const NumbersPage: FC = () => {
                             <div className="truncate text-xl font-semibold text-white">{value}</div>
                             <div className="mt-2 text-sm text-slate-400">{item.label || item.provider || orgName || 'Phone inventory'}</div>
                             {orgName && <div className="mt-1 text-xs text-slate-500">{orgName}</div>}
+                            <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                              <div>
+                                <div className="font-semibold uppercase tracking-[0.12em] text-slate-500">Calls</div>
+                                <div className="mt-1 text-slate-700">{item.call_volume ?? item.calls_this_period ?? '-'}</div>
+                              </div>
+                              <div>
+                                <div className="font-semibold uppercase tracking-[0.12em] text-slate-500">SMS</div>
+                                <div className="mt-1 text-slate-700">{item.sms_volume ?? item.sms_this_period ?? '-'}</div>
+                              </div>
+                              <div>
+                                <div className="font-semibold uppercase tracking-[0.12em] text-slate-500">Last activity</div>
+                                <div className="mt-1 text-slate-700">{formatActivityDate(item.last_activity_at || item.last_activity)}</div>
+                              </div>
+                            </div>
                           </div>
                           <StatusBadge tone={active ? 'success' : 'warning'}>
                             {active ? 'Available' : 'Needs review'}

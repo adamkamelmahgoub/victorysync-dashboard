@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageLayout } from '../../components/PageLayout';
+import { EmptyStatePanel, LoadingSkeleton, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 // Server-side admin actions use API endpoints, not client-side Supabase
 import { useOrgStats } from '../../hooks/useOrgStats';
 import { API_BASE_URL, buildApiUrl } from '../../config';
@@ -16,6 +17,13 @@ interface Organization {
   total_calls?: number;
   answered_calls?: number;
   answer_rate_pct?: number;
+  assigned_numbers_count?: number;
+  phone_numbers_count?: number;
+  members_count?: number;
+  sms_count?: number;
+  recordings_count?: number;
+  billing_status?: string | null;
+  status?: string | null;
 }
 
 interface OrgDetailsModalProps {
@@ -687,6 +695,13 @@ export default function AdminOrgsPage() {
         total_calls: o.total_calls ?? 0,
         answered_calls: o.answered_calls ?? 0,
         answer_rate_pct: o.answer_rate_pct ?? 0,
+        assigned_numbers_count: o.assigned_numbers_count ?? o.phone_numbers_count,
+        phone_numbers_count: o.phone_numbers_count,
+        members_count: o.members_count,
+        sms_count: o.sms_count,
+        recordings_count: o.recordings_count,
+        billing_status: o.billing_status ?? null,
+        status: o.status ?? null,
       }));
       setOrgs(list);
     } catch (err: any) {
@@ -757,9 +772,7 @@ export default function AdminOrgsPage() {
 
         <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           {/* LEFT PANEL: Create org form */}
-          <div className="rounded-2xl bg-slate-900/80 ring-1 ring-slate-800 p-5 space-y-4 h-fit">
-            <h2 className="font-semibold text-sm">Create Organization</h2>
-
+          <SectionCard title="Create organization" description="Create a client workspace, then assign members and numbers from its management view." className="h-fit">
             {createError && (
               <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
                 {createError}
@@ -782,14 +795,14 @@ export default function AdminOrgsPage() {
                   value={newOrgName}
                   onChange={(e) => setNewOrgName(e.target.value)}
                   placeholder="e.g., Acme Corp"
-                  className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 placeholder-slate-600 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  className="vs-input w-full"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={creating}
-                className="w-full px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 text-white font-semibold rounded-lg text-sm transition"
+                className="vs-button-primary w-full"
               >
                 {creating ? 'Creating...' : 'Create Organization'}
               </button>
@@ -798,28 +811,57 @@ export default function AdminOrgsPage() {
             <div className="text-xs text-slate-500 pt-3 border-t border-slate-700">
               Once created, you can assign users, phone numbers, and view real-time call metrics from the list below.
             </div>
-          </div>
+          </SectionCard>
 
           {/* RIGHT PANEL: Organizations list */}
-          <div className="rounded-2xl bg-slate-900/80 ring-1 ring-slate-800 p-5 overflow-hidden">
-            <h2 className="font-semibold text-sm mb-4">Organizations</h2>
+          <SectionCard title="Organizations" description="Platform-wide client workspaces and current period metrics." contentClassName="p-0">
 
             {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300 mb-4">
+              <div className="m-5 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
                 {error}
               </div>
             )}
 
             {loading ? (
-              <div className="text-xs text-slate-400 text-center py-8">
-                Loading organizations...
+              <div className="space-y-3 p-5">
+                {Array.from({ length: 6 }).map((_, index) => <LoadingSkeleton key={index} className="h-14" />)}
               </div>
             ) : orgs.length === 0 ? (
-              <div className="text-xs text-slate-400 text-center py-8">
-                No organizations yet. Create one using the form on the left.
-              </div>
+              <div className="p-5"><EmptyStatePanel title="No organizations yet" description="Create the first organization to start assigning numbers, members, billing, and reporting access." /></div>
             ) : (
-              <div className="space-y-2">
+              <>
+              <div className="overflow-auto">
+                <table className="w-full min-w-[980px] text-sm">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                    <tr>
+                      {['Organization', 'Assigned numbers', 'Members', 'Calls', 'SMS', 'Recordings', 'Billing', 'Status', 'Actions'].map((label) => (
+                        <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]">{label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {orgs.map((org) => (
+                      <tr key={org.id} className="hover:bg-violet-50/40">
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-slate-900">{org.name}</div>
+                          <div className="text-xs text-slate-500">Created {new Date(org.created_at).toLocaleDateString()}</div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{org.assigned_numbers_count ?? org.phone_numbers_count ?? '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{org.members_count ?? '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{org.total_calls ?? '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{org.sms_count ?? '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{org.recordings_count ?? '-'}</td>
+                        <td className="px-4 py-3"><StatusBadge tone={org.billing_status ? 'info' : 'neutral'}>{org.billing_status || 'Not configured'}</StatusBadge></td>
+                        <td className="px-4 py-3"><StatusBadge tone={org.status === 'inactive' ? 'warning' : 'success'}>{org.status || 'Active'}</StatusBadge></td>
+                        <td className="px-4 py-3">
+                          <button onClick={() => setSelectedOrg(org)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Manage</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="hidden">
                 {orgs.map((org) => (
                   <button
                     key={org.id}
@@ -840,8 +882,9 @@ export default function AdminOrgsPage() {
                   </button>
                 ))}
               </div>
+              </>
             )}
-          </div>
+          </SectionCard>
         </section>
       </div>
 

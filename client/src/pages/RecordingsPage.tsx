@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
-import { EmptyStatePanel, MetricStatCard, SectionCard } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
 type Recording = {
   id: string;
@@ -16,6 +16,11 @@ type Recording = {
   recording_url?: string | null;
   direction?: string | null;
   created_at?: string | null;
+  status?: string | null;
+  agent_name?: string | null;
+  agent_extension?: string | null;
+  extension?: string | null;
+  organization_name?: string | null;
 };
 
 function isoDateDaysAgo(days: number) {
@@ -155,6 +160,10 @@ export function RecordingsPage() {
 	  }, []);
 
   const handleDownload = async (recording: Recording) => {
+    if (!recording.id) {
+      setError('Recording is not available for download.');
+      return;
+    }
     try {
 	      const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download?inline=1`), {
         headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
@@ -278,7 +287,9 @@ export function RecordingsPage() {
 
         <SectionCard title="Recording list" description="Review call recordings with direct playback and download actions." contentClassName="p-0">
           {loading ? (
-            <div className="px-5 py-10 text-sm text-slate-400">Loading recordings...</div>
+            <div className="space-y-3 p-5">
+              {Array.from({ length: 7 }).map((_, index) => <LoadingSkeleton key={index} className="h-12" />)}
+            </div>
           ) : filteredRows.length === 0 ? (
             <div className="p-5"><EmptyStatePanel title={emptyCopy.title} description={emptyCopy.description} /></div>
           ) : (
@@ -286,20 +297,26 @@ export function RecordingsPage() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
                   <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Call date/time</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">From</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">To</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Agent / extension</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Duration</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Status</th>
+                    {isPlatformAdmin && <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Organization</th>}
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Recording</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/6">
                   {filteredRows.map((recording) => (
                     <tr key={recording.id} className="transition hover:bg-white/[0.03]">
+                      <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(recording.recording_date || recording.created_at)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-200">{recording.from_number || '-'}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-200">{recording.to_number || '-'}</td>
+                      <td className="px-4 py-3 text-slate-300">{recording.agent_name || recording.agent_extension || recording.extension || '-'}</td>
                       <td className="px-4 py-3 text-slate-300">{fmtDuration(secondsOf(recording))}</td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(recording.recording_date || recording.created_at)}</td>
+                      <td className="px-4 py-3"><StatusBadge tone={String(recording.status || '').toLowerCase().includes('fail') ? 'warning' : 'neutral'}>{recording.status || 'available'}</StatusBadge></td>
+                      {isPlatformAdmin && <td className="px-4 py-3 text-slate-300">{recording.organization_name || orgs.find((org) => org.id === recording.org_id)?.name || recording.org_id || '-'}</td>}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
 	                          {recording.id ? (
@@ -310,7 +327,7 @@ export function RecordingsPage() {
 	                              )}
 	                            </>
 	                          ) : <span className="text-xs text-slate-500">N/A</span>}
-                          <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>
+                          {recording.id && <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>}
                         </div>
                       </td>
                     </tr>

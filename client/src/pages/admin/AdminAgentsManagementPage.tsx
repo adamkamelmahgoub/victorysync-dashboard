@@ -1,6 +1,7 @@
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
+import { EmptyStatePanel, LoadingSkeleton, StatusBadge } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
 import { cleanupOrgMightyCallExtensions, getAdminMightyCallExtensions, getLiveAgentStatus, getOrgMightyCallExtensions, getVerifiedAdminMightyCallExtensions, importAdminMightyCallExtension } from '../../lib/apiClient';
@@ -12,6 +13,9 @@ type OrgUser = {
   user_id: string;
   role: string;
   mightycall_extension?: string | null;
+  assigned_number?: string | null;
+  assigned_phone_number?: string | null;
+  recent_call_count?: number | null;
   created_at?: string;
 };
 type ExtensionOption = {
@@ -91,7 +95,7 @@ const AdminAgentsManagementPage: FC = () => {
   const [manualImportMessage, setManualImportMessage] = useState<string | null>(null);
 
   const activeOrgId = selectedOrgId || '';
-  const surfaceClass = 'rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.96),rgba(8,15,30,0.96))] shadow-[0_24px_80px_rgba(2,8,23,0.45)] backdrop-blur';
+  const surfaceClass = 'vs-surface';
 
   const orgNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -673,9 +677,13 @@ const AdminAgentsManagementPage: FC = () => {
           </div>
 
           {loading ? (
-            <div className="px-6 py-10 text-sm text-slate-400">Loading assignments...</div>
+            <div className="space-y-3 p-6">
+              {Array.from({ length: 7 }).map((_, index) => <LoadingSkeleton key={index} className="h-12" />)}
+            </div>
           ) : filteredAssignments.length === 0 ? (
-            <div className="px-6 py-10 text-sm text-slate-400">No agent assignments found.</div>
+            <div className="p-6">
+              <EmptyStatePanel title="No agent assignments found" description="Create an assignment above to connect a user, organization, role, and MightyCall extension." />
+            </div>
           ) : (
             <div className="overflow-auto">
               <table className="w-full text-sm">
@@ -685,8 +693,10 @@ const AdminAgentsManagementPage: FC = () => {
                     <th className="px-4 py-3 text-left">Org</th>
                     <th className="px-4 py-3 text-left">Role</th>
                     <th className="px-4 py-3 text-left">Extension</th>
+                    <th className="px-4 py-3 text-left">Assigned Number</th>
                     <th className="px-4 py-3 text-left">Live</th>
                     <th className="px-4 py-3 text-left">On Call With</th>
+                    <th className="px-4 py-3 text-left">Recent Calls</th>
                     <th className="px-4 py-3 text-left">Started</th>
                     <th className="px-4 py-3 text-left">Actions</th>
                   </tr>
@@ -729,14 +739,14 @@ const AdminAgentsManagementPage: FC = () => {
                             <span className="font-medium text-slate-200">{row.mightycall_extension || '-'}</span>
                           )}
                         </td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-300">{row.assigned_number || row.assigned_phone_number || '-'}</td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                            live?.on_call ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/20' : 'bg-white/[0.05] text-slate-300 ring-1 ring-white/10'
-                          }`}>
-                            {live?.on_call ? 'On Call' : (live?.status || 'Idle')}
-                          </span>
+                          <StatusBadge tone={live?.on_call ? 'info' : live?.status ? 'neutral' : 'warning'}>
+                            {live?.on_call ? 'On Call' : (live?.status || 'Unknown')}
+                          </StatusBadge>
                         </td>
                         <td className="px-4 py-3 text-slate-300 break-words">{live?.counterpart || '-'}</td>
+                        <td className="px-4 py-3 text-slate-300">{typeof row.recent_call_count === 'number' ? row.recent_call_count : '-'}</td>
                         <td className="px-4 py-3 text-slate-400">{fmtDate(live?.started_at)}</td>
                         <td className="px-4 py-3">
                           {isEditing ? (

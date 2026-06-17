@@ -3,10 +3,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
-import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { getOrgPhoneNumbers, type PhoneNumber } from '../lib/phonesApi';
 import { sendSmsMessage, triggerMightyCallSMSSync } from '../lib/apiClient';
-import { normalizeSmsDirection } from '../lib/reportingMetrics';
+import { formatPhoneNumber, normalizePhoneDigits, normalizeSmsDirection } from '../lib/reportingMetrics';
 
 interface SMSMessage {
   id: string;
@@ -35,6 +35,16 @@ function conversationKey(message: SMSMessage) {
     : (message.from_number || message.to_number || 'Unknown');
 }
 
+function messageTimeValue(message: SMSMessage) {
+  return Date.parse(message.sent_at || message.message_date || message.created_at || '') || 0;
+}
+
+function messagePreview(message?: string | null) {
+  const text = String(message || '').trim();
+  if (!text) return '-';
+  return text.length > 96 ? `${text.slice(0, 96)}...` : text;
+}
+
 export function SMSPage() {
   const { user, orgs, selectedOrgId, globalRole } = useAuth();
   const { org: currentOrg } = useOrg();
@@ -61,6 +71,8 @@ export function SMSPage() {
   const [search, setSearch] = useState('');
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
   const [directionFilter, setDirectionFilter] = useState<'all' | 'inbound' | 'outbound' | 'unknown'>('all');
+
+  const ownedDigits = useMemo(() => new Set(senderNumbers.map((row) => normalizePhoneDigits(row.number)).filter(Boolean)), [senderNumbers]);
 
   const syncMessages = async () => {
     if (!orgId || !user?.id) return;
@@ -220,44 +232,28 @@ export function SMSPage() {
     });
   }, [messages, search]).filter((message) => {
     if (directionFilter === 'all') return true;
-    const direction = String(message.direction || '').toLowerCase();
-    if (directionFilter === 'unknown') return direction !== 'inbound' && direction !== 'outbound';
+    const direction = normalizeSmsDirection(message.direction, message.from_number, ownedDigits);
     return direction === directionFilter;
   });
 
 	  const summary = useMemo(() => {
-    const inbound = filteredMessages.filter((message) => normalizeSmsDirection(message.direction, message.from_number) === 'inbound').length;
-    const outbound = filteredMessages.filter((message) => normalizeSmsDirection(message.direction, message.from_number) === 'outbound').length;
+    const inbound = filteredMessages.filter((message) => normalizeSmsDirection(message.direction, message.from_number, ownedDigits) === 'inbound').length;
+    const outbound = filteredMessages.filter((message) => normalizeSmsDirection(message.direction, message.from_number, ownedDigits) === 'outbound').length;
     const unknown = filteredMessages.length - inbound - outbound;
     return { inbound, outbound, unknown };
-	  }, [filteredMessages]);
+	  }, [filteredMessages, ownedDigits]);
 
-	  const conversations = useMemo(() => {
-	    const groups = new Map<string, SMSMessage[]>();
-	    for (const message of filteredMessages) {
-	      const key = conversationKey(message);
-	      const rows = groups.get(key) || [];
-	      rows.push(message);
-	      groups.set(key, rows);
-	    }
-	    return Array.from(groups.entries()).map(([number, rows]) => ({
-	      number,
-	      rows: rows.slice().sort((a, b) => {
-	        const aTime = Date.parse(a.sent_at || a.message_date || a.created_at || '');
-	        const bTime = Date.parse(b.sent_at || b.message_date || b.created_at || '');
-	        return (aTime || 0) - (bTime || 0);
-	      }),
-	      latest: rows.slice().sort((a, b) => {
-	        const aTime = Date.parse(a.sent_at || a.message_date || a.created_at || '');
-	        const bTime = Date.parse(b.sent_at || b.message_date || b.created_at || '');
-	        return (bTime || 0) - (aTime || 0);
-	      })[0],
-	    })).sort((a, b) => {
-	      const aTime = Date.parse(a.latest?.sent_at || a.latest?.message_date || a.latest?.created_at || '');
-	      const bTime = Date.parse(b.latest?.sent_at || b.latest?.message_date || b.latest?.created_at || '');
-	      return (bTime || 0) - (aTime || 0);
-	    });
-	  }, [filteredMessages]);
+  const tableRows = useMemo(() => filteredMessages.slice().sort((a, b) => messageTimeValue(b) - messageTimeValue(a)), [filteredMessages]);
+
+  const assignedNumberFor = (message: SMSMessage) => {
+    const fromDigits = normalizePhoneDigits(message.from_number);
+    const toDigits = normalizePhoneDigits(message.to_number);
+    const owned = senderNumbers.find((row) => {
+      const digits = normalizePhoneDigits(row.number);
+      return digits && (digits === fromDigits || digits === toDigits);
+    });
+    return owned?.number || message.to_number || message.from_number || '-';
+  };
 
   const emptyCopy = search.trim()
     ? {
@@ -340,52 +336,61 @@ export function SMSPage() {
           </div>
 
           {loading ? (
-            <div className="text-sm text-slate-400">Loading messages...</div>
-          ) : filteredMessages.length === 0 ? (
+            <div className="space-y-3">
+              {Array.from({ length: 7 }).map((_, index) => <LoadingSkeleton key={index} className="h-12" />)}
+            </div>
+          ) : tableRows.length === 0 ? (
             <EmptyStatePanel
               title={emptyCopy.title}
               description={emptyCopy.description}
             />
           ) : (
-	            <div className="space-y-4">
-	              {conversations.map((conversation) => (
-	                <div key={conversation.number} className="vs-surface-muted p-4">
-	                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-	                    <div>
-	                      <div className="font-mono text-sm font-semibold text-white">{conversation.number}</div>
-	                      <div className="mt-1 text-xs text-slate-500">{conversation.rows.length} message{conversation.rows.length === 1 ? '' : 's'}</div>
-	                    </div>
-	                    <div className="text-xs text-slate-500">{conversation.latest ? formatTime(conversation.latest) : '-'}</div>
-	                  </div>
-	                  <div className="space-y-3">
-	                    {conversation.rows.map((message) => {
-	                      const direction = normalizeSmsDirection(message.direction, message.from_number);
-	                      const inbound = direction === 'inbound';
-	                      const outbound = direction === 'outbound';
-	                      return (
-	                        <div key={message.id} className={`rounded-2xl border px-4 py-3 ${outbound ? 'ml-auto max-w-[92%] border-emerald-400/15 bg-emerald-400/[0.04]' : 'mr-auto max-w-[92%] border-cyan-400/15 bg-cyan-400/[0.04]'}`}>
-	                          <div className="flex flex-wrap items-center gap-2">
-	                            <StatusBadge tone={inbound ? 'info' : outbound ? 'success' : 'neutral'}>
-	                              {inbound ? 'Inbound' : outbound ? 'Outbound' : 'Unknown'}
-	                            </StatusBadge>
-	                            {message.status && <StatusBadge tone="neutral">{message.status}</StatusBadge>}
-	                          </div>
-	                          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
-	                            <span className="font-mono text-xs text-slate-200">{message.from_number || '-'}</span>
-	                            <span>to</span>
-	                            <span className="font-mono text-xs text-slate-200">{message.to_number || '-'}</span>
-	                          </div>
-	                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{message.message_text || '-'}</p>
-	                          <div className="mt-2 text-xs text-slate-500">{formatTime(message)}</div>
-	                        </div>
-	                      );
-	                    })}
-	                  </div>
-	                </div>
-	              ))}
+            <div className="max-h-[72vh] overflow-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">
+                  <tr>
+                    {[
+                      'Date/time',
+                      'Direction',
+                      'From',
+                      'To',
+                      'Assigned number',
+                      'Message preview',
+                      'Status',
+                      ...(isPlatformAdmin ? ['Organization'] : []),
+                    ].map((label) => (
+                      <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]">{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {tableRows.map((message) => {
+                    const direction = normalizeSmsDirection(message.direction, message.from_number, ownedDigits);
+                    const inbound = direction === 'inbound';
+                    const outbound = direction === 'outbound';
+                    const messageOrgName = orgs.find((org) => org.id === message.org_id)?.name || message.org_id || '-';
+                    return (
+                      <tr key={message.id} className="hover:bg-violet-50/40">
+                        <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{formatTime(message)}</td>
+                        <td className="px-4 py-3">
+                          <StatusBadge tone={inbound ? 'info' : outbound ? 'success' : 'neutral'}>
+                            {inbound ? 'Inbound' : outbound ? 'Outbound' : 'Unknown'}
+                          </StatusBadge>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{formatPhoneNumber(message.from_number)}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{formatPhoneNumber(message.to_number)}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{formatPhoneNumber(assignedNumberFor(message))}</td>
+                        <td className="max-w-[360px] px-4 py-3 text-slate-700">{messagePreview(message.message_text)}</td>
+                        <td className="px-4 py-3">{message.status ? <StatusBadge tone="neutral">{message.status}</StatusBadge> : <span className="text-xs text-slate-500">-</span>}</td>
+                        {isPlatformAdmin && <td className="px-4 py-3 text-slate-600">{messageOrgName}</td>}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
 
               {nextOffset !== null && (
-                <div className="flex justify-center pt-2">
+                <div className="flex justify-center border-t border-slate-200 bg-white p-4">
                   <button onClick={() => loadMessages(false)} disabled={loadingMore} className="vs-button-secondary">
                     {loadingMore ? 'Loading more...' : 'Load more'}
                   </button>

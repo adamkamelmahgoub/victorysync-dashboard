@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PageLayout } from '../components/PageLayout';
-import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
@@ -56,7 +56,7 @@ function downloadCsv(filename: string, rows: CallRow[]) {
     'duration_seconds',
     'wait_seconds',
     'external_call_id',
-    'recording_url',
+    'transfer_status',
   ];
   const csv = [
     keys.join(','),
@@ -151,15 +151,14 @@ export default function CallsPage() {
 
   const openRecording = async (row: CallRow) => {
     if (!user?.id || !row.id) {
-      if (row.recording_url) window.open(String(row.recording_url), '_blank', 'noopener,noreferrer');
+      setError('Recording is not available for this call.');
       return;
     }
     const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(row.id))}/download?inline=1`), {
       headers: { 'x-user-id': user.id },
     });
     if (!response.ok) {
-      if (row.recording_url) window.open(String(row.recording_url), '_blank', 'noopener,noreferrer');
-      else setError('Recording is not available for this call.');
+      setError('Recording is not available for this call.');
       return;
     }
     const blob = await response.blob();
@@ -231,7 +230,9 @@ export default function CallsPage() {
 
         <SectionCard title="Call log" description="Normalized call activity from synced MightyCall and stored call data." contentClassName="p-0">
           {loading ? (
-            <div className="px-5 py-10 text-sm text-slate-400">Loading calls...</div>
+            <div className="space-y-3 p-5">
+              {Array.from({ length: 7 }).map((_, index) => <LoadingSkeleton key={index} className="h-12" />)}
+            </div>
           ) : rows.length === 0 ? (
             <div className="p-5">
               <EmptyStatePanel title="No calls found" description="No real call records matched this filter window. Try a wider date range, another organization, or sync the MightyCall reports." />
@@ -241,7 +242,7 @@ export default function CallsPage() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 border-b border-white/[0.08] bg-[#0c1120]/95 text-slate-400">
                   <tr>
-                    {['Time', 'Direction', 'Status', 'From', 'To', 'Agent', 'Duration', 'MightyCall ID', 'Recording'].map((label) => (
+                    {['Time', 'Direction', 'Status', 'From', 'To', 'Agent', 'Duration', 'Transfer', 'MightyCall ID', 'Recording'].map((label) => (
                       <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]">{label}</th>
                     ))}
                   </tr>
@@ -260,6 +261,7 @@ export default function CallsPage() {
                         <td className="px-4 py-3 font-mono text-xs text-slate-200">{formatPhoneNumber(row.to_number || row.business_number)}</td>
                         <td className="px-4 py-3 text-slate-300">{row.agent_name || row.agent_extension || row.extension || '-'}</td>
                         <td className="px-4 py-3 text-slate-300">{formatSeconds(row.duration_seconds || row.duration)}</td>
+                        <td className="px-4 py-3 text-slate-300">{row.transfer_status || row.transfer_type || row.transfer_target || '-'}</td>
                         <td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-slate-500">{row.external_call_id || row.external_id || row.mightycall_call_id || '-'}</td>
                         <td className="px-4 py-3">
                           {hasRecording ? (
