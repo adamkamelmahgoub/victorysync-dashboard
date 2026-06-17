@@ -20,6 +20,7 @@ import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
 import { getLiveAgentStatus } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
 import { answerRate as calculateAnswerRate } from '../lib/reportingMetrics';
+import { EmptyStatePanel } from '../components/DashboardPrimitives';
 
 type LiveAgentStatus = {
   user_id: string;
@@ -69,11 +70,11 @@ function Panel({
   className?: string;
 }) {
   return (
-    <section className={`overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.055] shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur-xl ${className}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
+    <section className={`vs-surface overflow-hidden ${className}`}>
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
         <div>
-          {eyebrow && <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-200/80">{eyebrow}</div>}
-          <h2 className="mt-1 text-base font-semibold text-white">{title}</h2>
+          {eyebrow && <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-700">{eyebrow}</div>}
+          <h2 className="mt-1 text-base font-semibold text-slate-950">{title}</h2>
         </div>
         {action}
       </div>
@@ -94,24 +95,24 @@ function MetricCard({
   tone: 'blue' | 'teal' | 'orange' | 'violet';
 }) {
   const tones = {
-    blue: 'bg-cyan-400/12 text-cyan-200',
-    teal: 'bg-emerald-400/12 text-emerald-200',
-    orange: 'bg-amber-400/12 text-amber-200',
-    violet: 'bg-violet-400/14 text-violet-100',
+    blue: 'bg-sky-50 text-sky-700',
+    teal: 'bg-emerald-50 text-emerald-700',
+    orange: 'bg-amber-50 text-amber-700',
+    violet: 'bg-violet-50 text-violet-700',
   };
 
   return (
-    <div className="rounded-lg border border-white/[0.08] bg-white/[0.055] p-5 shadow-[0_18px_48px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-[#aab2bd]">{label}</div>
-          <div className="mt-5 text-3xl font-semibold leading-none text-white">{value}</div>
+          <div className="text-sm font-medium text-slate-600">{label}</div>
+          <div className="mt-5 text-3xl font-semibold leading-none text-slate-950">{value}</div>
         </div>
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${tones[tone]}`}>
           {tone === 'blue' ? 'A' : tone === 'teal' ? 'L' : tone === 'orange' ? 'W' : 'C'}
         </div>
       </div>
-      <div className="mt-4 text-sm text-slate-400">{detail}</div>
+      <div className="mt-4 text-sm text-slate-500">{detail}</div>
     </div>
   );
 }
@@ -212,43 +213,43 @@ const DashboardNewV3: FC = () => {
           </div>
         )}
 
-        <section className="overflow-hidden rounded-lg border border-violet-300/16 bg-white/[0.055] shadow-[0_28px_90px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-          <div className="grid gap-px bg-white/[0.08] lg:grid-cols-[1.2fr,0.8fr]">
-            <div className="bg-[#0b1020]/72 p-6 sm:p-7">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200/80">Today at a glance</div>
+        <section className="vs-surface overflow-hidden">
+          <div className="grid gap-px bg-slate-200 lg:grid-cols-[1.2fr,0.8fr]">
+            <div className="bg-white p-6 sm:p-7">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-700">Today at a glance</div>
               <div className="mt-4 flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                  <div className="text-5xl font-semibold tracking-tight text-white">{answerRate}%</div>
-                  <div className="mt-3 max-w-xl text-sm leading-6 text-slate-300">
+                  <div className="text-5xl font-semibold tracking-tight text-slate-950">{answerRate}%</div>
+                  <div className="mt-3 max-w-xl text-sm leading-6 text-slate-600">
                     Answer rate across {formatNumber(total)} calls. {formatNumber(answered)} answered and {formatNumber(missed)} missed.
                   </div>
                 </div>
                 <div className="grid min-w-[300px] grid-cols-2 gap-3">
-                  <div className="rounded-lg border border-cyan-300/12 bg-cyan-400/[0.06] p-4">
-                    <div className="text-xs text-slate-400">On call</div>
-                    <div className="mt-2 text-2xl font-semibold text-white">{onCall}</div>
+                  <div className="rounded-lg border border-sky-200 bg-sky-50 p-4">
+                    <div className="text-xs text-slate-500">On call</div>
+                    <div className="mt-2 text-2xl font-semibold text-slate-950">{onCall}</div>
                   </div>
-                  <div className="rounded-lg border border-emerald-300/12 bg-emerald-400/[0.06] p-4">
-                    <div className="text-xs text-slate-400">Available</div>
-                    <div className="mt-2 text-2xl font-semibold text-white">{available}</div>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                    <div className="text-xs text-slate-500">Available</div>
+                    <div className="mt-2 text-2xl font-semibold text-slate-950">{available}</div>
                   </div>
                 </div>
               </div>
             </div>
-            <div className="bg-[#0f172a]/70 p-6 sm:p-7">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200/80">System state</div>
+            <div className="bg-slate-50 p-6 sm:p-7">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-700">System state</div>
               <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.045] px-4 py-3">
-                  <span className="text-sm text-slate-300">Live status</span>
-                  <span className="text-sm font-semibold text-emerald-200">{liveError ? 'Needs review' : 'Connected'}</span>
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+                  <span className="text-sm text-slate-600">Live status</span>
+                  <span className="text-sm font-semibold text-emerald-700">{liveError ? 'Needs review' : 'Connected'}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.045] px-4 py-3">
-                  <span className="text-sm text-slate-300">Last sync</span>
-                  <span className="text-sm font-semibold text-white">{formatDateTime(liveRefreshedAt)}</span>
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+                  <span className="text-sm text-slate-600">Last sync</span>
+                  <span className="text-sm font-semibold text-slate-950">{formatDateTime(liveRefreshedAt)}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.045] px-4 py-3">
-                  <span className="text-sm text-slate-300">Tracked numbers</span>
-                  <span className="text-sm font-semibold text-white">{metrics?.assignedPhones?.length || 0}</span>
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+                  <span className="text-sm text-slate-600">Tracked numbers</span>
+                  <span className="text-sm font-semibold text-slate-950">{metrics?.assignedPhones?.length || 0}</span>
                 </div>
               </div>
             </div>
@@ -294,36 +295,42 @@ const DashboardNewV3: FC = () => {
 
           <Panel title="Response Mix" eyebrow="Breakdown">
             <div className="p-5">
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={mixData.length ? mixData : [{ name: 'No data', value: 1, color: '#e2e8f0' }]}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={72}
-                      outerRadius={104}
-                      paddingAngle={4}
-                    >
-                      {(mixData.length ? mixData : [{ color: '#e2e8f0' }]).map((entry, index) => (
-                        <Cell key={`mix-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#111827', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="mt-2 space-y-3">
-                {(mixData.length ? mixData : [{ name: 'No data', value: 0, color: '#858d99' }]).map((item) => (
+              {mixData.length === 0 ? (
+                <EmptyStatePanel title="No response mix yet" description="Answered, missed, and live-call counts will appear here once real activity is returned by the reporting and live-status APIs." />
+              ) : (
+                <>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={mixData}
+                          dataKey="value"
+                          nameKey="name"
+                          innerRadius={72}
+                          outerRadius={104}
+                          paddingAngle={4}
+                        >
+                          {mixData.map((entry, index) => (
+                            <Cell key={`mix-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#111827', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-2 space-y-3">
+                    {mixData.map((item) => (
                   <div key={item.name} className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2 text-[#aab2bd]">
+                    <span className="flex items-center gap-2 text-slate-600">
                       <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
                       {item.name}
                     </span>
-                    <span className="font-semibold text-white">{formatNumber(item.value)}</span>
+                    <span className="font-semibold text-slate-950">{formatNumber(item.value)}</span>
                   </div>
-                ))}
-              </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </Panel>
         </div>

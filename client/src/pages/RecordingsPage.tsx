@@ -183,11 +183,6 @@ export function RecordingsPage() {
         headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
-        if (recording.recording_url) {
-          window.open(recording.recording_url, '_blank', 'noopener,noreferrer');
-          setError(null);
-          return;
-        }
         setError('Failed to open recording');
         return;
       }
@@ -200,10 +195,6 @@ export function RecordingsPage() {
 	        return next;
 	      });
     } catch (err: any) {
-      if (recording.recording_url) {
-        window.open(recording.recording_url, '_blank', 'noopener,noreferrer');
-        return;
-      }
       setError(err?.message || 'Error opening recording');
     }
   };
@@ -311,7 +302,7 @@ export function RecordingsPage() {
                       <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(recording.recording_date || recording.created_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-	                          {recording.recording_url ? (
+	                          {recording.id ? (
 	                            <>
 	                              <button onClick={() => handlePlay(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</button>
 	                              {playbackUrls[recording.id] && (

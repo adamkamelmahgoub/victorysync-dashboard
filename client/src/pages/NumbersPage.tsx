@@ -51,6 +51,10 @@ function formatDateTime(value?: string | null) {
   return date.toLocaleString();
 }
 
+function recordingDownloadUrl(recordingId: string) {
+  return buildApiUrl(`/api/recordings/${encodeURIComponent(recordingId)}/download?inline=1`);
+}
+
 function getPhoneValue(item?: PhoneNumberItem | null) {
   return item?.number || item?.phone_number || '';
 }
@@ -429,8 +433,8 @@ const NumbersPage: FC = () => {
                           </td>
                           <td className="px-4 py-3 text-slate-400">{formatDateTime(recording.started_at || recording.recording_date)}</td>
                           <td className="px-4 py-3 text-right">
-                            {recording.recording_url ? (
-                              <a href={recording.recording_url} target="_blank" rel="noreferrer" className="vs-button-secondary inline-flex">
+                            {recording.id ? (
+                              <a href={recordingDownloadUrl(recording.id)} target="_blank" rel="noreferrer" className="vs-button-secondary inline-flex">
                                 Open
                               </a>
                             ) : (
