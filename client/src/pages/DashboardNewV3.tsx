@@ -19,6 +19,7 @@ import { useCallSeries } from '../hooks/useCallSeries';
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
 import { getLiveAgentStatus } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
+import { answerRate as calculateAnswerRate } from '../lib/reportingMetrics';
 
 type LiveAgentStatus = {
   user_id: string;
@@ -157,7 +158,9 @@ const DashboardNewV3: FC = () => {
   const answered = metrics?.answered_calls_today || 0;
   const total = metrics?.total_calls_today || 0;
   const missed = Math.max(total - answered, 0);
-  const answerRate = Math.round(metrics?.answer_rate_today || 0);
+  const answerRate = metrics?.answer_rate_today != null
+    ? Math.round(metrics.answer_rate_today)
+    : calculateAnswerRate(answered, total);
   const onCall = liveAgents.filter(isAgentOnCall).length;
   const available = Math.max(liveAgents.length - onCall, 0);
 

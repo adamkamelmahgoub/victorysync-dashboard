@@ -6,6 +6,7 @@ import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { getOrgPhoneNumbers, type PhoneNumber } from '../lib/phonesApi';
 import { sendSmsMessage, triggerMightyCallSMSSync } from '../lib/apiClient';
+import { normalizeSmsDirection } from '../lib/reportingMetrics';
 
 interface SMSMessage {
   id: string;
@@ -225,8 +226,8 @@ export function SMSPage() {
   });
 
 	  const summary = useMemo(() => {
-    const inbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'inbound').length;
-    const outbound = filteredMessages.filter((message) => String(message.direction || '').toLowerCase() === 'outbound').length;
+    const inbound = filteredMessages.filter((message) => normalizeSmsDirection(message.direction, message.from_number) === 'inbound').length;
+    const outbound = filteredMessages.filter((message) => normalizeSmsDirection(message.direction, message.from_number) === 'outbound').length;
     const unknown = filteredMessages.length - inbound - outbound;
     return { inbound, outbound, unknown };
 	  }, [filteredMessages]);
@@ -358,7 +359,7 @@ export function SMSPage() {
 	                  </div>
 	                  <div className="space-y-3">
 	                    {conversation.rows.map((message) => {
-	                      const direction = String(message.direction || '').toLowerCase();
+	                      const direction = normalizeSmsDirection(message.direction, message.from_number);
 	                      const inbound = direction === 'inbound';
 	                      const outbound = direction === 'outbound';
 	                      return (

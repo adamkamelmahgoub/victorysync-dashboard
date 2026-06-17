@@ -178,6 +178,66 @@ for (const routeFile of routeFiles) {
   }
 }
 
+function routeSnippet(route) {
+  if (route.kind === 'router') {
+    const routeFile = routeFiles.find((file) => file.file === route.file);
+    if (!routeFile) return '';
+    const localPath = route.path
+      .replace(/^\/api\/reports/, '')
+      .replace(/^\/api\/admin/, '')
+      .replace(/^\/api/, '');
+    const markerSingle = `router.${route.method.toLowerCase()}('${localPath}'`;
+    const markerDouble = `router.${route.method.toLowerCase()}("${localPath}"`;
+    const index = Math.max(routeFile.text.indexOf(markerSingle), routeFile.text.indexOf(markerDouble));
+    return index >= 0 ? routeFile.text.slice(Math.max(0, index - 500), index + 1400) : routeFile.text;
+  }
+  const markerSingle = `app.${route.method.toLowerCase()}('${route.path}'`;
+  const markerDouble = `app.${route.method.toLowerCase()}("${route.path}"`;
+  const index = Math.max(server.indexOf(markerSingle), server.indexOf(markerDouble));
+  return index >= 0 ? server.slice(Math.max(0, index - 500), index + 1400) : '';
+}
+
+function classifyEndpoint(route) {
+  const snippet = routeSnippet(route);
+  const publicRoute = publicApiRoutes.includes(route.path);
+  const apiKeyProtected = snippet.includes('apiKeyAuthMiddleware') || route.path.includes('/sync/') || route.path.endsWith('/test-connection');
+  const authenticated = publicRoute ? false : true;
+  const roleRequired = route.path.startsWith('/api/admin/')
+    ? 'platform_or_admin_context'
+    : route.path.includes('/orgs/:orgId') || route.path.includes('/orgs/')
+      ? 'org_member_or_manager'
+      : authenticated
+        ? 'authenticated_user'
+        : 'public_allowlisted';
+  const organizationScoped = /orgId|org_id|orgs\/:orgId|resolveScope|getUserOrgIds|getCanonicalMembership|allowedPhone|assigned/i.test(snippet + route.path);
+  const inputValidated = route.method === 'GET' || route.kind === 'router' || /z\.|sanitize|validate|Number\.isFinite|String\(|parse|limit|offset/.test(snippet);
+  const outputSafety = !/password|secret|token|api_key|recording_url/i.test(snippet) || /mask|redact|download|signed|presigned|safe|credentials: undefined/i.test(snippet);
+  const rateLimited = route.path.startsWith('/api/') && !route.path.includes('/live-status/stream');
+  const logged = /audit|log|createApiLoggerMiddleware|recordAdminAuditLog|logAdminAction/i.test(snippet + server.slice(4300, 4525));
+  const risks = [];
+  if (!authenticated && !publicRoute && !apiKeyProtected) risks.push('not_authenticated');
+  if (route.path.startsWith('/api/admin/') && !/isPlatformAdmin|requirePlatformAdminRequest|ensureAdminContext|isPlatformManagerWith/.test(snippet)) risks.push('admin_guard_not_obvious');
+  if (!organizationScoped && /reports|calls|sms|recordings|billing|leads|members|phone/i.test(route.path)) risks.push('org_scope_not_obvious');
+  if (!inputValidated) risks.push('input_validation_not_obvious');
+  if (!outputSafety) risks.push('sensitive_output_review');
+  return {
+    method: route.method,
+    path: route.path,
+    file: route.file,
+    auth: apiKeyProtected ? 'api_key_or_session' : authenticated ? 'session_required' : 'public_allowlisted',
+    roleRequired,
+    organizationScoped,
+    inputValidated,
+    outputSafety,
+    rateLimited,
+    logged,
+    risks,
+  };
+}
+
+const endpointCatalog = apiRoutes.map(classifyEndpoint);
+const endpointRiskCount = endpointCatalog.filter((endpoint) => endpoint.risks.length > 0).length;
+
 const report = {
   ok: findings.length === 0,
   routes: {
@@ -187,6 +247,18 @@ const report = {
     mutating: mutatingRoutes.length,
     modular: modularRoutes.length,
     routeLevelApiKey: apiKeyRoutes.length,
+  },
+  endpointCoverage: {
+    classified: endpointCatalog.length,
+    sessionRequired: endpointCatalog.filter((endpoint) => endpoint.auth === 'session_required').length,
+    apiKeyOrSession: endpointCatalog.filter((endpoint) => endpoint.auth === 'api_key_or_session').length,
+    publicAllowlisted: endpointCatalog.filter((endpoint) => endpoint.auth === 'public_allowlisted').length,
+    orgScoped: endpointCatalog.filter((endpoint) => endpoint.organizationScoped).length,
+    inputValidated: endpointCatalog.filter((endpoint) => endpoint.inputValidated).length,
+    outputSafetyReviewed: endpointCatalog.filter((endpoint) => endpoint.outputSafety).length,
+    rateLimited: endpointCatalog.filter((endpoint) => endpoint.rateLimited).length,
+    logged: endpointCatalog.filter((endpoint) => endpoint.logged).length,
+    metadataReviewFlags: endpointRiskCount,
   },
   middleware: {
     authBeforeRoutes: authIndex !== -1 && apiRoutes.every((route) => route.kind === 'router' || route.index > authIndex || expectedPreAuthRoutes.has(route.path)),

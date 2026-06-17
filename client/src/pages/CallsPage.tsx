@@ -4,14 +4,18 @@ import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../co
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
+import {
+  averageHandleTimeSeconds,
+  countMissedCalls,
+  formatPhoneNumber,
+  formatSeconds,
+  isoDateDaysAgo,
+  normalizeCallStatus,
+} from '../lib/reportingMetrics';
 
 type CallRow = Record<string, any>;
 
 const PAGE_SIZE = 100;
-
-function isoDateDaysAgo(days: number) {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 function fmtDate(value?: string | null) {
   if (!value) return '-';
@@ -19,18 +23,11 @@ function fmtDate(value?: string | null) {
   return Number.isNaN(parsed.getTime()) ? '-' : parsed.toLocaleString();
 }
 
-function fmtSeconds(value: unknown) {
-  const total = Math.max(0, Math.round(Number(value) || 0));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${seconds}s`;
-}
-
 function statusTone(value?: string | null): 'neutral' | 'success' | 'warning' | 'info' {
+  const normalized = normalizeCallStatus(value);
   const text = String(value || '').toLowerCase();
-  if (text.includes('answer') || text.includes('complete') || text.includes('connect')) return 'success';
-  if (text.includes('miss') || text.includes('fail') || text.includes('abandon') || text.includes('busy')) return 'warning';
+  if (['answered', 'completed'].includes(normalized)) return 'success';
+  if (['missed', 'failed', 'abandoned'].includes(normalized)) return 'warning';
   if (text.includes('inbound') || text.includes('outbound') || text.includes('transfer')) return 'info';
   return 'neutral';
 }
@@ -143,14 +140,12 @@ export default function CallsPage() {
   }, [user?.id, activeOrgId, startDate, endDate, direction, status]);
 
   const summary = useMemo(() => {
-    const answered = rows.filter((row) => statusTone(statusOf(row)) === 'success').length;
-    const missed = rows.filter((row) => statusTone(statusOf(row)) === 'warning').length;
+    const answered = rows.filter((row) => ['answered', 'completed'].includes(normalizeCallStatus(statusOf(row)))).length;
+    const missed = countMissedCalls(rows);
     const inbound = rows.filter((row) => directionOf(row) === 'inbound').length;
     const outbound = rows.filter((row) => directionOf(row) === 'outbound').length;
     const recordings = rows.filter((row) => row.recording_url || row.has_recording).length;
-    const avgDuration = rows.length > 0
-      ? Math.round(rows.reduce((sum, row) => sum + Number(row.duration_seconds || row.duration || 0), 0) / rows.length)
-      : 0;
+    const avgDuration = averageHandleTimeSeconds(rows);
     return { answered, missed, inbound, outbound, recordings, avgDuration };
   }, [rows]);
 
@@ -192,7 +187,7 @@ export default function CallsPage() {
           <MetricStatCard label="Missed / failed" value={summary.missed} hint="Needs follow-up review" accent="amber" />
           <MetricStatCard label="Inbound" value={summary.inbound} hint="Customer-originated" />
           <MetricStatCard label="Outbound" value={summary.outbound} hint="Team-originated" />
-          <MetricStatCard label="Avg duration" value={fmtSeconds(summary.avgDuration)} hint={`${summary.recordings} recordings`} />
+          <MetricStatCard label="Avg duration" value={formatSeconds(summary.avgDuration)} hint={`${summary.recordings} recordings`} />
         </div>
 
         <SectionCard title="Filters" description="Narrow the call log without changing source data.">
@@ -261,10 +256,10 @@ export default function CallsPage() {
                         <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">{fmtDate(row.started_at || row.created_at)}</td>
                         <td className="px-4 py-3"><StatusBadge tone={statusTone(direction)}>{direction}</StatusBadge></td>
                         <td className="px-4 py-3"><StatusBadge tone={statusTone(status)}>{status}</StatusBadge></td>
-                        <td className="px-4 py-3 font-mono text-xs text-slate-200">{row.from_number || '-'}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-slate-200">{row.to_number || row.business_number || '-'}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-200">{formatPhoneNumber(row.from_number)}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-200">{formatPhoneNumber(row.to_number || row.business_number)}</td>
                         <td className="px-4 py-3 text-slate-300">{row.agent_name || row.agent_extension || row.extension || '-'}</td>
-                        <td className="px-4 py-3 text-slate-300">{fmtSeconds(row.duration_seconds || row.duration)}</td>
+                        <td className="px-4 py-3 text-slate-300">{formatSeconds(row.duration_seconds || row.duration)}</td>
                         <td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-slate-500">{row.external_call_id || row.external_id || row.mightycall_call_id || '-'}</td>
                         <td className="px-4 py-3">
                           {hasRecording ? (

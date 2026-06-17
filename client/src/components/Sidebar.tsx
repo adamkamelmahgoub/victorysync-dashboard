@@ -18,6 +18,7 @@ const navGlyphs: Record<string, string> = {
   'Phone Numbers': 'N',
   Leads: 'Q',
   'Agent Management': 'A',
+  Organizations: 'O',
   Reports: 'R',
   Recordings: 'P',
   SMS: 'S',
@@ -26,7 +27,9 @@ const navGlyphs: Record<string, string> = {
   Billing: '$',
   Diagnostics: 'X',
   Operations: 'O',
+  'Security Audit': 'U',
   Logs: 'G',
+  Settings: 'T',
 };
 
 function isActivePath(currentPath: string, itemPath: string) {
@@ -92,23 +95,24 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Operations',
           items: [
             { label: 'Calls', path: '/calls', featureKey: 'reports' },
+            { label: 'Reports', path: '/admin/reports' },
+            { label: 'SMS', path: '/sms', featureKey: 'sms' },
+            { label: 'Recordings', path: '/admin/recordings' },
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
             { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
             { label: 'Agent Management', path: '/admin/agents-management' },
-            { label: 'Reports', path: '/admin/reports' },
-            { label: 'Recordings', path: '/admin/recordings' },
-            { label: 'SMS', path: '/sms', featureKey: 'sms' },
           ],
         },
         {
           label: 'Admin',
           items: [
+            { label: 'Organizations', path: '/admin/orgs' },
+            { label: 'Operations', path: '/admin/operations' },
             { label: 'Invite Codes', path: '/admin/invites' },
             { label: 'Support', path: '/admin/support' },
             { label: 'Billing', path: '/admin/billing' },
+            { label: 'Security Audit', path: '/admin/logs' },
             { label: 'Diagnostics', path: '/admin/diagnostics' },
-            { label: 'Operations', path: '/admin/operations' },
-            { label: 'Logs', path: '/admin/logs' },
           ],
         },
       ]
@@ -131,6 +135,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'SMS', path: '/sms', featureKey: 'sms' },
             { label: 'Support', path: '/support', featureKey: 'support' },
             { label: 'Billing', path: '/billing', featureKey: 'billing' },
+            { label: 'Settings', path: '/account-settings' },
           ],
         },
       ];
