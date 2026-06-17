@@ -4342,11 +4342,12 @@ function resolveAllowedCorsOrigins(): string[] {
 const allowedCorsOrigins = resolveAllowedCorsOrigins();
 app.use(cors({
   origin(origin, callback) {
-    if (!origin) return callback(null, true);
+    if (!origin) return callback(null, process.env.NODE_ENV !== 'production' || process.env.ALLOW_NO_ORIGIN_CORS === 'true');
     if (allowedCorsOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('cors_origin_not_allowed'));
   },
   credentials: true,
+  maxAge: 600,
 }));
 // Default body limit — tighter for most endpoints; lead upload gets its own parser below
 app.use((req, res, next) => {
@@ -4362,6 +4363,11 @@ app.use('/api/leads/upload', express.json({ limit: '4mb' }));
 app.use('/api', (_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  res.setHeader('X-Download-Options', 'noopen');
+  res.setHeader('Origin-Agent-Cluster', '?1');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   // HSTS: tell browsers to always use HTTPS for the next year
@@ -4387,7 +4393,7 @@ app.use('/api', (req, res, next) => {
       request_id: requestId,
       method: req.method,
       path: req.path,
-      query: req.query,
+      query: stripSensitiveFields(req.query),
       status_code: res.statusCode,
       duration_ms: Date.now() - startedAt,
       actor_id: req.actorId || req.header('x-user-id') || null,
@@ -16979,6 +16985,32 @@ app.get('/api/recordings', async (req, res) => {
 
 // Register the users router for admin endpoints
 app.use('/api/admin', usersRouter);
+
+app.use('/api', (err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = Number.isFinite(Number(err?.status || err?.statusCode))
+    ? Math.min(Math.max(Number(err.status || err.statusCode), 400), 599)
+    : 500;
+  const errorCode = status === 403
+    ? 'forbidden'
+    : status === 401
+      ? 'unauthenticated'
+      : status === 400
+        ? 'invalid_request'
+        : 'internal_server_error';
+
+  logStructured('error', 'api.request.failed', {
+    request_id: req.requestId || null,
+    method: req.method,
+    path: req.path,
+    status_code: status,
+    error: fmtErr(err),
+  });
+
+  res.status(status).json({
+    error: errorCode,
+    request_id: req.requestId || null,
+  });
+});
 
 // During interactive debugging we may receive SIGINT/SIGTERM from the environment
 // (file watchers, dev tooling). To allow introspection without the process

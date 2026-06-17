@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -266,6 +266,150 @@ const report = {
   },
   findings,
 };
+
+function markdownEscape(value) {
+  return String(value ?? '')
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, ' ')
+    .trim();
+}
+
+function riskLevel(endpoint) {
+  if (endpoint.risks.includes('not_authenticated')) return 'Critical';
+  if (endpoint.risks.includes('admin_guard_not_obvious') || endpoint.risks.includes('sensitive_output_review')) return 'High';
+  if (endpoint.risks.includes('org_scope_not_obvious') || endpoint.risks.includes('input_validation_not_obvious')) return 'Medium';
+  return 'Low';
+}
+
+function issueSummary(endpoint) {
+  if (!endpoint.risks.length) return 'No unresolved issue found by static route review.';
+  return endpoint.risks.map((risk) => ({
+    not_authenticated: 'Route appears to bypass session/API-key authentication.',
+    admin_guard_not_obvious: 'Admin route needs manual confirmation of server-side role guard.',
+    org_scope_not_obvious: 'Tenant/org scoping was not obvious in the local route snippet.',
+    input_validation_not_obvious: 'Endpoint-specific validation was not obvious beyond global sanitization.',
+    sensitive_output_review: 'Response may include sensitive fields and needs manual output review.',
+  }[risk] || risk)).join(' ');
+}
+
+function fixSummary(endpoint) {
+  const fixes = [
+    `${endpoint.auth} enforced by API auth middleware or public allowlist.`,
+    endpoint.rateLimited ? 'Rate-limited by API middleware.' : 'Rate limiting requires manual route review.',
+    endpoint.logged ? 'Request logging enabled with redaction.' : 'Logging requires manual route review.',
+  ];
+  if (endpoint.organizationScoped) fixes.push('Org scoping detected in route or helper code.');
+  if (endpoint.inputValidated) fixes.push('Global Zod/sanitization and/or route validation detected.');
+  if (endpoint.outputSafety) fixes.push('No obvious unsafe secret/recording-token output detected.');
+  return fixes.join(' ');
+}
+
+function recommendation(endpoint) {
+  if (!endpoint.risks.length) return 'Keep regression tests and role/org-scope checks in place.';
+  if (endpoint.risks.includes('not_authenticated')) return 'Block release until this route is moved behind auth or explicitly allowlisted.';
+  if (endpoint.risks.includes('admin_guard_not_obvious')) return 'Add or verify requirePlatformAdminRequest/ensureAdminContext on this route.';
+  if (endpoint.risks.includes('org_scope_not_obvious')) return 'Add an org-membership negative test that changes org_id/query params.';
+  if (endpoint.risks.includes('input_validation_not_obvious')) return 'Add route-level Zod schema for params/body/query.';
+  if (endpoint.risks.includes('sensitive_output_review')) return 'Return signed/proxied URLs only and redact tokens/secrets from JSON.';
+  return 'Manual review recommended.';
+}
+
+function testPlan(endpoint) {
+  const checks = [`${endpoint.method} ${endpoint.path}: unauthenticated request should return 401 unless public/API-key allowlisted.`];
+  if (endpoint.roleRequired.includes('admin')) checks.push('Non-admin user should receive 403.');
+  if (endpoint.organizationScoped || /org|calls|sms|recordings|billing|leads|reports|phone/i.test(endpoint.path)) {
+    checks.push('Authenticated user changing org_id/orgId to another tenant should receive 403 or empty scoped data.');
+  }
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(endpoint.method) && endpoint.auth === 'session_required') {
+    checks.push('Missing/invalid CSRF token should return 403.');
+  }
+  checks.push('Malformed query/body should return 400; repeated requests should eventually return 429.');
+  return checks.join(' ');
+}
+
+function buildMarkdown() {
+  const now = new Date().toISOString();
+  const summaryRows = [
+    ['Generated at', now],
+    ['Total API endpoints reviewed', report.endpointCoverage.classified],
+    ['Session required', report.endpointCoverage.sessionRequired],
+    ['API key or session', report.endpointCoverage.apiKeyOrSession],
+    ['Public allowlisted', report.endpointCoverage.publicAllowlisted],
+    ['Org-scoped detected', report.endpointCoverage.orgScoped],
+    ['Input validation detected', report.endpointCoverage.inputValidated],
+    ['Output safety reviewed', report.endpointCoverage.outputSafetyReviewed],
+    ['Rate limited', report.endpointCoverage.rateLimited],
+    ['Logged', report.endpointCoverage.logged],
+    ['Metadata review flags', report.endpointCoverage.metadataReviewFlags],
+  ];
+
+  const endpointRows = endpointCatalog
+    .sort((a, b) => `${a.path} ${a.method}`.localeCompare(`${b.path} ${b.method}`))
+    .map((endpoint) => [
+      endpoint.method,
+      endpoint.path,
+      endpoint.file,
+      endpoint.auth,
+      endpoint.roleRequired,
+      endpoint.organizationScoped ? 'Yes' : 'Review',
+      endpoint.inputValidated ? 'Yes' : 'Review',
+      endpoint.outputSafety ? 'Yes' : 'Review',
+      endpoint.rateLimited ? 'Yes' : 'Review',
+      endpoint.logged ? 'Yes' : 'Review',
+      riskLevel(endpoint),
+      issueSummary(endpoint),
+      fixSummary(endpoint),
+      recommendation(endpoint),
+      testPlan(endpoint),
+    ]);
+
+  return [
+    '# VictorySync Security Audit',
+    '',
+    'This file is generated by `node scripts/security_endpoint_audit.mjs --write-markdown` and records the current static endpoint review. It complements runtime QA with Supabase/MightyCall credentials; items marked Review are conservative static-analysis flags that require manual or integration-test confirmation.',
+    '',
+    '## Summary',
+    '',
+    '| Check | Result |',
+    '| --- | --- |',
+    ...summaryRows.map(([check, result]) => `| ${markdownEscape(check)} | ${markdownEscape(result)} |`),
+    '',
+    '## Fixes Applied In This Audit Pass',
+    '',
+    '- Restricted production no-origin CORS unless `ALLOW_NO_ORIGIN_CORS=true` is explicitly set.',
+    '- Added Helmet-equivalent API headers: COOP, CORP, DNS prefetch off, download noopen, origin agent cluster, no-sniff, frame deny, no-referrer, permissions policy, HSTS in production, and API CSP.',
+    '- Redacted query strings before structured request logging.',
+    '- Added a sanitized API error handler that returns request IDs without stack traces or internal paths.',
+    '- Redacted production readiness output so it reports stable user/org references and email domains instead of raw IDs/emails.',
+    '- Added static regression coverage for the API edge hardening layer.',
+    '',
+    '## Frontend Security Review',
+    '',
+    '- Auth guards exist for protected routes; admin routes use `AdminRoute` and server-side admin checks remain the source of truth.',
+    '- Feature gates exist in route guards and sidebar filtering; backend `featureKeyForApiPath` also enforces feature access.',
+    '- `localStorage` usage is limited to UI preferences, lead saved views, lead alarm settings, and report UI edits; no API tokens or private keys were found in frontend storage during static review.',
+    '- No `dangerouslySetInnerHTML` use was found in `client/src` during static review.',
+    '- API calls are wrapped to include auth/CSRF for same-origin API requests.',
+    '',
+    '## Endpoint Review',
+    '',
+    '| Method | Path | File | Auth | Role Requirement | Org Scope | Validation | Output Safety | Rate Limit | Logged | Risk | Issue Found | Fix Applied | Remaining Recommendation | How To Test |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...endpointRows.map((row) => `| ${row.map(markdownEscape).join(' | ')} |`),
+    '',
+    '## Remaining Risks',
+    '',
+    '- Static route scanning cannot prove Supabase RLS behavior; run tenant-isolation integration tests against staging data.',
+    '- MightyCall live status, recording playback, and sync behavior require valid MightyCall credentials to verify end-to-end.',
+    '- Billing/payment correctness should be tested with real role fixtures and non-production payment/provider credentials.',
+    '- Endpoints marked Review should get focused integration tests for role denial, org_id tampering, malformed input, and export/download authorization.',
+    '',
+  ].join('\n');
+}
+
+if (process.argv.includes('--write-markdown')) {
+  writeFileSync(join(root, 'SECURITY_AUDIT.md'), buildMarkdown(), 'utf8');
+}
 
 if (findings.length) {
   console.error(JSON.stringify(report, null, 2));

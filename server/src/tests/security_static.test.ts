@@ -56,6 +56,26 @@ test('production rate limiting requires persistent redis unless explicitly bypas
   assert.match(apiSecurity, /rate_limit_not_configured/);
 });
 
+test('api edge hardening uses restrictive cors, security headers, redacted query logs, and sanitized error handler', () => {
+  const source = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+  assert.match(source, /ALLOW_NO_ORIGIN_CORS/);
+  assert.match(source, /Cross-Origin-Opener-Policy/);
+  assert.match(source, /Cross-Origin-Resource-Policy/);
+  assert.match(source, /X-Download-Options/);
+  assert.match(source, /query: stripSensitiveFields\(req\.query\)/);
+  assert.match(source, /api\.request\.failed/);
+  assert.match(source, /internal_server_error/);
+});
+
+test('production readiness output does not print raw user emails or ids', () => {
+  const source = readFileSync(join(process.cwd(), 'src', 'scripts', 'production_readiness_check.ts'), 'utf8');
+  assert.match(source, /stableLabel/);
+  assert.match(source, /email_domain/);
+  assert.doesNotMatch(source, /email: user\.email/);
+  assert.doesNotMatch(source, /id: user\.id/);
+  assert.doesNotMatch(source, /membership,\n/);
+});
+
 test('debug auth page is admin-only in the router', () => {
   const source = readFileSync(join(repoRoot, 'client', 'src', 'main.tsx'), 'utf8');
   assert.match(source, /path="\/debug-auth"[\s\S]*?<AdminRoute>[\s\S]*?<DebugAuthPage \/>[\s\S]*?<\/AdminRoute>/);
