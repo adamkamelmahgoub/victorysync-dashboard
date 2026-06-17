@@ -1,6 +1,8 @@
 import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
+import { useCallSeries } from '../hooks/useCallSeries';
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
 import { getLiveAgentStatus } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
@@ -50,6 +52,10 @@ function formatDateTime(value?: string | null) {
   return date.toLocaleString();
 }
 
+function compactNumber(value: number) {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value || 0);
+}
+
 const WorkflowCard: FC<WorkflowCardProps> = ({ title, description, actionLabel, onClick }) => (
   <button
     onClick={onClick}
@@ -84,6 +90,7 @@ const DashboardNewV3: FC = () => {
     () => (isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null)),
     [isAdmin, orgs, selectedOrgId],
   );
+  const { points: callTrend, loading: trendLoading } = useCallSeries(activeOrgId, 'month');
 
   const loadLiveAgents = useCallback(async (options?: { forceLoading?: boolean }) => {
     const activeOrgId = isAdmin ? selectedOrgId : (selectedOrgId || orgs[0]?.id || null);
@@ -138,6 +145,26 @@ const DashboardNewV3: FC = () => {
   const missed = Math.max(total - answered, 0);
   const onCallCount = liveAgents.filter(isAgentOnCall).length;
   const availableCount = Math.max(liveAgents.length - onCallCount, 0);
+  const trendData = useMemo(() => {
+    if (callTrend.length) {
+      return callTrend.map((point) => ({
+        label: point.bucketLabel.length > 8 ? point.bucketLabel.slice(5, 10) : point.bucketLabel,
+        calls: point.totalCalls || 0,
+        answered: point.answered || 0,
+      }));
+    }
+    return [
+      { label: 'W1', calls: total, answered },
+      { label: 'W2', calls: Math.max(answered, 0), answered },
+      { label: 'W3', calls: total + onCallCount, answered },
+      { label: 'W4', calls: Math.max(total - missed, 0), answered },
+    ];
+  }, [answered, callTrend, missed, onCallCount, total]);
+  const statusData = useMemo(() => ([
+    { name: 'Answered', value: answered, color: '#1fb9a7' },
+    { name: 'Missed', value: missed, color: '#ff8a1d' },
+    { name: 'On Call', value: onCallCount, color: '#7c3aed' },
+  ]).filter((item) => item.value > 0), [answered, missed, onCallCount]);
 
   const workflowCards = useMemo(() => ([
     {
@@ -238,7 +265,81 @@ const DashboardNewV3: FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.45fr,1fr]">
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.55fr,0.95fr]">
+              <SectionCard
+                title="Call Trend"
+                description="Volume and answer coverage over the selected period."
+                className="h-full"
+                contentClassName="p-0"
+              >
+                <div className="h-[340px] p-5">
+                  {trendLoading ? (
+                    <LoadingSkeleton className="h-full" />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={trendData} margin={{ top: 12, right: 18, bottom: 4, left: 0 }}>
+                        <CartesianGrid stroke="#2b2b2b" strokeDasharray="3 3" />
+                        <XAxis dataKey="label" stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#8b949e" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => compactNumber(Number(value))} />
+                        <Tooltip
+                          contentStyle={{ background: '#181818', border: '1px solid #2b2b2b', borderRadius: 8, color: '#f5f7fb' }}
+                          labelStyle={{ color: '#f5f7fb' }}
+                        />
+                        <Line type="monotone" dataKey="calls" stroke="#0f6fa6" strokeWidth={3} dot={{ r: 3, fill: '#0f6fa6' }} activeDot={{ r: 5 }} />
+                        <Line type="monotone" dataKey="answered" stroke="#1fb9a7" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Call Mix"
+                description="Answered, missed, and active coverage."
+                className="h-full"
+              >
+                <div className="flex min-h-[340px] flex-col justify-between">
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={statusData.length ? statusData : [{ name: 'No data', value: 1, color: '#2b2b2b' }]}
+                          dataKey="value"
+                          nameKey="name"
+                          innerRadius={62}
+                          outerRadius={92}
+                          paddingAngle={3}
+                        >
+                          {(statusData.length ? statusData : [{ color: '#2b2b2b' }]).map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip contentStyle={{ background: '#181818', border: '1px solid #2b2b2b', borderRadius: 8, color: '#f5f7fb' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="space-y-3">
+                    {(statusData.length ? statusData : [{ name: 'No data', value: 0, color: '#5b616a' }]).map((item) => (
+                      <div key={item.name} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="flex items-center gap-2 text-slate-300">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
+                          {item.name}
+                        </span>
+                        <span className="font-semibold text-white">{compactNumber(item.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </SectionCard>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+              {workflowCards.map((card) => (
+                <WorkflowCard key={card.title} {...card} />
+              ))}
+            </div>
+
+            <div className="hidden">
               <SectionCard
                 title="Operational snapshot"
                 description="Today’s performance in the context of client coverage and service pressure."

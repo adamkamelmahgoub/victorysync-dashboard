@@ -12,7 +12,6 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { OrgProvider, useOrg } from "./contexts/OrgContext";
 import { ToastProvider } from "./contexts/ToastContext";
-import DashboardNewV3 from "./pages/DashboardNewV3";
 import { LoginPage } from "./pages/LoginPage";
 import AuthCallbackPage from "./pages/AuthCallbackPage";
 import OAuthInvitePage from "./pages/OAuthInvitePage";
@@ -24,6 +23,7 @@ import { installAuthenticatedFetch } from "./lib/installAuthenticatedFetch";
 import { installConsoleRedaction } from "./lib/redactConsole";
 
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
+const DashboardNewV3 = lazy(() => import("./pages/DashboardNewV3"));
 const AdminOrgsPage = lazy(() => import("./pages/admin/AdminOrgsPage"));
 const AdminOrgOverviewPage = lazy(() => import("./pages/admin/AdminOrgOverviewPage").then((m) => ({ default: m.AdminOrgOverviewPage })));
 const AdminApiKeysPage = lazy(() => import("./pages/admin/AdminApiKeysPage"));
