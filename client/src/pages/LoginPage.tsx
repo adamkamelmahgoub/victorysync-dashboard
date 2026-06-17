@@ -91,7 +91,6 @@ export const LoginPage: FC = () => {
     const { error } = await signIn(siEmail, siPassword);
     setSiLoading(false);
     if (error) { setSiError(error); return; }
-    navigate(globalRole === 'platform_admin' ? '/admin' : redirectTo, { replace: true });
   };
 
   // Step 1: validate invite code

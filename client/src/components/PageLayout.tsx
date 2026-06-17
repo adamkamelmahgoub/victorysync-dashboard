@@ -1,5 +1,5 @@
-import React, { FC, ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { FC, FormEvent, ReactNode, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardShellHeader } from './DashboardPrimitives';
@@ -14,11 +14,20 @@ interface PageLayoutProps {
 }
 
 export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, actions, meta, children }) => {
-  const { globalRole, selectedOrgId, setSelectedOrgId, orgs, user, profile } = useAuth();
+  const { globalRole, selectedOrgId, setSelectedOrgId, orgs, user, profile, signOut } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const isAdmin = globalRole === 'platform_admin';
   const selectedOrgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
   const userName = profile?.full_name || user?.email || 'Signed in';
+  const [topbarSearch, setTopbarSearch] = useState('');
+
+  const submitSearch = (event: FormEvent) => {
+    event.preventDefault();
+    const query = topbarSearch.trim();
+    if (!query) return;
+    navigate(`/calls?search=${encodeURIComponent(query)}`);
+  };
 
   const defaultMeta = (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm xl:text-right">
@@ -44,11 +53,13 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
               </div>
             </div>
 
-            <div className="flex flex-1 items-center gap-3 lg:max-w-2xl">
+            <form onSubmit={submitSearch} className="flex flex-1 items-center gap-3 lg:max-w-2xl">
               <label className="relative flex-1">
                 <span className="sr-only">Search dashboard</span>
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">/</span>
                 <input
+                  value={topbarSearch}
+                  onChange={(event) => setTopbarSearch(event.target.value)}
                   className="vs-input h-10 w-full pl-9"
                   placeholder="Search calls, numbers, reports..."
                   aria-label="Search dashboard"
@@ -67,7 +78,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
                   ))}
                 </select>
               )}
-            </div>
+            </form>
 
             <div className="hidden items-center gap-3 md:flex">
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
@@ -76,6 +87,13 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
               <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-sm font-semibold text-slate-800" title={userName}>
                 {userName.slice(0, 1).toUpperCase()}
               </div>
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-rose-50 hover:text-rose-700"
+              >
+                Logout
+              </button>
             </div>
           </div>
         </div>

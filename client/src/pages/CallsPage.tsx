@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
@@ -76,6 +77,7 @@ function downloadCsv(filename: string, rows: CallRow[]) {
 export default function CallsPage() {
   const { user, globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const { org } = useOrg();
+  const [searchParams] = useSearchParams();
   const isPlatformAdmin = globalRole === 'platform_admin';
   const activeOrgId = isPlatformAdmin ? selectedOrgId : (selectedOrgId || org?.id || orgs[0]?.id || null);
   const orgName = activeOrgId ? (orgs.find((item) => item.id === activeOrgId)?.name || org?.name || 'Selected organization') : 'all organizations';
@@ -86,7 +88,7 @@ export default function CallsPage() {
   const [error, setError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(isoDateDaysAgo(14));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('search') || '');
   const [direction, setDirection] = useState('all');
   const [status, setStatus] = useState('all');
   const [agent, setAgent] = useState('');
@@ -137,7 +139,12 @@ export default function CallsPage() {
 
   useEffect(() => {
     void loadCalls(true);
-  }, [user?.id, activeOrgId, startDate, endDate, direction, status]);
+  }, [user?.id, activeOrgId, startDate, endDate, direction, status, searchParams]);
+
+  useEffect(() => {
+    const nextSearch = searchParams.get('search') || '';
+    setSearch(nextSearch);
+  }, [searchParams]);
 
   const summary = useMemo(() => {
     const answered = rows.filter((row) => ['answered', 'completed'].includes(normalizeCallStatus(statusOf(row)))).length;
