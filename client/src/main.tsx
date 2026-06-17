@@ -51,6 +51,7 @@ const APIKeysPage = lazy(() => import("./pages/APIKeysPage").then((m) => ({ defa
 const BillingPage = lazy(() => import("./pages/BillingPage"));
 const LiveStatusPage = lazy(() => import("./pages/LiveStatusPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
+const CallsPage = lazy(() => import("./pages/CallsPage"));
 
 declare global {
   interface Window {
@@ -184,6 +185,14 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <FeatureRoute featureKey="leads"><LeadsPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/calls"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="reports"><CallsPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />

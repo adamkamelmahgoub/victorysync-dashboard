@@ -68,10 +68,10 @@ function Panel({
   className?: string;
 }) {
   return (
-    <section className={`overflow-hidden rounded-xl border border-[#2c3138] bg-[#15171b] shadow-[0_18px_60px_rgba(0,0,0,0.22)] ${className}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-[#262b31] px-5 py-4">
+    <section className={`overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.055] shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur-xl ${className}`}>
+      <div className="flex items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
         <div>
-          {eyebrow && <div className="text-[11px] font-semibold uppercase text-[#858d99]">{eyebrow}</div>}
+          {eyebrow && <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-200/80">{eyebrow}</div>}
           <h2 className="mt-1 text-base font-semibold text-white">{title}</h2>
         </div>
         {action}
@@ -93,14 +93,14 @@ function MetricCard({
   tone: 'blue' | 'teal' | 'orange' | 'violet';
 }) {
   const tones = {
-    blue: 'bg-[#0b4f7a] text-[#8bd4ff]',
-    teal: 'bg-[#0d5d55] text-[#7af2df]',
-    orange: 'bg-[#703d11] text-[#ffbd72]',
-    violet: 'bg-[#49237e] text-[#c9a4ff]',
+    blue: 'bg-cyan-400/12 text-cyan-200',
+    teal: 'bg-emerald-400/12 text-emerald-200',
+    orange: 'bg-amber-400/12 text-amber-200',
+    violet: 'bg-violet-400/14 text-violet-100',
   };
 
   return (
-    <div className="rounded-xl border border-[#2c3138] bg-[#17191e] p-5">
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.055] p-5 shadow-[0_18px_48px_rgba(0,0,0,0.18)] backdrop-blur-xl">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-sm font-medium text-[#aab2bd]">{label}</div>
@@ -110,7 +110,7 @@ function MetricCard({
           {tone === 'blue' ? 'A' : tone === 'teal' ? 'L' : tone === 'orange' ? 'W' : 'C'}
         </div>
       </div>
-      <div className="mt-4 text-sm text-[#858d99]">{detail}</div>
+      <div className="mt-4 text-sm text-slate-400">{detail}</div>
     </div>
   );
 }
@@ -193,7 +193,7 @@ const DashboardNewV3: FC = () => {
       description="A live operating dashboard for calls, coverage, and response quality."
       meta={(
         <div className="rounded-xl border border-[#2c3138] bg-[#15171b] px-4 py-3 text-sm text-[#aab2bd]">
-          <span className="text-[#858d99]">Workspace</span>
+          <span className="text-slate-500">Workspace</span>
           <span className="ml-2 font-semibold text-white">{orgName}</span>
         </div>
       )}
@@ -215,42 +215,42 @@ const DashboardNewV3: FC = () => {
           </div>
         )}
 
-        <section className="overflow-hidden rounded-2xl border border-[#2c3138] bg-[#14161a]">
-          <div className="grid gap-px bg-[#2c3138] lg:grid-cols-[1.2fr,0.8fr]">
-            <div className="bg-[#14161a] p-6 sm:p-7">
-              <div className="text-xs font-semibold uppercase text-[#858d99]">Today at a glance</div>
+        <section className="overflow-hidden rounded-lg border border-violet-300/16 bg-white/[0.055] shadow-[0_28px_90px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+          <div className="grid gap-px bg-white/[0.08] lg:grid-cols-[1.2fr,0.8fr]">
+            <div className="bg-[#0b1020]/72 p-6 sm:p-7">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200/80">Today at a glance</div>
               <div className="mt-4 flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
                 <div>
                   <div className="text-5xl font-semibold tracking-tight text-white">{answerRate}%</div>
-                  <div className="mt-3 max-w-xl text-sm leading-6 text-[#aab2bd]">
+                  <div className="mt-3 max-w-xl text-sm leading-6 text-slate-300">
                     Answer rate across {formatNumber(total)} calls. {formatNumber(answered)} answered and {formatNumber(missed)} missed.
                   </div>
                 </div>
                 <div className="grid min-w-[300px] grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-[#1b1e23] p-4">
-                    <div className="text-xs text-[#858d99]">On call</div>
+                  <div className="rounded-lg border border-cyan-300/12 bg-cyan-400/[0.06] p-4">
+                    <div className="text-xs text-slate-400">On call</div>
                     <div className="mt-2 text-2xl font-semibold text-white">{onCall}</div>
                   </div>
-                  <div className="rounded-xl bg-[#1b1e23] p-4">
-                    <div className="text-xs text-[#858d99]">Available</div>
+                  <div className="rounded-lg border border-emerald-300/12 bg-emerald-400/[0.06] p-4">
+                    <div className="text-xs text-slate-400">Available</div>
                     <div className="mt-2 text-2xl font-semibold text-white">{available}</div>
                   </div>
                 </div>
               </div>
             </div>
-            <div className="bg-[#15171b] p-6 sm:p-7">
-              <div className="text-xs font-semibold uppercase text-[#858d99]">System state</div>
+            <div className="bg-[#0f172a]/70 p-6 sm:p-7">
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-200/80">System state</div>
               <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between rounded-xl bg-[#1b1e23] px-4 py-3">
-                  <span className="text-sm text-[#aab2bd]">Live status</span>
-                  <span className="text-sm font-semibold text-[#20c7b6]">{liveError ? 'Needs review' : 'Connected'}</span>
+                <div className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.045] px-4 py-3">
+                  <span className="text-sm text-slate-300">Live status</span>
+                  <span className="text-sm font-semibold text-emerald-200">{liveError ? 'Needs review' : 'Connected'}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-xl bg-[#1b1e23] px-4 py-3">
-                  <span className="text-sm text-[#aab2bd]">Last sync</span>
+                <div className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.045] px-4 py-3">
+                  <span className="text-sm text-slate-300">Last sync</span>
                   <span className="text-sm font-semibold text-white">{formatDateTime(liveRefreshedAt)}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-xl bg-[#1b1e23] px-4 py-3">
-                  <span className="text-sm text-[#aab2bd]">Tracked numbers</span>
+                <div className="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.045] px-4 py-3">
+                  <span className="text-sm text-slate-300">Tracked numbers</span>
                   <span className="text-sm font-semibold text-white">{metrics?.assignedPhones?.length || 0}</span>
                 </div>
               </div>
