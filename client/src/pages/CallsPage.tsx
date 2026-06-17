@@ -239,30 +239,43 @@ export default function CallsPage() {
             </div>
           ) : (
             <div className="max-h-[72vh] overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 z-10 border-b border-white/[0.08] bg-[#0c1120]/95 text-slate-400">
+              <table className="w-full min-w-[1120px] text-sm">
+                <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">
                   <tr>
-                    {['Time', 'Direction', 'Status', 'From', 'To', 'Agent', 'Duration', 'Transfer', 'MightyCall ID', 'Recording'].map((label) => (
+                    {[
+                      'Date/time',
+                      'Direction',
+                      'From',
+                      'To',
+                      'Assigned number',
+                      'Agent/extension',
+                      'Status',
+                      'Duration',
+                      'Transfer status',
+                      'Recording',
+                      ...(isPlatformAdmin ? ['Organization'] : []),
+                    ].map((label) => (
                       <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]">{label}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.06]">
+                <tbody className="divide-y divide-slate-100 bg-white">
                   {rows.map((row, index) => {
                     const direction = directionOf(row);
                     const status = statusOf(row);
                     const hasRecording = row.recording_url || row.has_recording;
+                    const rowOrgName = orgs.find((item) => item.id === row.org_id)?.name || row.organization_name || row.org_name || row.org_id || '-';
                     return (
-                      <tr key={String(row.id || row.external_call_id || row.external_id || index)} className="transition hover:bg-white/[0.035]">
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">{fmtDate(row.started_at || row.created_at)}</td>
+                      <tr key={String(row.id || row.external_call_id || row.external_id || index)} className="transition hover:bg-violet-50/40">
+                        <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{fmtDate(row.started_at || row.created_at)}</td>
                         <td className="px-4 py-3"><StatusBadge tone={statusTone(direction)}>{direction}</StatusBadge></td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{formatPhoneNumber(row.from_number)}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{formatPhoneNumber(row.to_number || row.business_number)}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{formatPhoneNumber(row.business_number || row.assigned_number || row.phone_number || row.to_number)}</td>
+                        <td className="px-4 py-3 text-slate-700">{row.agent_name || row.agent_extension || row.extension || '-'}</td>
                         <td className="px-4 py-3"><StatusBadge tone={statusTone(status)}>{status}</StatusBadge></td>
-                        <td className="px-4 py-3 font-mono text-xs text-slate-200">{formatPhoneNumber(row.from_number)}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-slate-200">{formatPhoneNumber(row.to_number || row.business_number)}</td>
-                        <td className="px-4 py-3 text-slate-300">{row.agent_name || row.agent_extension || row.extension || '-'}</td>
-                        <td className="px-4 py-3 text-slate-300">{formatSeconds(row.duration_seconds || row.duration)}</td>
-                        <td className="px-4 py-3 text-slate-300">{row.transfer_status || row.transfer_type || row.transfer_target || '-'}</td>
-                        <td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-slate-500">{row.external_call_id || row.external_id || row.mightycall_call_id || '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatSeconds(row.duration_seconds || row.duration)}</td>
+                        <td className="px-4 py-3 text-slate-700">{row.transfer_status || row.transfer_type || row.transfer_target || '-'}</td>
                         <td className="px-4 py-3">
                           {hasRecording ? (
                             <button className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => void openRecording(row)}>Open</button>
@@ -270,6 +283,7 @@ export default function CallsPage() {
                             <span className="text-xs text-slate-500">Unavailable</span>
                           )}
                         </td>
+                        {isPlatformAdmin && <td className="px-4 py-3 text-slate-600">{rowOrgName}</td>}
                       </tr>
                     );
                   })}
@@ -277,7 +291,7 @@ export default function CallsPage() {
               </table>
 
               {nextOffset !== null && (
-                <div className="flex justify-center border-t border-white/[0.08] p-4">
+                <div className="flex justify-center border-t border-slate-200 bg-white p-4">
                   <button className="vs-button-secondary" onClick={() => loadCalls(false)} disabled={loadingMore}>
                     {loadingMore ? 'Loading more...' : 'Load more'}
                   </button>

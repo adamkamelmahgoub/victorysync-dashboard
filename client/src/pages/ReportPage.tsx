@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PageLayout } from '../components/PageLayout';
-import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
+import { answerRate, formatPhoneNumber, hasRecording } from '../lib/reportingMetrics';
 
 type ReportTab = 'overview' | 'calls' | 'recordings' | 'sms' | 'transfers' | 'numbers' | 'agents';
 
@@ -70,6 +71,10 @@ function downloadCsv(filename: string, rows: Row[]) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function orgNameFor(row: Row, orgs: Array<{ id: string; name?: string | null }>) {
+  return orgs.find((org) => org.id === row.org_id)?.name || row.organization_name || row.org_name || row.org_id || '-';
 }
 
 export default function ReportPage() {
@@ -180,19 +185,20 @@ export default function ReportPage() {
     }
   };
 
-  const kpis = useMemo(() => ([
-    ['Total Calls', overview.total_calls ?? 0],
-    ['Answered', overview.answered_calls ?? 0],
-    ['Missed', overview.missed_calls ?? 0],
-    ['Abandoned', overview.abandoned_calls ?? 0],
-    ['Avg Duration', fmtSeconds(overview.avg_duration_seconds)],
-    ['Avg Wait', fmtSeconds(overview.avg_wait_seconds)],
-    ['Recordings', overview.total_recordings ?? 0],
-    ['SMS', overview.total_sms ?? 0],
-    ['Inbound SMS', overview.inbound_sms ?? 0],
-    ['Outbound SMS', overview.outbound_sms ?? 0],
-    ['Transfers', overview.total_transfers ?? 0],
-  ]), [overview]);
+  const kpis = useMemo(() => {
+    const totalCalls = Number(overview.total_calls || 0);
+    const answeredCalls = Number(overview.answered_calls || 0);
+    return [
+      { label: 'Calls', value: totalCalls, hint: 'Total calls in the selected report window.', accent: 'cyan' as const },
+      { label: 'Answered', value: answeredCalls, hint: 'Calls normalized as answered or completed.', accent: 'emerald' as const },
+      { label: 'Missed', value: Number(overview.missed_calls || 0), hint: 'Calls that were not successfully connected.', accent: 'amber' as const },
+      { label: 'Transfers', value: Number(overview.total_transfers || 0), hint: 'Transfer rows from transfer data or call metadata.', accent: 'violet' as const },
+      { label: 'Average duration', value: fmtSeconds(overview.avg_duration_seconds), hint: 'Average call duration from call rows.', accent: 'neutral' as const },
+      { label: 'Answer rate', value: `${answerRate(answeredCalls, totalCalls)}%`, hint: 'Answered calls divided by total calls.', accent: 'emerald' as const },
+      { label: 'SMS', value: Number(overview.total_sms || 0), hint: `${Number(overview.inbound_sms || 0)} inbound, ${Number(overview.outbound_sms || 0)} outbound.`, accent: 'cyan' as const },
+      { label: 'Recordings', value: Number(overview.total_recordings || 0), hint: 'Recording rows available for the selected filters.', accent: 'violet' as const },
+    ];
+  }, [overview]);
 
   const resetFilters = () => {
     setStartDate(isoDateDaysAgo(30));
@@ -308,12 +314,14 @@ export default function ReportPage() {
           ))}
         </div>
 
-        {error && <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+        {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
         {activeTab === 'overview' ? (
           <div className="space-y-6">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {kpis.map(([label, value]) => <MetricStatCard key={label} label={String(label)} value={value} />)}
+              {loading
+                ? Array.from({ length: 8 }).map((_, index) => <LoadingSkeleton key={index} className="h-32" />)
+                : kpis.map((kpi) => <MetricStatCard key={kpi.label} label={kpi.label} value={kpi.value} hint={kpi.hint} accent={kpi.accent} />)}
             </div>
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
               <TopList title="Top Agents" rows={editedTopAgents} onEdit={editTopAgent} />
@@ -323,11 +331,11 @@ export default function ReportPage() {
           </div>
         ) : activeTab === 'numbers' ? (
           <SectionCard title="Number performance" description="Assigned numbers available in the current report scope." contentClassName="p-0">
-            <ReportTable rows={numbers} columns={['number', 'label', 'org_id', 'calls', 'answered', 'missed', 'sms', 'transfers', 'recordings']} loading={loading} />
+            <ReportTable rows={numbers} columns={['number', 'label', 'org_id', 'calls', 'answered', 'missed', 'sms', 'transfers', 'recordings']} loading={loading} orgs={orgs} isPlatformAdmin={isPlatformAdmin} />
           </SectionCard>
         ) : (
           <SectionCard title={`${tabLabels.find((tab) => tab.id === activeTab)?.label} report`} description="Rows are normalized from real source records only." contentClassName="p-0">
-            <ReportTable rows={rows} loading={loading} tab={activeTab} onOpenRecording={openRecording} />
+            <ReportTable rows={rows} loading={loading} tab={activeTab} onOpenRecording={openRecording} orgs={orgs} isPlatformAdmin={isPlatformAdmin} />
           </SectionCard>
         )}
       </div>
@@ -341,9 +349,9 @@ function TopList({ title, rows, onEdit }: { title: string; rows: Array<{ key: st
       {rows.length === 0 ? <EmptyStatePanel title="No data" description="No matching rows in this filter window." /> : (
         <div className="space-y-3">
           {rows.map((row: any) => (
-            <div key={row.key || `${row.org_id || ''}:${row.extension || row.label}`} className="flex items-center justify-between gap-4 rounded-2xl bg-white/[0.03] px-4 py-3">
+            <div key={row.key || `${row.org_id || ''}:${row.extension || row.label}`} className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-slate-100">{row.label || row.agent_name || row.key}</div>
+                <div className="truncate text-sm font-semibold text-slate-950">{row.label || row.agent_name || row.key}</div>
                 {(row.email || row.extension) && (
                   <div className="truncate text-xs text-slate-500">
                     {[row.email, row.extension ? `Ext ${row.extension}` : null].filter(Boolean).join(' · ')}
@@ -356,7 +364,7 @@ function TopList({ title, rows, onEdit }: { title: string; rows: Array<{ key: st
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className="text-sm font-semibold text-white">{row.count}{row.unit ? ` ${row.unit}` : ''}</span>
+                <span className="text-sm font-semibold text-slate-950">{row.count}{row.unit ? ` ${row.unit}` : ''}</span>
                 {onEdit && <button type="button" onClick={() => onEdit(row)} className="vs-button-secondary px-2 py-1 text-xs">Edit</button>}
               </div>
             </div>
@@ -367,34 +375,51 @@ function TopList({ title, rows, onEdit }: { title: string; rows: Array<{ key: st
   );
 }
 
-function ReportTable({ rows, loading, tab, columns, onOpenRecording }: { rows: Row[]; loading: boolean; tab?: ReportTab; columns?: string[]; onOpenRecording?: (row: Row) => Promise<void> }) {
+function ReportTable({
+  rows,
+  loading,
+  tab,
+  columns,
+  onOpenRecording,
+  orgs,
+  isPlatformAdmin,
+}: {
+  rows: Row[];
+  loading: boolean;
+  tab?: ReportTab;
+  columns?: string[];
+  onOpenRecording?: (row: Row) => Promise<void>;
+  orgs: Array<{ id: string; name?: string | null }>;
+  isPlatformAdmin: boolean;
+}) {
   const resolvedColumns = columns || (
     tab === 'agents'
       ? ['agent_name', 'email', 'extension', 'total_activity', 'total_calls', 'total_recordings', 'total_sms', 'answered_calls', 'missed_calls', 'avg_duration_seconds', 'transfers']
       : tab === 'transfers'
         ? ['transferred_at', 'agent_extension', 'original_caller', 'original_receiving_number', 'transfer_target', 'transfer_type', 'result']
         : tab === 'sms'
-          ? ['sent_at', 'from_number', 'to_number', 'direction', 'status', 'message_text']
+          ? ['sent_at', 'direction', 'from_number', 'to_number', 'phone_number', 'status', 'message_text']
           : tab === 'recordings'
-            ? ['recording_date', 'from_number', 'to_number', 'direction', 'duration_seconds', 'recording_url']
-            : ['started_at', 'agent_extension', 'from_number', 'to_number', 'direction', 'status', 'duration_seconds']
+            ? ['recording_date', 'from_number', 'to_number', 'agent_extension', 'duration_seconds', 'status', 'recording_url']
+            : ['started_at', 'direction', 'from_number', 'to_number', 'business_number', 'agent_extension', 'status', 'duration_seconds', 'transfer_status', 'recording_url']
   );
+  const displayColumns = isPlatformAdmin && !resolvedColumns.includes('organization') ? [...resolvedColumns, 'organization'] : resolvedColumns;
 
-  if (loading) return <div className="px-5 py-10 text-sm text-slate-400">Loading report rows...</div>;
+  if (loading) return <div className="space-y-3 p-5">{Array.from({ length: 7 }).map((_, index) => <LoadingSkeleton key={index} className="h-12" />)}</div>;
   if (rows.length === 0) return <div className="p-5"><EmptyStatePanel title="No matching data" description="No real records matched the current filters." /></div>;
 
   return (
     <div className="overflow-auto">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
-          <tr>{resolvedColumns.map((column) => <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">{column.replace(/_/g, ' ')}</th>)}</tr>
+      <table className="w-full min-w-[980px] text-sm">
+        <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-slate-500">
+          <tr>{displayColumns.map((column) => <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]">{column.replace(/_/g, ' ')}</th>)}</tr>
         </thead>
-        <tbody className="divide-y divide-white/6">
+        <tbody className="divide-y divide-slate-100 bg-white">
           {rows.map((row, index) => (
-            <tr key={String(row.id || row.external_id || row.external_call_id || index)} className="hover:bg-white/[0.03]">
-              {resolvedColumns.map((column) => (
-                <td key={column} className="max-w-[320px] truncate px-4 py-3 text-slate-200">
-                  {cellValue(row, column, onOpenRecording)}
+            <tr key={String(row.id || row.external_id || row.external_call_id || index)} className="hover:bg-violet-50/40">
+              {displayColumns.map((column) => (
+                <td key={column} className="max-w-[320px] truncate px-4 py-3 text-slate-700">
+                  {cellValue(row, column, onOpenRecording, orgs)}
                 </td>
               ))}
             </tr>
@@ -405,16 +430,18 @@ function ReportTable({ rows, loading, tab, columns, onOpenRecording }: { rows: R
   );
 }
 
-function cellValue(row: Row, column: string, onOpenRecording?: (row: Row) => Promise<void>) {
+function cellValue(row: Row, column: string, onOpenRecording?: (row: Row) => Promise<void>, orgs: Array<{ id: string; name?: string | null }> = []) {
   const value = row[column];
-  if (column.includes('date') || column.endsWith('_at')) return <span className="text-xs text-slate-400">{fmtDate(String(value || ''))}</span>;
+  if (column === 'organization') return orgNameFor(row, orgs);
+  if (column.includes('date') || column.endsWith('_at')) return <span className="text-xs text-slate-500">{fmtDate(String(value || ''))}</span>;
   if (column.includes('duration')) return fmtSeconds(value);
   if (column === 'recording_url') {
-    return value ? <button type="button" className="text-cyan-200 hover:text-cyan-100" onClick={() => onOpenRecording?.(row).catch(() => window.open(String(value), '_blank', 'noopener,noreferrer'))}>Download / Open</button> : <span className="text-slate-500">Recording unavailable</span>;
+    return hasRecording(row) ? <button type="button" className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => onOpenRecording?.(row).catch(() => undefined)}>Open</button> : <span className="text-slate-500">Unavailable</span>;
   }
   if (column === 'direction' || column === 'status' || column === 'result' || column === 'transfer_type') {
     return <StatusBadge tone={badgeTone(String(value || ''))}>{String(value || 'unknown')}</StatusBadge>;
   }
+  if (['from_number', 'to_number', 'phone_number', 'business_number', 'original_caller', 'original_receiving_number'].includes(column)) return <span className="font-mono text-xs">{formatPhoneNumber(value)}</span>;
   if (column === 'message_text') return String(value || '').slice(0, 160) || '-';
   if (column === 'number') return <span className="font-mono">{String(value || numberText(row))}</span>;
   return String(value ?? '-') || '-';
