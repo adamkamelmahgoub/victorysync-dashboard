@@ -28,7 +28,7 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs = 8000) {
+async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs = 5000) {
   const timeoutPromise = new Promise<null>((resolve) => {
     window.setTimeout(() => resolve(null), timeoutMs);
   });
@@ -177,9 +177,22 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   }, [user?.id, selectedOrgId]);
 
   const signIn = async (email: string, password: string): Promise<{ error?: string }> => {
+    setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
-    return {};
+    if (error) {
+      setLoading(false);
+      return { error: error.message };
+    }
+
+    try {
+      await hydrateUserContext();
+      return {};
+    } catch (err: any) {
+      console.error("Error hydrating auth after sign-in:", err);
+      return { error: err?.message || "Signed in, but failed to load your dashboard access." };
+    } finally {
+      setLoading(false);
+    }
   };
 
   const signOut = async () => {

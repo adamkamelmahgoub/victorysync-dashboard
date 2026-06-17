@@ -13,8 +13,6 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { OrgProvider, useOrg } from "./contexts/OrgContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import { LoginPage } from "./pages/LoginPage";
-import AuthCallbackPage from "./pages/AuthCallbackPage";
-import OAuthInvitePage from "./pages/OAuthInvitePage";
 import OrgAdminRoute from './components/OrgAdminRoute';
 import ErrorBoundary from "./components/ErrorBoundary";
 import LoggingProvider from "./components/LoggingProvider";
@@ -157,8 +155,6 @@ function AppRouter() {
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">Loading...</div>}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/auth/callback" element={<AuthCallbackPage />} />
-        <Route path="/auth/invite" element={<OAuthInvitePage />} />
         <Route
           path="/"
           element={
