@@ -22,7 +22,7 @@ export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem('vs-theme');
-    return stored === 'light' ? 'light' : 'dark';
+    return stored === 'dark' ? 'dark' : 'light';
   });
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
         });
         if (!response.ok) return;
         const data = await response.json();
-        const next = data?.user?.theme === 'light' ? 'light' : 'dark';
+        const next = data?.user?.theme === 'dark' ? 'dark' : 'light';
         if (!cancelled) setThemeState(next);
       } catch {
         // keep local theme

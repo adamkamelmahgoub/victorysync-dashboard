@@ -30,7 +30,8 @@ export function installAuthenticatedFetch() {
     if (csrfTokenCache && Date.now() - csrfTokenCache.fetchedAt < 10 * 60 * 1000) {
       return csrfTokenCache.token;
     }
-    const url = `${API_BASE_URL.replace(/\/$/, "")}/api/csrf-token`;
+    const base = API_BASE_URL ? API_BASE_URL.replace(/\/$/, "") : "";
+    const url = `${base}/api/csrf-token`;
     const response = await originalFetch(url, { headers, cache: "no-store" }).catch(() => null);
     if (!response?.ok) return null;
     const json = await response.json().catch(() => null);

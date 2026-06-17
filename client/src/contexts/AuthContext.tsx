@@ -15,6 +15,7 @@ type AuthContextValue = {
   orgs: Array<{ id: string; name: string; logo_url?: string | null }>;
   selectedOrgId: string | null;
   loading: boolean;
+  authError: string | null;
   globalRole: string | null;
   featureAccess: Record<string, boolean>;
   featureAccessLoaded: boolean;
@@ -54,6 +55,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string; logo_url?: string | null }>>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [globalRole, setGlobalRole] = useState<string | null>(null);
   const [featureAccess, setFeatureAccess] = useState<Record<string, boolean>>({});
   const [featureAccessLoaded, setFeatureAccessLoaded] = useState(false);
@@ -68,6 +70,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     setFeatureAccess({});
     setFeatureAccessLoaded(true);
     setProfile(null);
+    setAuthError(null);
   };
 
   const loadFeatures = async (nextUser: AppUser | null = user, orgId: string | null = selectedOrgId) => {
@@ -101,10 +104,10 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       : null;
 
     if (!internalUser) {
-      resetAuthState();
-      return;
+      throw new Error("We signed you in, but could not load your VictorySync profile. Please contact an admin if this continues.");
     }
 
+    setAuthError(null);
     currentUserIdRef.current = internalUser.id;
     setUser(internalUser);
     setGlobalRole(profileData?.profile?.global_role ?? null);
@@ -138,9 +141,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       if (session?.user) {
         setLoading(true);
         hydrateUserContext()
-          .catch((err) => console.error("Error initializing auth:", err))
+          .catch((err) => {
+            console.error("Error initializing auth:", err);
+            setAuthError(err?.message || "Unable to restore your session.");
+            resetAuthState();
+          })
           .finally(() => setLoading(false));
       } else {
+        resetAuthState();
         setLoading(false);
       }
     });
@@ -159,7 +167,11 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         }
         setLoading(true);
         hydrateUserContext()
-          .catch((err) => console.error("Error on auth state change:", err))
+          .catch((err) => {
+            console.error("Error on auth state change:", err);
+            setAuthError(err?.message || "Unable to load your account access.");
+            resetAuthState();
+          })
           .finally(() => setLoading(false));
       } else {
         resetAuthState();
@@ -178,10 +190,15 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   const signIn = async (email: string, password: string): Promise<{ error?: string }> => {
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setAuthError(null);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     if (error) {
+      const message = /invalid login credentials/i.test(error.message)
+        ? "The email or password is incorrect."
+        : error.message || "Unable to sign in. Please try again.";
+      setAuthError(message);
       setLoading(false);
-      return { error: error.message };
+      return { error: message };
     }
 
     try {
@@ -189,7 +206,9 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       return {};
     } catch (err: any) {
       console.error("Error hydrating auth after sign-in:", err);
-      return { error: err?.message || "Signed in, but failed to load your dashboard access." };
+      const message = err?.message || "Signed in, but failed to load your dashboard access.";
+      setAuthError(message);
+      return { error: message };
     } finally {
       setLoading(false);
     }
@@ -199,8 +218,12 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     try {
       postLog("/api/logs/auth", { event_type: "logout", email: user?.email || null });
       await supabase.auth.signOut();
+      resetAuthState();
+      currentUserIdRef.current = null;
     } catch (err) {
       console.error("Sign out error:", err);
+      resetAuthState();
+      currentUserIdRef.current = null;
     }
   };
 
@@ -219,7 +242,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, globalRole, featureAccess, featureAccessLoaded, profile, refreshProfile, refreshFeatures, signIn, signOut, setSelectedOrgId }}>
+    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, authError, globalRole, featureAccess, featureAccessLoaded, profile, refreshProfile, refreshFeatures, signIn, signOut, setSelectedOrgId }}>
       {children}
     </AuthContext.Provider>
   );

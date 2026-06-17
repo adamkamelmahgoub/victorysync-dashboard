@@ -79,19 +79,22 @@ installConsoleRedaction();
 installAuthenticatedFetch();
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, authError } = useAuth();
   const { loading: orgLoading } = useOrg();
+  const location = useLocation();
 
   if (authLoading || orgLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">
-        Loading...
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-900">
+        <div className="rounded-lg border border-slate-200 bg-white px-5 py-4 text-sm font-medium shadow-sm">
+          Loading workspace...
+        </div>
       </div>
     );
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ from: location, authError }} />;
   }
 
   return children;
@@ -108,8 +111,10 @@ function AdminRoute({ children }: { children: JSX.Element }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">
-        Loading...
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-900">
+        <div className="rounded-lg border border-slate-200 bg-white px-5 py-4 text-sm font-medium shadow-sm">
+          Loading admin access...
+        </div>
       </div>
     );
   }
@@ -140,8 +145,10 @@ function FeatureRoute({ featureKey, children }: { featureKey: string; children: 
   const isAdmin = ["platform_admin", "admin", "super_admin"].includes(String(globalRole || ""));
   if (!isAdmin && !featureAccessLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">
-        Loading...
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-900">
+        <div className="rounded-lg border border-slate-200 bg-white px-5 py-4 text-sm font-medium shadow-sm">
+          Loading permissions...
+        </div>
       </div>
     );
   }
@@ -153,7 +160,7 @@ function FeatureRoute({ featureKey, children }: { featureKey: string; children: 
 
 function AppRouter() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">Loading...</div>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-900">Loading...</div>}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route

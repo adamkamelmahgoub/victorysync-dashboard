@@ -21,26 +21,26 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   const userName = profile?.full_name || user?.email || 'Signed in';
 
   const defaultMeta = (
-    <div className="rounded-lg border border-white/[0.08] bg-white/[0.045] px-3 py-2 text-left xl:text-right">
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm xl:text-right">
       <div className="text-[11px] font-semibold uppercase text-slate-500">Today</div>
-      <div className="mt-1 text-sm font-medium text-slate-200">{new Date().toLocaleDateString()}</div>
+      <div className="mt-1 text-sm font-medium text-slate-900">{new Date().toLocaleDateString()}</div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[var(--vs-bg)] text-white">
+    <div className="min-h-screen bg-[var(--vs-bg)] text-[var(--vs-text)]">
       <Sidebar isAdmin={isAdmin} currentPath={location.pathname} />
 
       <main className="min-h-screen pt-14 lg:ml-[260px] lg:pt-0">
-        <div className="sticky top-14 z-50 border-b border-white/[0.07] bg-[#070a13]/86 px-4 backdrop-blur-2xl lg:top-0 lg:px-6">
+        <div className="sticky top-14 z-50 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-xl lg:top-0 lg:px-6">
           <div className="mx-auto flex h-16 max-w-[1680px] items-center justify-between gap-4">
             <div className="hidden min-w-0 items-center gap-3 lg:flex">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-violet-300/20 bg-violet-400/10 text-sm font-bold text-violet-100">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-sm font-bold text-violet-700">
                 VS
               </div>
               <div className="min-w-0">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Command center</div>
-                <div className="truncate text-sm font-semibold text-slate-100">{selectedOrgName}</div>
+                <div className="truncate text-sm font-semibold text-slate-900">{selectedOrgName}</div>
               </div>
             </div>
 
@@ -70,10 +70,10 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
             </div>
 
             <div className="hidden items-center gap-3 md:flex">
-              <div className="rounded-lg border border-emerald-300/20 bg-emerald-400/[0.07] px-3 py-2 text-xs font-semibold text-emerald-200">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
                 Systems online
               </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.05] text-sm font-semibold text-white" title={userName}>
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-sm font-semibold text-slate-800" title={userName}>
                 {userName.slice(0, 1).toUpperCase()}
               </div>
             </div>

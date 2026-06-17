@@ -18,18 +18,18 @@ export function DashboardShellHeader({
   meta?: ReactNode;
 }) {
   return (
-    <header className="border-b border-white/[0.07] bg-transparent">
+    <header className="border-b border-slate-200 bg-transparent">
       <div className="px-4 py-6 sm:px-5 lg:px-6 lg:py-8">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
             {eyebrow && (
-              <div className="inline-flex items-center rounded-lg border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-100">
+              <div className="inline-flex items-center rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-700">
                 {eyebrow}
               </div>
             )}
-            <h1 className="mt-3 text-3xl font-semibold text-white lg:text-4xl">{title}</h1>
+            <h1 className="mt-3 text-3xl font-semibold text-slate-950 lg:text-4xl">{title}</h1>
             {description && (
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{description}</p>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{description}</p>
             )}
           </div>
 
@@ -61,10 +61,10 @@ export function SectionCard({
   return (
     <section className={cx('vs-surface overflow-hidden', className)}>
       {(title || actions) && (
-        <div className="flex flex-col gap-3 border-b border-white/[0.08] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            {title && <h2 className="text-base font-semibold text-white">{title}</h2>}
-            {description && <p className="mt-1 text-sm text-slate-400">{description}</p>}
+            {title && <h2 className="text-base font-semibold text-slate-950">{title}</h2>}
+            {description && <p className="mt-1 text-sm text-slate-600">{description}</p>}
           </div>
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
@@ -86,28 +86,28 @@ export function MetricStatCard({
   accent?: 'neutral' | 'cyan' | 'emerald' | 'amber';
 }) {
   const tones = {
-    neutral: 'border-white/[0.08] bg-white/[0.045]',
-    cyan: 'border-cyan-300/16 bg-cyan-400/[0.055]',
-    emerald: 'border-emerald-300/16 bg-emerald-400/[0.05]',
-    amber: 'border-amber-300/16 bg-amber-400/[0.055]',
+    neutral: 'border-slate-200 bg-white',
+    cyan: 'border-sky-200 bg-sky-50',
+    emerald: 'border-emerald-200 bg-emerald-50',
+    amber: 'border-amber-200 bg-amber-50',
   };
 
   return (
-    <div className={cx('rounded-lg border p-5 shadow-[0_18px_50px_rgba(0,0,0,0.18)]', tones[accent])}>
+    <div className={cx('rounded-lg border p-5 shadow-sm', tones[accent])}>
       <div className="flex items-start justify-between gap-3">
-        <div className="text-[12px] font-medium text-slate-400">{label}</div>
+        <div className="text-[12px] font-medium text-slate-600">{label}</div>
         <div className={cx(
           'flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold',
-          accent === 'cyan' && 'bg-sky-500/15 text-sky-300',
-          accent === 'emerald' && 'bg-teal-500/15 text-teal-300',
-          accent === 'amber' && 'bg-orange-500/15 text-orange-300',
-          accent === 'neutral' && 'bg-violet-400/[0.10] text-violet-200',
+          accent === 'cyan' && 'bg-sky-100 text-sky-700',
+          accent === 'emerald' && 'bg-emerald-100 text-emerald-700',
+          accent === 'amber' && 'bg-amber-100 text-amber-700',
+          accent === 'neutral' && 'bg-violet-100 text-violet-700',
         )}>
           {accent === 'cyan' ? 'UP' : accent === 'emerald' ? 'OK' : accent === 'amber' ? '!' : 'VS'}
         </div>
       </div>
-      <div className="mt-5 text-2xl font-semibold text-white">{value}</div>
-      {hint && <div className="mt-2 text-xs text-slate-400">{hint}</div>}
+      <div className="mt-5 text-2xl font-semibold text-slate-950">{value}</div>
+      {hint && <div className="mt-2 text-xs text-slate-500">{hint}</div>}
     </div>
   );
 }
@@ -120,10 +120,10 @@ export function StatusBadge({
   children: ReactNode;
 }) {
   const tones = {
-    neutral: 'border-transparent bg-white/[0.06] text-slate-300',
-    success: 'border-transparent bg-emerald-400/[0.08] text-emerald-200',
-    warning: 'border-transparent bg-amber-400/[0.08] text-amber-200',
-    info: 'border-transparent bg-cyan-400/[0.08] text-cyan-200',
+    neutral: 'border-slate-200 bg-slate-100 text-slate-700',
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    warning: 'border-amber-200 bg-amber-50 text-amber-700',
+    info: 'border-sky-200 bg-sky-50 text-sky-700',
   };
 
   return (
@@ -143,9 +143,9 @@ export function EmptyStatePanel({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-violet-300/18 bg-violet-400/[0.045] px-6 py-10 text-center">
-      <div className="text-base font-semibold text-white">{title}</div>
-      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-400">{description}</p>
+    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center shadow-sm">
+      <div className="text-base font-semibold text-slate-950">{title}</div>
+      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-600">{description}</p>
       {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
   );
@@ -156,5 +156,5 @@ export function LoadingSkeleton({
 }: {
   className?: string;
 }) {
-  return <div className={cx('animate-pulse rounded-lg bg-white/[0.06]', className)} />;
+  return <div className={cx('animate-pulse rounded-lg bg-slate-200', className)} />;
 }

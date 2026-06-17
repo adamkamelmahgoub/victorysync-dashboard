@@ -1,5 +1,6 @@
 // client/src/lib/apiClient.ts
 import { API_BASE_URL, buildApiUrl } from "../config";
+import { supabase } from "./supabaseClient";
 
 type Json = any;
 type FetchJsonInit = RequestInit & { timeoutMs?: number };
@@ -24,15 +25,15 @@ async function withBrowserAuthHeaders(url: string, init?: FetchJsonInit): Promis
 
   const headers = new Headers(init?.headers || {});
   try {
-    const accessToken = await window.__victorysyncGetClerkToken?.();
-    if (accessToken && !headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${accessToken}`);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${session.access_token}`);
     }
-    if (window.__victorysyncClerkUserId && !headers.has("x-user-id")) {
-      headers.set("x-user-id", window.__victorysyncClerkUserId);
+    if (session?.user?.id && !headers.has("x-user-id")) {
+      headers.set("x-user-id", session.user.id);
     }
   } catch (err) {
-    console.warn("[apiClient] Failed to attach Clerk session to API request", err);
+    console.warn("[apiClient] Failed to attach Supabase session to API request", err);
   }
 
   return { ...(init || {}), headers };

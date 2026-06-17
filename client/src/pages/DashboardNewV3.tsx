@@ -173,14 +173,8 @@ const DashboardNewV3: FC = () => {
         missed: point.missed || 0,
       }));
     }
-    return [
-      { label: 'Mon', total, answered, missed },
-      { label: 'Tue', total: Math.max(total + 2, answered), answered, missed },
-      { label: 'Wed', total: Math.max(total - 1, answered), answered, missed },
-      { label: 'Thu', total: total + onCall, answered, missed },
-      { label: 'Fri', total: Math.max(total - missed, 0), answered, missed },
-    ];
-  }, [answered, missed, onCall, points, total]);
+    return [];
+  }, [points]);
 
   const mixData = useMemo(() => ([
     { name: 'Answered', value: answered, color: '#20c7b6' },
@@ -273,6 +267,10 @@ const DashboardNewV3: FC = () => {
             <div className="h-[360px] p-5">
               {trendLoading ? (
                 <div className="h-full animate-pulse rounded-xl bg-white/[0.04]" />
+              ) : trendData.length === 0 ? (
+                <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center text-sm text-slate-600">
+                  No call volume series is available for this date range yet.
+                </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={trendData} margin={{ top: 12, right: 18, bottom: 0, left: 0 }}>
@@ -282,10 +280,10 @@ const DashboardNewV3: FC = () => {
                         <stop offset="100%" stopColor="#0f6fa6" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid stroke="#282d34" strokeDasharray="3 3" />
-                    <XAxis dataKey="label" stroke="#858d99" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#858d99" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ background: '#15171b', border: '1px solid #2c3138', borderRadius: 12, color: '#fff' }} />
+                    <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
+                    <XAxis dataKey="label" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#111827', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} />
                     <Area type="monotone" dataKey="total" stroke="#0f6fa6" strokeWidth={3} fill="url(#callsGradient)" />
                     <Area type="monotone" dataKey="answered" stroke="#20c7b6" strokeWidth={2} fill="transparent" />
                   </AreaChart>
@@ -300,18 +298,18 @@ const DashboardNewV3: FC = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={mixData.length ? mixData : [{ name: 'No data', value: 1, color: '#2c3138' }]}
+                      data={mixData.length ? mixData : [{ name: 'No data', value: 1, color: '#e2e8f0' }]}
                       dataKey="value"
                       nameKey="name"
                       innerRadius={72}
                       outerRadius={104}
                       paddingAngle={4}
                     >
-                      {(mixData.length ? mixData : [{ color: '#2c3138' }]).map((entry, index) => (
+                      {(mixData.length ? mixData : [{ color: '#e2e8f0' }]).map((entry, index) => (
                         <Cell key={`mix-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ background: '#15171b', border: '1px solid #2c3138', borderRadius: 12, color: '#fff' }} />
+                    <Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#111827', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>

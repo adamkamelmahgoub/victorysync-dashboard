@@ -1,6 +1,6 @@
 import type { FC, FormEvent } from "react";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import { useAuth } from "../contexts/AuthContext";
 import { buildApiUrl } from "../config";
@@ -28,8 +28,9 @@ interface ValidatedInvite {
 
 export const LoginPage: FC = () => {
   const { theme, toggleTheme } = useTheme();
-  const { signIn } = useAuth();
+  const { signIn, user, globalRole, authError } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [mode, setMode] = useState<Mode>("signin");
   const isLight = theme === "light";
 
@@ -50,10 +51,21 @@ export const LoginPage: FC = () => {
   const [invError, setInvError] = useState<string | null>(null);
   const [invLoading, setInvLoading] = useState(false);
   const [validatedInvite, setValidatedInvite] = useState<ValidatedInvite | null>(null);
+  const redirectTo = (location.state as any)?.from?.pathname || (globalRole === 'platform_admin' ? '/admin' : '/dashboard');
+
+  useEffect(() => {
+    const route = globalRole === 'platform_admin' ? '/admin' : redirectTo;
+    if (user) navigate(route, { replace: true });
+  }, [globalRole, navigate, redirectTo, user]);
+
+  useEffect(() => {
+    const message = (location.state as any)?.authError || authError;
+    if (message) setSiError(message);
+  }, [authError, location.state]);
 
   // ── Styles ──
   const isLight_ = isLight;
-  const pageClass = isLight_ ? "min-h-screen bg-slate-100 text-slate-950" : "min-h-screen bg-[#030711] text-white";
+  const pageClass = isLight_ ? "min-h-screen bg-[#f6f6f7] text-slate-950" : "min-h-screen bg-[#030711] text-white";
   const panelClass = isLight_
     ? "border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.12)]"
     : "border-white/[0.07] bg-slate-950/72 shadow-[0_28px_70px_rgba(0,0,0,0.32)]";
@@ -76,7 +88,7 @@ export const LoginPage: FC = () => {
     const { error } = await signIn(siEmail, siPassword);
     setSiLoading(false);
     if (error) { setSiError(error); return; }
-    navigate("/dashboard");
+    navigate(globalRole === 'platform_admin' ? '/admin' : redirectTo, { replace: true });
   };
 
   // Step 1: validate invite code
