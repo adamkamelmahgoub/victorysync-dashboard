@@ -1,6 +1,12 @@
 export type LivePresenceStatus = 'available' | 'ringing' | 'on_call' | 'offline' | 'unknown';
 export type CallOutcomeStatus = 'answered' | 'missed' | 'abandoned' | 'failed' | 'voicemail' | 'completed' | 'unknown';
 export type SmsDirection = 'inbound' | 'outbound' | 'unknown';
+export type CallDirection = 'inbound' | 'outbound' | 'internal' | 'unknown';
+
+export type DateRange = {
+  start?: string;
+  end?: string;
+};
 
 export function normalizePhoneDigits(value: unknown) {
   return String(value || '').replace(/\D/g, '');
@@ -37,6 +43,16 @@ export function normalizeSmsDirection(value: unknown, fromNumber?: unknown, owne
   return 'unknown';
 }
 
+export function normalizeCallDirection(value: unknown, fromNumber?: unknown, ownedDigits?: Set<string>): CallDirection {
+  const text = String(value || '').trim().toLowerCase();
+  if (text.includes('internal')) return 'internal';
+  if (text.includes('out')) return 'outbound';
+  if (text.includes('in')) return 'inbound';
+  const fromDigits = normalizePhoneDigits(fromNumber);
+  if (ownedDigits && fromDigits) return ownedDigits.has(fromDigits) ? 'outbound' : 'inbound';
+  return 'unknown';
+}
+
 export function normalizeLivePresenceStatus(value: unknown, onCall?: boolean, stale?: boolean): LivePresenceStatus {
   const text = String(value || '').trim().toLowerCase();
   if (stale && !onCall) return 'unknown';
@@ -50,6 +66,14 @@ export function normalizeLivePresenceStatus(value: unknown, onCall?: boolean, st
 
 export function answerRate(answered: number, total: number) {
   return total > 0 ? Math.round((answered / total) * 1000) / 10 : 0;
+}
+
+export function countTotalCalls(rows: Array<Record<string, any>>) {
+  return rows.length;
+}
+
+export function countAnsweredCalls(rows: Array<Record<string, any>>) {
+  return rows.filter((row) => ['answered', 'completed'].includes(normalizeCallStatus(row.status || row.result || row.call_status))).length;
 }
 
 export function averageHandleTimeSeconds(rows: Array<Record<string, any>>) {
@@ -76,12 +100,44 @@ export function countTransfers(rows: Array<Record<string, any>>) {
   }).length;
 }
 
+export function countRecordingsAvailable(rows: Array<Record<string, any>>) {
+  return rows.filter((row) => hasRecording(row)).length;
+}
+
+export function hasRecording(row: Record<string, any>) {
+  return Boolean(row.recording_url || row.recordingUrl || row.recording_id || row.recordingId || row.has_recording || row.hasRecording);
+}
+
+export function calculateAnswerRateFromRows(rows: Array<Record<string, any>>) {
+  return answerRate(countAnsweredCalls(rows), countTotalCalls(rows));
+}
+
+export function filterRowsByDateRange<T extends Record<string, any>>(rows: T[], range: DateRange, fieldNames = ['created_at', 'timestamp', 'started_at', 'date_time', 'date']) {
+  const startTime = range.start ? new Date(`${range.start}T00:00:00.000Z`).getTime() : Number.NEGATIVE_INFINITY;
+  const endTime = range.end ? new Date(`${range.end}T23:59:59.999Z`).getTime() : Number.POSITIVE_INFINITY;
+  return rows.filter((row) => {
+    const raw = fieldNames.map((field) => row[field]).find(Boolean);
+    if (!raw) return true;
+    const time = new Date(raw).getTime();
+    if (!Number.isFinite(time)) return true;
+    return time >= startTime && time <= endTime;
+  });
+}
+
 export function formatSeconds(value: unknown) {
   const total = Math.max(0, Math.round(Number(value) || 0));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
+export const formatDuration = formatSeconds;
+
+export function formatPercent(value: unknown) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '0%';
+  return `${Math.round(number * 10) / 10}%`;
 }
 
 export function isoDateDaysAgo(days: number) {

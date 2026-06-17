@@ -39,6 +39,7 @@ export const LoginPage: FC = () => {
   const [siPassword, setSiPassword] = useState("");
   const [siError, setSiError] = useState<string | null>(null);
   const [siLoading, setSiLoading] = useState(false);
+  const [showSiPassword, setShowSiPassword] = useState(false);
 
   // Invite signup state
   const [inviteStep, setInviteStep] = useState<InviteStep>("code");
@@ -48,6 +49,8 @@ export const LoginPage: FC = () => {
   const [invFullName, setInvFullName] = useState("");
   const [invPassword, setInvPassword] = useState("");
   const [invConfirm, setInvConfirm] = useState("");
+  const [showInvPassword, setShowInvPassword] = useState(false);
+  const [showInvConfirm, setShowInvConfirm] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
   const [invLoading, setInvLoading] = useState(false);
   const [validatedInvite, setValidatedInvite] = useState<ValidatedInvite | null>(null);
@@ -267,13 +270,20 @@ export const LoginPage: FC = () => {
                         value={siEmail} onChange={e => setSiEmail(e.target.value)} className={inputClass} />
                     </Field>
                     <Field label="Password" isLight={isLight_} mutedText={mutedText}>
-                      <input type="password" required autoComplete="current-password" placeholder="••••••••"
-                        value={siPassword} onChange={e => setSiPassword(e.target.value)} className={inputClass} />
+                      <PasswordInput
+                        value={siPassword}
+                        onChange={setSiPassword}
+                        show={showSiPassword}
+                        onToggle={() => setShowSiPassword((show) => !show)}
+                        autoComplete="current-password"
+                        placeholder="Enter your password"
+                        inputClass={inputClass}
+                      />
                     </Field>
                     {siError && <ErrorBanner msg={siError} />}
                     <button type="submit" disabled={siLoading}
                       className="w-full rounded-xl bg-cyan-500 px-4 py-3 text-sm font-bold text-slate-950 shadow-[0_10px_24px_rgba(6,182,212,0.22)] transition hover:bg-cyan-400 disabled:opacity-60">
-                      {siLoading ? "Signing in…" : "Sign in"}
+                      {siLoading ? "Signing in..." : "Sign in"}
                     </button>
                   </form>
                 </div>
@@ -297,7 +307,7 @@ export const LoginPage: FC = () => {
                   {invError && <ErrorBanner msg={invError} />}
                   <button type="submit" disabled={invLoading}
                     className="w-full rounded-xl bg-emerald-400 px-4 py-3 text-sm font-bold text-slate-950 shadow-[0_10px_24px_rgba(16,185,129,0.22)] transition hover:bg-emerald-300 disabled:opacity-60">
-                    {invLoading ? "Checking…" : "Validate invite →"}
+                    {invLoading ? "Checking..." : "Validate invite"}
                   </button>
                 </form>
               )}
@@ -307,7 +317,7 @@ export const LoginPage: FC = () => {
                 <form onSubmit={handleCreateAccount} className="mt-6 space-y-4">
                   {/* Confirmed invite banner */}
                   <div className={`rounded-xl border px-4 py-3 text-sm ${isLight_ ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-emerald-400/25 bg-emerald-400/10 text-emerald-300"}`}>
-                    <span className="font-semibold">Invite confirmed</span> — {validatedInvite.org_name || validatedInvite.org_id}
+                    <span className="font-semibold">Invite confirmed</span> - {validatedInvite.org_name || validatedInvite.org_id}
                     <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold uppercase ${isLight_ ? "bg-emerald-100 text-emerald-700" : "bg-emerald-400/20 text-emerald-300"}`}>
                       {validatedInvite.role}
                     </span>
@@ -318,12 +328,26 @@ export const LoginPage: FC = () => {
                       value={invFullName} onChange={e => setInvFullName(e.target.value)} className={inputClass} />
                   </Field>
                   <Field label="Password" isLight={isLight_} mutedText={mutedText}>
-                    <input type="password" required autoComplete="new-password" placeholder="Min. 8 characters"
-                      value={invPassword} onChange={e => setInvPassword(e.target.value)} className={inputClass} />
+                    <PasswordInput
+                      value={invPassword}
+                      onChange={setInvPassword}
+                      show={showInvPassword}
+                      onToggle={() => setShowInvPassword((show) => !show)}
+                      autoComplete="new-password"
+                      placeholder="Min. 8 characters"
+                      inputClass={inputClass}
+                    />
                   </Field>
                   <Field label="Confirm password" isLight={isLight_} mutedText={mutedText}>
-                    <input type="password" required autoComplete="new-password" placeholder="••••••••"
-                      value={invConfirm} onChange={e => setInvConfirm(e.target.value)} className={inputClass} />
+                    <PasswordInput
+                      value={invConfirm}
+                      onChange={setInvConfirm}
+                      show={showInvConfirm}
+                      onToggle={() => setShowInvConfirm((show) => !show)}
+                      autoComplete="new-password"
+                      placeholder="Confirm password"
+                      inputClass={inputClass}
+                    />
                   </Field>
 
                   {invError && <ErrorBanner msg={invError} />}
@@ -331,11 +355,11 @@ export const LoginPage: FC = () => {
                   <div className="flex gap-3">
                     <button type="button" onClick={() => setInvStep("code")}
                       className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${isLight_ ? "border-slate-200 text-slate-600 hover:bg-slate-50" : "border-white/[0.08] text-slate-400 hover:bg-white/[0.04]"}`}>
-                      ← Back
+                      Back
                     </button>
                     <button type="submit" disabled={invLoading}
                       className="flex-1 rounded-xl bg-emerald-400 px-4 py-3 text-sm font-bold text-slate-950 shadow-[0_10px_24px_rgba(16,185,129,0.22)] transition hover:bg-emerald-300 disabled:opacity-60">
-                      {invLoading ? "Creating account…" : "Create account"}
+                      {invLoading ? "Creating account..." : "Create account"}
                     </button>
                   </div>
                 </form>
@@ -368,6 +392,46 @@ function Field({ label, isLight, mutedText, children }: { label: string; isLight
     <div>
       <label className={`mb-1.5 block text-xs font-semibold uppercase tracking-wide ${mutedText}`}>{label}</label>
       {children}
+    </div>
+  );
+}
+
+function PasswordInput({
+  value,
+  onChange,
+  show,
+  onToggle,
+  autoComplete,
+  placeholder,
+  inputClass,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  show: boolean;
+  onToggle: () => void;
+  autoComplete: string;
+  placeholder: string;
+  inputClass: string;
+}) {
+  return (
+    <div className="relative">
+      <input
+        type={show ? "text" : "password"}
+        required
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={`${inputClass} pr-20`}
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={show ? "Hide password" : "Show password"}
+        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+      >
+        {show ? "Hide" : "Show"}
+      </button>
     </div>
   );
 }
