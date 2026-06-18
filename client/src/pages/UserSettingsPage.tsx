@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
+import StripePortalButton from '../components/StripePortalButton';
 import { buildApiUrl } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
 import {
@@ -364,6 +365,26 @@ export default function UserSettingsPage() {
                 Light
               </button>
             </div>
+          </div>
+        </div>
+
+        <div className="vs-surface p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">Billing & Payments</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Open Stripe to update saved cards, manage payment methods, and view Stripe-hosted billing details for this account.
+              </p>
+            </div>
+            <StripePortalButton
+              orgId={selectedOrgId}
+              label="Open Stripe billing"
+              className="vs-button-primary whitespace-nowrap"
+              onError={(nextMessage) => setMessage(nextMessage || null)}
+            />
+          </div>
+          <div className="mt-4 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-800">
+            Payment details are handled directly by Stripe. VictorySync never stores raw card numbers.
           </div>
         </div>
 

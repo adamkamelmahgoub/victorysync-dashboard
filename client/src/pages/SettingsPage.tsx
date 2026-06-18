@@ -4,12 +4,14 @@ import { useAuth } from "../contexts/AuthContext";
 import { useOrg } from "../contexts/OrgContext";
 import { supabase } from "../lib/supabaseClient";
 import { PageLayout } from "../components/PageLayout";
+import StripePortalButton from "../components/StripePortalButton";
 
 export const SettingsPage: FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { org, isAdmin, refresh } = useOrg();
   const [loading, setLoading] = useState(false);
+  const [billingMessage, setBillingMessage] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     timezone: '',
@@ -80,7 +82,33 @@ export const SettingsPage: FC = () => {
 
   return (
     <PageLayout title="Organization Settings" description="Manage your organization settings, SLA targets, and business hours">
-      <form onSubmit={handleSubmit} className="vs-surface space-y-6 p-6">
+      <div className="space-y-6">
+        <div className="vs-surface p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">Stripe Billing Portal</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Manage this organization&apos;s payment methods, subscriptions, and Stripe invoices in Stripe&apos;s hosted portal.
+              </p>
+            </div>
+            <StripePortalButton
+              orgId={org.id}
+              label="Open Stripe billing"
+              className="vs-button-primary whitespace-nowrap"
+              onError={(message) => setBillingMessage(message || null)}
+            />
+          </div>
+          {billingMessage && (
+            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+              {billingMessage}
+            </div>
+          )}
+          <p className="mt-4 text-xs text-slate-500">
+            Card entry, payment method updates, and subscription management happen on Stripe-hosted pages.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="vs-surface space-y-6 p-6">
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Organization Name</label>
@@ -157,6 +185,7 @@ export const SettingsPage: FC = () => {
             </button>
           )}
         </form>
+      </div>
     </PageLayout>
   );
 };

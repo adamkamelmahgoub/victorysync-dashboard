@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardShellHeader } from './DashboardPrimitives';
+import StripePortalButton from './StripePortalButton';
 
 interface PageLayoutProps {
   title: string;
@@ -133,6 +134,12 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
                     >
                       Organization settings
                     </button>
+                    <StripePortalButton
+                      orgId={selectedOrgId}
+                      label="Billing portal"
+                      loadingLabel="Opening billing..."
+                      className="w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
                     <button
                       type="button"
                       onClick={() => void signOut()}
