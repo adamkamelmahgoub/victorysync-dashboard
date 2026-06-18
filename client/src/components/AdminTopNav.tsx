@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { preloadRoute } from '../lib/routePreloader';
 
 export default function AdminTopNav() {
   const navigate = useNavigate();
@@ -54,6 +55,8 @@ export default function AdminTopNav() {
             return (
               <button
                 key={it.to}
+                onMouseEnter={() => preloadRoute(it.to)}
+                onFocus={() => preloadRoute(it.to)}
                 onClick={() => navigate(it.to)}
                 className={`rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
                   active

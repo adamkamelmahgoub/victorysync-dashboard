@@ -99,6 +99,59 @@ body {
   min-height: 100vh;
 }
 
+.vs-route-progress {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 9999;
+  height: 3px;
+  width: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: linear-gradient(90deg, #7c3aed 0%, #a855f7 52%, #06b6d4 100%);
+  box-shadow: 0 0 18px rgba(124, 58, 237, 0.35);
+  transition:
+    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+.vs-route-progress.is-visible {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.vs-route-transition {
+  animation: vs-page-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform;
+}
+
+@keyframes vs-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.997);
+    filter: saturate(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: saturate(1);
+  }
+}
+
+.vs-pressed {
+  transform: translateY(1px) scale(0.99) !important;
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease !important;
+}
+
+.vs-surface,
+.vs-surface-muted,
+.vs-table-shell {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
+}
+
 .vs-surface {
   background: linear-gradient(180deg, var(--bg-card) 0%, #fbfcff 100%);
   border: 1px solid var(--vs-border);
@@ -140,7 +193,8 @@ body {
   border: 1px solid var(--vs-border);
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   color: var(--vs-text);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.94) inset, 0 1px 2px rgba(15, 23, 42, 0.05);
+  will-change: transform, box-shadow;
 }
 
 .vs-button-secondary:hover {
@@ -161,6 +215,7 @@ body {
   border-radius: var(--radius-button);
   border: 1px solid rgba(109, 40, 217, 0.55);
   box-shadow: 0 1px 0 rgba(255,255,255,0.28) inset, 0 12px 26px rgba(124, 58, 237, 0.25);
+  will-change: transform, box-shadow;
 }
 
 .vs-button-primary:hover {
@@ -256,6 +311,24 @@ button:disabled {
   color: #374151;
   box-shadow: 0 1px 0 rgba(255,255,255,0.92) inset, 0 1px 2px rgba(15, 23, 42, 0.05);
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background-color 160ms ease;
+  will-change: transform, box-shadow;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  .vs-route-transition,
+  .vs-route-progress {
+    animation: none !important;
+    transform: none !important;
+  }
 }
 
 .vs-icon-button:hover {

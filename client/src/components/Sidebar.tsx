@@ -2,6 +2,7 @@ import React, { FC, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { preloadRoute } from '../lib/routePreloader';
 
 interface SidebarProps {
   isAdmin: boolean;
@@ -63,6 +64,8 @@ function NavButton({
   return (
     <button
       onClick={onClick}
+      onMouseEnter={() => preloadRoute(item.path)}
+      onFocus={() => preloadRoute(item.path)}
       data-log={`Navigate ${item.label}`}
       data-log-type="navigation_click"
       className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition duration-200 ${

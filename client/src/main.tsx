@@ -1,4 +1,4 @@
-import { StrictMode, Suspense, lazy } from "react";
+import { StrictMode, Suspense, lazy, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BrowserRouter,
@@ -19,6 +19,7 @@ import LoggingProvider from "./components/LoggingProvider";
 import LeadAlertOverlay from "./components/LeadAlertOverlay";
 import { installAuthenticatedFetch } from "./lib/installAuthenticatedFetch";
 import { installConsoleRedaction } from "./lib/redactConsole";
+import { warmCoreRoutes } from "./lib/routePreloader";
 
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
 const DashboardNewV3 = lazy(() => import("./pages/DashboardNewV3"));
@@ -76,6 +77,67 @@ if ((import.meta as any).env && (import.meta as any).env.VITE_DEBUG_API === 'tru
 
 installConsoleRedaction();
 installAuthenticatedFetch();
+
+function AppLoadingFallback({ label = 'Loading workspace...' }: { label?: string }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 text-slate-900">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.10)]">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 animate-pulse rounded-2xl bg-violet-100 ring-1 ring-violet-200" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-slate-950">{label}</div>
+            <div className="mt-1 text-xs text-slate-500">Preparing the next view</div>
+          </div>
+        </div>
+        <div className="mt-5 space-y-3">
+          <div className="h-3 w-3/4 animate-pulse rounded-full bg-slate-100" />
+          <div className="h-3 w-full animate-pulse rounded-full bg-slate-100" />
+          <div className="h-3 w-2/3 animate-pulse rounded-full bg-slate-100" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NavigationProgress() {
+  const location = useLocation();
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    setVisible(true);
+    const timer = window.setTimeout(() => setVisible(false), 420);
+    return () => window.clearTimeout(timer);
+  }, [location.key, location.pathname, location.search]);
+
+  return <div className={`vs-route-progress ${visible ? 'is-visible' : ''}`} aria-hidden="true" />;
+}
+
+function PageTransition({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  return (
+    <div key={location.key} className="vs-route-transition">
+      {children}
+    </div>
+  );
+}
+
+function InteractionFeedback() {
+  useEffect(() => {
+    const press = (event: PointerEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('button, a, [role="button"]')
+        : null;
+      if (!target || target.hasAttribute('disabled') || target.getAttribute('aria-disabled') === 'true') return;
+      target.classList.add('vs-pressed');
+      window.setTimeout(() => target.classList.remove('vs-pressed'), 220);
+    };
+    const warm = () => window.setTimeout(warmCoreRoutes, 700);
+    document.addEventListener('pointerdown', press, { passive: true });
+    warm();
+    return () => document.removeEventListener('pointerdown', press);
+  }, []);
+  return null;
+}
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { user, loading: authLoading, authError } = useAuth();
@@ -159,8 +221,11 @@ function FeatureRoute({ featureKey, children }: { featureKey: string; children: 
 
 function AppRouter() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-900">Loading...</div>}>
-      <Routes>
+    <>
+      <NavigationProgress />
+      <Suspense fallback={<AppLoadingFallback />}>
+        <PageTransition>
+          <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/"
@@ -443,8 +508,10 @@ function AppRouter() {
         }
       />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </Suspense>
+          </Routes>
+        </PageTransition>
+      </Suspense>
+    </>
   );
 }
 
@@ -457,6 +524,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
             <ErrorBoundary>
               <LoggingProvider />
               <ToastProvider>
+                <InteractionFeedback />
                 <LeadAlertOverlay />
                 <AppRouter />
               </ToastProvider>
