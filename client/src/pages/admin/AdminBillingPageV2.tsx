@@ -371,6 +371,25 @@ export const AdminBillingPageV2: React.FC = () => {
     }
   };
 
+  const sendInvoiceReminder = async (invoice: Invoice) => {
+    const actionId = `reminder:${invoice.id}`;
+    setInvoiceAction(actionId);
+    setError(null);
+    try {
+      const response = await fetch(buildApiUrl(`/api/admin/billing/invoices/${encodeURIComponent(invoice.id)}/reminder`), {
+        method: 'POST',
+        headers: authHeaders,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || payload.error || 'Failed to send invoice reminder');
+      setError('Payment reminder sent.');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to send invoice reminder');
+    } finally {
+      setInvoiceAction(null);
+    }
+  };
+
   const exportInvoice = async (id: string) => {
     const response = await fetch(buildApiUrl(`/api/admin/billing/invoices/${encodeURIComponent(id)}/export?format=csv`), {
       headers: { 'x-user-id': user?.id || '' },
@@ -638,6 +657,15 @@ export const AdminBillingPageV2: React.FC = () => {
                             className="vs-button-primary"
                           >
                             {invoiceAction === invoice.id ? 'Opening...' : 'Pay by card'}
+                          </button>
+                        )}
+                        {isPlatformAdmin && invoicePayable(invoice) && (
+                          <button
+                            onClick={() => sendInvoiceReminder(invoice)}
+                            disabled={invoiceAction === `reminder:${invoice.id}`}
+                            className="vs-button-secondary"
+                          >
+                            {invoiceAction === `reminder:${invoice.id}` ? 'Sending...' : 'Send reminder'}
                           </button>
                         )}
                         <button onClick={() => exportInvoice(invoice.id)} className="vs-button-secondary">Export CSV</button>

@@ -91,6 +91,11 @@ import {
   pageViewLogSchema,
   stripSensitiveFields,
 } from './security/adminLogging';
+import {
+  notifyDashboardUpdate,
+  notifyInvoiceCreated,
+  notifyPaymentReminder,
+} from './services/emailNotifications';
 
 const DEFAULT_MIGHTYCALL_HISTORY_START = '2020-01-01';
 installConsoleRedaction();
@@ -4467,6 +4472,36 @@ app.use('/api', async (req, res, next) => {
   }
 });
 app.use('/api', csrfProtection as any);
+app.use('/api', (req, res, next) => {
+  const method = req.method.toUpperCase();
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return next();
+  if (
+    req.path.startsWith('/logs') ||
+    req.path === '/csrf-token' ||
+    req.path === '/billing/stripe/webhook'
+  ) {
+    return next();
+  }
+
+  res.on('finish', () => {
+    if (res.statusCode < 200 || res.statusCode >= 400) return;
+    const rawOrgId =
+      (typeof req.body?.org_id === 'string' && req.body.org_id) ||
+      (typeof req.body?.orgId === 'string' && req.body.orgId) ||
+      (typeof req.query.org_id === 'string' && req.query.org_id) ||
+      (typeof req.query.orgId === 'string' && req.query.orgId) ||
+      null;
+    void notifyDashboardUpdate({
+      actorId: req.actorId || req.header('x-user-id') || null,
+      method,
+      path: req.path,
+      orgId: rawOrgId,
+      statusCode: res.statusCode,
+    });
+  });
+
+  next();
+});
 app.use('/api/billing/stripe', stripeBillingRouter);
 
 app.post('/api/logs/activity', async (req, res) => {
@@ -12845,10 +12880,42 @@ app.get("/s/series", async (req, res) => {
           }
         }
 
+        void notifyInvoiceCreated({ ...invoice, invoice_items: itemsData });
         res.json({ invoice: { ...invoice, invoice_items: itemsData } });
       } catch (err: any) {
         console.error('[billing/invoices POST] error:', err);
         res.status(500).json({ error: 'failed_to_create_invoice', detail: err?.message });
+      }
+    });
+
+    app.post('/api/admin/billing/invoices/:id/reminder', async (req, res) => {
+      try {
+        const actorId = req.header('x-user-id') || null;
+        if (!actorId || !(await isPlatformAdmin(actorId))) {
+          return res.status(403).json({ error: 'unauthorized' });
+        }
+
+        const invoiceId = String(req.params.id || '').trim();
+        if (!invoiceId) return res.status(400).json({ error: 'missing_invoice_id' });
+
+        const { data: invoice, error } = await supabaseAdmin
+          .from('invoices')
+          .select('*, invoice_items (*)')
+          .eq('id', invoiceId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!invoice) return res.status(404).json({ error: 'invoice_not_found' });
+
+        const status = String((invoice as any).status || '').toLowerCase();
+        if (['paid', 'void', 'voided', 'cancelled', 'canceled'].includes(status)) {
+          return res.status(409).json({ error: 'invoice_not_open' });
+        }
+
+        const result = await notifyPaymentReminder(invoice);
+        res.json({ success: true, notification: result });
+      } catch (err: any) {
+        console.error('[billing/invoices reminder] error:', err);
+        res.status(500).json({ error: 'failed_to_send_invoice_reminder', detail: err?.message });
       }
     });
 

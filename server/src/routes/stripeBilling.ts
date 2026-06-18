@@ -3,6 +3,11 @@ import Stripe from 'stripe';
 import { z } from 'zod';
 import { isOrgAdmin, isOrgManagerWith, isOrgMember, isPlatformAdmin } from '../auth/rbac';
 import { supabaseAdmin } from '../lib/supabaseClient';
+import {
+  notifyPaymentFailed,
+  notifyPaymentSucceeded,
+  notifySubscriptionChanged,
+} from '../services/emailNotifications';
 
 const router = express.Router();
 
@@ -405,14 +410,14 @@ async function upsertStripeInvoice(invoice: any) {
 
 async function syncStripeSubscription(subscription: any, fallbackOrgId?: string | null, fallbackPlanId?: string | null) {
   const orgId = String(subscription.metadata?.org_id || fallbackOrgId || '');
-  if (!orgId) return;
+  if (!orgId) return null;
   const item = subscription.items.data[0] || null;
   const planId = subscription.metadata?.plan_id || fallbackPlanId || undefined;
   const nextBillingDate = (subscription as any).current_period_end
     ? new Date((subscription as any).current_period_end * 1000).toISOString().slice(0, 10)
     : undefined;
 
-  await upsertOrgSubscription({
+  const saved = await upsertOrgSubscription({
     org_id: orgId,
     plan_id: planId,
     status: subscription.status,
@@ -427,6 +432,7 @@ async function syncStripeSubscription(subscription: any, fallbackOrgId?: string 
     auto_renew: !subscription.cancel_at_period_end,
     metadata: { stripe_status: subscription.status },
   });
+  return saved;
 }
 
 const checkoutSchema = z.object({
@@ -771,10 +777,25 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
                 purpose: session.metadata?.purpose || 'payment',
               },
             });
+            void notifyPaymentSucceeded({
+              orgId: resolvedOrgId,
+              invoiceId: session.metadata?.invoice_id || null,
+              invoiceNumber: session.metadata?.invoice_number || null,
+              amount: centsToAmount(session.amount_total),
+              currency: normalizeCurrency(session.currency),
+            });
           }
         } else if (subscriptionId) {
           const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          await syncStripeSubscription(subscription, orgId, planId);
+          const synced = await syncStripeSubscription(subscription, orgId, planId);
+          if ((synced as any)?.org_id) {
+            void notifySubscriptionChanged({
+              orgId: String((synced as any).org_id),
+              status: subscription.status,
+              planName: session.metadata?.plan_name || null,
+              eventType: event.type,
+            });
+          }
         } else if (orgId) {
           await upsertOrgSubscription({
             org_id: orgId,
@@ -797,13 +818,28 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
             stripe_checkout_session_id: session.id,
             metadata: { stripe_event: event.type, stripe_session_id: session.id },
           });
+          void notifySubscriptionChanged({
+            orgId,
+            status: session.payment_status === 'paid' ? 'active' : session.payment_status,
+            planName: session.metadata?.plan_name || null,
+            eventType: event.type,
+          });
         }
         break;
       }
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
-        await syncStripeSubscription(event.data.object as any);
+        const subscription = event.data.object as any;
+        const synced = await syncStripeSubscription(subscription);
+        if ((synced as any)?.org_id) {
+          void notifySubscriptionChanged({
+            orgId: String((synced as any).org_id),
+            status: subscription.status,
+            planName: subscription.metadata?.plan_name || null,
+            eventType: event.type,
+          });
+        }
         break;
       }
       case 'invoice.created':
@@ -827,6 +863,23 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
             stripe_subscription_id: typeof (invoice as any).subscription === 'string' ? (invoice as any).subscription : (invoice as any).subscription?.id,
             metadata: { stripe_event: event.type },
           });
+          if (event.type === 'invoice.payment_failed') {
+            void notifyPaymentFailed({
+              orgId: String((localInvoice as any).org_id),
+              invoiceId: String((localInvoice as any).id || invoice.id),
+              invoiceNumber: invoice.number || (localInvoice as any).invoice_number || null,
+              amount: centsToAmount(invoice.amount_due || invoice.total),
+              currency: normalizeCurrency(invoice.currency),
+            });
+          } else {
+            void notifyPaymentSucceeded({
+              orgId: String((localInvoice as any).org_id),
+              invoiceId: String((localInvoice as any).id || invoice.id),
+              invoiceNumber: invoice.number || (localInvoice as any).invoice_number || null,
+              amount: centsToAmount(invoice.amount_paid || invoice.total),
+              currency: normalizeCurrency(invoice.currency),
+            });
+          }
         }
         break;
       }

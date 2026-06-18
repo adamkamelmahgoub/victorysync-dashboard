@@ -90,6 +90,9 @@ This map documents the production data contract for the redesigned dashboard. UI
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Client billing overview | Billing service | `/api/client/billing/overview`, `/api/client/billing/invoices`, `/api/client/billing/records` | billing tables | plan/package, invoices, payment status, usage, seats | Client scoped to own org | Clean "billing not configured" state | No fake invoices. |
 | Admin billing | Billing admin service | `/api/admin/billing/records`, `/api/admin/billing/invoices`, `/api/admin/billing-packages`, `/api/admin/orgs`, `/api/admin/users` | billing/admin tables | records, invoices, packages, orgs, users | Platform admins only | Empty state when billing records absent | Export endpoints must use same RBAC. |
+| Invoice reminder email | Backend notification service | `POST /api/admin/billing/invoices/:id/reminder` | invoices, invoice_items, org_members/org_users/profiles | invoice id, org id, status, totals, recipient emails | Platform admins only | Returns skipped reason when email env is disabled/missing | Sends only operational invoice metadata; no card data or request payloads. |
+| Stripe payment/subscription emails | Stripe webhook sync | `/api/billing/stripe/webhook` | invoices, billing_records, org_subscriptions, org_members/org_users/profiles | Stripe event, org id, invoice number, amount/status | Stripe signed webhook only | Webhook still succeeds if email is skipped | Email hooks run after DB sync and do not expose Stripe secrets. |
+| Dashboard update emails | API mutation middleware | Successful `POST/PUT/PATCH/DELETE /api/*` when enabled | org_members/org_users/profiles | method, path, actor id, org id, status code | Authenticated routes after auth/CSRF | No-op unless email notifications are enabled | Sanitized metadata only; request bodies and secrets are never emailed. |
 
 ## Settings
 
