@@ -51,6 +51,7 @@ type BillingPlan = {
   included_minutes?: number | null;
   included_sms?: number | null;
   stripe_price_id?: string | null;
+  stripe_price_source?: 'plan' | 'env' | null;
   features?: unknown;
 };
 
@@ -338,8 +339,13 @@ export default function BillingPage() {
                     >
                       {billingAction === plan.id ? 'Opening Checkout...' : current ? 'Update in Stripe' : 'Start Stripe Checkout'}
                     </button>
+                    {hasStripePrice && plan.stripe_price_source === 'env' && (
+                      <p className="mt-3 text-xs leading-5 text-slate-600">Using the Stripe price configured in server environment variables.</p>
+                    )}
                     {!hasStripePrice && (
-                      <p className="mt-3 text-xs leading-5 text-amber-700">This plan needs a Stripe price ID before Checkout can be used.</p>
+                      <p className="mt-3 text-xs leading-5 text-amber-700">
+                        Subscriptions need a Stripe recurring price. Ask a platform admin to open Admin Billing &gt; Packages and click Create Stripe price.
+                      </p>
                     )}
                   </div>
                 );

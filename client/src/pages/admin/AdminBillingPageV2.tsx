@@ -118,6 +118,7 @@ export const AdminBillingPageV2: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
+  const [packageAction, setPackageAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [records, setRecords] = useState<BillingRecord[]>([]);
@@ -443,6 +444,25 @@ export const AdminBillingPageV2: React.FC = () => {
     await loadPackages();
   };
 
+  const createStripePrice = async (billingPackage: BillingPackage) => {
+    setPackageAction(billingPackage.id);
+    setError(null);
+    try {
+      const response = await fetch(buildApiUrl('/api/billing/stripe/plan-price'), {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ plan_id: billingPackage.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || payload.error || 'Failed to create Stripe price');
+      await loadPackages();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to create Stripe price');
+    } finally {
+      setPackageAction(null);
+    }
+  };
+
   const filteredRecords = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return records;
@@ -653,7 +673,18 @@ export const AdminBillingPageV2: React.FC = () => {
                         </div>
                         <p className="mt-2 text-sm leading-6 text-slate-600">{billingPackage.description || 'No package description provided yet.'}</p>
                       </div>
-                      <button onClick={() => deletePackage(billingPackage.id)} className="vs-button-secondary">Delete</button>
+                      <div className="flex flex-wrap gap-2">
+                        {!billingPackage.stripe_price_id && (
+                          <button
+                            onClick={() => createStripePrice(billingPackage)}
+                            disabled={packageAction === billingPackage.id || !(Number(billingPackage.base_monthly_cost || 0) > 0)}
+                            className="vs-button-primary"
+                          >
+                            {packageAction === billingPackage.id ? 'Creating...' : 'Create Stripe price'}
+                          </button>
+                        )}
+                        <button onClick={() => deletePackage(billingPackage.id)} className="vs-button-secondary">Delete</button>
+                      </div>
                     </div>
                     <div className="mt-5 grid grid-cols-2 gap-3">
                       <div className="vs-surface p-4">
@@ -663,7 +694,7 @@ export const AdminBillingPageV2: React.FC = () => {
                       </div>
                       <div className="vs-surface p-4">
                         <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Included</div>
-                        <div className="mt-2 text-sm text-slate-200">{billingPackage.included_minutes || 0} mins · {billingPackage.included_sms || 0} SMS</div>
+                        <div className="mt-2 text-sm text-slate-700">{billingPackage.included_minutes || 0} mins / {billingPackage.included_sms || 0} SMS</div>
                       </div>
                     </div>
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-4 text-xs text-slate-700">

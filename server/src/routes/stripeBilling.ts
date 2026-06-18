@@ -435,6 +435,10 @@ const checkoutSchema = z.object({
   quantity: z.coerce.number().int().min(1).max(500).default(1),
 });
 
+const planPriceSchema = z.object({
+  plan_id: z.string().uuid(),
+});
+
 const paymentSessionSchema = z.object({
   org_id: z.string().uuid().optional(),
   invoice_id: z.string().uuid().optional(),
@@ -453,9 +457,76 @@ router.get('/plans', async (req, res) => {
       .eq('is_active', true)
       .order('base_monthly_cost', { ascending: true });
     if (error) throw error;
-    res.json({ plans: data || [], stripe_configured: Boolean(process.env.STRIPE_SECRET_KEY) });
+    const plans = (data || []).map((plan: any) => ({
+      ...plan,
+      stripe_price_id: plan.stripe_price_id || fallbackPriceForPlan(plan),
+      stripe_price_source: plan.stripe_price_id ? 'plan' : fallbackPriceForPlan(plan) ? 'env' : null,
+    }));
+    res.json({ plans, stripe_configured: Boolean(process.env.STRIPE_SECRET_KEY) });
   } catch (err: any) {
     res.status(500).json({ error: 'stripe_plans_failed', detail: err?.message || 'Unable to load plans' });
+  }
+});
+
+router.post('/plan-price', async (req, res) => {
+  try {
+    const actorId = await getActorId(req);
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const parsed = planPriceSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_plan_price_request' });
+
+    const plan = await getPlan(parsed.data.plan_id);
+    if (!plan || plan.is_active === false) return res.status(404).json({ error: 'plan_not_found' });
+    if (plan.stripe_price_id) return res.json({ plan, stripe_price_id: plan.stripe_price_id, already_configured: true });
+
+    const amount = Number(plan.base_monthly_cost || 0);
+    const amountCents = amountToCents(amount);
+    if (amountCents < 50) return res.status(400).json({ error: 'plan_amount_too_small', message: 'Set a package price of at least 0.50 before creating a Stripe recurring price.' });
+
+    const stripe = getStripe();
+    let productId = String(plan.stripe_product_id || '');
+    if (!productId) {
+      const product = await stripe.products.create({
+        name: String(plan.name || 'VictorySync plan'),
+        description: plan.description || undefined,
+        metadata: { plan_id: String(plan.id), source: 'victorysync' },
+      });
+      productId = product.id;
+    }
+
+    const interval = String(plan.billing_interval || 'month').toLowerCase() === 'year' ? 'year' : 'month';
+    const currency = normalizeCurrency(plan.currency || 'USD');
+    const price = await stripe.prices.create({
+      product: productId,
+      currency: currency.toLowerCase(),
+      unit_amount: amountCents,
+      recurring: { interval },
+      metadata: { plan_id: String(plan.id), source: 'victorysync' },
+    });
+
+    const updatePayload = {
+      stripe_product_id: productId,
+      stripe_price_id: price.id,
+      currency,
+      billing_interval: interval,
+    };
+    const { data, error } = await supabaseAdmin
+      .from('billing_plans')
+      .update(updatePayload)
+      .eq('id', plan.id)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+
+    res.json({ plan: data, stripe_product_id: productId, stripe_price_id: price.id });
+  } catch (err: any) {
+    const status = err?.message === 'stripe_not_configured' ? 503 : 500;
+    res.status(status).json({
+      error: err?.message === 'stripe_not_configured' ? 'stripe_not_configured' : 'stripe_plan_price_failed',
+      message: err?.message || 'Unable to create Stripe price',
+    });
   }
 });
 
