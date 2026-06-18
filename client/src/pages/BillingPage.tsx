@@ -38,6 +38,19 @@ type BillingRecord = {
   created_at?: string;
 };
 
+type BillingPlan = {
+  id: string;
+  name: string;
+  description?: string | null;
+  base_monthly_cost?: number | null;
+  currency?: string | null;
+  billing_interval?: string | null;
+  included_minutes?: number | null;
+  included_sms?: number | null;
+  stripe_price_id?: string | null;
+  features?: unknown;
+};
+
 function formatMoney(amount?: number | null, currency = 'USD') {
   return `${currency} ${Number(amount ?? 0).toFixed(2)}`;
 }
@@ -62,6 +75,9 @@ export default function BillingPage() {
   const [overview, setOverview] = useState<BillingOverview | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [records, setRecords] = useState<BillingRecord[]>([]);
+  const [plans, setPlans] = useState<BillingPlan[]>([]);
+  const [stripeConfigured, setStripeConfigured] = useState(false);
+  const [billingAction, setBillingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const totalBilled = useMemo(() => invoices.reduce((acc, i) => acc + Number(i.total_amount ?? i.total ?? 0), 0), [invoices]);
@@ -76,22 +92,27 @@ export default function BillingPage() {
     setError(null);
     try {
       const headers = { 'x-user-id': user.id };
-      const [ovRes, invRes, recRes] = await Promise.all([
+      const [ovRes, invRes, recRes, plansRes] = await Promise.all([
         fetch(buildApiUrl('/api/client/billing/overview'), { headers }),
         fetch(buildApiUrl('/api/client/billing/invoices?limit=5000'), { headers }),
         fetch(buildApiUrl('/api/client/billing/records?limit=5000'), { headers }),
+        fetch(buildApiUrl('/api/billing/stripe/plans'), { headers }),
       ]);
 
       if (!ovRes.ok) throw new Error('Failed to load billing overview');
       if (!invRes.ok) throw new Error('Failed to load invoices');
       if (!recRes.ok) throw new Error('Failed to load billing records');
+      if (!plansRes.ok) throw new Error('Failed to load billing plans');
 
       const ov = await ovRes.json();
       const inv = await invRes.json();
       const rec = await recRes.json();
+      const planJson = await plansRes.json();
       setOverview(ov);
       setInvoices(inv.invoices || []);
       setRecords(rec.records || []);
+      setPlans(planJson.plans || []);
+      setStripeConfigured(Boolean(planJson.stripe_configured));
     } catch (e: any) {
       setError(e?.message || 'Failed to load billing data');
     } finally {
@@ -123,8 +144,69 @@ export default function BillingPage() {
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
+  const startCheckout = async (planId: string) => {
+    if (!user?.id) return;
+    setBillingAction(planId);
+    setError(null);
+    try {
+      const resp = await fetch(buildApiUrl('/api/billing/stripe/checkout-session'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({ org_id: overview?.org_id || undefined, plan_id: planId, quantity: 1 }),
+      });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok || !payload.url) {
+        throw new Error(payload.message || payload.error || 'Unable to start Stripe Checkout');
+      }
+      window.location.href = payload.url;
+    } catch (e: any) {
+      setError(e?.message || 'Unable to start Stripe Checkout');
+    } finally {
+      setBillingAction(null);
+    }
+  };
+
+  const openBillingPortal = async () => {
+    if (!user?.id) return;
+    setBillingAction('portal');
+    setError(null);
+    try {
+      const resp = await fetch(buildApiUrl('/api/billing/stripe/portal-session'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({ org_id: overview?.org_id || undefined }),
+      });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok || !payload.url) {
+        throw new Error(payload.error || 'Unable to open Stripe billing portal');
+      }
+      window.location.href = payload.url;
+    } catch (e: any) {
+      setError(e?.message || 'Unable to open Stripe billing portal');
+    } finally {
+      setBillingAction(null);
+    }
+  };
+
+  const planFeatures = (plan: BillingPlan) => {
+    if (Array.isArray(plan.features)) return plan.features.map((feature) => String(feature)).filter(Boolean);
+    if (plan.features && typeof plan.features === 'object') return Object.keys(plan.features as Record<string, unknown>);
+    return [];
+  };
+
   return (
-    <PageLayout title="Billing" description="Your plan, next due date, and invoices">
+    <PageLayout
+      title="Billing"
+      description="Manage your VictorySync plan, Stripe subscription, payment details, invoices, and usage records."
+      actions={
+        <div className="flex flex-wrap gap-2">
+          <button onClick={openBillingPortal} disabled={loading || billingAction === 'portal'} className="vs-button-secondary">
+            {billingAction === 'portal' ? 'Opening...' : 'Manage payment'}
+          </button>
+          <button onClick={loadData} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>
+        </div>
+      }
+    >
       <div className="space-y-6">
         {error && (
           <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
@@ -165,6 +247,74 @@ export default function BillingPage() {
             />
           </section>
         )}
+
+        <SectionCard
+          title="Stripe subscription"
+          description="Hosted Stripe Checkout and Billing Portal keep card data out of VictorySync while syncing billing status back to the dashboard."
+          actions={
+            <StatusBadge tone={stripeConfigured ? 'success' : 'warning'}>
+              {stripeConfigured ? 'Stripe configured' : 'Stripe env missing'}
+            </StatusBadge>
+          }
+        >
+          {loading ? (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, index) => <LoadingSkeleton key={index} className="h-44" />)}
+            </div>
+          ) : plans.length === 0 ? (
+            <EmptyStatePanel
+              title="No Stripe-enabled plans"
+              description="Create billing packages and add Stripe price IDs so clients can subscribe through Checkout."
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+              {plans.map((plan) => {
+                const current = overview?.package?.id === plan.id;
+                const hasStripePrice = Boolean(plan.stripe_price_id);
+                return (
+                  <div key={plan.id} className={`rounded-2xl border bg-white p-5 shadow-sm ${current ? 'border-violet-300 ring-2 ring-violet-100' : 'border-slate-200'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-base font-semibold text-slate-950">{plan.name}</div>
+                        <p className="mt-1 min-h-[40px] text-sm leading-5 text-slate-600">{plan.description || 'Plan details are managed by VictorySync billing.'}</p>
+                      </div>
+                      {current && <StatusBadge tone="success">Current</StatusBadge>}
+                    </div>
+                    <div className="mt-5 flex items-end gap-1">
+                      <div className="text-3xl font-semibold text-slate-950">{formatMoney(plan.base_monthly_cost, plan.currency || 'USD')}</div>
+                      <div className="pb-1 text-sm text-slate-500">/{plan.billing_interval || 'month'}</div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-slate-700">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Minutes</div>
+                        <div className="mt-1 font-semibold text-slate-950">{plan.included_minutes ?? 0}</div>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">SMS</div>
+                        <div className="mt-1 font-semibold text-slate-950">{plan.included_sms ?? 0}</div>
+                      </div>
+                    </div>
+                    {planFeatures(plan).length > 0 && (
+                      <div className="mt-4 space-y-1 text-sm text-slate-600">
+                        {planFeatures(plan).slice(0, 4).map((feature) => <div key={feature}>• {feature}</div>)}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => startCheckout(plan.id)}
+                      disabled={!stripeConfigured || !hasStripePrice || billingAction === plan.id}
+                      className="vs-button-primary mt-5 w-full"
+                    >
+                      {billingAction === plan.id ? 'Opening Checkout...' : current ? 'Update in Stripe' : 'Start Stripe Checkout'}
+                    </button>
+                    {!hasStripePrice && (
+                      <p className="mt-3 text-xs leading-5 text-amber-700">This plan needs a Stripe price ID before Checkout can be used.</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SectionCard>
 
         <SectionCard title="Billing records" description="Usage, charges, credits, and adjustments returned by the billing records API." contentClassName="p-0">
           {loading ? (

@@ -35,6 +35,7 @@ const publicApiRoutes = [
   /^\/auth\/signup-with-invite$/,
   /^\/access-code\/verify$/,
   /^\/leads\/inbound$/,
+  /^\/billing\/stripe\/webhook$/,
   ...(process.env.ENABLE_LEGACY_WEBHOOKS === 'true' ? [/^\/webhooks\/mightycall$/] : []),
 ];
 

@@ -50,6 +50,10 @@ type BillingPackage = {
   description?: string | null;
   features?: any;
   base_monthly_cost?: number;
+  currency?: string;
+  billing_interval?: string;
+  stripe_product_id?: string | null;
+  stripe_price_id?: string | null;
   included_minutes?: number;
   included_sms?: number;
   overage_minute_cost?: number;
@@ -142,6 +146,10 @@ export const AdminBillingPageV2: React.FC = () => {
     included_sms: '0',
     overage_minute_cost: '0.01',
     overage_sms_cost: '0.01',
+    currency: 'USD',
+    billing_interval: 'month',
+    stripe_product_id: '',
+    stripe_price_id: '',
     features_json: '[]',
     is_active: true,
     autoAssignOrgId: '',
@@ -352,6 +360,10 @@ export const AdminBillingPageV2: React.FC = () => {
         included_sms: Number(packageForm.included_sms || 0),
         overage_minute_cost: Number(packageForm.overage_minute_cost || 0),
         overage_sms_cost: Number(packageForm.overage_sms_cost || 0),
+        currency: packageForm.currency || 'USD',
+        billing_interval: packageForm.billing_interval || 'month',
+        stripe_product_id: packageForm.stripe_product_id || null,
+        stripe_price_id: packageForm.stripe_price_id || null,
         features,
         is_active: packageForm.is_active,
       };
@@ -582,6 +594,9 @@ export const AdminBillingPageV2: React.FC = () => {
                           <StatusBadge tone={billingPackage.is_active === false ? 'warning' : 'success'}>
                             {billingPackage.is_active === false ? 'Inactive' : 'Active'}
                           </StatusBadge>
+                          <StatusBadge tone={billingPackage.stripe_price_id ? 'success' : 'warning'}>
+                            {billingPackage.stripe_price_id ? 'Stripe ready' : 'Stripe price missing'}
+                          </StatusBadge>
                         </div>
                         <p className="mt-2 text-sm leading-6 text-slate-400">{billingPackage.description || 'No package description provided yet.'}</p>
                       </div>
@@ -590,12 +605,18 @@ export const AdminBillingPageV2: React.FC = () => {
                     <div className="mt-5 grid grid-cols-2 gap-3">
                       <div className="vs-surface p-4">
                         <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Monthly</div>
-                        <div className="mt-2 text-2xl font-semibold text-white">{formatCurrency('USD', billingPackage.base_monthly_cost)}</div>
+                        <div className="mt-2 text-2xl font-semibold text-white">{formatCurrency(billingPackage.currency || 'USD', billingPackage.base_monthly_cost)}</div>
+                        <div className="mt-1 text-xs text-slate-400">per {billingPackage.billing_interval || 'month'}</div>
                       </div>
                       <div className="vs-surface p-4">
                         <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Included</div>
                         <div className="mt-2 text-sm text-slate-200">{billingPackage.included_minutes || 0} mins · {billingPackage.included_sms || 0} SMS</div>
                       </div>
+                    </div>
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-4 text-xs text-slate-700">
+                      <div className="font-semibold uppercase tracking-[0.16em] text-slate-500">Stripe IDs</div>
+                      <div className="mt-2 break-all">Product: {billingPackage.stripe_product_id || 'Not linked'}</div>
+                      <div className="mt-1 break-all">Price: {billingPackage.stripe_price_id || 'Not linked'}</div>
                     </div>
                   </div>
                 ))}
@@ -796,6 +817,20 @@ export const AdminBillingPageV2: React.FC = () => {
             <Field label="Monthly Price">
               <input className="vs-input w-full" type="number" step="0.01" value={packageForm.base_monthly_cost} onChange={(e) => setPackageForm({ ...packageForm, base_monthly_cost: e.target.value })} />
             </Field>
+            <Field label="Currency">
+              <select className="vs-input w-full" value={packageForm.currency} onChange={(e) => setPackageForm({ ...packageForm, currency: e.target.value })}>
+                <option value="USD">USD</option>
+                <option value="CAD">CAD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+              </select>
+            </Field>
+            <Field label="Billing Interval">
+              <select className="vs-input w-full" value={packageForm.billing_interval} onChange={(e) => setPackageForm({ ...packageForm, billing_interval: e.target.value })}>
+                <option value="month">month</option>
+                <option value="year">year</option>
+              </select>
+            </Field>
             <div className="md:col-span-2">
               <Field label="Description">
                 <input className="vs-input w-full" value={packageForm.description} onChange={(e) => setPackageForm({ ...packageForm, description: e.target.value })} />
@@ -812,6 +847,12 @@ export const AdminBillingPageV2: React.FC = () => {
             </Field>
             <Field label="Overage / SMS">
               <input className="vs-input w-full" type="number" step="0.01" value={packageForm.overage_sms_cost} onChange={(e) => setPackageForm({ ...packageForm, overage_sms_cost: e.target.value })} />
+            </Field>
+            <Field label="Stripe Product ID">
+              <input className="vs-input w-full" placeholder="prod_..." value={packageForm.stripe_product_id} onChange={(e) => setPackageForm({ ...packageForm, stripe_product_id: e.target.value })} />
+            </Field>
+            <Field label="Stripe Price ID">
+              <input className="vs-input w-full" placeholder="price_..." value={packageForm.stripe_price_id} onChange={(e) => setPackageForm({ ...packageForm, stripe_price_id: e.target.value })} />
             </Field>
             <Field label="Assign to Organization">
               <select className="vs-input w-full" value={packageForm.autoAssignOrgId} onChange={(e) => setPackageForm({ ...packageForm, autoAssignOrgId: e.target.value })}>

@@ -61,6 +61,7 @@ import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgM
 import usersRouter from './routes/users';
 import reportsRouter from './routes/reports';
 import mightyCallApiRouter from './routes/mightycallApi';
+import stripeBillingRouter, { stripeWebhookHandler } from './routes/stripeBilling';
 import { startMightyCallPolling } from './mightycall/sync';
 import { Readable } from 'stream';
 import { writeAuditLog } from './lib/audit';
@@ -4350,6 +4351,7 @@ app.use(cors({
   maxAge: 600,
 }));
 // Default body limit — tighter for most endpoints; lead upload gets its own parser below
+app.post('/api/billing/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), stripeWebhookHandler);
 app.use((req, res, next) => {
   if (req.path === '/api/leads/upload') return next(); // handled with larger limit below
   express.json({ limit: '512kb' })(req, res, next);
@@ -4465,6 +4467,7 @@ app.use('/api', async (req, res, next) => {
   }
 });
 app.use('/api', csrfProtection as any);
+app.use('/api/billing/stripe', stripeBillingRouter);
 
 app.post('/api/logs/activity', async (req, res) => {
   try {
@@ -12944,6 +12947,10 @@ app.get("/s/series", async (req, res) => {
           included_sms,
           overage_minute_cost,
           overage_sms_cost,
+          currency,
+          billing_interval,
+          stripe_product_id,
+          stripe_price_id,
           features,
           is_active
         } = req.body || {};
@@ -12959,6 +12966,10 @@ app.get("/s/series", async (req, res) => {
             included_sms: Number(included_sms || 0) || 0,
             overage_minute_cost: Number(overage_minute_cost || 0.01) || 0.01,
             overage_sms_cost: Number(overage_sms_cost || 0.01) || 0.01,
+            currency: currency || 'USD',
+            billing_interval: billing_interval || 'month',
+            stripe_product_id: stripe_product_id || null,
+            stripe_price_id: stripe_price_id || null,
             features: features || [],
             is_active: is_active !== false
           })

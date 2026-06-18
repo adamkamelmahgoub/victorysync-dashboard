@@ -93,7 +93,7 @@ const apiRoutes = routes.filter((route) => route.path.startsWith('/api/'));
 const authIndex = server.indexOf("app.use('/api', enforceAuthenticatedApi");
 const csrfIndex = server.indexOf("app.use('/api', csrfProtection");
 
-const expectedPreAuthRoutes = new Set(['/api/csrf-token']);
+const expectedPreAuthRoutes = new Set(['/api/csrf-token', '/api/billing/stripe/webhook']);
 for (const route of apiRoutes.filter((route) => route.kind === 'app' && route.index < authIndex)) {
   if (!expectedPreAuthRoutes.has(route.path)) {
     findings.push({
@@ -112,6 +112,7 @@ const publicApiRoutes = [
   '/api/auth/signup-with-invite',
   '/api/access-code/verify',
   '/api/leads/inbound',
+  '/api/billing/stripe/webhook',
 ];
 
 for (const publicRoute of publicApiRoutes) {
