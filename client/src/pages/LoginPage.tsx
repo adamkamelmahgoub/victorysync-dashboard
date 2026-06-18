@@ -17,7 +17,7 @@ interface ValidatedInvite {
 }
 
 export const LoginPage: FC = () => {
-  const { signIn, user, globalRole, authError } = useAuth();
+  const { signIn, user, globalRole, authError, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const redirectTo = (location.state as any)?.from?.pathname || (globalRole === "platform_admin" ? "/admin" : "/dashboard");
@@ -43,9 +43,9 @@ export const LoginPage: FC = () => {
   const [validatedInvite, setValidatedInvite] = useState<ValidatedInvite | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || authLoading) return;
     navigate(globalRole === "platform_admin" ? "/admin" : redirectTo, { replace: true });
-  }, [globalRole, navigate, redirectTo, user]);
+  }, [authLoading, globalRole, navigate, redirectTo, user]);
 
   useEffect(() => {
     const message = (location.state as any)?.authError || authError;
@@ -176,10 +176,10 @@ export const LoginPage: FC = () => {
             </div>
 
             <div className="mt-6 grid grid-cols-2 rounded-2xl border border-slate-200 bg-slate-100/80 p-1 shadow-inner">
-              <button type="button" onClick={() => switchMode("signin")} className={mode === "signin" ? "rounded-xl bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm ring-1 ring-violet-100" : "rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white/70 hover:text-slate-950"}>
+              <button type="button" onClick={() => switchMode("signin")} className={mode === "signin" ? "rounded-xl bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm ring-1 ring-violet-100" : "rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white/70 hover:text-slate-950"}>
                 Sign in
               </button>
-              <button type="button" onClick={() => switchMode("invite")} className={mode === "invite" ? "rounded-xl bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm ring-1 ring-violet-100" : "rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white/70 hover:text-slate-950"}>
+              <button type="button" onClick={() => switchMode("invite")} className={mode === "invite" ? "rounded-xl bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm ring-1 ring-violet-100" : "rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white/70 hover:text-slate-950"}>
                 Use invite
               </button>
             </div>
@@ -193,8 +193,8 @@ export const LoginPage: FC = () => {
                   <PasswordField value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword((value) => !value)} autoComplete="current-password" placeholder="Enter your password" />
                 </Field>
                 {signinError && <ErrorBanner>{signinError}</ErrorBanner>}
-                <button type="submit" disabled={signinLoading} className="vs-button-primary w-full">
-                  {signinLoading ? "Signing in..." : "Sign in"}
+                <button type="submit" disabled={signinLoading || authLoading} className="vs-button-primary w-full">
+                  {signinLoading || authLoading ? "Signing in..." : "Sign in"}
                 </button>
               </form>
             )}

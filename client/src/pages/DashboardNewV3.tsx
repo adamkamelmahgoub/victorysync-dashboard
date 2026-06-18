@@ -362,8 +362,8 @@ const DashboardNewV3: FC = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={callsByHour} margin={{ top: 12, right: 18, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-                    <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="name" stroke="#374151" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#374151" fontSize={12} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#111827', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} />
                     <Bar dataKey="value" fill="#7c3aed" radius={[6, 6, 0, 0]} />
                   </BarChart>
@@ -427,8 +427,8 @@ const DashboardNewV3: FC = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={callsByNumber} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
                     <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-                    <XAxis type="number" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis type="category" dataKey="name" width={100} stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                    <XAxis type="number" stroke="#374151" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis type="category" dataKey="name" width={100} stroke="#374151" fontSize={12} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#111827', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} />
                     <Bar dataKey="value" fill="#0f6fa6" radius={[0, 6, 6, 0]} />
                   </BarChart>
@@ -468,8 +468,8 @@ const DashboardNewV3: FC = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={agentActivity} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
                     <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-                    <XAxis type="number" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis type="category" dataKey="name" width={100} stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                    <XAxis type="number" stroke="#374151" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis type="category" dataKey="name" width={100} stroke="#374151" fontSize={12} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, color: '#111827', boxShadow: '0 10px 30px rgba(15,23,42,0.12)' }} />
                     <Bar dataKey="value" fill="#20c7b6" radius={[0, 6, 6, 0]} />
                   </BarChart>

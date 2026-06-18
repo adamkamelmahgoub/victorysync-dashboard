@@ -98,15 +98,15 @@ function statusVisuals(agent: LiveAgentStatus): {
 } {
   switch (statusKey(agent)) {
     case 'available':
-      return { badgeTone: 'success', cardClass: 'border-emerald-400/25 bg-emerald-400/[0.03]', label: 'Available' };
+      return { badgeTone: 'success', cardClass: 'border-emerald-200 bg-emerald-50/70', label: 'Available' };
     case 'ringing':
-      return { badgeTone: 'warning', cardClass: 'border-amber-400/25 bg-amber-400/[0.035]', label: 'Ringing' };
+      return { badgeTone: 'warning', cardClass: 'border-amber-200 bg-amber-50/80', label: 'Ringing' };
     case 'on_call':
-      return { badgeTone: 'info', cardClass: 'border-cyan-400/25 bg-cyan-400/[0.035]', label: 'On call' };
+      return { badgeTone: 'info', cardClass: 'border-sky-200 bg-sky-50/80', label: 'On call' };
     case 'offline':
-      return { badgeTone: 'neutral', cardClass: 'border-slate-500/20 bg-white/[0.018]', label: 'Offline' };
+      return { badgeTone: 'neutral', cardClass: 'border-slate-200 bg-white', label: 'Offline' };
     default:
-      return { badgeTone: 'neutral', cardClass: 'border-white/[0.04] bg-white/[0.025]', label: 'Unknown' };
+      return { badgeTone: 'neutral', cardClass: 'border-slate-200 bg-white', label: 'Unknown' };
   }
 }
 
@@ -223,12 +223,12 @@ const LiveStatusPage: FC = () => {
           {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
         </select>
       )}
-      <div className="flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/[0.08] px-3 py-1 text-xs font-semibold text-cyan-200">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300" />
+      <div className="flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-700 shadow-sm">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
         MightyCall API polling
       </div>
       {loading && items.length > 0 && (
-        <div className="rounded-full border border-emerald-400/30 bg-emerald-400/[0.08] px-3 py-1 text-xs font-semibold text-emerald-300">
+        <div className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 shadow-sm">
           Refreshing
         </div>
       )}
@@ -243,13 +243,13 @@ const LiveStatusPage: FC = () => {
 
   const meta = (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <div className="rounded-lg border border-white/[0.08] bg-white/[0.045] px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Live roster</div>
-        <div className="mt-2 text-sm font-medium text-slate-200">{counts.on_call} on call - {counts.ringing} ringing</div>
+      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="text-xs font-bold uppercase text-slate-600">Live roster</div>
+        <div className="mt-2 text-sm font-semibold text-slate-950">{counts.on_call} on call - {counts.ringing} ringing</div>
       </div>
-      <div className="rounded-lg border border-white/[0.08] bg-white/[0.045] px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Updated</div>
-        <div className="mt-2 text-sm font-medium text-slate-200">{refreshedAt ? fmtDateTime(refreshedAt) : 'Waiting for first sync'}</div>
+      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="text-xs font-bold uppercase text-slate-600">Updated</div>
+        <div className="mt-2 text-sm font-semibold text-slate-950">{refreshedAt ? fmtDateTime(refreshedAt) : 'Waiting for first sync'}</div>
       </div>
     </div>
   );
@@ -263,9 +263,9 @@ const LiveStatusPage: FC = () => {
       meta={meta}
     >
       <div className="space-y-6">
-        {error && <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{error}</div>}
+        {error && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">{error}</div>}
         {staleItems.length > 0 && (
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
             {staleItems.length} extension{staleItems.length === 1 ? '' : 's'} have stale API evidence. Last known state remains visible until MightyCall returns a fresher status.
           </div>
         )}
@@ -295,11 +295,11 @@ const LiveStatusPage: FC = () => {
                 const active = isAgentOnCall(agent);
                 const counterpart = agent.counterpart || (agent.direction === 'outbound' ? agent.to_number : agent.from_number);
                 return (
-                  <article key={stableAgentKey(agent)} className={`rounded-lg border p-5 shadow-[0_14px_34px_rgba(2,6,23,0.14)] ${visuals.cardClass}`}>
+                  <article key={stableAgentKey(agent)} className={`rounded-2xl border p-5 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_16px_36px_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:shadow-[0_4px_14px_rgba(15,23,42,0.08),0_24px_52px_rgba(15,23,42,0.10)] ${visuals.cardClass}`}>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
-                        <div className="truncate text-base font-semibold text-white">{agent.display_name || agent.email || `Extension ${agent.extension || '-'}`}</div>
-                        <div className="mt-1 text-sm text-slate-400">
+                        <div className="truncate text-base font-bold text-slate-950">{agent.display_name || agent.email || `Extension ${agent.extension || '-'}`}</div>
+                        <div className="mt-1 text-sm font-medium text-slate-600">
                           {agent.email || 'No email'}
                           {agent.extension ? ` - Ext ${agent.extension}` : ''}
                           {isAdmin && agent.org_id ? ` - ${orgNameById.get(agent.org_id) || agent.org_id}` : ''}
@@ -308,28 +308,28 @@ const LiveStatusPage: FC = () => {
                       <div className="flex flex-wrap items-center gap-2">
                         <StatusBadge tone={visuals.badgeTone}>{visuals.label}</StatusBadge>
                         {isFresh(agent, nowMs) && !isStale(agent, nowMs) && (
-                          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-1 text-xs font-semibold text-emerald-200">Fresh</span>
+                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">Fresh</span>
                         )}
                         {isStale(agent, nowMs) && (
-                          <span className="rounded-full border border-amber-400/20 bg-amber-400/[0.08] px-3 py-1 text-xs font-semibold text-amber-200">Stale</span>
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">Stale</span>
                         )}
                       </div>
                     </div>
 
                     <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="vs-surface-muted p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Current call</div>
-                        <div className="mt-3 break-words text-sm text-slate-200">{active ? formatPhoneNumber(counterpart) : 'Not on a call'}</div>
-                        <div className="mt-2 text-xs text-slate-500">{active ? `${agent.direction || 'unknown'} - ${liveDuration(agent, nowMs)}` : 'No active call evidence'}</div>
-                        <div className="mt-2 text-xs text-slate-500">Call ID: {agent.current_call_id || '-'}</div>
+                        <div className="text-xs font-bold uppercase text-slate-600">Current call</div>
+                        <div className="mt-3 break-words text-sm font-semibold text-slate-950">{active ? formatPhoneNumber(counterpart) : 'Not on a call'}</div>
+                        <div className="mt-2 text-sm text-slate-600">{active ? `${agent.direction || 'unknown'} - ${liveDuration(agent, nowMs)}` : 'No active call evidence'}</div>
+                        <div className="mt-2 text-sm text-slate-600">Call ID: {agent.current_call_id || '-'}</div>
                       </div>
                       <div className="vs-surface-muted p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">API evidence</div>
-                        <div className="mt-3 text-sm text-slate-200">Started {active ? fmtDateTime(agent.started_at || agent.answered_at) : '-'}</div>
-                        <div className="mt-2 text-xs text-slate-500">Raw: {agent.raw_status || agent.status || '-'}</div>
-                        <div className="mt-1 text-xs text-slate-500">Source: {agent.api_source || agent.source || '-'}</div>
-                        <div className="mt-1 text-xs text-slate-500">Decision: {agent.decision_reason || '-'}</div>
-                        <div className="mt-1 text-xs text-slate-500">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
+                        <div className="text-xs font-bold uppercase text-slate-600">API evidence</div>
+                        <div className="mt-3 text-sm font-semibold text-slate-950">Started {active ? fmtDateTime(agent.started_at || agent.answered_at) : '-'}</div>
+                        <div className="mt-2 text-sm text-slate-600">Raw: {agent.raw_status || agent.status || '-'}</div>
+                        <div className="mt-1 text-sm text-slate-600">Source: {agent.api_source || agent.source || '-'}</div>
+                        <div className="mt-1 text-sm text-slate-600">Decision: {agent.decision_reason || '-'}</div>
+                        <div className="mt-1 text-sm text-slate-600">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
                       </div>
                     </div>
                   </article>

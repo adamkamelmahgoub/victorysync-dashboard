@@ -301,13 +301,36 @@ table {
 }
 
 .vs-table-shell th {
-  color: #64748b !important;
+  color: #374151 !important;
+  font-size: 0.8125rem !important;
   font-weight: 800;
   letter-spacing: 0 !important;
 }
 
 .vs-table-shell td {
   vertical-align: middle;
+  color: #374151 !important;
+  font-size: 0.875rem !important;
+  line-height: 1.55 !important;
+}
+
+.vs-table-shell .text-xs {
+  font-size: 0.8125rem !important;
+  line-height: 1.45 !important;
+}
+
+.vs-table-shell .text-slate-400,
+.vs-table-shell .text-slate-500,
+.vs-table-shell .text-gray-400,
+.vs-table-shell .text-gray-500 {
+  color: #4b5563 !important;
+}
+
+.vs-table-shell .text-slate-100,
+.vs-table-shell .text-slate-200,
+.vs-table-shell .text-slate-300,
+.vs-table-shell .text-white {
+  color: #111827 !important;
 }
 
 .vs-table-shell tbody tr {
@@ -633,5 +656,50 @@ tbody tr:hover {
 }
 
 :root[data-theme='light'] .recharts-text {
-  fill: #64748b;
+  fill: #374151 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.recharts-cartesian-axis-tick-value,
+.recharts-legend-item-text,
+.recharts-label,
+.recharts-text {
+  fill: #374151 !important;
+  color: #374151 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+.recharts-cartesian-grid line {
+  stroke: rgba(148, 163, 184, 0.35) !important;
+}
+
+.recharts-tooltip-wrapper {
+  outline: none !important;
+}
+
+.recharts-default-tooltip {
+  border: 1px solid #e5e7eb !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14) !important;
+  color: #111827 !important;
+}
+
+.recharts-tooltip-label,
+.recharts-tooltip-item,
+.recharts-tooltip-item-name,
+.recharts-tooltip-item-value {
+  color: #111827 !important;
+  font-size: 13px !important;
+}
+
+table th {
+  color: #374151 !important;
+  font-weight: 800;
+}
+
+table td {
+  color: #374151;
 }
