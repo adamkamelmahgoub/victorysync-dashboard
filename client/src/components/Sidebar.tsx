@@ -61,6 +61,9 @@ function NavIcon({ label }: { label: string }) {
   if (key.includes('invite')) return (
     <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /><path d="M17 17v-4" /><path d="M15 15h4" /></svg>
   );
+  if (key.includes('email') || key.includes('notification')) return (
+    <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /><path d="M17 11.5h3" /><path d="M17 15h3" /></svg>
+  );
   if (key.includes('support')) return (
     <svg {...common}><path d="M12 18h.01" /><path d="M9.1 9a3 3 0 1 1 5.8 1c-.6 1.7-2.9 1.7-2.9 4" /><circle cx="12" cy="12" r="10" /></svg>
   );
@@ -180,6 +183,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'API Keys', path: '/admin/api-keys' },
             { label: 'Invite Codes', path: '/admin/invites' },
             { label: 'Support', path: '/admin/support' },
+            { label: 'Email Preferences', path: '/admin/email-preferences' },
             { label: 'Number Requests', path: '/admin/number-change-requests' },
             { label: 'Diagnostics', path: '/admin/diagnostics' },
             { label: 'Logs', path: '/admin/logs' },
@@ -211,6 +215,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'API Keys', path: '/api-keys', featureKey: 'api_keys' },
             { label: 'Org Settings', path: '/settings' },
             { label: 'Account Settings', path: '/account-settings' },
+            { label: 'Email Preferences', path: '/email-preferences' },
             { label: 'Support', path: '/support', featureKey: 'support' },
           ],
         },

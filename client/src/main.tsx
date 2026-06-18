@@ -52,6 +52,7 @@ const BillingPage = lazy(() => import("./pages/BillingPage"));
 const LiveStatusPage = lazy(() => import("./pages/LiveStatusPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const CallsPage = lazy(() => import("./pages/CallsPage"));
+const EmailPreferencesPage = lazy(() => import("./pages/EmailPreferencesPage"));
 
 declare global {
   interface Window {
@@ -316,6 +317,14 @@ function AppRouter() {
         }
       />
       <Route
+        path="/email-preferences"
+        element={
+          <ProtectedRoute>
+            <EmailPreferencesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/recordings"
         element={
           <ProtectedRoute>
@@ -504,6 +513,14 @@ function AppRouter() {
         element={
           <AdminRoute>
             <AdminBillingPageV2 />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/email-preferences"
+        element={
+          <AdminRoute>
+            <EmailPreferencesPage />
           </AdminRoute>
         }
       />

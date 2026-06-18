@@ -174,9 +174,31 @@ const LiveStatusPage: FC = () => {
     void load(true);
     const intervalId = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load(false);
-    }, 5_000);
+    }, 3_000);
     return () => window.clearInterval(intervalId);
   }, [load]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    const intervalId = window.setInterval(async () => {
+      if (document.visibilityState !== 'visible' || cancelled || syncing) return;
+      try {
+        const result = await refreshLiveAgentStatus(activeOrgId, user.id);
+        if (cancelled) return;
+        if (Array.isArray(result?.items)) {
+          setItems(mergeLiveRows(itemsRef.current, result.items as LiveAgentStatus[]));
+          setRefreshedAt(result.refreshed_at || new Date().toISOString());
+        }
+      } catch {
+        // Direct polling continues to provide a quiet fallback.
+      }
+    }, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeOrgId, syncing, user?.id]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);

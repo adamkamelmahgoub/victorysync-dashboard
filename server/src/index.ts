@@ -62,6 +62,7 @@ import usersRouter from './routes/users';
 import reportsRouter from './routes/reports';
 import mightyCallApiRouter from './routes/mightycallApi';
 import stripeBillingRouter, { stripeWebhookHandler } from './routes/stripeBilling';
+import notificationPreferencesRouter from './routes/notificationPreferences';
 import { startMightyCallPolling } from './mightycall/sync';
 import { Readable } from 'stream';
 import { writeAuditLog } from './lib/audit';
@@ -8007,6 +8008,7 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
 
 app.use('/api', mightyCallApiRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api', notificationPreferencesRouter);
 
 // POST /api/sms/send - generic org-scoped SMS send endpoint used by the SMS dashboard
 app.post('/api/sms/send', async (req, res) => {

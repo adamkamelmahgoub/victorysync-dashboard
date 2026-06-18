@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import { supabaseAdmin } from '../lib/supabaseClient';
+import { filterEmailsByNotificationPreference, type NotificationPreferenceKey } from './notificationPreferences';
 
 type EmailPayload = {
   to: string[];
@@ -238,6 +239,16 @@ async function notifyRecipients(to: string[], params: Parameters<typeof renderNo
   }
 }
 
+async function notifyRecipientsForCategory(
+  to: string[],
+  category: NotificationPreferenceKey,
+  params: Parameters<typeof renderNotificationEmail>[0] & { subject: string },
+  fallback = true,
+) {
+  const filtered = await filterEmailsByNotificationPreference(to, category, fallback);
+  return notifyRecipients(filtered, params);
+}
+
 function money(currency: string | null | undefined, amount: unknown) {
   return `${String(currency || 'USD').toUpperCase()} ${Number(amount || 0).toFixed(2)}`;
 }
@@ -254,7 +265,7 @@ function invoiceTotal(invoice: any) {
 export async function notifyInvoiceCreated(invoice: any) {
   const total = invoiceTotal(invoice);
   const recipients = await getOrgBillingRecipientEmails(invoice?.org_id);
-  return notifyRecipients(recipients, {
+  return notifyRecipientsForCategory(recipients, 'billing_emails', {
     subject: `New VictorySync invoice ${invoice?.invoice_number || ''}`.trim(),
     eyebrow: 'Billing update',
     title: 'A new invoice is available',
@@ -273,7 +284,7 @@ export async function notifyInvoiceCreated(invoice: any) {
 export async function notifyPaymentReminder(invoice: any) {
   const total = invoiceTotal(invoice);
   const recipients = await getOrgBillingRecipientEmails(invoice?.org_id);
-  return notifyRecipients(recipients, {
+  return notifyRecipientsForCategory(recipients, 'payment_emails', {
     subject: `Payment reminder: ${invoice?.invoice_number || 'VictorySync invoice'}`,
     eyebrow: 'Payment reminder',
     title: 'Invoice payment reminder',
@@ -297,7 +308,7 @@ export async function notifyPaymentSucceeded(params: {
   currency?: string | null;
 }) {
   const recipients = await getOrgBillingRecipientEmails(params.orgId);
-  return notifyRecipients(recipients, {
+  return notifyRecipientsForCategory(recipients, 'payment_emails', {
     subject: 'VictorySync payment received',
     eyebrow: 'Payment received',
     title: 'Payment received successfully',
@@ -320,7 +331,7 @@ export async function notifyPaymentFailed(params: {
   currency?: string | null;
 }) {
   const recipients = await getOrgBillingRecipientEmails(params.orgId);
-  return notifyRecipients(recipients, {
+  return notifyRecipientsForCategory(recipients, 'payment_emails', {
     subject: 'VictorySync payment needs attention',
     eyebrow: 'Payment failed',
     title: 'A Stripe payment failed',
@@ -342,7 +353,7 @@ export async function notifySubscriptionChanged(params: {
   eventType?: string | null;
 }) {
   const recipients = await getOrgBillingRecipientEmails(params.orgId);
-  return notifyRecipients(recipients, {
+  return notifyRecipientsForCategory(recipients, 'billing_emails', {
     subject: 'VictorySync subscription updated',
     eyebrow: 'Subscription update',
     title: 'Subscription status changed',
@@ -370,10 +381,8 @@ export async function notifyDashboardUpdate(params: {
   statusCode?: number;
 }) {
   if (!shouldNotifyDashboardUpdates()) return { skipped: true, reason: 'dashboard_update_notifications_disabled' };
-  const recipients = params.orgId
-    ? await getOrgBillingRecipientEmails(params.orgId)
-    : await getPlatformAdminEmails();
-  return notifyRecipients(recipients, {
+  const recipients = await getPlatformAdminEmails();
+  return notifyRecipientsForCategory(recipients, 'dashboard_update_emails', {
     subject: `VictorySync update: ${params.method} ${params.path}`,
     eyebrow: 'Dashboard update',
     title: 'Dashboard data was updated',

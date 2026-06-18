@@ -354,42 +354,58 @@ async function loadDirectMightyCallStatuses(assignments: any[]) {
   return { rows: rows.filter(Boolean), warnings };
 }
 
+async function buildLiveStatusPayload(req: express.Request) {
+  const scope = await resolveOrgScope(req);
+  if (scope.orgIds.length === 0) {
+    return {
+      items: [],
+      refreshed_at: new Date().toISOString(),
+      source: 'mightycall_api_direct',
+      api_source: 'mightycall_api_direct',
+      direct_warnings: [],
+    };
+  }
+
+  const assignments = await loadAssignedExtensionRows(scope.orgIds);
+  const direct = await loadDirectMightyCallStatuses(assignments);
+  const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
+  const { data: orgs } = await supabaseAdmin.from('organizations').select('id, name').in('id', scope.orgIds);
+  const orgNames = new Map((orgs || []).map((row: any) => [String(row.id), String(row.name || '')]));
+  const liveByKey = new Map<string, any>();
+  for (const row of direct.rows) {
+    const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
+    liveByKey.set(key, row);
+  }
+  for (const assignment of assignments) {
+    const key = `${assignment.org_id}:${assignment.extension}`;
+    if (!liveByKey.has(key)) liveByKey.set(key, assignmentToLiveRow(assignment));
+  }
+
+  const items = Array.from(liveByKey.values()).map((row: any) => mapLiveRow(row, orgNames, identityByKey));
+  const refreshedAt = items.map((item: any) => item.refreshed_at).filter(Boolean).sort().slice(-1)[0] || new Date().toISOString();
+  return {
+    items,
+    refreshed_at: refreshedAt,
+    source: 'mightycall_api_direct',
+    api_source: 'mightycall_api_direct',
+    live_status_version: 'mightycall-api-direct-authenticated',
+    direct_warnings: direct.warnings,
+  };
+}
+
 router.get('/live-status', async (req, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
-    const scope = await resolveOrgScope(req);
-    if (scope.orgIds.length === 0) return res.json({ items: [], refreshed_at: new Date().toISOString(), source: 'mightycall_api_direct', api_source: 'mightycall_api_direct' });
-    const assignments = await loadAssignedExtensionRows(scope.orgIds);
-    const direct = await loadDirectMightyCallStatuses(assignments);
-    const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
-    const { data: orgs } = await supabaseAdmin.from('organizations').select('id, name').in('id', scope.orgIds);
-    const orgNames = new Map((orgs || []).map((row: any) => [String(row.id), String(row.name || '')]));
-    const liveByKey = new Map<string, any>();
-    for (const row of direct.rows) {
-      const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
-      liveByKey.set(key, row);
-    }
-    for (const assignment of assignments) {
-      const key = `${assignment.org_id}:${assignment.extension}`;
-      if (!liveByKey.has(key)) liveByKey.set(key, assignmentToLiveRow(assignment));
-    }
-    const items = Array.from(liveByKey.values()).map((row: any) => mapLiveRow(row, orgNames, identityByKey));
-    const refreshedAt = items.map((item: any) => item.refreshed_at).filter(Boolean).sort().slice(-1)[0] || new Date().toISOString();
     res.json({
-      items,
-      refreshed_at: refreshedAt,
-      source: 'mightycall_api_direct',
-      api_source: 'mightycall_api_direct',
-      live_status_version: 'mightycall-api-direct-authenticated',
+      ...(await buildLiveStatusPayload(req)),
       sync: {
         ok: true,
         skipped: true,
         reason: 'direct_extension_status_read',
         refreshed_at: new Date().toISOString(),
       },
-      direct_warnings: direct.warnings,
     });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'live_status_failed' });
@@ -401,9 +417,16 @@ router.post('/live-status/sync', async (req, res) => {
     await getActor(req);
     const result: any = await runLiveStatusSync('manual-live-status');
     const recentCalls = await withTimeout(syncRecentCalls(2), 8_000, 0);
+    const payload = await buildLiveStatusPayload(req);
     res.json({
       ...result,
       syncedCalls: (result.syncedCalls || 0) + recentCalls,
+      ...payload,
+      sync: {
+        ...(result || {}),
+        syncedCalls: (result.syncedCalls || 0) + recentCalls,
+        refreshed_at: new Date().toISOString(),
+      },
     });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'live_status_sync_failed' });
