@@ -330,7 +330,7 @@ export default function UserSettingsPage() {
     return (
       <PageLayout title="Account Settings" description="Manage your profile and preferences">
         <div className="p-8 text-center">
-          <p className="text-slate-400">Loading profile...</p>
+          <p className="text-slate-600">Loading profile...</p>
         </div>
       </PageLayout>
     );
@@ -340,21 +340,21 @@ export default function UserSettingsPage() {
     <PageLayout title="Account Settings" description="Manage your profile and preferences">
       <div className="max-w-4xl mx-auto space-y-6">
         {message && (
-          <div className={`p-4 rounded-lg border ${
+          <div className={`rounded-2xl border p-4 ${
             message.includes('success') || message.includes('successfully') || message.includes('Copied') || message.includes('generated')
-              ? 'bg-emerald-900/20 border-emerald-700 text-emerald-300'
-              : 'bg-red-900/20 border-red-700 text-red-300'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-red-200 bg-red-50 text-red-700'
           }`}>
             <p className="text-sm">{message}</p>
           </div>
         )}
 
-        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-          <h2 className="text-lg font-semibold text-white mb-6">Appearance</h2>
+        <div className="vs-surface p-6">
+          <h2 className="mb-6 text-lg font-semibold text-slate-950">Appearance</h2>
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-sm font-semibold text-slate-200">Theme</div>
-              <div className="mt-1 text-sm text-slate-400">VictorySync now uses a visibility-first light interface across the dashboard.</div>
+              <div className="text-sm font-semibold text-slate-900">Theme</div>
+              <div className="mt-1 text-sm text-slate-600">VictorySync now uses a visibility-first light interface across the dashboard.</div>
             </div>
             <div className="inline-flex rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200">
               <button
@@ -367,16 +367,16 @@ export default function UserSettingsPage() {
           </div>
         </div>
 
-        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
+        <div className="vs-surface p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-white">Lead Alarm</h2>
-              <p className="mt-1 text-sm text-slate-400">
+              <h2 className="text-lg font-semibold text-slate-950">Lead Alarm</h2>
+              <p className="mt-1 text-sm text-slate-600">
                 Choose one or more sounds for incoming lead alerts on this device.
               </p>
             </div>
             <button
-              className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-500"
+              className="vs-button-destructive"
               onClick={() => void playLeadAlarmSequence(leadAlarmIds)}
               data-log="Preview lead alarm"
             >
@@ -391,18 +391,18 @@ export default function UserSettingsPage() {
                 className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition ${
                   leadAlarmIds.includes(option.id)
                     ? 'border-rose-400/50 bg-rose-400/10'
-                    : 'border-slate-700 bg-slate-800/40 hover:border-slate-600'
+                    : 'border-slate-200 bg-white hover:border-violet-200 hover:bg-violet-50/40'
                 }`}
               >
                 <input
                   type="checkbox"
-                  className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-800 text-rose-500"
+                  className="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-rose-500"
                   checked={leadAlarmIds.includes(option.id)}
                   onChange={() => toggleLeadAlarm(option.id)}
                 />
                 <span>
-                  <span className="block text-sm font-semibold text-slate-100">{option.name}</span>
-                  <span className="mt-1 block text-xs text-slate-400">{option.description}</span>
+                  <span className="block text-sm font-semibold text-slate-900">{option.name}</span>
+                  <span className="mt-1 block text-xs text-slate-600">{option.description}</span>
                 </span>
               </label>
             ))}
@@ -413,32 +413,32 @@ export default function UserSettingsPage() {
         </div>
 
         {/* Profile Picture */}
-        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-          <h2 className="text-lg font-semibold text-white mb-6">Profile Picture</h2>
+        <div className="vs-surface p-6">
+          <h2 className="mb-6 text-lg font-semibold text-slate-950">Profile Picture</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <div className="w-32 h-32 rounded-lg bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden">
+              <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50">
                 {profilePicPreview ? (
                   <img src={profilePicPreview} alt="Profile" className="w-full h-full object-cover" />
                 ) : (
-                  <span className="text-slate-500">No photo</span>
+                  <span className="text-slate-600">No photo</span>
                 )}
               </div>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-white mb-2">Upload Picture</label>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">Upload Picture</label>
                 <input
                   type="file"
                   accept="image/*"
                   onChange={handleProfilePicChange}
-                  className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600"
+                  className="block w-full text-sm text-slate-700 file:mr-4 file:rounded-xl file:border file:border-slate-200 file:bg-white file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-700 file:shadow-sm hover:file:bg-slate-50"
                 />
               </div>
               <button
                 onClick={uploadProfilePic}
                 disabled={!profilePicPreview || saving}
-                className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-600 text-white rounded-lg font-semibold transition"
+                className="vs-button-secondary w-full"
               >
                 {saving ? 'Uploading...' : 'Upload Picture'}
               </button>
@@ -447,34 +447,34 @@ export default function UserSettingsPage() {
         </div>
 
         {/* Basic Info */}
-        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-          <h2 className="text-lg font-semibold text-white mb-6">Basic Information</h2>
+        <div className="vs-surface p-6">
+          <h2 className="mb-6 text-lg font-semibold text-slate-950">Basic Information</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-2">Full Name</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Full Name</label>
               <input
                 type="text"
                 value={formData.full_name}
                 onChange={(e) => handleProfileChange('full_name', e.target.value)}
-                className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                className="vs-input w-full"
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-2">Email</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Email</label>
               <input
                 type="email"
                 value={formData.email}
                 onChange={(e) => handleProfileChange('email', e.target.value)}
-                className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                className="vs-input w-full"
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-2">Phone Number</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Phone Number</label>
               <input
                 type="tel"
                 value={formData.phone_number}
                 onChange={(e) => handleProfileChange('phone_number', e.target.value)}
-                className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                className="vs-input w-full"
               />
             </div>
           </div>
@@ -482,7 +482,7 @@ export default function UserSettingsPage() {
             <button
               onClick={saveProfile}
               disabled={saving}
-              className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 text-white rounded-lg font-semibold transition"
+              className="vs-button-primary"
             >
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
@@ -490,35 +490,35 @@ export default function UserSettingsPage() {
         </div>
 
         {/* Organization Logo */}
-        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-          <h2 className="text-lg font-semibold text-white mb-6">Organization Logo</h2>
-          <p className="text-sm text-slate-400 mb-4">
+        <div className="vs-surface p-6">
+          <h2 className="mb-6 text-lg font-semibold text-slate-950">Organization Logo</h2>
+          <p className="mb-4 text-sm text-slate-600">
             {selectedOrgId ? `Upload a logo for ${orgInfo?.name || 'the selected organization'}` : 'Select an organization first to upload an organization logo.'}
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <div className="w-32 h-32 rounded-lg bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden">
+              <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50">
                 {logoPreview ? (
                   <img src={logoPreview} alt="Logo" className="w-full h-full object-cover" />
                 ) : (
-                  <span className="text-slate-500">No logo</span>
+                  <span className="text-slate-600">No logo</span>
                 )}
               </div>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-white mb-2">Upload Logo</label>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">Upload Logo</label>
                 <input
                   type="file"
                   accept="image/*"
                   onChange={handleLogoPicChange}
-                  className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-700 file:text-white hover:file:bg-slate-600"
+                  className="block w-full text-sm text-slate-700 file:mr-4 file:rounded-xl file:border file:border-slate-200 file:bg-white file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-700 file:shadow-sm hover:file:bg-slate-50"
                 />
               </div>
               <button
                 onClick={uploadOrgLogo}
                 disabled={!logoPreview || saving || !selectedOrgId}
-                className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-600 text-white rounded-lg font-semibold transition"
+                className="vs-button-secondary w-full"
               >
                 {saving ? 'Uploading...' : 'Upload Logo'}
               </button>
@@ -626,35 +626,35 @@ export default function UserSettingsPage() {
         )}
 
         {/* Change Password */}
-        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-          <h2 className="text-lg font-semibold text-white mb-6">Change Password</h2>
+        <div className="vs-surface p-6">
+          <h2 className="mb-6 text-lg font-semibold text-slate-950">Change Password</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-2">Current Password</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Current Password</label>
               <input
                 type="password"
                 value={passwordData.currentPassword}
                 onChange={(e) => handlePasswordChange('currentPassword', e.target.value)}
-                className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                className="vs-input w-full"
               />
             </div>
             <div></div>
             <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-2">New Password</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">New Password</label>
               <input
                 type="password"
                 value={passwordData.newPassword}
                 onChange={(e) => handlePasswordChange('newPassword', e.target.value)}
-                className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                className="vs-input w-full"
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-2">Confirm Password</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Confirm Password</label>
               <input
                 type="password"
                 value={passwordData.confirmPassword}
                 onChange={(e) => handlePasswordChange('confirmPassword', e.target.value)}
-                className="w-full px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                className="vs-input w-full"
               />
             </div>
           </div>
@@ -662,7 +662,7 @@ export default function UserSettingsPage() {
             <button
               onClick={changePassword}
               disabled={saving || !passwordData.currentPassword || !passwordData.newPassword}
-              className="px-6 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-600 text-white rounded-lg font-semibold transition"
+              className="vs-button-outline"
             >
               {saving ? 'Updating...' : 'Change Password'}
             </button>

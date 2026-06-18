@@ -28,10 +28,10 @@ export default function AdminTopNav() {
 
   return (
     <div className="vs-surface mb-6 overflow-hidden">
-      <div className="flex flex-col gap-4 border-b border-white/8 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+      <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50/70 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Admin workspace</div>
-          <div className="mt-2 text-sm text-slate-300">Cross-client operations, configuration, and monitoring</div>
+          <div className="mt-2 text-sm text-slate-600">Cross-client operations, configuration, and monitoring</div>
         </div>
         {orgs && orgs.length > 0 && (
           <select
@@ -57,8 +57,8 @@ export default function AdminTopNav() {
                 onClick={() => navigate(it.to)}
                 className={`rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
                   active
-                    ? 'bg-white/[0.07] text-white ring-1 ring-cyan-400/20'
-                    : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'
+                    ? 'bg-violet-50 text-violet-800 shadow-sm ring-1 ring-violet-200'
+                    : 'text-slate-700 hover:bg-white hover:text-slate-950 hover:shadow-sm hover:ring-1 hover:ring-slate-200'
                 }`}
               >
                 {it.label}

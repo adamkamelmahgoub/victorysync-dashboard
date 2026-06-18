@@ -24,10 +24,10 @@ export const AdminLayout: FC<AdminLayoutProps> = ({
         <button
           key={tab.id}
           onClick={() => onTabChange?.(tab.id)}
-          className={`rounded-md border px-3 py-2 text-sm font-medium transition ${
+          className={`rounded-xl border px-3 py-2 text-sm font-semibold shadow-sm transition hover:-translate-y-0.5 active:translate-y-0 ${
             activeTab === tab.id
-              ? 'border-sky-400/30 bg-sky-400/[0.12] text-sky-100'
-              : 'border-white/[0.075] bg-white/[0.035] text-slate-300 hover:bg-white/[0.06] hover:text-white'
+              ? 'border-violet-200 bg-violet-50 text-violet-800'
+              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-950'
           }`}
         >
           {tab.label}

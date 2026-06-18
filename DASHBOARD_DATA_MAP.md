@@ -8,7 +8,7 @@ This map documents the production data contract for the redesigned dashboard. UI
 | --- | --- | --- | --- | --- | --- | --- |
 | Login | Supabase Auth | `supabase.auth.signInWithPassword` | `email`, `password` | Public | Inline form error | Frontend no longer depends on Clerk. Auth session is restored from Supabase on refresh. |
 | Current user/profile | Supabase Auth + `users`/org membership tables | `/api/user/profile`, `/api/user/orgs` | user id, email, role, org ids | Authenticated users | Protected routes show skeleton while hydrating, then redirect to `/login` | API requests attach the Supabase access token server-side. |
-| Sidebar/topbar | Auth context | `/api/user/profile`, org context from auth provider | role, feature access, selected org | Role-gated | Hide unauthorized nav links | Sidebar IA now matches Overview, Live Status, Reports, Calls, SMS, Recordings, Agents, Phone Numbers, Organizations, Billing, Settings. |
+| Sidebar/topbar | Auth context | `/api/user/profile`, org context from auth provider | role, feature access, selected org | Role-gated | Hide unauthorized nav links | Sidebar IA now matches Overview, Live Status, Reports, Calls, SMS, Recordings, Agents, Phone Numbers, Organizations, Billing, Settings, plus real admin/system routes such as Users, Roles/Permissions, Invites, Integrations, Data Sync, API Keys, Support, Diagnostics, Logs, Packages, and Invoices. |
 
 ## Overview
 
@@ -94,8 +94,20 @@ This map documents the production data contract for the redesigned dashboard. UI
 
 | Section | Data source | Endpoint/API | DB table/view if known | Required fields | Role visibility | Empty/failure behavior | Notes/fixes applied |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Account settings | User/profile service | `/api/user/profile`, password/profile upload endpoints | users/profile storage | name, email, avatar, password change | Authenticated user | Inline validation/errors | Does not display secrets. |
-| API keys/settings | User/admin key services | `/api/user/api-keys`, `/api/admin/api-keys`, MightyCall settings APIs | API key metadata only | key id/name/status, masked value | Owner/admin by role | Empty state when no keys | Secrets must stay server-only and masked in UI. |
+| Account settings profile | User/profile service | `GET /api/user/profile`, `PUT /api/user/profile` | users/profile storage | full name, email, phone number, selected org id | Authenticated user | Loading message while fetching, inline success/error alert | Light settings cards and labeled inputs. Does not display secrets. |
+| Profile picture | User upload service | `POST /api/user/upload-profile-pic` | profile storage | image data, user id | Authenticated user | Button disabled until image selected, inline error if upload fails | Uses user-selected image only; no fake avatar URL is generated. |
+| Organization logo | User/org upload service | `POST /api/user/upload-org-logo` | organization/profile storage | image data, selected org id | Authenticated org user/admin | Button disabled unless an organization and image are selected | No API secrets are displayed. |
+| Password change | User auth service | `POST /api/user/change-password` | auth provider/user credentials | current password, new password | Authenticated user | Inline validation for mismatch/short password; API error shown in page | Password values are never logged or rendered. |
+| Organization settings | Supabase client update + audit insert | `organizations` update via Supabase, `audit_logs` insert | organizations, audit_logs | name, timezone, SLA target, escalation email, business hours | Org admin only for saving; read scoped by org context | Loading card when org is absent, save button hidden for non-admins | Shows only real organization settings; business-hours unavailable state is explicit. |
+| API keys/settings | Admin key services | `/api/admin/api-keys`, `/api/admin/users/:id/api-keys`, MightyCall settings APIs | API key metadata only | key id/name/status, masked value | Owner/admin by role | Empty state when no keys | Secrets must stay server-only and masked in UI. Disabled account-level key UI was removed from the rendered settings surface. |
+
+## Security And Audit Logs
+
+| Section | Data source | Endpoint/API | DB table/view if known | Required fields | Role visibility | Empty/failure behavior | Notes/fixes applied |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Admin logs KPIs | Admin observability API | `/api/admin/logs/summary` via `getAdminLogsSummary` | audit/activity/pageview/error/API/auth log tables | total events, active users, unresolved errors, average API response, failed logins | Platform/admin roles only | Permission alert for unauthorized users, zero values only when API returns zero | Values are real API summary fields, not placeholders. |
+| Admin logs table | Admin observability API | `/api/admin/logs/:tab` via `getAdminLogs` | audit/activity/pageview/error/API/auth/session tables | event, user, org, timestamp, endpoint, status, metadata by tab | Platform/admin roles only | Empty row when no logs match filters, inline API error if fetch fails | Light table shell, export uses currently returned scoped rows. |
+| Admin logs filters | Admin observability API query params | `/api/admin/logs/:tab?start_date=&organization_id=&event_type=&resolved=&search=` | log tables | date range, org id, search, event type, resolved flag | Platform/admin roles only | Filtered empty state if no rows | Live refresh keeps using the same scoped filters. |
 
 ## Shared Calculation Utilities
 

@@ -71,30 +71,34 @@ export const SettingsPage: FC = () => {
   };
 
   if (!org) {
-    return <div>Loading...</div>;
+    return (
+      <PageLayout title="Organization Settings" description="Manage your organization settings, SLA targets, and business hours">
+        <div className="vs-surface p-6 text-sm text-slate-600">Loading organization settings...</div>
+      </PageLayout>
+    );
   }
 
   return (
     <PageLayout title="Organization Settings" description="Manage your organization settings, SLA targets, and business hours">
-      <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <form onSubmit={handleSubmit} className="vs-surface space-y-6 p-6">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium mb-2">Organization Name</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Organization Name</label>
               <input
                 type="text"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-md"
+                className="vs-input w-full"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">Timezone</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Timezone</label>
               <select
                 value={formData.timezone}
                 onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-md"
+                className="vs-input w-full"
               >
                 <option value="America/New_York">Eastern Time</option>
                 <option value="America/Chicago">Central Time</option>
@@ -104,50 +108,50 @@ export const SettingsPage: FC = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">SLA Target (%)</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">SLA Target (%)</label>
               <input
                 type="number"
                 value={formData.sla_target_percent}
                 onChange={(e) => setFormData({ ...formData, sla_target_percent: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-md"
+                className="vs-input w-full"
                 min="0"
                 max="100"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">SLA Target (seconds)</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">SLA Target (seconds)</label>
               <input
                 type="number"
                 value={formData.sla_target_seconds}
                 onChange={(e) => setFormData({ ...formData, sla_target_seconds: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-md"
+                className="vs-input w-full"
                 min="0"
               />
             </div>
 
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium mb-2">Escalation Email</label>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Escalation Email</label>
               <input
                 type="email"
                 value={formData.escalation_email}
                 onChange={(e) => setFormData({ ...formData, escalation_email: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-md"
+                className="vs-input w-full"
               />
             </div>
           </div>
 
-          <div>
-            <h3 className="text-lg font-medium mb-4">Business Hours</h3>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <h3 className="mb-2 text-lg font-semibold text-slate-950">Business Hours</h3>
             {/* Business hours form - simplified for now */}
-            <p className="text-sm text-slate-400">Business hours configuration coming soon...</p>
+            <p className="text-sm text-slate-600">Business hours are not configured in this workspace yet. No hidden or fake schedule is shown.</p>
           </div>
 
           {isAdmin && (
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50"
+              className="vs-button-primary"
             >
               {loading ? 'Saving...' : 'Save Settings'}
             </button>
