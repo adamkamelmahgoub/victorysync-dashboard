@@ -21,13 +21,7 @@ const navGlyphs: Record<string, string> = {
   Agents: 'A',
   'Phone Numbers': 'N',
   Organizations: 'O',
-  Leads: 'Q',
-  'Invite Codes': 'I',
-  Support: '?',
   Billing: '$',
-  Diagnostics: 'X',
-  'Ops Console': 'K',
-  Logs: 'G',
   Settings: 'T',
 };
 
@@ -84,49 +78,28 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const navGroups: NavGroup[] = isAdmin
     ? [
         {
-          label: 'Overview',
+          label: 'Workspace',
           items: [
             { label: 'Overview', path: '/' },
             { label: 'Live Status', path: '/live-status', badge: 'Live', featureKey: 'live_status' },
-          ],
-        },
-        {
-          label: 'Operations',
-          items: [
             { label: 'Reports', path: '/admin/reports' },
             { label: 'Calls', path: '/calls', featureKey: 'reports' },
             { label: 'SMS', path: '/sms', featureKey: 'sms' },
             { label: 'Recordings', path: '/admin/recordings' },
             { label: 'Agents', path: '/admin/agents-management' },
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
-            { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
-          ],
-        },
-        {
-          label: 'Admin',
-          items: [
             { label: 'Organizations', path: '/admin/orgs' },
             { label: 'Billing', path: '/admin/billing' },
             { label: 'Settings', path: '/account-settings' },
-            { label: 'Ops Console', path: '/admin/operations' },
-            { label: 'Invite Codes', path: '/admin/invites' },
-            { label: 'Support', path: '/admin/support' },
-            { label: 'Logs', path: '/admin/logs' },
-            { label: 'Diagnostics', path: '/admin/diagnostics' },
           ],
         },
       ]
     : [
         {
-          label: 'Overview',
+          label: 'Workspace',
           items: [
             { label: 'Overview', path: '/' },
             { label: 'Live Status', path: '/live-status', badge: 'Live', featureKey: 'live_status' },
-          ],
-        },
-        {
-          label: 'Workspace',
-          items: [
             { label: 'Reports', path: '/reports', featureKey: 'reports' },
             { label: 'Calls', path: '/calls', featureKey: 'reports' },
             { label: 'SMS', path: '/sms', featureKey: 'sms' },
@@ -135,7 +108,6 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
             { label: 'Billing', path: '/billing', featureKey: 'billing' },
             { label: 'Settings', path: '/account-settings' },
-            { label: 'Support', path: '/support', featureKey: 'support' },
           ],
         },
       ];

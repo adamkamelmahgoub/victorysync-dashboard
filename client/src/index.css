@@ -53,9 +53,7 @@
 body {
   @apply antialiased;
   color: var(--vs-text);
-  background:
-    radial-gradient(circle at 8% -8%, rgba(124, 58, 237, 0.08), transparent 24%),
-    linear-gradient(180deg, var(--vs-bg) 0%, var(--vs-bg-alt) 100%);
+  background: var(--vs-bg);
   font-feature-settings: "tnum" 1, "cv02" 1, "cv03" 1, "cv04" 1;
 }
 
@@ -106,10 +104,10 @@ body {
 }
 
 .vs-button-primary {
-  background: linear-gradient(135deg, #7c3aed, #2563eb 58%, #0891b2);
+  background: #7c3aed;
   @apply px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50;
   border-radius: var(--vs-radius);
-  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.22);
+  box-shadow: 0 10px 24px rgba(124, 58, 237, 0.22);
 }
 
 button,
@@ -218,10 +216,7 @@ tbody tr:hover {
 }
 
 :root[data-theme='light'] body {
-  background:
-    radial-gradient(circle at 10% 0%, rgba(8,145,178,0.08), transparent 22%),
-    radial-gradient(circle at 92% 0%, rgba(226,232,240,0.7), transparent 24%),
-    linear-gradient(180deg, var(--vs-bg) 0%, var(--vs-bg-alt) 100%);
+  background: var(--vs-bg);
 }
 
 :root[data-theme='light'] .text-white,
@@ -337,7 +332,7 @@ tbody tr:hover {
 }
 
 :root[data-theme='light'] aside {
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(241,245,249,0.98)) !important;
+  background: #ffffff !important;
   border-right-color: rgba(148, 163, 184, 0.18) !important;
 }
 
