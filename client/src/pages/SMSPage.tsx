@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
-import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, SegmentedControl, StatusBadge } from '../components/DashboardPrimitives';
 import { getOrgPhoneNumbers, type PhoneNumber } from '../lib/phonesApi';
 import { sendSmsMessage, triggerMightyCallSMSSync } from '../lib/apiClient';
 import { formatPhoneNumber, normalizePhoneDigits, normalizeSmsDirection } from '../lib/reportingMetrics';
@@ -319,17 +319,14 @@ export function SMSPage() {
               placeholder="Search numbers, statuses, or message text"
               className="vs-input w-full"
             />
-            <div className="grid grid-cols-4 overflow-hidden rounded-2xl border border-white/8 bg-white/[0.03] text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-              {(['all', 'inbound', 'outbound', 'unknown'] as const).map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setDirectionFilter(value)}
-                  className={`px-3 py-3 transition ${directionFilter === value ? 'bg-cyan-400/[0.12] text-cyan-100' : 'hover:bg-white/[0.04]'}`}
-                >
-                  {value === 'all' ? 'All' : value}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              value={directionFilter}
+              onChange={setDirectionFilter}
+              options={(['all', 'inbound', 'outbound', 'unknown'] as const).map((value) => ({
+                value,
+                label: value === 'all' ? 'All' : value,
+              }))}
+            />
             <button onClick={() => loadMessages(true, { syncFirst: true })} disabled={loading || syncing} className="vs-button-secondary">
               {loading || syncing ? 'Syncing...' : 'Sync'}
             </button>
@@ -345,7 +342,7 @@ export function SMSPage() {
               description={emptyCopy.description}
             />
           ) : (
-            <div className="max-h-[72vh] overflow-auto rounded-lg border border-slate-200">
+            <div className="vs-table-shell max-h-[72vh] overflow-auto">
               <table className="w-full min-w-[980px] text-sm">
                 <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">
                   <tr>

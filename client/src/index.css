@@ -176,6 +176,45 @@ table {
   border-spacing: 0;
 }
 
+.vs-table-shell {
+  border: 1px solid var(--vs-border);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 16px 36px rgba(15, 23, 42, 0.06);
+}
+
+.vs-table-shell table {
+  overflow: hidden;
+}
+
+.vs-table-shell thead,
+.vs-table-shell thead[class*="bg-"] {
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
+}
+
+.vs-table-shell th {
+  color: #64748b !important;
+  font-weight: 800;
+  letter-spacing: 0 !important;
+}
+
+.vs-table-shell td {
+  vertical-align: middle;
+}
+
+.vs-table-shell tbody tr {
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.vs-table-shell tbody tr:hover {
+  background: rgba(245, 243, 255, 0.72) !important;
+}
+
+.vs-table-shell tbody tr:focus-within {
+  background: rgba(245, 243, 255, 0.88) !important;
+  box-shadow: inset 3px 0 0 rgba(124, 58, 237, 0.78);
+}
+
 thead {
   background: #f8fafc;
 }

@@ -153,6 +153,46 @@ export function StatusBadge({
   );
 }
 
+export function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+  className,
+}: {
+  options: Array<{ value: T; label: ReactNode; count?: ReactNode }>;
+  value: T;
+  onChange: (value: T) => void;
+  className?: string;
+}) {
+  return (
+    <div className={cx('inline-flex flex-wrap gap-1 rounded-2xl border border-slate-200 bg-slate-100/80 p-1 shadow-inner', className)}>
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className={cx(
+              'rounded-xl px-3 py-2 text-sm font-semibold transition focus:outline-none focus:ring-4 focus:ring-violet-100',
+              active
+                ? 'bg-white text-violet-800 shadow-sm ring-1 ring-violet-200'
+                : 'text-slate-600 hover:bg-white/80 hover:text-slate-950 hover:shadow-sm active:scale-[0.99]'
+            )}
+          >
+            <span>{option.label}</span>
+            {option.count !== undefined && (
+              <span className={cx('ml-2 rounded-full px-2 py-0.5 text-xs', active ? 'bg-violet-50 text-violet-700' : 'bg-white text-slate-500')}>
+                {option.count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ChartCard({
   title,
   description,
@@ -265,7 +305,7 @@ export function DataTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05),0_16px_36px_rgba(15,23,42,0.06)] ring-1 ring-white">
+    <div className="vs-table-shell overflow-x-auto">
       <table className="min-w-full divide-y divide-slate-200 text-sm">
         <thead className="bg-slate-50/95">
           <tr>

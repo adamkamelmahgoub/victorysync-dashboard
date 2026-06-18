@@ -98,10 +98,10 @@ function Panel({
 }) {
   return (
     <section className={`vs-surface overflow-hidden ${className}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 bg-gradient-to-b from-white to-slate-50/80 px-5 py-4">
         <div>
-          {eyebrow && <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-700">{eyebrow}</div>}
-          <h2 className="mt-1 text-base font-semibold text-slate-950">{title}</h2>
+          {eyebrow && <div className="text-[11px] font-bold uppercase text-violet-700">{eyebrow}</div>}
+          <h2 className="mt-1 text-base font-bold text-slate-950">{title}</h2>
         </div>
         {action}
       </div>
@@ -129,13 +129,14 @@ function MetricCard({
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-5 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_18px_44px_rgba(15,23,42,0.08)] ring-1 ring-white transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_14px_rgba(15,23,42,0.08),0_24px_56px_rgba(15,23,42,0.11)]">
+      <div className={`absolute inset-x-0 top-0 h-1 ${tone === 'blue' ? 'bg-sky-500' : tone === 'teal' ? 'bg-emerald-500' : tone === 'orange' ? 'bg-amber-500' : 'bg-violet-500'}`} />
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-slate-600">{label}</div>
-          <div className="mt-5 text-3xl font-semibold leading-none text-slate-950">{value}</div>
+          <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
+          <div className="mt-5 text-3xl font-bold leading-none text-slate-950">{value}</div>
         </div>
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${tones[tone]}`}>
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xs font-bold shadow-sm ring-1 ring-white ${tones[tone]}`}>
           {tone === 'blue' ? 'A' : tone === 'teal' ? 'L' : tone === 'orange' ? 'W' : 'C'}
         </div>
       </div>
@@ -281,10 +282,10 @@ const DashboardNewV3: FC = () => {
       title="Operations Command"
       description="A live operating dashboard for calls, coverage, and response quality."
       meta={(
-        <div className="rounded-xl border border-[#2c3138] bg-[#15171b] px-4 py-3 text-sm text-[#aab2bd]">
-          <span className="text-slate-500">Workspace</span>
-          <span className="ml-2 font-semibold text-white">{orgName}</span>
-        </div>
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+            <span className="text-slate-500">Workspace</span>
+          <span className="ml-2 font-semibold text-slate-950">{orgName}</span>
+          </div>
       )}
       actions={(
         <>
@@ -327,40 +328,40 @@ const DashboardNewV3: FC = () => {
         )}
 
         <section className="vs-surface overflow-hidden">
-          <div className="grid gap-px bg-slate-200 lg:grid-cols-[1.2fr,0.8fr]">
-            <div className="bg-white p-6 sm:p-7">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-700">Today at a glance</div>
+          <div className="grid gap-px bg-slate-200/80 lg:grid-cols-[1.2fr,0.8fr]">
+            <div className="bg-gradient-to-br from-white via-white to-violet-50/60 p-6 sm:p-8">
+              <div className="text-xs font-bold uppercase text-violet-700">Today at a glance</div>
               <div className="mt-4 flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                  <div className="text-5xl font-semibold tracking-tight text-slate-950">{answerRate}%</div>
+                  <div className="text-5xl font-bold text-slate-950">{answerRate}%</div>
                   <div className="mt-3 max-w-xl text-sm leading-6 text-slate-600">
                     Answer rate across {reportLoading ? 'loading' : formatNumber(total)} calls. {formatNumber(answered)} answered and {formatNumber(missed)} missed.
                   </div>
                 </div>
                 <div className="grid min-w-[300px] grid-cols-2 gap-3">
-                  <div className="rounded-lg border border-sky-200 bg-sky-50 p-4">
+                  <div className="rounded-2xl border border-sky-200 bg-white/80 p-4 shadow-sm">
                     <div className="text-xs text-slate-500">On call</div>
-                    <div className="mt-2 text-2xl font-semibold text-slate-950">{onCall}</div>
+                    <div className="mt-2 text-2xl font-bold text-slate-950">{onCall}</div>
                   </div>
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="rounded-2xl border border-emerald-200 bg-white/80 p-4 shadow-sm">
                     <div className="text-xs text-slate-500">Available</div>
-                    <div className="mt-2 text-2xl font-semibold text-slate-950">{available}</div>
+                    <div className="mt-2 text-2xl font-bold text-slate-950">{available}</div>
                   </div>
                 </div>
               </div>
             </div>
             <div className="bg-slate-50 p-6 sm:p-7">
-              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-700">System state</div>
+              <div className="text-xs font-bold uppercase text-violet-700">System state</div>
               <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+                <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                   <span className="text-sm text-slate-600">Live status</span>
                   <span className="text-sm font-semibold text-emerald-700">{liveError ? 'Needs review' : 'Connected'}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+                <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                   <span className="text-sm text-slate-600">Last sync</span>
                   <span className="text-sm font-semibold text-slate-950">{formatDateTime(liveRefreshedAt)}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+                <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                   <span className="text-sm text-slate-600">Tracked numbers</span>
                   <span className="text-sm font-semibold text-slate-950">{metrics?.assignedPhones?.length || 0}</span>
                 </div>
@@ -516,21 +517,21 @@ const DashboardNewV3: FC = () => {
             eyebrow="Agents"
             action={<button className="vs-button-secondary" onClick={() => navigate('/live-status')}>Open</button>}
           >
-            <div className="divide-y divide-[#262b31]">
+            <div className="divide-y divide-slate-100">
               {liveError && <div className="px-5 py-4 text-sm text-orange-300">{liveError}</div>}
               {topAgents.length === 0 ? (
-                <div className="px-5 py-10 text-center text-sm text-[#858d99]">{liveLoading ? 'Loading live agents...' : 'No live agents returned yet.'}</div>
+                <div className="px-5 py-10 text-center text-sm text-slate-500">{liveLoading ? 'Loading live agents...' : 'No live agents returned yet.'}</div>
               ) : topAgents.map((agent) => {
                 const active = isAgentOnCall(agent);
                 return (
-                  <div key={agent.user_id} className="flex items-center justify-between gap-4 px-5 py-4">
+                  <div key={agent.user_id} className="flex items-center justify-between gap-4 px-5 py-4 transition hover:bg-violet-50/50">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-white">{agent.display_name || agent.email || 'Agent'}</div>
-                      <div className="mt-1 truncate text-xs text-[#858d99]">
+                      <div className="truncate text-sm font-semibold text-slate-950">{agent.display_name || agent.email || 'Agent'}</div>
+                      <div className="mt-1 truncate text-xs text-slate-500">
                         {agent.email || 'No email'}{agent.extension ? ` - Ext ${agent.extension}` : ''}
                       </div>
                     </div>
-                    <div className={`rounded-full px-3 py-1 text-xs font-semibold ${active ? 'bg-[#0d5d55] text-[#7af2df]' : 'bg-[#242832] text-[#aab2bd]'}`}>
+                    <div className={`rounded-full border px-3 py-1 text-xs font-semibold ${active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-100 text-slate-600'}`}>
                       {active ? 'On call' : (agent.status || 'Idle')}
                     </div>
                   </div>
@@ -549,10 +550,10 @@ const DashboardNewV3: FC = () => {
                 <button
                   key={title}
                   onClick={() => navigate(path)}
-                  className="rounded-xl border border-[#2c3138] bg-[#1b1e23] p-4 text-left transition hover:border-[#3c4652] hover:bg-[#20242b]"
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md active:translate-y-0"
                 >
-                  <div className="text-sm font-semibold text-white">{title}</div>
-                  <div className="mt-1 text-sm text-[#858d99]">{description}</div>
+                  <div className="text-sm font-semibold text-slate-950">{title}</div>
+                  <div className="mt-1 text-sm text-slate-500">{description}</div>
                 </button>
               ))}
             </div>

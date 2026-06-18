@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PageLayout } from '../components/PageLayout';
-import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, SegmentedControl, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { buildApiUrl } from '../config';
@@ -306,13 +306,7 @@ export default function ReportPage() {
           </div>
         </SectionCard>
 
-        <div className="flex gap-2 overflow-x-auto">
-          {tabLabels.map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={activeTab === tab.id ? 'vs-button-primary' : 'vs-button-secondary'}>
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl options={tabLabels.map((tab) => ({ value: tab.id, label: tab.label }))} value={activeTab} onChange={setActiveTab} />
 
         {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
@@ -409,7 +403,7 @@ function ReportTable({
   if (rows.length === 0) return <div className="p-5"><EmptyStatePanel title="No matching data" description="No real records matched the current filters." /></div>;
 
   return (
-    <div className="overflow-auto">
+    <div className="vs-table-shell overflow-auto">
       <table className="w-full min-w-[980px] text-sm">
         <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-slate-500">
           <tr>{displayColumns.map((column) => <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]">{column.replace(/_/g, ' ')}</th>)}</tr>

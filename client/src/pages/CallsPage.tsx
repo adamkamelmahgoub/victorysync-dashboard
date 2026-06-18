@@ -245,7 +245,7 @@ export default function CallsPage() {
               <EmptyStatePanel title="No calls found" description="No real call records matched this filter window. Try a wider date range, another organization, or sync the MightyCall reports." />
             </div>
           ) : (
-            <div className="max-h-[72vh] overflow-auto">
+            <div className="vs-table-shell max-h-[72vh] overflow-auto">
               <table className="w-full min-w-[1120px] text-sm">
                 <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">
                   <tr>
