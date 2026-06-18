@@ -110,7 +110,8 @@ function invoicePayable(invoice: Invoice) {
 }
 
 export const AdminBillingPageV2: React.FC = () => {
-  const { user } = useAuth();
+  const { user, globalRole } = useAuth();
+  const isPlatformAdmin = globalRole === 'platform_admin';
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
   const initialTab = requestedTab === 'invoices' || requestedTab === 'packages' || requestedTab === 'records' ? requestedTab : 'records';
@@ -523,7 +524,7 @@ export const AdminBillingPageV2: React.FC = () => {
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setShowCreateRecord(true)} className="vs-button-secondary">New record</button>
           <button onClick={() => setShowCreateInvoice(true)} className="vs-button-secondary">New invoice</button>
-          <button onClick={() => setShowCreatePackage(true)} className="vs-button-primary">New package</button>
+          {isPlatformAdmin && <button onClick={() => setShowCreatePackage(true)} className="vs-button-primary">New package</button>}
         </div>
       }
     >
@@ -674,7 +675,7 @@ export const AdminBillingPageV2: React.FC = () => {
                         <p className="mt-2 text-sm leading-6 text-slate-600">{billingPackage.description || 'No package description provided yet.'}</p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {!billingPackage.stripe_price_id && (
+                        {isPlatformAdmin && !billingPackage.stripe_price_id && (
                           <button
                             onClick={() => createStripePrice(billingPackage)}
                             disabled={packageAction === billingPackage.id || !(Number(billingPackage.base_monthly_cost || 0) > 0)}
@@ -683,7 +684,9 @@ export const AdminBillingPageV2: React.FC = () => {
                             {packageAction === billingPackage.id ? 'Creating...' : 'Create Stripe price'}
                           </button>
                         )}
-                        <button onClick={() => deletePackage(billingPackage.id)} className="vs-button-secondary">Delete</button>
+                        {isPlatformAdmin && (
+                          <button onClick={() => deletePackage(billingPackage.id)} className="vs-button-secondary">Delete</button>
+                        )}
                       </div>
                     </div>
                     <div className="mt-5 grid grid-cols-2 gap-3">
@@ -697,11 +700,16 @@ export const AdminBillingPageV2: React.FC = () => {
                         <div className="mt-2 text-sm text-slate-700">{billingPackage.included_minutes || 0} mins / {billingPackage.included_sms || 0} SMS</div>
                       </div>
                     </div>
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-4 text-xs text-slate-700">
-                      <div className="font-semibold uppercase tracking-[0.16em] text-slate-500">Stripe IDs</div>
-                      <div className="mt-2 break-all">Product: {billingPackage.stripe_product_id || 'Not linked'}</div>
-                      <div className="mt-1 break-all">Price: {billingPackage.stripe_price_id || 'Not linked'}</div>
-                    </div>
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-4 text-xs text-slate-700">
+                        <div className="font-semibold uppercase tracking-[0.16em] text-slate-500">Stripe IDs</div>
+                        <div className="mt-2 break-all">Product: {billingPackage.stripe_product_id || 'Not linked'}</div>
+                        <div className="mt-1 break-all">Price: {billingPackage.stripe_price_id || 'Not linked'}</div>
+                        {!billingPackage.stripe_price_id && !isPlatformAdmin && (
+                          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+                            Only platform admins can connect packages to Stripe recurring prices.
+                          </div>
+                        )}
+                      </div>
                   </div>
                 ))}
               </div>

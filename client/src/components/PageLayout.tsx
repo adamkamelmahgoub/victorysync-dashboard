@@ -47,7 +47,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
       <Sidebar isAdmin={isAdmin} currentPath={`${location.pathname}${location.search}`} />
 
       <main className="min-h-screen pt-14 lg:ml-[280px] lg:pt-0">
-        <div className="sticky top-14 z-50 border-b border-slate-200/80 bg-white/86 px-4 shadow-[0_1px_0_rgba(15,23,42,0.03),0_12px_34px_rgba(15,23,42,0.04)] backdrop-blur-xl lg:top-0 lg:px-6">
+        <div className="sticky top-14 z-50 border-b border-slate-200/80 bg-white/88 px-4 shadow-[0_1px_0_rgba(15,23,42,0.03),0_12px_34px_rgba(15,23,42,0.04)] backdrop-blur-xl transition-[box-shadow,background-color] duration-300 lg:top-0 lg:px-6">
           <div className="mx-auto flex h-16 max-w-[1680px] items-center justify-between gap-4">
             <div className="hidden min-w-0 items-center gap-3 lg:flex">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-violet-200 bg-violet-50 text-sm font-bold text-violet-700 shadow-sm">
@@ -155,13 +155,15 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
         </div>
 
         <div className="mx-auto max-w-[1680px]">
-          <DashboardShellHeader
-            eyebrow={eyebrow}
-            title={title}
-            description={description}
-            actions={actions}
-            meta={meta || defaultMeta}
-          />
+          <div className="animate-[vs-page-enter_360ms_cubic-bezier(0.22,1,0.36,1)_both]">
+            <DashboardShellHeader
+              eyebrow={eyebrow}
+              title={title}
+              description={description}
+              actions={actions}
+              meta={meta || defaultMeta}
+            />
+          </div>
 
           <div className="px-4 py-5 sm:px-5 lg:px-6 lg:py-6">
             {children}

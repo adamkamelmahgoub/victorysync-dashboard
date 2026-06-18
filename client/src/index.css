@@ -123,14 +123,14 @@ body {
 }
 
 .vs-route-transition {
-  animation: vs-page-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: vs-page-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
   will-change: opacity, transform;
 }
 
 @keyframes vs-page-enter {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.997);
+    transform: translateY(12px) scale(0.994);
     filter: saturate(0.96);
   }
   to {
@@ -158,6 +158,7 @@ body {
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   backdrop-filter: none;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease;
 }
 
 .vs-surface-muted {
@@ -166,6 +167,13 @@ body {
   border-radius: var(--radius-card);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   backdrop-filter: none;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+.vs-surface:hover,
+.vs-surface-muted:hover {
+  border-color: rgba(124, 58, 237, 0.18);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 22px 52px rgba(15, 23, 42, 0.09);
 }
 
 .vs-input {
@@ -175,16 +183,19 @@ body {
   background: var(--vs-input-bg);
   color: var(--vs-text);
   box-shadow: 0 1px 0 rgba(255,255,255,0.92) inset, 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease, transform 160ms ease;
 }
 
 .vs-input:hover {
   border-color: rgba(100, 116, 139, 0.28);
+  transform: translateY(-1px);
 }
 
 .vs-input:focus {
   border-color: rgba(167, 139, 250, 0.65);
   background: var(--vs-surface);
   box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.14), 0 1px 2px rgba(15, 23, 42, 0.05);
+  transform: translateY(0);
 }
 
 .vs-button-secondary {
@@ -235,6 +246,25 @@ button:disabled {
   cursor: not-allowed;
   transform: none !important;
   filter: saturate(0.86);
+}
+
+.vs-button-primary,
+.vs-button-secondary,
+.vs-button-outline,
+.vs-button-ghost,
+.vs-button-destructive,
+.vs-icon-button {
+  user-select: none;
+}
+
+.vs-button-primary:focus-visible,
+.vs-button-secondary:focus-visible,
+.vs-button-outline:focus-visible,
+.vs-button-ghost:focus-visible,
+.vs-button-destructive:focus-visible,
+.vs-icon-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.18), 0 8px 22px rgba(15, 23, 42, 0.08);
 }
 
 .vs-button-outline {

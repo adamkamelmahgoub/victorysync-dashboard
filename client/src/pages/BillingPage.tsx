@@ -74,7 +74,7 @@ function statusTone(status?: string | null): 'neutral' | 'success' | 'warning' |
 }
 
 export default function BillingPage() {
-  const { user } = useAuth();
+  const { user, globalRole } = useAuth();
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<BillingOverview | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -83,6 +83,7 @@ export default function BillingPage() {
   const [stripeConfigured, setStripeConfigured] = useState(false);
   const [billingAction, setBillingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const canManageSubscriptions = globalRole === 'platform_admin';
 
   const totalBilled = useMemo(() => invoices.reduce((acc, i) => acc + Number(i.total_amount ?? i.total ?? 0), 0), [invoices]);
   const billingConfigured = Boolean(overview?.package || invoices.length || records.length);
@@ -332,20 +333,28 @@ export default function BillingPage() {
                         {planFeatures(plan).slice(0, 4).map((feature) => <div key={feature}>• {feature}</div>)}
                       </div>
                     )}
-                    <button
-                      onClick={() => startCheckout(plan.id)}
-                      disabled={!stripeConfigured || !hasStripePrice || billingAction === plan.id}
-                      className="vs-button-primary mt-5 w-full"
-                    >
-                      {billingAction === plan.id ? 'Opening Checkout...' : current ? 'Update in Stripe' : 'Start Stripe Checkout'}
-                    </button>
-                    {hasStripePrice && plan.stripe_price_source === 'env' && (
-                      <p className="mt-3 text-xs leading-5 text-slate-600">Using the Stripe price configured in server environment variables.</p>
-                    )}
-                    {!hasStripePrice && (
-                      <p className="mt-3 text-xs leading-5 text-amber-700">
-                        Subscriptions need a Stripe recurring price. Ask a platform admin to open Admin Billing &gt; Packages and click Create Stripe price.
-                      </p>
+                    {canManageSubscriptions ? (
+                      <>
+                        <button
+                          onClick={() => startCheckout(plan.id)}
+                          disabled={!stripeConfigured || !hasStripePrice || billingAction === plan.id}
+                          className="vs-button-primary mt-5 w-full"
+                        >
+                          {billingAction === plan.id ? 'Opening Checkout...' : current ? 'Update in Stripe' : 'Start Stripe Checkout'}
+                        </button>
+                        {hasStripePrice && plan.stripe_price_source === 'env' && (
+                          <p className="mt-3 text-xs leading-5 text-slate-600">Using the Stripe price configured in server environment variables.</p>
+                        )}
+                        {!hasStripePrice && (
+                          <p className="mt-3 text-xs leading-5 text-amber-700">
+                            Subscriptions need a Stripe recurring price. Open Admin Billing &gt; Packages and click Create Stripe price.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-5 text-slate-700">
+                        Subscription plan changes are managed by VictorySync. You can still pay invoices and update saved payment methods through Stripe.
+                      </div>
                     )}
                   </div>
                 );
