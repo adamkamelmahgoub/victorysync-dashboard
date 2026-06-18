@@ -12746,8 +12746,13 @@ app.get("/s/series", async (req, res) => {
         // Generate invoice number
         const invoiceNumber = `INV-${Date.now()}`;
 
+        const lineTotal = (item: any) => {
+          const explicit = Number(item?.line_total ?? item?.total_price ?? item?.total ?? 0);
+          if (explicit > 0) return explicit;
+          return (Number(item?.quantity || 0) || 0) * (Number(item?.unit_price || 0) || 0);
+        };
         const computedSubtotal = Number(
-          subtotal ?? items.reduce((acc: number, item: any) => acc + ((Number(item?.quantity || 0) || 0) * (Number(item?.unit_price || 0) || 0)), 0)
+          subtotal ?? items.reduce((acc: number, item: any) => acc + lineTotal(item), 0)
         ) || 0;
         const computedTax = Number(tax_amount ?? 0) || 0;
         const computedTotal = Number(total_amount ?? grand_total ?? (computedSubtotal + computedTax)) || 0;
@@ -12766,7 +12771,11 @@ app.get("/s/series", async (req, res) => {
         if (metadata !== undefined) invoiceData.metadata = metadata;
         if (computedSubtotal > 0) invoiceData.subtotal = computedSubtotal;
         if (computedTax > 0) invoiceData.tax_amount = computedTax;
-        if (computedTotal > 0) invoiceData.total_amount = computedTotal;
+        if (computedTotal > 0) {
+          invoiceData.total_amount = computedTotal;
+          invoiceData.grand_total = computedTotal;
+          invoiceData.amount_due = computedTotal;
+        }
 
         let invoice: any = null;
         let invoiceError: any = null;
@@ -12783,7 +12792,11 @@ app.get("/s/series", async (req, res) => {
           const minimalInvoiceData: any = {
             org_id,
             invoice_number: invoiceNumber,
-            status: status || 'draft'
+            status: status || 'draft',
+            subtotal: computedSubtotal,
+            tax_amount: computedTax,
+            total_amount: computedTotal,
+            currency: currency || 'USD'
           };
           const retry = await supabaseAdmin
             .from('invoices')
@@ -12803,7 +12816,8 @@ app.get("/s/series", async (req, res) => {
             invoice_id: invoice.id,
             description: item.description || '',
             quantity: item.quantity || 1,
-            unit_price: item.unit_price || 0
+            unit_price: item.unit_price || 0,
+            total_price: lineTotal(item)
           }));
 
           const { data: created, error: itemsError } = await supabaseAdmin
@@ -12811,8 +12825,24 @@ app.get("/s/series", async (req, res) => {
             .insert(invoiceItems)
             .select();
 
-          if (itemsError) console.warn('invoice_items insert warning:', itemsError);
-          itemsData = created || [];
+          if (itemsError && String(itemsError.message || '').toLowerCase().includes('column')) {
+            const fallbackItems = items.map((item: any) => ({
+              invoice_id: invoice.id,
+              description: item.description || '',
+              quantity: item.quantity || 1,
+              unit_price: item.unit_price || 0,
+              line_total: lineTotal(item)
+            }));
+            const retry = await supabaseAdmin
+              .from('invoice_items')
+              .insert(fallbackItems)
+              .select();
+            if (retry.error) console.warn('invoice_items insert warning:', retry.error);
+            itemsData = retry.data || [];
+          } else {
+            if (itemsError) console.warn('invoice_items insert warning:', itemsError);
+            itemsData = created || [];
+          }
         }
 
         res.json({ invoice: { ...invoice, invoice_items: itemsData } });

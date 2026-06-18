@@ -37,11 +37,14 @@ type Invoice = {
   invoice_number: string;
   subtotal?: number;
   tax_amount?: number;
+  amount_due?: number;
+  grand_total?: number;
   total_amount?: number;
   total?: number;
+  currency?: string;
   status: string;
   created_at: string;
-  invoice_items?: Array<{ description?: string; quantity?: number; unit_price?: number; line_total?: number }>;
+  invoice_items?: Array<{ description?: string; quantity?: number; unit_price?: number; line_total?: number; total_price?: number; total?: number }>;
 };
 
 type BillingPackage = {
@@ -89,6 +92,23 @@ function formatCurrency(currency: string | undefined, value: number | undefined 
   return `${currency || 'USD'} ${Number(value || 0).toFixed(2)}`;
 }
 
+function invoiceItemTotal(item: NonNullable<Invoice['invoice_items']>[number]) {
+  const explicit = Number(item.line_total ?? item.total_price ?? item.total ?? 0);
+  if (explicit > 0) return explicit;
+  return (Number(item.quantity || 0) || 0) * (Number(item.unit_price || 0) || 0);
+}
+
+function invoiceTotal(invoice: Invoice) {
+  const headerTotal = Number(invoice.amount_due ?? invoice.total_amount ?? invoice.grand_total ?? invoice.total ?? 0);
+  if (headerTotal > 0) return headerTotal;
+  return (invoice.invoice_items || []).reduce((sum, item) => sum + invoiceItemTotal(item), 0);
+}
+
+function invoicePayable(invoice: Invoice) {
+  const status = String(invoice.status || '').toLowerCase();
+  return invoiceTotal(invoice) > 0 && !['paid', 'void', 'voided', 'cancelled', 'canceled'].includes(status);
+}
+
 export const AdminBillingPageV2: React.FC = () => {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -97,6 +117,7 @@ export const AdminBillingPageV2: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'records' | 'invoices' | 'packages'>(initialTab);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [records, setRecords] = useState<BillingRecord[]>([]);
@@ -331,6 +352,23 @@ export const AdminBillingPageV2: React.FC = () => {
     await loadInvoices();
   };
 
+  const payInvoice = async (invoice: Invoice) => {
+    setInvoiceAction(invoice.id);
+    setError(null);
+    try {
+      const response = await fetch(buildApiUrl('/api/billing/stripe/payment-session'), {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ org_id: invoice.org_id, invoice_id: invoice.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.url) throw new Error(payload.message || payload.error || 'Failed to start Stripe payment');
+      window.location.href = payload.url;
+    } finally {
+      setInvoiceAction(null);
+    }
+  };
+
   const exportInvoice = async (id: string) => {
     const response = await fetch(buildApiUrl(`/api/admin/billing/invoices/${encodeURIComponent(id)}/export?format=csv`), {
       headers: { 'x-user-id': user?.id || '' },
@@ -472,7 +510,7 @@ export const AdminBillingPageV2: React.FC = () => {
       <div className="space-y-6">
         <AdminTopNav />
 
-        {error && <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+        {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</div>}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <MetricStatCard label="Billing Records" value={records.length} hint="Line-item charges and adjustments" />
@@ -506,7 +544,7 @@ export const AdminBillingPageV2: React.FC = () => {
         {activeTab === 'records' && (
           <SectionCard title="Billing records" description="Charges, refunds, and subscription movements with human-readable org and user context.">
             {loading ? (
-              <div className="text-sm text-slate-400">Loading billing records...</div>
+              <div className="text-sm text-slate-600">Loading billing records...</div>
             ) : filteredRecords.length === 0 ? (
               <EmptyStatePanel title="No billing records" description="Create the first billing record to start tracking charges, payments, or manual adjustments." />
             ) : (
@@ -516,20 +554,20 @@ export const AdminBillingPageV2: React.FC = () => {
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-base font-semibold text-white">{record.description}</div>
+                          <div className="text-base font-semibold text-slate-950">{record.description}</div>
                           <StatusBadge tone={String(record.status || '').toLowerCase() === 'paid' ? 'success' : 'warning'}>
                             {record.status}
                           </StatusBadge>
                           <StatusBadge tone="neutral">{record.type}</StatusBadge>
                         </div>
-                        <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-400">
+                        <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-600">
                           <span>Organization: {orgNameById.get(record.org_id || '') || 'Unassigned'}</span>
                           <span>User: {userEmailById.get(record.user_id || '') || 'Not linked'}</span>
                           <span>Date: {new Date(record.created_at).toLocaleDateString()}</span>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="text-sm font-semibold text-cyan-200">{formatCurrency(record.currency, record.amount)}</div>
+                        <div className="text-sm font-semibold text-slate-950">{formatCurrency(record.currency, record.amount)}</div>
                         <button onClick={() => deleteRecord(record.id)} className="vs-button-secondary">Delete</button>
                       </div>
                     </div>
@@ -543,7 +581,7 @@ export const AdminBillingPageV2: React.FC = () => {
         {activeTab === 'invoices' && (
           <SectionCard title="Invoices" description="Draft, export, and manage invoicing output with a more usable summary view.">
             {loading ? (
-              <div className="text-sm text-slate-400">Loading invoices...</div>
+              <div className="text-sm text-slate-600">Loading invoices...</div>
             ) : filteredInvoices.length === 0 ? (
               <EmptyStatePanel title="No invoices" description="Create an invoice to give clients a structured billing artifact with line items and totals." />
             ) : (
@@ -553,19 +591,34 @@ export const AdminBillingPageV2: React.FC = () => {
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-base font-semibold text-white">{invoice.invoice_number || invoice.id}</div>
+                          <div className="text-base font-semibold text-slate-950">{invoice.invoice_number || invoice.id}</div>
                           <StatusBadge tone={String(invoice.status || '').toLowerCase() === 'paid' ? 'success' : 'warning'}>
                             {invoice.status}
                           </StatusBadge>
                         </div>
-                        <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-400">
+                        <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-600">
                           <span>Organization: {orgNameById.get(invoice.org_id || '') || 'Unknown org'}</span>
                           <span>Created: {new Date(invoice.created_at).toLocaleDateString()}</span>
                           <span>{invoice.invoice_items?.length || 0} line items</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-sm font-semibold text-cyan-200">{formatCurrency('USD', invoice.total_amount ?? invoice.total ?? 0)}</div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="text-sm font-semibold text-slate-950">{formatCurrency(invoice.currency || 'USD', invoiceTotal(invoice))}</div>
+                        {invoicePayable(invoice) && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await payInvoice(invoice);
+                              } catch (e: any) {
+                                setError(e?.message || 'Failed to start Stripe payment');
+                              }
+                            }}
+                            disabled={invoiceAction === invoice.id}
+                            className="vs-button-primary"
+                          >
+                            {invoiceAction === invoice.id ? 'Opening...' : 'Pay by card'}
+                          </button>
+                        )}
                         <button onClick={() => exportInvoice(invoice.id)} className="vs-button-secondary">Export CSV</button>
                         <button onClick={() => deleteInvoice(invoice.id)} className="vs-button-secondary">Delete</button>
                       </div>
@@ -580,7 +633,7 @@ export const AdminBillingPageV2: React.FC = () => {
         {activeTab === 'packages' && (
           <SectionCard title="Packages" description="Manage the plan catalog clients actually experience on the billing side.">
             {loading ? (
-              <div className="text-sm text-slate-400">Loading packages...</div>
+              <div className="text-sm text-slate-600">Loading packages...</div>
             ) : filteredPackages.length === 0 ? (
               <EmptyStatePanel title="No packages" description="Create a billing package to establish clean plan pricing, allowances, and overage rules." />
             ) : (
@@ -590,7 +643,7 @@ export const AdminBillingPageV2: React.FC = () => {
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-lg font-semibold text-white">{billingPackage.name}</div>
+                          <div className="text-lg font-semibold text-slate-950">{billingPackage.name}</div>
                           <StatusBadge tone={billingPackage.is_active === false ? 'warning' : 'success'}>
                             {billingPackage.is_active === false ? 'Inactive' : 'Active'}
                           </StatusBadge>
@@ -598,15 +651,15 @@ export const AdminBillingPageV2: React.FC = () => {
                             {billingPackage.stripe_price_id ? 'Stripe ready' : 'Stripe price missing'}
                           </StatusBadge>
                         </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-400">{billingPackage.description || 'No package description provided yet.'}</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">{billingPackage.description || 'No package description provided yet.'}</p>
                       </div>
                       <button onClick={() => deletePackage(billingPackage.id)} className="vs-button-secondary">Delete</button>
                     </div>
                     <div className="mt-5 grid grid-cols-2 gap-3">
                       <div className="vs-surface p-4">
                         <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Monthly</div>
-                        <div className="mt-2 text-2xl font-semibold text-white">{formatCurrency(billingPackage.currency || 'USD', billingPackage.base_monthly_cost)}</div>
-                        <div className="mt-1 text-xs text-slate-400">per {billingPackage.billing_interval || 'month'}</div>
+                        <div className="mt-2 text-2xl font-semibold text-slate-950">{formatCurrency(billingPackage.currency || 'USD', billingPackage.base_monthly_cost)}</div>
+                        <div className="mt-1 text-xs text-slate-600">per {billingPackage.billing_interval || 'month'}</div>
                       </div>
                       <div className="vs-surface p-4">
                         <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Included</div>

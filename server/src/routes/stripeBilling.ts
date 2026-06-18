@@ -254,6 +254,33 @@ async function getInvoiceForPayment(invoiceId: string) {
   return data as any;
 }
 
+async function getInvoiceItemsForPayment(invoiceId: string) {
+  const { data: itemsA } = await supabaseAdmin
+    .from('invoice_items')
+    .select('*')
+    .eq('invoice_id', invoiceId);
+  if (itemsA && itemsA.length > 0) return itemsA as any[];
+
+  const { data: itemsB } = await supabaseAdmin
+    .from('invoice_line_items')
+    .select('*')
+    .eq('invoice_id', invoiceId);
+  return (itemsB || []) as any[];
+}
+
+function invoiceItemTotal(item: any) {
+  const explicit = Number(item?.line_total ?? item?.total_price ?? item?.total ?? 0);
+  if (explicit > 0) return explicit;
+  return (Number(item?.quantity || 0) || 0) * (Number(item?.unit_price || 0) || 0);
+}
+
+async function getPayableInvoiceAmount(invoice: any) {
+  const headerAmount = Number(invoice?.amount_due ?? invoice?.total_amount ?? invoice?.grand_total ?? invoice?.total ?? 0);
+  if (headerAmount > 0) return headerAmount;
+  const items = await getInvoiceItemsForPayment(String(invoice.id));
+  return items.reduce((sum, item) => sum + invoiceItemTotal(item), 0);
+}
+
 async function markInvoicePaidFromCheckout(session: any) {
   const invoiceId = String(session.metadata?.invoice_id || '');
   if (!invoiceId) return null;
@@ -515,7 +542,7 @@ router.post('/payment-session', async (req, res) => {
         return res.status(409).json({ error: 'invoice_not_payable' });
       }
 
-      amount = Number(invoice.amount_due ?? invoice.total_amount ?? invoice.grand_total ?? invoice.total ?? amount ?? 0);
+      amount = await getPayableInvoiceAmount(invoice);
       currency = normalizeCurrency(invoice.currency || currency);
       description = `VictorySync invoice ${invoice.invoice_number || invoice.id}`;
     } else {
