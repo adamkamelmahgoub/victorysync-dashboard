@@ -178,18 +178,18 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold">Agents & Extensions</h2>
         <div className="flex items-center gap-3">
-          <div className="text-sm text-gray-400">
+          <div className="text-sm text-slate-600">
             {liveLoading ? 'Refreshing live status...' : `Live status ${refreshedAt ? `updated ${fmtDateTime(refreshedAt)}` : 'not loaded yet'}`}
           </div>
           <button
-            className="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded"
+            className="vs-button-secondary !px-3 !py-1.5 !text-xs"
             onClick={() => fetchAvailableExtensions()}
             disabled={extensionsLoading || apiUnavailable}
           >
             {extensionsLoading ? 'Loading extensions...' : 'Refresh Extensions'}
           </button>
           <button
-            className="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded"
+            className="vs-button-secondary !px-3 !py-1.5 !text-xs"
             onClick={() => fetchLiveStatuses()}
             disabled={liveLoading || apiUnavailable}
           >
@@ -198,44 +198,44 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
         </div>
       </div>
       {apiUnavailable && (
-        <div className="mb-4 p-3 bg-rose-900/30 text-rose-300 rounded">Members API unavailable (404). Server endpoints may not be deployed; agent list may be incomplete.</div>
+        <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">Members API unavailable (404). Server endpoints may not be deployed; agent list may be incomplete.</div>
       )}
-      {error && <div className="text-rose-400 mb-2">{error}</div>}
-      {liveError && <div className="text-amber-300 mb-2">{liveError}</div>}
-      {extensionsError && <div className="text-amber-300 mb-2">{extensionsError}</div>}
-      {extensionsInfo && <div className="text-cyan-300 mb-2">{extensionsInfo}</div>}
+      {error && <div className="mb-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+      {liveError && <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{liveError}</div>}
+      {extensionsError && <div className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{extensionsError}</div>}
+      {extensionsInfo && <div className="mb-2 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-700">{extensionsInfo}</div>}
       {!extensionsError && extensionsAudit.length > 0 && (
-        <div className="text-xs text-slate-400 mb-2">
+        <div className="mb-2 text-sm text-slate-600">
           Hidden {extensionsAudit.length} stale saved extension{extensionsAudit.length === 1 ? '' : 's'} that are not currently live.
         </div>
       )}
       {loading ? (
-        <div className="py-6 text-center text-sm text-gray-400">Loading agents...</div>
+        <div className="py-6 text-center text-sm text-slate-600">Loading agents...</div>
       ) : (
-        <div className="bg-slate-900/70 rounded shadow-sm overflow-hidden">
+        <div className="vs-table-shell overflow-hidden">
           <table className="w-full text-left">
-            <thead className="bg-slate-900/60">
+            <thead className="bg-slate-50">
               <tr>
-                <th className="p-3 text-sm text-slate-300">Email</th>
-                <th className="p-3 text-sm text-slate-300">Role</th>
-                <th className="p-3 text-sm text-slate-300">Extension</th>
-                <th className="p-3 text-sm text-slate-300">Live</th>
-                <th className="p-3 text-sm text-slate-300">On Call With</th>
-                <th className="p-3 text-sm text-slate-300">Call Status</th>
-                <th className="p-3 text-sm text-slate-300">Actions</th>
+                <th className="p-3 text-sm text-slate-700">Email</th>
+                <th className="p-3 text-sm text-slate-700">Role</th>
+                <th className="p-3 text-sm text-slate-700">Extension</th>
+                <th className="p-3 text-sm text-slate-700">Live</th>
+                <th className="p-3 text-sm text-slate-700">On Call With</th>
+                <th className="p-3 text-sm text-slate-700">Call Status</th>
+                <th className="p-3 text-sm text-slate-700">Actions</th>
               </tr>
             </thead>
             <tbody>
               {agents.map(agent => {
                 const live = liveStatusByUserId[agent.id];
                 return (
-                <tr key={agent.id} className="border-t border-slate-800">
-                  <td className="p-3 text-slate-200">{agent.email}</td>
-                  <td className="p-3 text-slate-200">{agent.role}</td>
+                <tr key={agent.id} className="border-t border-slate-100 hover:bg-violet-50/40">
+                  <td className="p-3 text-slate-900">{agent.email}</td>
+                  <td className="p-3 text-slate-700">{agent.role}</td>
 	                  <td className="p-3">
 	                    {editing === agent.id ? (
 	                      <select
-	                        className="p-1 rounded bg-slate-800 border border-slate-700 min-w-[180px] text-sm text-slate-200"
+	                        className="vs-input min-w-[180px] !p-1"
 	                        value={newExt}
 	                        onChange={e => setNewExt(e.target.value)}
 	                      >
@@ -247,18 +247,18 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
 	                        ))}
 	                      </select>
 	                    ) : (
-	                      agent.extension || <span className="text-gray-500">(none)</span>
+	                      agent.extension || <span className="text-slate-500">(none)</span>
 	                    )}
                   </td>
                   <td className="p-3">
                     <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                      live?.on_call ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-800 text-slate-300'
+                      live?.on_call ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'border border-slate-200 bg-slate-100 text-slate-700'
                     }`}>
                       {live?.on_call ? 'On Call' : (live?.status || 'Idle')}
                     </span>
                   </td>
-                  <td className="p-3 text-slate-200 text-sm">{live?.counterpart || '—'}</td>
-                  <td className="p-3 text-sm text-slate-300">
+                  <td className="p-3 text-sm text-slate-700">{live?.counterpart || '—'}</td>
+                  <td className="p-3 text-sm text-slate-700">
                     <div>{live?.status || '—'}</div>
                     {live?.started_at && <div className="text-xs text-slate-500">Started {fmtDateTime(live.started_at)}</div>}
                   </td>
@@ -266,14 +266,14 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                     {editing === agent.id ? (
                       <>
                         <button
-                          className="px-3 py-1 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded mr-2"
+                          className="vs-button-primary mr-2 !px-3 !py-1.5 !text-xs"
                           onClick={() => handleSave(agent)}
                           disabled={apiUnavailable || !!error && (error.includes('Unauthenticated') || error.includes('Access forbidden'))}
                         >
                           Save
                         </button>
                         <button
-                          className="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 rounded"
+                          className="vs-button-secondary !px-3 !py-1.5 !text-xs"
                           onClick={() => setEditing(null)}
                         >
                           Cancel
@@ -281,7 +281,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                       </>
                     ) : (
                       <button
-                        className="px-3 py-1 text-sm bg-sky-700 hover:bg-sky-800 text-white rounded"
+                        className="vs-button-primary !px-3 !py-1.5 !text-xs"
                         onClick={() => handleEdit(agent.id, agent.extension || '')}
                         disabled={apiUnavailable || !!error && (error.includes('Unauthenticated') || error.includes('Access forbidden'))}
                       >

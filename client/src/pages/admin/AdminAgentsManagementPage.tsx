@@ -640,12 +640,12 @@ const AdminAgentsManagementPage: FC = () => {
                 <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">{activeOrgExtensionsError}</div>
               )}
               {activeOrgHiddenExtensions.length > 0 && (
-                <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-3">
-                  <div className="text-sm font-medium text-slate-200">Hidden stale extensions</div>
-                  <div className="mt-1 text-xs text-slate-400">These were saved in the database but are not currently live in MightyCall, so they are excluded from the dropdown.</div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-sm font-semibold text-slate-950">Hidden stale extensions</div>
+                  <div className="mt-1 text-sm text-slate-600">These were saved in the database but are not currently live in MightyCall, so they are excluded from the dropdown.</div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {activeOrgHiddenExtensions.map((option) => (
-                      <span key={option.extension} className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-300">
+                      <span key={option.extension} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
                         {option.display_name ? `${option.extension} - ${option.display_name}` : option.extension}
                         {option.sources?.length ? ` (${option.sources.join(', ')})` : ''}
                       </span>

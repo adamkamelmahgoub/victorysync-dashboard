@@ -9,7 +9,7 @@ export const TeamPage: React.FC = () => {
   if (loading) {
     return (
       <PageLayout title="Team" description="Manage organization access">
-        <div className="vs-surface p-6 text-slate-300">Loading team settings...</div>
+        <div className="vs-surface p-6 text-slate-600">Loading team settings...</div>
       </PageLayout>
     );
   }
@@ -17,7 +17,7 @@ export const TeamPage: React.FC = () => {
   if (!org) {
     return (
       <PageLayout title="Team" description="Manage organization access">
-        <div className="vs-surface p-6 text-slate-300">No organization selected.</div>
+        <div className="vs-surface p-6 text-slate-600">No organization selected.</div>
       </PageLayout>
     );
   }

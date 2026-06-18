@@ -528,25 +528,25 @@ export default function UserSettingsPage() {
 
         {/* API Keys Management - DISABLED: requires database migration */}
         {false && (
-        <div className="bg-slate-900/80 rounded-xl p-6 ring-1 ring-slate-800">
-          <h2 className="text-lg font-semibold text-white mb-6">API Keys</h2>
-          <p className="text-sm text-slate-400 mb-6">Generate and manage API keys for programmatic access to your account</p>
+        <div className="vs-surface p-6">
+          <h2 className="mb-6 text-lg font-semibold text-slate-950">API Keys</h2>
+          <p className="mb-6 text-sm text-slate-600">Generate and manage API keys for programmatic access to your account</p>
 
           {/* Generate New Key */}
-          <div className="mb-8 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
-            <label className="block text-sm font-semibold text-slate-300 mb-3">Generate New API Key</label>
+          <div className="mb-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <label className="mb-3 block text-sm font-semibold text-slate-700">Generate New API Key</label>
             <div className="flex gap-3">
               <input
                 type="text"
                 placeholder="Label (e.g., 'Production', 'Testing')"
                 value={newKeyLabel}
                 onChange={(e) => setNewKeyLabel(e.target.value)}
-                className="flex-1 px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                className="vs-input flex-1"
               />
               <button
                 onClick={generateApiKey}
                 disabled={generatingKey || !newKeyLabel}
-                className="px-6 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-600 text-white rounded-lg font-semibold transition whitespace-nowrap"
+                className="vs-button-primary whitespace-nowrap"
               >
                 {generatingKey ? 'Generating...' : 'Generate'}
               </button>
@@ -563,7 +563,7 @@ export default function UserSettingsPage() {
                   type="text"
                   value={showNewKeyPlaintext || ''}
                   readOnly
-                  className="flex-1 px-4 py-2 bg-slate-900 border border-amber-700 rounded-lg text-amber-300 font-mono text-sm"
+                  className="vs-input flex-1 font-mono"
                 />
                 <button
                   onClick={() => copyToClipboard(showNewKeyPlaintext || '')}
@@ -583,22 +583,22 @@ export default function UserSettingsPage() {
 
           {/* API Keys List */}
           <div>
-            <h3 className="text-sm font-semibold text-slate-300 mb-4">Active Keys</h3>
+            <h3 className="mb-4 text-sm font-semibold text-slate-700">Active Keys</h3>
             {loadingApiKeys ? (
-              <p className="text-slate-400 text-sm">Loading keys...</p>
+              <p className="text-sm text-slate-600">Loading keys...</p>
             ) : apiKeys.length === 0 ? (
-              <p className="text-slate-400 text-sm">No API keys yet. Generate one above to get started.</p>
+              <p className="text-sm text-slate-600">No API keys yet. Generate one above to get started.</p>
             ) : (
               <div className="space-y-2">
                 {apiKeys.map((key) => (
                   <div
                     key={key.id}
-                    className="flex items-center justify-between p-4 bg-slate-800/50 rounded-lg border border-slate-700"
+                    className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4"
                   >
                     <div className="flex-1">
-                      <p className="text-sm font-semibold text-white">{key.label}</p>
+                      <p className="text-sm font-semibold text-slate-900">{key.label}</p>
                       <div className="flex items-center gap-2 mt-1">
-                        <span className="font-mono text-xs text-slate-400">
+                        <span className="font-mono text-xs text-slate-600">
                           {key.key_prefix}...
                         </span>
                         <span className="text-xs text-slate-500">
