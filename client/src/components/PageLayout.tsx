@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardShellHeader } from './DashboardPrimitives';
 import StripePortalButton from './StripePortalButton';
+import { buildApiUrl } from '../config';
 
 interface PageLayoutProps {
   title: string;
@@ -23,10 +24,50 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   const userName = profile?.full_name || user?.email || 'Signed in';
   const [topbarSearch, setTopbarSearch] = useState('');
   const [profileOpen, setProfileOpen] = useState(false);
+  const [syncHealth, setSyncHealth] = useState<{ label: string; tone: 'ok' | 'syncing' | 'stale' }>({
+    label: 'Sync online',
+    tone: 'syncing',
+  });
 
   useEffect(() => {
     setProfileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    const loadSyncHealth = async () => {
+      try {
+        const response = await fetch(buildApiUrl('/api/mightycall/sync/status'), {
+          headers: { 'x-user-id': user.id },
+          cache: 'no-store',
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || cancelled) return;
+        const sync = payload.sync || {};
+        const running = Object.values(sync.running || {}).some(Boolean);
+        const lastValues = Object.values(sync.lastSyncAt || {})
+          .map((value) => (typeof value === 'string' ? Date.parse(value) : Number.NaN))
+          .filter((value) => Number.isFinite(value)) as number[];
+        const latest = lastValues.length ? Math.max(...lastValues) : 0;
+        const ageMs = latest ? Date.now() - latest : Number.POSITIVE_INFINITY;
+        setSyncHealth({
+          label: running ? 'Syncing now' : ageMs < 180_000 ? 'Data current' : 'Sync pending',
+          tone: running ? 'syncing' : ageMs < 180_000 ? 'ok' : 'stale',
+        });
+      } catch {
+        if (!cancelled) setSyncHealth({ label: 'Sync pending', tone: 'stale' });
+      }
+    };
+    void loadSyncHealth();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadSyncHealth();
+    }, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [user?.id]);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -91,8 +132,17 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
             </form>
 
             <div className="hidden items-center gap-3 md:flex">
-              <div className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 shadow-sm">
-                Systems online
+              <div
+                className={`rounded-full border px-3 py-2 text-xs font-semibold shadow-sm ${
+                  syncHealth.tone === 'ok'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : syncHealth.tone === 'syncing'
+                      ? 'border-violet-200 bg-violet-50 text-violet-700'
+                      : 'border-amber-200 bg-amber-50 text-amber-700'
+                }`}
+                title="Background MightyCall data sync status"
+              >
+                {syncHealth.label}
               </div>
               <div className="relative">
                 <button

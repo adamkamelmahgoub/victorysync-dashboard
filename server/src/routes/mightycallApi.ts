@@ -2,6 +2,7 @@ import express from 'express';
 import { isOrgMember, isPlatformAdmin } from '../auth/rbac';
 import { supabaseAdmin } from '../lib/supabaseClient';
 import {
+  getMightyCallBackgroundSyncStatus,
   runLiveStatusSync,
   runMightyCallSync,
   syncCallDetails,
@@ -426,6 +427,19 @@ router.post('/mightycall/sync', async (req, res) => {
     });
   } catch (err: any) {
     res.status(err?.status || 500).json({ error: err?.message || 'mightycall_sync_failed' });
+  }
+});
+
+router.get('/mightycall/sync/status', async (req, res) => {
+  try {
+    await getActor(req);
+    res.json({
+      ok: true,
+      sync: getMightyCallBackgroundSyncStatus(),
+      refreshed_at: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(err?.status || 500).json({ error: err?.message || 'mightycall_sync_status_failed' });
   }
 });
 

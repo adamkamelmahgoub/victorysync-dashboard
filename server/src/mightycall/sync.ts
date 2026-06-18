@@ -1,6 +1,14 @@
 import { supabaseAdmin } from '../lib/supabaseClient';
 import { getMightyCallToken, mightyCallGetFirst } from './client';
-import { fetchMightyCallLiveCallByExtension } from '../integrations/mightycall';
+import {
+  fetchMightyCallLiveCallByExtension,
+  syncMightyCallCallHistory,
+  syncMightyCallPhoneNumbers,
+  syncMightyCallRecordings,
+  syncMightyCallReports,
+  syncMightyCallSMS,
+  syncMightyCallVoicemails,
+} from '../integrations/mightycall';
 import { getMightyCallStatusByExtension, type MightyCallStatusByExtension } from '../services/mightycallLiveStatus';
 import {
   arrayFromApiResponse,
@@ -47,6 +55,40 @@ let schedulerStarted = false;
 let lastStatusSyncAt = 0;
 let lastRecentCallsSyncAt = 0;
 let lastSlowSyncAt = 0;
+let lastPhoneInventorySyncAt = 0;
+let lastReportsSyncAt = 0;
+let lastSmsSyncAt = 0;
+let lastRecordingsSyncAt = 0;
+let lastVoicemailSyncAt = 0;
+let rollingReportsSyncRunning = false;
+let rollingSmsSyncRunning = false;
+let rollingRecordingsSyncRunning = false;
+let rollingVoicemailSyncRunning = false;
+let phoneInventorySyncRunning = false;
+
+type BackgroundSyncStatus = {
+  started: boolean;
+  running: Record<string, boolean>;
+  lastSyncAt: Record<string, string | null>;
+  intervalsMs: Record<string, number>;
+  lookbackDays: number;
+};
+
+function numberFromEnv(name: string, fallback: number, min = 1_000) {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= min ? raw : fallback;
+}
+
+const POLL_STATUS_INTERVAL_MS = numberFromEnv('MIGHTYCALL_STATUS_SYNC_INTERVAL_MS', 5_000);
+const POLL_RECENT_CALLS_INTERVAL_MS = numberFromEnv('MIGHTYCALL_RECENT_CALLS_SYNC_INTERVAL_MS', 15_000);
+const POLL_CALL_DETAILS_INTERVAL_MS = numberFromEnv('MIGHTYCALL_CALL_DETAILS_SYNC_INTERVAL_MS', 60_000);
+const POLL_PHONE_INVENTORY_INTERVAL_MS = numberFromEnv('MIGHTYCALL_PHONE_INVENTORY_SYNC_INTERVAL_MS', 5 * 60_000);
+const POLL_REPORTS_INTERVAL_MS = numberFromEnv('MIGHTYCALL_REPORTS_SYNC_INTERVAL_MS', 2 * 60_000);
+const POLL_SMS_INTERVAL_MS = numberFromEnv('MIGHTYCALL_SMS_SYNC_INTERVAL_MS', 60_000);
+const POLL_RECORDINGS_INTERVAL_MS = numberFromEnv('MIGHTYCALL_RECORDINGS_SYNC_INTERVAL_MS', 90_000);
+const POLL_VOICEMAIL_INTERVAL_MS = numberFromEnv('MIGHTYCALL_VOICEMAIL_SYNC_INTERVAL_MS', 2 * 60_000);
+const BACKGROUND_SYNC_LOOKBACK_DAYS = numberFromEnv('MIGHTYCALL_BACKGROUND_SYNC_LOOKBACK_DAYS', 14, 1);
+const BACKGROUND_SYNC_MAX_ORGS = numberFromEnv('MIGHTYCALL_BACKGROUND_SYNC_MAX_ORGS', 100, 1);
 
 const CALL_LIST_PATHS = ['/calls', '/call-history', '/callhistory', '/journal/calls', '/journal/requests'];
 const CALL_DETAIL_PATHS = ['/calls/{id}', '/call-history/{id}', '/callhistory/{id}', '/journal/calls/{id}', '/journal/requests/{id}', '/requests/{id}'];
@@ -79,6 +121,133 @@ function emptyResult(reason: string): SyncResult {
 
 function safeWarning(err: any) {
   return String(err?.message || err || 'unknown_error').replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]');
+}
+
+function isoDateDaysAgo(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+async function getBackgroundSyncOrgIds() {
+  const ids = new Set<string>();
+  try {
+    const { data } = await supabaseAdmin
+      .from('organizations')
+      .select('id, status, is_active')
+      .limit(BACKGROUND_SYNC_MAX_ORGS);
+    for (const row of (data || []) as any[]) {
+      const status = String(row?.status || '').toLowerCase();
+      if (row?.id && row?.is_active !== false && !['disabled', 'archived', 'inactive'].includes(status)) ids.add(String(row.id));
+    }
+  } catch {}
+  if (ids.size === 0) {
+    try {
+      const { data } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('org_id')
+        .not('org_id', 'is', null)
+        .limit(BACKGROUND_SYNC_MAX_ORGS * 5);
+      for (const row of (data || []) as any[]) if (row?.org_id) ids.add(String(row.org_id));
+    } catch {}
+  }
+  return Array.from(ids).slice(0, BACKGROUND_SYNC_MAX_ORGS);
+}
+
+async function getPhoneIdsForOrg(orgId: string) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('org_phone_numbers')
+      .select('phone_number_id')
+      .eq('org_id', orgId)
+      .limit(1000);
+    if (!error) {
+      const ids = (data || []).map((row: any) => String(row.phone_number_id || '')).filter(Boolean);
+      if (ids.length) return ids;
+    }
+  } catch {}
+  try {
+    const { data } = await supabaseAdmin
+      .from('phone_numbers')
+      .select('id')
+      .eq('org_id', orgId)
+      .limit(1000);
+    return (data || []).map((row: any) => String(row.id || '')).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function trackLastSync(kind: keyof BackgroundSyncStatus['lastSyncAt']) {
+  const now = Date.now();
+  if (kind === 'status') lastStatusSyncAt = now;
+  if (kind === 'recentCalls') lastRecentCallsSyncAt = now;
+  if (kind === 'callDetails') lastSlowSyncAt = now;
+  if (kind === 'phoneInventory') lastPhoneInventorySyncAt = now;
+  if (kind === 'reports') lastReportsSyncAt = now;
+  if (kind === 'sms') lastSmsSyncAt = now;
+  if (kind === 'recordings') lastRecordingsSyncAt = now;
+  if (kind === 'voicemails') lastVoicemailSyncAt = now;
+}
+
+function lastIso(ms: number) {
+  return ms > 0 ? new Date(ms).toISOString() : null;
+}
+
+async function withBackgroundLock<T>(lock: 'reports' | 'sms' | 'recordings' | 'voicemails' | 'phoneInventory', job: () => Promise<T>) {
+  if (lock === 'reports' && rollingReportsSyncRunning) return null;
+  if (lock === 'sms' && rollingSmsSyncRunning) return null;
+  if (lock === 'recordings' && rollingRecordingsSyncRunning) return null;
+  if (lock === 'voicemails' && rollingVoicemailSyncRunning) return null;
+  if (lock === 'phoneInventory' && phoneInventorySyncRunning) return null;
+  if (lock === 'reports') rollingReportsSyncRunning = true;
+  if (lock === 'sms') rollingSmsSyncRunning = true;
+  if (lock === 'recordings') rollingRecordingsSyncRunning = true;
+  if (lock === 'voicemails') rollingVoicemailSyncRunning = true;
+  if (lock === 'phoneInventory') phoneInventorySyncRunning = true;
+  try {
+    return await job();
+  } finally {
+    if (lock === 'reports') rollingReportsSyncRunning = false;
+    if (lock === 'sms') rollingSmsSyncRunning = false;
+    if (lock === 'recordings') rollingRecordingsSyncRunning = false;
+    if (lock === 'voicemails') rollingVoicemailSyncRunning = false;
+    if (lock === 'phoneInventory') phoneInventorySyncRunning = false;
+  }
+}
+
+export function getMightyCallBackgroundSyncStatus(): BackgroundSyncStatus {
+  return {
+    started: schedulerStarted,
+    running: {
+      fullApiSync: syncRunning,
+      liveStatus: statusSyncRunning,
+      reports: rollingReportsSyncRunning,
+      sms: rollingSmsSyncRunning,
+      recordings: rollingRecordingsSyncRunning,
+      voicemails: rollingVoicemailSyncRunning,
+      phoneInventory: phoneInventorySyncRunning,
+    },
+    lastSyncAt: {
+      status: lastIso(lastStatusSyncAt),
+      recentCalls: lastIso(lastRecentCallsSyncAt),
+      callDetails: lastIso(lastSlowSyncAt),
+      phoneInventory: lastIso(lastPhoneInventorySyncAt),
+      reports: lastIso(lastReportsSyncAt),
+      sms: lastIso(lastSmsSyncAt),
+      recordings: lastIso(lastRecordingsSyncAt),
+      voicemails: lastIso(lastVoicemailSyncAt),
+    },
+    intervalsMs: {
+      status: POLL_STATUS_INTERVAL_MS,
+      recentCalls: POLL_RECENT_CALLS_INTERVAL_MS,
+      callDetails: POLL_CALL_DETAILS_INTERVAL_MS,
+      phoneInventory: POLL_PHONE_INVENTORY_INTERVAL_MS,
+      reports: POLL_REPORTS_INTERVAL_MS,
+      sms: POLL_SMS_INTERVAL_MS,
+      recordings: POLL_RECORDINGS_INTERVAL_MS,
+      voicemails: POLL_VOICEMAIL_INTERVAL_MS,
+    },
+    lookbackDays: BACKGROUND_SYNC_LOOKBACK_DAYS,
+  };
 }
 
 async function recordSyncRun(result: SyncResult, status: 'running' | 'completed' | 'failed', startedAt: string, finishedAt?: string) {
@@ -996,22 +1165,122 @@ export async function runMightyCallSync(reason = 'manual'): Promise<SyncResult> 
   }
 }
 
+async function runPhoneInventoryBackgroundSync() {
+  return withBackgroundLock('phoneInventory', async () => {
+    await syncMightyCallPhoneNumbers(supabaseAdmin);
+    trackLastSync('phoneInventory');
+  });
+}
+
+async function runRollingReportsBackgroundSync() {
+  return withBackgroundLock('reports', async () => {
+    const orgIds = await getBackgroundSyncOrgIds();
+    const start = isoDateDaysAgo(BACKGROUND_SYNC_LOOKBACK_DAYS);
+    const end = new Date().toISOString().slice(0, 10);
+    for (const orgId of orgIds) {
+      try {
+        const phoneIds = await getPhoneIdsForOrg(orgId);
+        await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end);
+        await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end });
+      } catch (err) {
+        console.warn('[mightycall background] reports/calls sync failed:', orgId, safeWarning(err));
+      }
+    }
+    trackLastSync('reports');
+  });
+}
+
+async function runRollingSmsBackgroundSync() {
+  return withBackgroundLock('sms', async () => {
+    const orgIds = await getBackgroundSyncOrgIds();
+    for (const orgId of orgIds) {
+      try {
+        await syncMightyCallSMS(supabaseAdmin, orgId);
+      } catch (err) {
+        console.warn('[mightycall background] sms sync failed:', orgId, safeWarning(err));
+      }
+    }
+    try {
+      await syncSmsIfApiSupported();
+    } catch (err) {
+      console.warn('[mightycall background] api sms sync failed:', safeWarning(err));
+    }
+    trackLastSync('sms');
+  });
+}
+
+async function runRollingRecordingsBackgroundSync() {
+  return withBackgroundLock('recordings', async () => {
+    const orgIds = await getBackgroundSyncOrgIds();
+    const start = isoDateDaysAgo(BACKGROUND_SYNC_LOOKBACK_DAYS);
+    const end = new Date().toISOString().slice(0, 10);
+    for (const orgId of orgIds) {
+      try {
+        const phoneIds = await getPhoneIdsForOrg(orgId);
+        await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end);
+      } catch (err) {
+        console.warn('[mightycall background] recordings sync failed:', orgId, safeWarning(err));
+      }
+    }
+    try {
+      await syncCallDetails(100);
+    } catch (err) {
+      console.warn('[mightycall background] call details recording sync failed:', safeWarning(err));
+    }
+    trackLastSync('recordings');
+  });
+}
+
+async function runRollingVoicemailBackgroundSync() {
+  return withBackgroundLock('voicemails', async () => {
+    const orgIds = await getBackgroundSyncOrgIds();
+    for (const orgId of orgIds) {
+      try {
+        await syncMightyCallVoicemails(supabaseAdmin, orgId);
+      } catch (err) {
+        console.warn('[mightycall background] voicemail sync failed:', orgId, safeWarning(err));
+      }
+    }
+    trackLastSync('voicemails');
+  });
+}
+
 export function startMightyCallPolling() {
   if (schedulerStarted || process.env.MIGHTYCALL_DISABLE_POLLING === 'true') return;
   schedulerStarted = true;
   const tick = async () => {
     const now = Date.now();
-    if (now - lastStatusSyncAt > 5_000) {
+    if (now - lastStatusSyncAt > POLL_STATUS_INTERVAL_MS) {
       lastStatusSyncAt = now;
       runLiveStatusSync('poll-status').catch((err) => console.warn('[mightycall poll] status sync failed:', safeWarning(err)));
     }
-    if (now - lastRecentCallsSyncAt > 15_000) {
+    if (now - lastRecentCallsSyncAt > POLL_RECENT_CALLS_INTERVAL_MS) {
       lastRecentCallsSyncAt = now;
       syncRecentCalls().catch((err) => console.warn('[mightycall poll] recent calls failed:', safeWarning(err)));
     }
-    if (now - lastSlowSyncAt > 60_000) {
+    if (now - lastSlowSyncAt > POLL_CALL_DETAILS_INTERVAL_MS) {
       lastSlowSyncAt = now;
       syncCallDetails(25).catch((err) => console.warn('[mightycall poll] call details failed:', safeWarning(err)));
+    }
+    if (now - lastPhoneInventorySyncAt > POLL_PHONE_INVENTORY_INTERVAL_MS) {
+      lastPhoneInventorySyncAt = now;
+      runPhoneInventoryBackgroundSync().catch((err) => console.warn('[mightycall poll] phone inventory failed:', safeWarning(err)));
+    }
+    if (now - lastReportsSyncAt > POLL_REPORTS_INTERVAL_MS) {
+      lastReportsSyncAt = now;
+      runRollingReportsBackgroundSync().catch((err) => console.warn('[mightycall poll] reports failed:', safeWarning(err)));
+    }
+    if (now - lastSmsSyncAt > POLL_SMS_INTERVAL_MS) {
+      lastSmsSyncAt = now;
+      runRollingSmsBackgroundSync().catch((err) => console.warn('[mightycall poll] sms failed:', safeWarning(err)));
+    }
+    if (now - lastRecordingsSyncAt > POLL_RECORDINGS_INTERVAL_MS) {
+      lastRecordingsSyncAt = now;
+      runRollingRecordingsBackgroundSync().catch((err) => console.warn('[mightycall poll] recordings failed:', safeWarning(err)));
+    }
+    if (now - lastVoicemailSyncAt > POLL_VOICEMAIL_INTERVAL_MS) {
+      lastVoicemailSyncAt = now;
+      runRollingVoicemailBackgroundSync().catch((err) => console.warn('[mightycall poll] voicemails failed:', safeWarning(err)));
     }
   };
   setInterval(tick, 5_000).unref?.();

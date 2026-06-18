@@ -57,12 +57,14 @@ This map documents the production data contract for the redesigned dashboard. UI
 | Recording list | Reporting rows | `/api/reports/recordings` | recordings/calls tables | call time, from, to, agent/extension, duration, status, recording id/url, org id | Role scoped | Helpful empty state if no recording URLs are available | No fake recording rows. |
 | Recording sync | MightyCall integration | `/api/mightycall/sync/recordings` | MightyCall API + stored recordings | authorized admin, date range | Admin/sync-authorized users only | Show sync error without stack trace | Sync trigger remains protected. |
 | Audio/download | Backend proxy | `/api/recordings/:id/download` | recordings table | recording id, org/user access | Role scoped | Link/player hidden if unavailable | URLs are not treated as public authorization. |
+| Background recording sync | MightyCall scheduler | background `syncMightyCallRecordings` + `syncCallDetails` | recordings/calls tables | org id, phone ids, rolling date range | Server-side only | Existing rows remain visible if API fails | Runs on configurable interval without UI clicks. |
 
 ## Live Status
 
 | Section | Data source | Endpoint/API | DB table/view if known | Required fields | Role visibility | Empty/failure behavior | Notes/fixes applied |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Agent status board | MightyCall polling/cache | `/api/live-status` | MightyCall API/cache/users/extensions | agent name, extension, status, current call number, call started, last updated, org id | Admin global, clients own org, agents own extension if supported | Unknown/offline status instead of blank | Polling uses API fetch and keeps prior rows while refreshing to avoid flicker. |
+| Sync health chip | Background sync status | `/api/mightycall/sync/status` | in-memory scheduler status + sync runs | last sync timestamps, running lanes, intervals | Authenticated users | Shows Sync pending if status cannot load | Topbar reflects live background sync state instead of static copy. |
 
 ## Agents
 
