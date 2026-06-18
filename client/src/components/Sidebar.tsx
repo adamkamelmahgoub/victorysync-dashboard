@@ -35,7 +35,6 @@ const navGlyphs: Record<string, string> = {
   Logs: 'L',
   Settings: 'T',
   'Debug Auth': 'B',
-  'Admin Home': 'H',
   'Org Settings': 'S',
   'Org Manage': 'M',
   'Account Settings': 'A',
@@ -118,7 +117,6 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Command',
           items: [
             { label: 'Overview', path: '/' },
-            { label: 'Admin Home', path: '/admin' },
             { label: 'Live Status', path: '/live-status', badge: 'Live', featureKey: 'live_status' },
             { label: 'Reports', path: '/admin/reports' },
             { label: 'Calls', path: '/calls', featureKey: 'reports' },

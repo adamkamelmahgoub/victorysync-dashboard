@@ -352,7 +352,7 @@ export function EmptyStatePanel({
 }
 
 export function ErrorStatePanel({
-  title = 'Something went wrong',
+  title = 'Unable to load this section',
   description = 'The page could not load this data. Please try again.',
   action,
 }: {

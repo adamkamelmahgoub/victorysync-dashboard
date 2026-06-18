@@ -34,7 +34,6 @@ const AdminRecordingsPage = lazy(() => import("./pages/admin/AdminRecordingsPage
 const AdminAgentsManagementPage = lazy(() => import("./pages/admin/AdminAgentsManagementPage"));
 const AdminInviteCodesPage = lazy(() => import("./pages/admin/AdminInviteCodesPage"));
 const AdminBillingPageV2 = lazy(() => import("./pages/admin/AdminBillingPageV2").then((m) => ({ default: m.AdminBillingPageV2 })));
-const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage"));
 const AdminDiagnosticsPage = lazy(() => import("./pages/admin/AdminDiagnosticsPage"));
 const AdminLogsPage = lazy(() => import("./pages/admin/AdminLogsPage"));
 const OrgManagePage = lazy(() => import("./pages/OrgManagePage"));
@@ -301,11 +300,7 @@ function AppRouter() {
       />
       <Route
         path="/admin"
-        element={
-          <AdminRoute>
-            <AdminDashboardPage />
-          </AdminRoute>
-        }
+        element={<Navigate to="/dashboard" replace />}
       />
       <Route
         path="/admin/users"

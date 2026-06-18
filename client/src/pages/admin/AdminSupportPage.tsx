@@ -144,7 +144,7 @@ const AdminSupportPage: FC = () => {
       <div className="space-y-6">
         <AdminTopNav />
 
-        {error && <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+        {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</div>}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricStatCard label="Tickets" value={summary.total} />
@@ -167,7 +167,7 @@ const AdminSupportPage: FC = () => {
             </div>
 
             {loading ? (
-              <div className="text-sm text-slate-400">Loading tickets...</div>
+              <div className="text-sm text-slate-600">Loading tickets...</div>
             ) : filteredTickets.length === 0 ? (
               <EmptyStatePanel title="No tickets found" description="No support tickets matched the current filter." />
             ) : (
@@ -176,15 +176,15 @@ const AdminSupportPage: FC = () => {
                   <button
                     key={ticket.id}
                     onClick={() => setSelectedTicket(ticket)}
-                    className={`w-full rounded-3xl border p-4 text-left transition ${
+                    className={`w-full rounded-2xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 ${
                       selectedTicket?.id === ticket.id
-                        ? 'border-cyan-400/20 bg-cyan-400/[0.07]'
-                        : 'border-white/8 bg-white/[0.025] hover:bg-white/[0.04]'
+                        ? 'border-violet-200 bg-violet-50 text-violet-900'
+                        : 'border-slate-200 bg-white text-slate-900 hover:border-violet-200 hover:bg-violet-50/40'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-white">{ticket.subject}</div>
+                        <div className="truncate text-sm font-semibold text-slate-950">{ticket.subject}</div>
                         <div className="mt-2 text-xs text-slate-500">{ticket.org_id}</div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <StatusBadge tone={ticket.status === 'open' ? 'info' : ticket.status === 'resolved' ? 'success' : 'neutral'}>{ticket.status}</StatusBadge>
@@ -221,7 +221,7 @@ const AdminSupportPage: FC = () => {
                       <option value="closed">Closed</option>
                     </select>
                   </div>
-                  <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Priority</div>
                     <div className="mt-2"><StatusBadge tone={selectedTicket.priority === 'high' ? 'warning' : 'neutral'}>{selectedTicket.priority}</StatusBadge></div>
                   </div>
@@ -229,15 +229,18 @@ const AdminSupportPage: FC = () => {
 
                 <div className="text-xs text-slate-500">Created {new Date(selectedTicket.created_at).toLocaleString()}</div>
 
-                <div className="max-h-[360px] space-y-3 overflow-y-auto rounded-3xl border border-white/8 bg-white/[0.02] p-4">
+                <div className="max-h-[360px] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   {selectedTicket.support_ticket_messages?.map((msg) => (
-                    <div key={msg.id} className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                    <div key={msg.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                       <div className="mb-2 text-xs text-slate-500">
                         {msg.sender_user_id === selectedTicket.created_by ? 'Client' : 'You'} · {new Date(msg.created_at).toLocaleString()}
                       </div>
-                      <p className="text-sm text-slate-100">{msg.message}</p>
+                      <p className="text-sm text-slate-700">{msg.message}</p>
                     </div>
                   ))}
+                  {!selectedTicket.support_ticket_messages?.length && (
+                    <p className="py-6 text-center text-sm text-slate-600">No messages yet.</p>
+                  )}
                 </div>
 
                 <div className="space-y-3">

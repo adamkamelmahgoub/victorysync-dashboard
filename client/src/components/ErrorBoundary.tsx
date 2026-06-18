@@ -27,18 +27,37 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold mb-2">Something went wrong</h2>
-            <p className="text-sm text-slate-400">An unexpected error occurred while loading the dashboard.</p>
-            <div className="mt-4">
+        <main className="flex min-h-screen items-center justify-center bg-[var(--bg-app)] p-6 text-[var(--text-primary)]">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-[0_18px_48px_rgba(15,23,42,0.12)]">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-sm font-black text-rose-700">
+              !
+            </div>
+            <h2 className="mt-5 text-2xl font-bold text-slate-950">This page could not load</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              VictorySync hit an unexpected page error. The event was logged, and you can safely return to the dashboard or retry the page.
+            </p>
+            <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <button
-                className="text-xs text-emerald-400 underline"
+                className="vs-button-primary"
+                onClick={() => {
+                  this.setState({ hasError: false, error: null });
+                  window.location.assign('/dashboard');
+                }}
+              >
+                Go to dashboard
+              </button>
+              <button
+                className="vs-button-secondary"
                 onClick={() => window.location.reload()}
               >
-                Reload
+                Reload page
               </button>
             </div>
+            {this.state.error?.message && (
+              <p className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-600">
+                {this.state.error.message}
+              </p>
+            )}
           </div>
         </main>
       );
