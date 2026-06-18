@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { buildApiUrl } from '../../config';
 import { getOrgFeatures, getProductionHealth, getUserFeatureOverrides, saveOrgFeatures, saveUserFeatureOverrides } from '../../lib/apiClient';
 import { MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 interface Organization {
   id: string;
@@ -48,6 +48,7 @@ interface ApiKey {
 
 export function AdminOperationsPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const toast = (() => {
     try {
@@ -57,7 +58,12 @@ export function AdminOperationsPage() {
     }
   })();
 
-  const [activeTab, setActiveTab] = useState<'details' | 'features' | 'members' | 'phones' | 'users'>('details');
+  type OperationsTab = 'details' | 'features' | 'members' | 'phones' | 'users';
+  const requestedTab = searchParams.get('tab');
+  const initialTab: OperationsTab = requestedTab === 'features' || requestedTab === 'members' || requestedTab === 'phones' || requestedTab === 'users' || requestedTab === 'details'
+    ? requestedTab
+    : 'details';
+  const [activeTab, setActiveTab] = useState<OperationsTab>(initialTab);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +116,26 @@ export function AdminOperationsPage() {
     if (!user?.id) return;
     void loadProductionHealth();
   }, [user?.id]);
+
+  useEffect(() => {
+    if (requestedTab === 'details' || requestedTab === 'features' || requestedTab === 'members' || requestedTab === 'phones' || requestedTab === 'users') {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
+
+  useEffect(() => {
+    if (activeTab === 'phones' && allPhones.length === 0) {
+      void loadAllPhones();
+    }
+    if (activeTab === 'users' && allUsers.length === 0) {
+      void loadAllUsers();
+    }
+  }, [activeTab, allPhones.length, allUsers.length]);
+
+  const selectTab = (tab: OperationsTab) => {
+    setActiveTab(tab);
+    setSearchParams(tab === 'details' ? {} : { tab });
+  };
 
   // Load org details when selected org changes
   useEffect(() => {
@@ -694,13 +720,7 @@ export function AdminOperationsPage() {
                     <button
                       key={tab}
                       onClick={() => {
-                        setActiveTab(tab as any);
-                        if (tab === 'phones' && allPhones.length === 0) {
-                          loadAllPhones();
-                        }
-                        if (tab === 'users' && allUsers.length === 0) {
-                          loadAllUsers();
-                        }
+                        selectTab(tab as OperationsTab);
                       }}
                       className={`py-4 border-b-2 transition font-medium text-sm ${
                         activeTab === tab

@@ -4,6 +4,7 @@ import { PageLayout } from '../../components/PageLayout';
 import AdminTopNav from '../../components/AdminTopNav';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 import { buildApiUrl } from '../../config';
+import { useSearchParams } from 'react-router-dom';
 
 type OrgOption = {
   id: string;
@@ -86,7 +87,10 @@ function formatCurrency(currency: string | undefined, value: number | undefined 
 
 export const AdminBillingPageV2: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'records' | 'invoices' | 'packages'>('records');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get('tab');
+  const initialTab = requestedTab === 'invoices' || requestedTab === 'packages' || requestedTab === 'records' ? requestedTab : 'records';
+  const [activeTab, setActiveTab] = useState<'records' | 'invoices' | 'packages'>(initialTab);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -219,6 +223,12 @@ export const AdminBillingPageV2: React.FC = () => {
     if (!user?.id) return;
     loadActiveTab();
   }, [activeTab, user?.id]);
+
+  useEffect(() => {
+    if (requestedTab === 'records' || requestedTab === 'invoices' || requestedTab === 'packages') {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -429,6 +439,11 @@ export const AdminBillingPageV2: React.FC = () => {
     { id: 'packages' as const, label: 'Packages', count: packages.length },
   ];
 
+  const selectTab = (tab: 'records' | 'invoices' | 'packages') => {
+    setActiveTab(tab);
+    setSearchParams(tab === 'records' ? {} : { tab });
+  };
+
   return (
     <PageLayout
       eyebrow="Admin billing"
@@ -460,7 +475,7 @@ export const AdminBillingPageV2: React.FC = () => {
               {tabButtons.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => selectTab(tab.id)}
                   className={activeTab === tab.id ? 'vs-button-primary' : 'vs-button-secondary'}
                 >
                   {tab.label} ({tab.count})

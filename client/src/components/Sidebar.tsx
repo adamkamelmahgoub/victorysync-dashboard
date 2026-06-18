@@ -39,11 +39,24 @@ const navGlyphs: Record<string, string> = {
   'Org Settings': 'S',
   'Org Manage': 'M',
   'Account Settings': 'A',
+  'Billing Records': 'B',
+  Invoices: 'I',
+  'Packages / Plans': 'P',
+  Members: 'M',
+  'Roles / Permissions': 'R',
+  'Number Assignments': 'N',
+  'User API Access': 'K',
+  Integrations: 'I',
+  'Data Sync': 'S',
+  'Activity / Audit': 'V',
 };
 
 function isActivePath(currentPath: string, itemPath: string) {
-  if (itemPath === '/') return currentPath === '/';
-  return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
+  const [currentBase, currentQuery = ''] = currentPath.split('?');
+  const [itemBase, itemQuery = ''] = itemPath.split('?');
+  if (itemPath === '/') return currentBase === '/';
+  if (itemQuery) return currentBase === itemBase && currentQuery === itemQuery;
+  return currentBase === itemBase || currentBase.startsWith(`${itemBase}/`);
 }
 
 function NavButton({
@@ -118,22 +131,32 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           items: [
             { label: 'Agents', path: '/admin/agents-management' },
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
+            { label: 'Number Assignments', path: '/admin/operations?tab=phones' },
             { label: 'Organizations', path: '/admin/orgs' },
             { label: 'Org Overview', path: '/admin/org-overview' },
+            { label: 'Members', path: '/admin/operations?tab=members' },
             { label: 'Users', path: '/admin/users' },
+            { label: 'User API Access', path: '/admin/operations?tab=users' },
+            { label: 'Roles / Permissions', path: '/admin/operations?tab=features' },
             { label: 'Billing', path: '/admin/billing' },
+            { label: 'Billing Records', path: '/admin/billing?tab=records' },
+            { label: 'Invoices', path: '/admin/billing?tab=invoices' },
+            { label: 'Packages / Plans', path: '/admin/billing?tab=packages' },
           ],
         },
         {
           label: 'Platform',
           items: [
             { label: 'MightyCall', path: '/admin/mightycall' },
+            { label: 'Integrations', path: '/admin/mightycall' },
+            { label: 'Data Sync', path: '/admin/mightycall' },
             { label: 'API Keys', path: '/admin/api-keys' },
             { label: 'Invite Codes', path: '/admin/invites' },
             { label: 'Support', path: '/admin/support' },
             { label: 'Number Requests', path: '/admin/number-change-requests' },
             { label: 'Ops Console', path: '/admin/operations' },
             { label: 'Diagnostics', path: '/admin/diagnostics' },
+            { label: 'Activity / Audit', path: '/admin/diagnostics' },
             { label: 'Logs', path: '/admin/logs' },
             { label: 'Org Settings', path: '/settings' },
             ...(selectedOrgId ? [{ label: 'Org Manage', path: `/orgs/${selectedOrgId}/manage` }] : []),
