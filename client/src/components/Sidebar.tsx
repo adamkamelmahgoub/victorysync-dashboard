@@ -56,6 +56,7 @@ function isActivePath(currentPath: string, itemPath: string) {
   const [itemBase, itemQuery = ''] = itemPath.split('?');
   if (itemPath === '/') return currentBase === '/';
   if (itemQuery) return currentBase === itemBase && currentQuery === itemQuery;
+  if (currentQuery && currentBase === itemBase) return false;
   return currentBase === itemBase || currentBase.startsWith(`${itemBase}/`);
 }
 
@@ -134,6 +135,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Number Assignments', path: '/admin/operations?tab=phones' },
             { label: 'Organizations', path: '/admin/orgs' },
             { label: 'Org Overview', path: '/admin/org-overview' },
+            ...(selectedOrgId ? [{ label: 'Org Dashboard', path: `/admin/orgs/${selectedOrgId}/dashboard` }] : []),
             { label: 'Members', path: '/admin/operations?tab=members' },
             { label: 'Users', path: '/admin/users' },
             { label: 'User API Access', path: '/admin/operations?tab=users' },
@@ -148,15 +150,15 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Platform',
           items: [
             { label: 'MightyCall', path: '/admin/mightycall' },
-            { label: 'Integrations', path: '/admin/mightycall' },
-            { label: 'Data Sync', path: '/admin/mightycall' },
+            { label: 'Integrations', path: '/admin/mightycall?section=integrations' },
+            { label: 'Data Sync', path: '/admin/mightycall?section=sync' },
             { label: 'API Keys', path: '/admin/api-keys' },
             { label: 'Invite Codes', path: '/admin/invites' },
             { label: 'Support', path: '/admin/support' },
             { label: 'Number Requests', path: '/admin/number-change-requests' },
             { label: 'Ops Console', path: '/admin/operations' },
             { label: 'Diagnostics', path: '/admin/diagnostics' },
-            { label: 'Activity / Audit', path: '/admin/diagnostics' },
+            { label: 'Activity / Audit', path: '/admin/diagnostics?section=audit' },
             { label: 'Logs', path: '/admin/logs' },
             { label: 'Org Settings', path: '/settings' },
             ...(selectedOrgId ? [{ label: 'Org Manage', path: `/orgs/${selectedOrgId}/manage` }] : []),

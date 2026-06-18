@@ -146,7 +146,7 @@ export const LoginPage: FC = () => {
   };
 
   return (
-    <main className="min-h-screen bg-[#f6f6f7] px-4 py-8 text-slate-950 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_18%_-10%,rgba(124,58,237,0.12),transparent_28%),linear-gradient(180deg,#ffffff_0%,#f6f6f7_45%,#eef1f5_100%)] px-4 py-8 text-slate-950 sm:px-6 lg:px-8">
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center justify-center">
         <div className="grid w-full gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
           <section className="hidden lg:block">
@@ -158,7 +158,7 @@ export const LoginPage: FC = () => {
             </div>
           </section>
 
-          <section className="mx-auto w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_42px_rgba(148,163,184,0.18)] sm:p-8">
+          <section className="mx-auto w-full max-w-md rounded-2xl border border-slate-200 bg-white/96 p-6 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_28px_70px_rgba(15,23,42,0.14)] ring-1 ring-white backdrop-blur sm:p-8">
             <div className="mb-8 lg:hidden">
               <BrandBlock compact />
             </div>
@@ -175,11 +175,11 @@ export const LoginPage: FC = () => {
               </p>
             </div>
 
-            <div className="mt-6 grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-50 p-1">
-              <button type="button" onClick={() => switchMode("signin")} className={mode === "signin" ? "rounded-md bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm" : "rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-950"}>
+            <div className="mt-6 grid grid-cols-2 rounded-2xl border border-slate-200 bg-slate-100/80 p-1 shadow-inner">
+              <button type="button" onClick={() => switchMode("signin")} className={mode === "signin" ? "rounded-xl bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm ring-1 ring-violet-100" : "rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white/70 hover:text-slate-950"}>
                 Sign in
               </button>
-              <button type="button" onClick={() => switchMode("invite")} className={mode === "invite" ? "rounded-md bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm" : "rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-950"}>
+              <button type="button" onClick={() => switchMode("invite")} className={mode === "invite" ? "rounded-xl bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm ring-1 ring-violet-100" : "rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white/70 hover:text-slate-950"}>
                 Use invite
               </button>
             </div>
@@ -259,7 +259,7 @@ export const LoginPage: FC = () => {
 function BrandBlock({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className={`${compact ? "h-10 w-10" : "h-12 w-12"} flex items-center justify-center rounded-lg bg-violet-600 text-sm font-black text-white shadow-sm`}>
+      <div className={`${compact ? "h-10 w-10" : "h-12 w-12"} flex items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-sm font-black text-white shadow-[0_14px_30px_rgba(124,58,237,0.28)]`}>
         VS
       </div>
       <div>
@@ -272,7 +272,7 @@ function BrandBlock({ compact = false }: { compact?: boolean }) {
 
 function InfoRow({ title, description }: { title: string; description: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm ring-1 ring-white">
       <div className="text-sm font-semibold text-slate-950">{title}</div>
       <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
     </div>
@@ -314,7 +314,7 @@ function PasswordField({
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
       />
-      <button type="button" onClick={onToggle} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-950">
+      <button type="button" onClick={onToggle} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950">
         {show ? "Hide" : "Show"}
       </button>
     </div>
