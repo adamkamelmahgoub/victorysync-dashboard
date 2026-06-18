@@ -117,7 +117,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
         full_name: profileData.user.full_name || "",
         phone_number: profileData.user.phone_number || "",
         profile_pic_url: profileData.user.profile_pic_url || "",
-        theme: profileData.user.theme || "dark",
+        theme: profileData.user.theme || "light",
       });
     }
 

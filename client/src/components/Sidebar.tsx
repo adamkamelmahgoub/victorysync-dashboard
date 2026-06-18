@@ -102,7 +102,7 @@ function NavButton({
 export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const navigate = useNavigate();
   const { signOut, user, selectedOrgId, orgs, profile, featureAccess, featureAccessLoaded } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({
     Developer: true,
@@ -231,7 +231,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           onClick={() => void toggleTheme()}
           className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50 hover:text-slate-950 active:translate-y-0"
         >
-          {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          Light UI
         </button>
         <button
           onClick={() => navigateTo('/account-settings')}

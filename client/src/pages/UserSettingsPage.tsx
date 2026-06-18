@@ -12,7 +12,7 @@ import {
 } from '../lib/leadAlarm';
 export default function UserSettingsPage() {
   const { user, selectedOrgId, refreshProfile } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { setTheme } = useTheme();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -354,18 +354,12 @@ export default function UserSettingsPage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-sm font-semibold text-slate-200">Theme</div>
-              <div className="mt-1 text-sm text-slate-400">Choose the dashboard appearance for your account.</div>
+              <div className="mt-1 text-sm text-slate-400">VictorySync now uses a visibility-first light interface across the dashboard.</div>
             </div>
-            <div className="inline-flex rounded-xl bg-slate-800/70 p-1">
-              <button
-                onClick={() => void setTheme('dark')}
-                className={`rounded-lg px-4 py-2 text-sm transition ${theme === 'dark' ? 'bg-cyan-600 text-white' : 'text-slate-300'}`}
-              >
-                Dark
-              </button>
+            <div className="inline-flex rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200">
               <button
                 onClick={() => void setTheme('light')}
-                className={`rounded-lg px-4 py-2 text-sm transition ${theme === 'light' ? 'bg-cyan-600 text-white' : 'text-slate-300'}`}
+                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700"
               >
                 Light
               </button>

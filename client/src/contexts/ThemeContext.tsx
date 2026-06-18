@@ -12,17 +12,16 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-function applyTheme(theme: ThemeMode) {
-  document.documentElement.dataset.theme = theme;
-  document.body.dataset.theme = theme;
-  localStorage.setItem('vs-theme', theme);
+function applyTheme(_theme: ThemeMode) {
+  document.documentElement.dataset.theme = 'light';
+  document.body.dataset.theme = 'light';
+  localStorage.setItem('vs-theme', 'light');
 }
 
 export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [theme, setThemeState] = useState<ThemeMode>(() => {
-    const stored = localStorage.getItem('vs-theme');
-    return stored === 'dark' ? 'dark' : 'light';
+    return 'light';
   });
 
   useEffect(() => {
@@ -38,8 +37,7 @@ export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
           headers: { 'x-user-id': user.id }
         });
         if (!response.ok) return;
-        const data = await response.json();
-        const next = data?.user?.theme === 'dark' ? 'dark' : 'light';
+        const next = 'light';
         if (!cancelled) setThemeState(next);
       } catch {
         // keep local theme
@@ -51,8 +49,8 @@ export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
     };
   }, [user?.id]);
 
-  const setTheme = async (next: ThemeMode) => {
-    setThemeState(next);
+  const setTheme = async (_next: ThemeMode) => {
+    setThemeState('light');
     if (!user?.id) return;
     try {
       await fetch(buildApiUrl('/api/user/profile'), {
@@ -61,7 +59,7 @@ export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
           'Content-Type': 'application/json',
           'x-user-id': user.id,
         },
-        body: JSON.stringify({ theme: next })
+        body: JSON.stringify({ theme: 'light' })
       });
     } catch {
       // local preference is still applied
@@ -69,7 +67,7 @@ export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   const toggleTheme = async () => {
-    await setTheme(theme === 'dark' ? 'light' : 'dark');
+    await setTheme('light');
   };
 
   const value = useMemo(() => ({ theme, setTheme, toggleTheme }), [theme]);
