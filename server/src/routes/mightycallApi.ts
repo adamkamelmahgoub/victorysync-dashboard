@@ -354,6 +354,56 @@ async function loadDirectMightyCallStatuses(assignments: any[]) {
   return { rows: rows.filter(Boolean), warnings };
 }
 
+function liveRowStatus(row: any) {
+  return String(row?.normalized_status || row?.status || '').toLowerCase();
+}
+
+function liveRowIsActive(row: any) {
+  return ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(liveRowStatus(row));
+}
+
+function liveRowTimestampMs(row: any) {
+  const parsed = Date.parse(String(row?.last_synced_at || row?.updated_at || row?.last_event_at || row?.status_started_at || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function loadCachedLiveStatusRows(orgIds: string[]) {
+  if (orgIds.length === 0) return [];
+  const rows: any[] = [];
+  try {
+    const { data } = await supabaseAdmin
+      .from('agent_live_status')
+      .select('*')
+      .in('org_id', orgIds)
+      .limit(2000);
+    rows.push(...((data || []) as any[]));
+  } catch {}
+  try {
+    const { data } = await supabaseAdmin
+      .from('live_agent_statuses')
+      .select('*')
+      .in('org_id', orgIds)
+      .limit(2000);
+    rows.push(...((data || []) as any[]).map((row: any) => ({
+      ...row,
+      mightycall_extension: row.mightycall_extension || row.extension,
+      normalized_status: row.normalized_status || row.status,
+      last_synced_at: row.last_synced_at || row.last_seen_at || row.updated_at,
+      source: row.source || 'live_agent_statuses_cache',
+    })));
+  } catch {}
+
+  const byKey = new Map<string, any>();
+  for (const row of rows) {
+    const extension = String(row.mightycall_extension || row.extension || '').replace(/\D/g, '');
+    if (!row.org_id || !extension) continue;
+    const key = `${row.org_id}:${extension}`;
+    const current = byKey.get(key);
+    if (!current || liveRowTimestampMs(row) >= liveRowTimestampMs(current)) byKey.set(key, row);
+  }
+  return Array.from(byKey.values());
+}
+
 async function buildLiveStatusPayload(req: express.Request) {
   const scope = await resolveOrgScope(req);
   if (scope.orgIds.length === 0) {
@@ -367,14 +417,25 @@ async function buildLiveStatusPayload(req: express.Request) {
   }
 
   const assignments = await loadAssignedExtensionRows(scope.orgIds);
-  const direct = await loadDirectMightyCallStatuses(assignments);
+  const [cachedRows, direct] = await Promise.all([
+    loadCachedLiveStatusRows(scope.orgIds),
+    loadDirectMightyCallStatuses(assignments),
+  ]);
   const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
   const { data: orgs } = await supabaseAdmin.from('organizations').select('id, name').in('id', scope.orgIds);
   const orgNames = new Map((orgs || []).map((row: any) => [String(row.id), String(row.name || '')]));
   const liveByKey = new Map<string, any>();
-  for (const row of direct.rows) {
+  for (const row of cachedRows) {
     const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
     liveByKey.set(key, row);
+  }
+  for (const row of direct.rows) {
+    const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
+    const current = liveByKey.get(key);
+    const nextIsActive = liveRowIsActive(row);
+    const currentIsActive = liveRowIsActive(current);
+    const currentFresh = current && Date.now() - liveRowTimestampMs(current) < 45_000;
+    if (nextIsActive || !currentIsActive || !currentFresh) liveByKey.set(key, row);
   }
   for (const assignment of assignments) {
     const key = `${assignment.org_id}:${assignment.extension}`;

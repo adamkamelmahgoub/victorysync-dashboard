@@ -17,7 +17,7 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuth();
+  const { user, globalRole } = useAuth();
   const hasLoadedOnce = useRef(false);
   const requestInFlight = useRef(false);
 
@@ -26,7 +26,7 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
     const id = window.setInterval(() => fetchMetrics({ silent: true }), 15_000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line
-  }, [orgId, user?.id]);
+  }, [orgId, user?.id, globalRole]);
 
   function dateKey(date: Date) {
     return date.toISOString().slice(0, 10);
@@ -98,14 +98,18 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
       }));
       hasLoadedOnce.current = true;
 
+      const isAdmin = ['platform_admin', 'admin', 'super_admin'].includes(String(globalRole || ''));
       const numbersPath = orgId
-        ? `/api/reports/numbers?org_id=${encodeURIComponent(orgId)}&start_date=${today}&end_date=${today}&_fresh=${Date.now()}`
-        : `/api/reports/numbers?start_date=${today}&end_date=${today}&_fresh=${Date.now()}`;
+        ? `/api/orgs/${encodeURIComponent(orgId)}/phone-numbers?_fresh=${Date.now()}`
+        : isAdmin
+          ? `/api/admin/phone-numbers?_fresh=${Date.now()}`
+          : `/api/reports/numbers?start_date=${today}&end_date=${today}&_fresh=${Date.now()}`;
       void fetchJson(buildApiUrl(numbersPath), { headers, cache: 'no-store' })
         .then((numbersData) => {
-          const assignedPhones = (numbersData.numbers || []).map((row: any) => ({
+          const rows = numbersData.phone_numbers || numbersData.numbers || [];
+          const assignedPhones = rows.map((row: any) => ({
             id: row.id || row.phone_number_id || row.number,
-            number: row.number || row.phone_number || row.business_number,
+            number: row.number || row.phone_number || row.business_number || row.e164,
             label: row.label || row.organization_name || null,
           })).filter((row: any) => row.number);
           setMetrics((current) => current ? { ...current, assignedPhones } : current);

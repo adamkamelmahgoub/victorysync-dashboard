@@ -61,7 +61,10 @@ export async function getNotificationPreferencesByUserIds(userIds: string[]) {
     .from('notification_preferences')
     .select('*')
     .in('user_id', ids);
-  if (error) throw error;
+  if (error) {
+    if (isMissingPreferenceTable(error)) return new Map<string, any>();
+    throw error;
+  }
   return new Map((data || []).map((row: any) => [String(row.user_id), row]));
 }
 
@@ -72,8 +75,18 @@ export async function getNotificationPreferencesByEmails(emails: string[]) {
     .from('notification_preferences')
     .select('*')
     .in('email', clean);
-  if (error) throw error;
+  if (error) {
+    if (isMissingPreferenceTable(error)) return new Map<string, any>();
+    throw error;
+  }
   return new Map((data || []).map((row: any) => [String(row.email || '').toLowerCase(), row]));
+}
+
+export function isMissingPreferenceTable(error: any) {
+  const code = String(error?.code || '');
+  const status = Number(error?.status || error?.statusCode || 0);
+  const message = String(error?.message || error?.details || '');
+  return status === 404 || code === '42P01' || /notification_preferences|schema cache|does not exist|not found/i.test(message);
 }
 
 export async function filterEmailsByNotificationPreference(
@@ -113,6 +126,13 @@ export async function upsertNotificationPreferences(params: {
     .upsert(payload, { onConflict: 'user_id' })
     .select('*')
     .single();
-  if (error) throw error;
+  if (error) {
+    if (isMissingPreferenceTable(error)) {
+      const err = new Error('notification_preferences migration has not been applied yet') as Error & { status?: number };
+      err.status = 503;
+      throw err;
+    }
+    throw error;
+  }
   return data;
 }
