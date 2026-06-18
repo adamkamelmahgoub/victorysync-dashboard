@@ -8,7 +8,7 @@ This map documents the production data contract for the redesigned dashboard. UI
 | --- | --- | --- | --- | --- | --- | --- |
 | Login | Supabase Auth | `supabase.auth.signInWithPassword` | `email`, `password` | Public | Inline form error | Frontend no longer depends on Clerk. Auth session is restored from Supabase on refresh. |
 | Current user/profile | Supabase Auth + `users`/org membership tables | `/api/user/profile`, `/api/user/orgs` | user id, email, role, org ids | Authenticated users | Protected routes show skeleton while hydrating, then redirect to `/login` | API requests attach the Supabase access token server-side. |
-| Sidebar/topbar | Auth context | `/api/user/profile`, org context from auth provider | role, feature access, selected org | Role-gated | Hide unauthorized nav links | Sidebar IA now matches Overview, Live Status, Reports, Calls, SMS, Recordings, Agents, Phone Numbers, Organizations, Billing, Settings, plus real admin/system routes such as Users, Roles/Permissions, Invites, Integrations, Data Sync, API Keys, Support, Diagnostics, Logs, Packages, and Invoices. |
+| Sidebar/topbar | Auth context | `/api/user/profile`, org context from auth provider | role, feature access, selected org | Role-gated | Hide unauthorized nav links | Sidebar IA now uses one link per primary page to avoid duplicate-content routes: Overview, Live Status, Reports, Calls, SMS, Recordings, Agents, Phone Numbers, Organizations, Users, Ops Console, Billing, MightyCall, API Keys, Invites, Support, Number Requests, Diagnostics, Logs, and Settings. Query-tab destinations remain reachable inside their parent pages. |
 
 ## Overview
 
