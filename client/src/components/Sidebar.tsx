@@ -9,7 +9,7 @@ interface SidebarProps {
 }
 
 type NavItem = { label: string; path: string; badge?: string; featureKey?: string };
-type NavGroup = { label: string; items: NavItem[] };
+type NavGroup = { label: string; items: NavItem[]; defaultCollapsed?: boolean };
 
 const navGlyphs: Record<string, string> = {
   Overview: 'O',
@@ -35,6 +35,10 @@ const navGlyphs: Record<string, string> = {
   Logs: 'L',
   Settings: 'T',
   'Debug Auth': 'B',
+  'Admin Home': 'H',
+  'Org Settings': 'S',
+  'Org Manage': 'M',
+  'Account Settings': 'A',
 };
 
 function isActivePath(currentPath: string, itemPath: string) {
@@ -61,7 +65,7 @@ function NavButton({
       className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition duration-200 ${
         active
           ? 'bg-violet-50 text-violet-900 shadow-[inset_3px_0_0_rgba(124,58,237,0.9),0_8px_20px_rgba(124,58,237,0.08)] ring-1 ring-violet-200/80'
-          : 'text-slate-700 hover:bg-white hover:text-slate-950 hover:shadow-sm hover:ring-1 hover:ring-slate-200/80 active:scale-[0.99]'
+          : 'text-slate-700 hover:bg-white hover:text-slate-950 hover:shadow-sm hover:ring-1 hover:ring-slate-200/80 active:scale-[0.99] focus:outline-none focus:ring-4 focus:ring-violet-100'
       }`}
     >
       <span className="flex min-w-0 items-center gap-2">
@@ -86,6 +90,13 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const { signOut, user, selectedOrgId, orgs, profile, featureAccess, featureAccessLoaded } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({
+    Developer: true,
+  });
+
+  const toggleGroup = (label: string) => {
+    setCollapsedGroups((current) => ({ ...current, [label]: !(current[label] ?? false) }));
+  };
 
   const navGroups: NavGroup[] = isAdmin
     ? [
@@ -93,6 +104,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Command',
           items: [
             { label: 'Overview', path: '/' },
+            { label: 'Admin Home', path: '/admin' },
             { label: 'Live Status', path: '/live-status', badge: 'Live', featureKey: 'live_status' },
             { label: 'Reports', path: '/admin/reports' },
             { label: 'Calls', path: '/calls', featureKey: 'reports' },
@@ -123,11 +135,14 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Ops Console', path: '/admin/operations' },
             { label: 'Diagnostics', path: '/admin/diagnostics' },
             { label: 'Logs', path: '/admin/logs' },
-            { label: 'Settings', path: '/account-settings' },
+            { label: 'Org Settings', path: '/settings' },
+            ...(selectedOrgId ? [{ label: 'Org Manage', path: `/orgs/${selectedOrgId}/manage` }] : []),
+            { label: 'Account Settings', path: '/account-settings' },
           ],
         },
         {
           label: 'Developer',
+          defaultCollapsed: true,
           items: [
             { label: 'Debug Auth', path: '/debug-auth' },
           ],
@@ -148,7 +163,9 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
             { label: 'Billing', path: '/billing', featureKey: 'billing' },
             { label: 'API Keys', path: '/api-keys', featureKey: 'api_keys' },
-            { label: 'Settings', path: '/account-settings' },
+            { label: 'Org Settings', path: '/settings' },
+            ...(selectedOrgId ? [{ label: 'Org Manage', path: `/orgs/${selectedOrgId}/manage` }] : []),
+            { label: 'Account Settings', path: '/account-settings' },
             { label: 'Support', path: '/support', featureKey: 'support' },
           ],
         },
@@ -236,16 +253,32 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
       </div>
 
       <nav className="mt-4 flex-1 overflow-y-auto pr-1">
-        {navGroups.map((group) => (
-          <div key={group.label} className="mb-4">
-            <div className="mb-2 px-3 text-[10px] font-bold uppercase text-slate-500">{group.label}</div>
-            <div className="space-y-1">
-              {group.items.filter((item) => isAdmin || !item.featureKey || (featureAccessLoaded && featureAccess[item.featureKey] !== false)).map((item) => (
-                <NavButton key={item.path} item={item} currentPath={currentPath} onClick={() => navigateTo(item.path)} />
-              ))}
+        {navGroups.map((group) => {
+          const visibleItems = group.items.filter((item) => isAdmin || !item.featureKey || (featureAccessLoaded && featureAccess[item.featureKey] !== false));
+          if (!visibleItems.length) return null;
+          const collapsed = collapsedGroups[group.label] ?? group.defaultCollapsed ?? false;
+
+          return (
+            <div key={group.label} className="mb-3">
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.label)}
+                aria-expanded={!collapsed}
+                className="mb-2 flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left text-[10px] font-bold uppercase text-slate-500 transition hover:bg-white hover:text-slate-700 hover:shadow-sm focus:outline-none focus:ring-4 focus:ring-violet-100"
+              >
+                <span>{group.label}</span>
+                <span className={`text-xs transition-transform ${collapsed ? '-rotate-90' : 'rotate-0'}`}>v</span>
+              </button>
+              {!collapsed && (
+                <div className="space-y-1">
+                  {visibleItems.map((item) => (
+                    <NavButton key={item.path} item={item} currentPath={currentPath} onClick={() => navigateTo(item.path)} />
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
 
       {accountControls}

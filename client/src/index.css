@@ -18,7 +18,7 @@
   --vs-brand-accent: #f59e0b;
   --vs-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 18px 48px rgba(15, 23, 42, 0.08);
   --vs-input-bg: #ffffff;
-  --vs-radius: 8px;
+  --vs-radius: 12px;
   color-scheme: light;
 }
 
@@ -145,11 +145,30 @@ textarea {
   letter-spacing: 0;
 }
 
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.16), 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
 select,
 input,
 textarea {
   border-radius: var(--vs-radius);
   border-color: var(--vs-border);
+}
+
+select {
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98));
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 table {
