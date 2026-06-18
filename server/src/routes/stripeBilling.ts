@@ -25,6 +25,15 @@ function normalizeCurrency(currency: string | null | undefined) {
   return String(currency || 'usd').toUpperCase();
 }
 
+function amountToCents(amount: number) {
+  return Math.round(Number(amount || 0) * 100);
+}
+
+function stripeId(value: unknown) {
+  if (!value) return null;
+  return typeof value === 'string' ? value : String((value as any).id || '') || null;
+}
+
 async function getActorId(req: Request) {
   return String((req as any).actorId || req.header('x-user-id') || '').trim() || null;
 }
@@ -186,7 +195,7 @@ async function insertBillingRecord(payload: Record<string, any>) {
   const { error } = await supabaseAdmin.from('billing_records').insert(enriched);
   if (!error) return;
   if (String(error.message || '').toLowerCase().includes('column')) {
-  const minimal = {
+    const minimal = {
       org_id: enriched.org_id || null,
       user_id: enriched.user_id || null,
       type: enriched.type,
@@ -198,6 +207,92 @@ async function insertBillingRecord(payload: Record<string, any>) {
     const retry = await supabaseAdmin.from('billing_records').insert(minimal);
     if (retry.error) throw retry.error;
     return;
+  }
+  throw error;
+}
+
+async function insertPaymentTransaction(payload: Record<string, any>) {
+  const enriched: Record<string, any> = {
+    status: 'paid',
+    amount: 0,
+    currency: 'USD',
+    payment_method: 'card',
+    provider: 'stripe',
+    processed_at: new Date().toISOString(),
+    metadata: {},
+    ...payload,
+  };
+
+  const { error } = await supabaseAdmin.from('payment_transactions').insert(enriched);
+  if (!error) return;
+
+  const message = String(error.message || '').toLowerCase();
+  if (message.includes('does not exist') || message.includes('schema cache')) return;
+  if (message.includes('column')) {
+    const minimal = {
+      org_id: enriched.org_id || null,
+      invoice_id: enriched.invoice_id || null,
+      amount: enriched.amount,
+      status: enriched.status,
+      currency: enriched.currency,
+      metadata: enriched.metadata,
+    };
+    const retry = await supabaseAdmin.from('payment_transactions').insert(minimal);
+    if (retry.error && !String(retry.error.message || '').toLowerCase().includes('does not exist')) throw retry.error;
+    return;
+  }
+  throw error;
+}
+
+async function getInvoiceForPayment(invoiceId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('invoices')
+    .select('*')
+    .eq('id', invoiceId)
+    .maybeSingle();
+  if (error) throw error;
+  return data as any;
+}
+
+async function markInvoicePaidFromCheckout(session: any) {
+  const invoiceId = String(session.metadata?.invoice_id || '');
+  if (!invoiceId) return null;
+
+  const paidAt = new Date().toISOString();
+  const amountPaid = centsToAmount(session.amount_total);
+  const paymentIntentId = stripeId(session.payment_intent);
+  const updatePayload: Record<string, any> = {
+    status: 'paid',
+    paid_at: paidAt,
+    amount_paid: amountPaid,
+    amount_due: 0,
+    stripe_customer_id: stripeId(session.customer),
+    stripe_checkout_session_id: session.id,
+    stripe_payment_intent_id: paymentIntentId,
+    metadata: {
+      stripe_checkout_session_id: session.id,
+      stripe_payment_intent_id: paymentIntentId,
+      paid_via: 'stripe_checkout',
+    },
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from('invoices')
+    .update(updatePayload)
+    .eq('id', invoiceId)
+    .select()
+    .maybeSingle();
+  if (!error) return data as any;
+
+  if (String(error.message || '').toLowerCase().includes('column')) {
+    const retry = await supabaseAdmin
+      .from('invoices')
+      .update({ status: 'paid' })
+      .eq('id', invoiceId)
+      .select()
+      .maybeSingle();
+    if (retry.error) throw retry.error;
+    return retry.data as any;
   }
   throw error;
 }
@@ -313,6 +408,16 @@ const checkoutSchema = z.object({
   quantity: z.coerce.number().int().min(1).max(500).default(1),
 });
 
+const paymentSessionSchema = z.object({
+  org_id: z.string().uuid().optional(),
+  invoice_id: z.string().uuid().optional(),
+  amount: z.coerce.number().positive().max(100000).optional(),
+  currency: z.string().trim().regex(/^[a-zA-Z]{3}$/).default('USD'),
+  description: z.string().trim().min(3).max(180).optional(),
+}).refine((value) => Boolean(value.invoice_id || value.amount), {
+  message: 'invoice_id or amount is required',
+});
+
 router.get('/plans', async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
@@ -386,6 +491,101 @@ router.post('/checkout-session', async (req, res) => {
   }
 });
 
+router.post('/payment-session', async (req, res) => {
+  try {
+    const actorId = await getActorId(req);
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const parsed = paymentSessionSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_payment_request' });
+
+    let invoice: any = null;
+    let orgId = parsed.data.org_id || null;
+    let amount = Number(parsed.data.amount || 0);
+    let currency = normalizeCurrency(parsed.data.currency);
+    let description = parsed.data.description || 'VictorySync payment';
+
+    if (parsed.data.invoice_id) {
+      invoice = await getInvoiceForPayment(parsed.data.invoice_id);
+      if (!invoice) return res.status(404).json({ error: 'invoice_not_found' });
+      orgId = String(invoice.org_id || orgId || '');
+      if (!orgId) return res.status(400).json({ error: 'invoice_missing_org' });
+
+      const status = String(invoice.status || '').toLowerCase();
+      if (['paid', 'void', 'voided', 'cancelled', 'canceled'].includes(status)) {
+        return res.status(409).json({ error: 'invoice_not_payable' });
+      }
+
+      amount = Number(invoice.amount_due ?? invoice.total_amount ?? invoice.grand_total ?? invoice.total ?? amount ?? 0);
+      currency = normalizeCurrency(invoice.currency || currency);
+      description = `VictorySync invoice ${invoice.invoice_number || invoice.id}`;
+    } else {
+      orgId = await resolveBillingOrgId(actorId, orgId);
+    }
+
+    if (!orgId) return res.status(403).json({ error: 'forbidden' });
+    if (!(await canManageBilling(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+
+    const amountCents = amountToCents(amount);
+    if (amountCents < 50) return res.status(400).json({ error: 'amount_too_small' });
+    if (amountCents > 10_000_000) return res.status(400).json({ error: 'amount_too_large' });
+
+    const stripe = getStripe();
+    const customerId = await getOrCreateCustomer(stripe, orgId, actorId);
+    const metadata: Record<string, string> = {
+      org_id: orgId,
+      user_id: actorId,
+      purpose: invoice ? 'invoice_payment' : 'one_time_payment',
+    };
+    if (invoice?.id) metadata.invoice_id = String(invoice.id);
+    if (invoice?.invoice_number) metadata.invoice_number = String(invoice.invoice_number);
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer: customerId,
+      payment_method_types: ['card'],
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: currency.toLowerCase(),
+          unit_amount: amountCents,
+          product_data: {
+            name: description,
+            metadata: { org_id: orgId },
+          },
+        },
+      }],
+      success_url: frontendUrl('/billing?stripe_payment=success'),
+      cancel_url: frontendUrl('/billing?stripe_payment=cancelled'),
+      client_reference_id: orgId,
+      metadata,
+      payment_intent_data: { metadata },
+      invoice_creation: {
+        enabled: true,
+        invoice_data: { metadata },
+      },
+    });
+
+    if (invoice?.id) {
+      await supabaseAdmin
+        .from('invoices')
+        .update({
+          stripe_customer_id: customerId,
+          stripe_checkout_session_id: session.id,
+          metadata: { stripe_checkout_session_id: session.id, payment_status: 'checkout_started' },
+        })
+        .eq('id', invoice.id)
+        .then((result) => {
+          if (result.error && !String(result.error.message || '').toLowerCase().includes('column')) throw result.error;
+        });
+    }
+
+    res.json({ url: session.url, session_id: session.id });
+  } catch (err: any) {
+    const status = err?.message === 'stripe_not_configured' ? 503 : 500;
+    res.status(status).json({ error: err?.message === 'stripe_not_configured' ? 'stripe_not_configured' : 'stripe_payment_session_failed' });
+  }
+});
+
 const portalSchema = z.object({ org_id: z.string().uuid().optional() });
 
 router.post('/portal-session', async (req, res) => {
@@ -433,7 +633,48 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
         const orgId = session.metadata?.org_id || session.client_reference_id || null;
         const planId = session.metadata?.plan_id || null;
         const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id || null;
-        if (subscriptionId) {
+        if (session.mode === 'payment') {
+          const localInvoice = await markInvoicePaidFromCheckout(session);
+          const resolvedOrgId = orgId || (localInvoice as any)?.org_id || null;
+          if (resolvedOrgId) {
+            await insertPaymentTransaction({
+              org_id: resolvedOrgId,
+              invoice_id: session.metadata?.invoice_id || null,
+              amount: centsToAmount(session.amount_total),
+              currency: normalizeCurrency(session.currency),
+              status: session.payment_status === 'paid' ? 'paid' : session.payment_status,
+              stripe_payment_intent_id: stripeId(session.payment_intent),
+              stripe_invoice_id: stripeId(session.invoice),
+              stripe_customer_id: stripeId(session.customer),
+              metadata: {
+                stripe_event: event.type,
+                stripe_session_id: session.id,
+                purpose: session.metadata?.purpose || 'payment',
+              },
+            });
+            await insertBillingRecord({
+              org_id: resolvedOrgId,
+              user_id: session.metadata?.user_id || null,
+              type: 'payment',
+              description: session.metadata?.invoice_number
+                ? `Stripe card payment for invoice ${session.metadata.invoice_number}`
+                : 'Stripe card payment',
+              amount: centsToAmount(session.amount_total),
+              currency: normalizeCurrency(session.currency),
+              status: session.payment_status === 'paid' ? 'paid' : session.payment_status,
+              stripe_customer_id: stripeId(session.customer),
+              stripe_checkout_session_id: session.id,
+              stripe_payment_intent_id: stripeId(session.payment_intent),
+              stripe_invoice_id: stripeId(session.invoice),
+              metadata: {
+                stripe_event: event.type,
+                stripe_session_id: session.id,
+                invoice_id: session.metadata?.invoice_id || null,
+                purpose: session.metadata?.purpose || 'payment',
+              },
+            });
+          }
+        } else if (subscriptionId) {
           const subscription = await stripe.subscriptions.retrieve(subscriptionId);
           await syncStripeSubscription(subscription, orgId, planId);
         } else if (orgId) {
@@ -445,7 +686,7 @@ export async function stripeWebhookHandler(req: Request, res: Response) {
             stripe_checkout_session_id: session.id,
           });
         }
-        if (orgId) {
+        if (orgId && session.mode !== 'payment') {
           await insertBillingRecord({
             org_id: orgId,
             user_id: session.metadata?.user_id || null,

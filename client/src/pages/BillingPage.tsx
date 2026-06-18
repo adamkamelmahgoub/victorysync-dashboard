@@ -23,6 +23,9 @@ type Invoice = {
   invoice_number?: string;
   status?: string;
   created_at?: string;
+  currency?: string;
+  amount_due?: number;
+  grand_total?: number;
   total_amount?: number;
   total?: number;
 };
@@ -166,6 +169,35 @@ export default function BillingPage() {
     }
   };
 
+  const invoiceAmount = (invoice: Invoice) => Number(invoice.amount_due ?? invoice.total_amount ?? invoice.grand_total ?? invoice.total ?? 0);
+
+  const invoicePayable = (invoice: Invoice) => {
+    const status = String(invoice.status || '').toLowerCase();
+    return invoiceAmount(invoice) > 0 && !['paid', 'void', 'voided', 'cancelled', 'canceled'].includes(status);
+  };
+
+  const payInvoice = async (invoice: Invoice) => {
+    if (!user?.id) return;
+    setBillingAction(`pay:${invoice.id}`);
+    setError(null);
+    try {
+      const resp = await fetch(buildApiUrl('/api/billing/stripe/payment-session'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({ org_id: overview?.org_id || undefined, invoice_id: invoice.id }),
+      });
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok || !payload.url) {
+        throw new Error(payload.message || payload.error || 'Unable to open card payment');
+      }
+      window.location.href = payload.url;
+    } catch (e: any) {
+      setError(e?.message || 'Unable to open card payment');
+    } finally {
+      setBillingAction(null);
+    }
+  };
+
   const openBillingPortal = async () => {
     if (!user?.id) return;
     setBillingAction('portal');
@@ -197,7 +229,7 @@ export default function BillingPage() {
   return (
     <PageLayout
       title="Billing"
-      description="Manage your VictorySync plan, Stripe subscription, payment details, invoices, and usage records."
+      description="Manage your VictorySync plan, Stripe subscription, card payments, invoices, and usage records."
       actions={
         <div className="flex flex-wrap gap-2">
           <button onClick={openBillingPortal} disabled={loading || billingAction === 'portal'} className="vs-button-secondary">
@@ -381,9 +413,20 @@ export default function BillingPage() {
                       <td className="px-4 py-3 font-medium text-slate-900">{invoice.invoice_number || invoice.id}</td>
                       <td className="px-4 py-3"><StatusBadge tone={statusTone(invoice.status)}>{invoice.status || 'Unknown'}</StatusBadge></td>
                       <td className="px-4 py-3 text-slate-600">{formatDate(invoice.created_at)}</td>
-                      <td className="px-4 py-3 font-medium text-slate-900">{formatMoney(invoice.total_amount ?? invoice.total)}</td>
+                      <td className="px-4 py-3 font-medium text-slate-900">{formatMoney(invoiceAmount(invoice), invoice.currency || 'USD')}</td>
                       <td className="px-4 py-3">
-                        <button onClick={() => exportInvoice(invoice.id)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Export CSV</button>
+                        <div className="flex flex-wrap gap-2">
+                          {invoicePayable(invoice) && (
+                            <button
+                              onClick={() => payInvoice(invoice)}
+                              disabled={!stripeConfigured || billingAction === `pay:${invoice.id}`}
+                              className="vs-button-primary !px-3 !py-1.5 !text-xs"
+                            >
+                              {billingAction === `pay:${invoice.id}` ? 'Opening...' : 'Pay by card'}
+                            </button>
+                          )}
+                          <button onClick={() => exportInvoice(invoice.id)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Export CSV</button>
+                        </div>
                       </td>
                     </tr>
                   ))}

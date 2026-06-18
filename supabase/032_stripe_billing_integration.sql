@@ -22,6 +22,8 @@ alter table public.invoices
   add column if not exists stripe_invoice_id text,
   add column if not exists stripe_customer_id text,
   add column if not exists stripe_subscription_id text,
+  add column if not exists stripe_checkout_session_id text,
+  add column if not exists stripe_payment_intent_id text,
   add column if not exists stripe_hosted_invoice_url text,
   add column if not exists stripe_invoice_pdf text,
   add column if not exists currency text default 'USD',
@@ -49,4 +51,6 @@ create unique index if not exists idx_invoices_stripe_invoice_id_unique
   on public.invoices(stripe_invoice_id)
   where stripe_invoice_id is not null;
 create index if not exists idx_billing_records_stripe_invoice_id on public.billing_records(stripe_invoice_id);
+create index if not exists idx_invoices_stripe_checkout_session_id on public.invoices(stripe_checkout_session_id);
+create index if not exists idx_invoices_stripe_payment_intent_id on public.invoices(stripe_payment_intent_id);
 create index if not exists idx_payment_transactions_stripe_payment_intent_id on public.payment_transactions(stripe_payment_intent_id);
