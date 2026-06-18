@@ -299,7 +299,7 @@ export function SMSPage() {
     >
       <div className="space-y-6">
         {error && (
-          <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
             {error}
           </div>
         )}
@@ -402,8 +402,8 @@ export function SMSPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
           <div className="vs-surface w-full max-w-lg p-6">
             <div className="mb-5">
-              <h2 className="text-xl font-semibold text-white">Send SMS</h2>
-              <p className="mt-2 text-sm text-slate-400">Send an outbound SMS without leaving the dashboard.</p>
+              <h2 className="text-xl font-semibold text-slate-950">Send SMS</h2>
+              <p className="mt-2 text-sm text-slate-600">Send an outbound SMS without leaving the dashboard.</p>
             </div>
 
             <div className="space-y-4">

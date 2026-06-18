@@ -273,11 +273,11 @@ export function RecordingsPage() {
 		                <option value="outbound">Outbound</option>
 		              </select>
 		            </div>
-	            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">{syncing ? 'Syncing recent recordings...' : 'Scope: assigned numbers only'}</div>
+	            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm">{syncing ? 'Syncing recent recordings...' : 'Scope: assigned numbers only'}</div>
           </div>
         </SectionCard>
 
-        {error && <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+        {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</div>}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <MetricStatCard label="Recordings" value={summary.total} />
@@ -293,9 +293,9 @@ export function RecordingsPage() {
           ) : filteredRows.length === 0 ? (
             <div className="p-5"><EmptyStatePanel title={emptyCopy.title} description={emptyCopy.description} /></div>
           ) : (
-            <div className="max-h-[72vh] overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500">
+            <div className="vs-table-shell max-h-[72vh] overflow-auto">
+              <table className="w-full min-w-[1040px] text-sm">
+                <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-slate-600">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Call date/time</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">From</th>
@@ -307,16 +307,16 @@ export function RecordingsPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Recording</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/6">
+                <tbody className="divide-y divide-slate-100 bg-white">
                   {filteredRows.map((recording) => (
-                    <tr key={recording.id} className="transition hover:bg-white/[0.03]">
-                      <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(recording.recording_date || recording.created_at)}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-200">{recording.from_number || '-'}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-200">{recording.to_number || '-'}</td>
-                      <td className="px-4 py-3 text-slate-300">{recording.agent_name || recording.agent_extension || recording.extension || '-'}</td>
-                      <td className="px-4 py-3 text-slate-300">{fmtDuration(secondsOf(recording))}</td>
+                    <tr key={recording.id} className="transition hover:bg-violet-50/40">
+                      <td className="px-4 py-3 text-slate-600">{fmtDate(recording.recording_date || recording.created_at)}</td>
+                      <td className="px-4 py-3 font-mono text-slate-700">{recording.from_number || '-'}</td>
+                      <td className="px-4 py-3 font-mono text-slate-700">{recording.to_number || '-'}</td>
+                      <td className="px-4 py-3 text-slate-700">{recording.agent_name || recording.agent_extension || recording.extension || '-'}</td>
+                      <td className="px-4 py-3 text-slate-700">{fmtDuration(secondsOf(recording))}</td>
                       <td className="px-4 py-3"><StatusBadge tone={String(recording.status || '').toLowerCase().includes('fail') ? 'warning' : 'neutral'}>{recording.status || 'available'}</StatusBadge></td>
-                      {isPlatformAdmin && <td className="px-4 py-3 text-slate-300">{recording.organization_name || orgs.find((org) => org.id === recording.org_id)?.name || recording.org_id || '-'}</td>}
+                      {isPlatformAdmin && <td className="px-4 py-3 text-slate-700">{recording.organization_name || orgs.find((org) => org.id === recording.org_id)?.name || recording.org_id || '-'}</td>}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
 	                          {recording.id ? (
@@ -336,7 +336,7 @@ export function RecordingsPage() {
               </table>
 
               {nextOffset !== null && (
-                <div className="flex justify-center border-t border-white/8 p-4">
+                <div className="flex justify-center border-t border-slate-200 bg-white p-4">
                   <button onClick={() => fetchRecordings(false)} disabled={loadingMore} className="vs-button-secondary">
                     {loadingMore ? 'Loading more...' : 'Load more'}
                   </button>

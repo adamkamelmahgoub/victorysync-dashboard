@@ -371,15 +371,15 @@ const NumbersPage: FC = () => {
                         onClick={() => setSelectedPhoneId(item.id)}
                         className={`rounded-3xl border p-5 text-left transition ${
                           isSelected
-                            ? 'border-cyan-400/30 bg-cyan-400/[0.07]'
-                            : 'border-white/8 bg-white/[0.03] hover:border-white/14 hover:bg-white/[0.045]'
+                            ? 'border-violet-300 bg-violet-50 shadow-[0_12px_28px_rgba(124,58,237,0.10)]'
+                            : 'border-slate-200 bg-white shadow-sm hover:border-violet-200 hover:bg-violet-50/40 hover:shadow-md'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
-                            <div className="truncate text-xl font-semibold text-white">{value}</div>
-                            <div className="mt-2 text-sm text-slate-400">{item.label || item.provider || orgName || 'Phone inventory'}</div>
-                            {orgName && <div className="mt-1 text-xs text-slate-500">{orgName}</div>}
+                            <div className="truncate text-xl font-semibold text-slate-950">{value}</div>
+                            <div className="mt-2 text-sm font-medium text-slate-600">{item.label || item.provider || orgName || 'Phone inventory'}</div>
+                            {orgName && <div className="mt-1 text-sm text-slate-600">{orgName}</div>}
                             <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
                               <div>
                                 <div className="font-semibold uppercase tracking-[0.12em] text-slate-500">Calls</div>
@@ -428,9 +428,9 @@ const NumbersPage: FC = () => {
                   description={`No recordings are currently linked to ${selectedPhoneValue}. Once calls are recorded, they will appear here with the phone number label instead of an internal UUID.`}
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="border-b border-white/8 text-slate-500">
+                <div className="vs-table-shell overflow-x-auto">
+                  <table className="w-full min-w-[840px] text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Direction</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Caller</th>
@@ -441,23 +441,23 @@ const NumbersPage: FC = () => {
                         <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-[0.18em]">Recording</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/6">
+                    <tbody className="divide-y divide-slate-100 bg-white">
                       {filteredRecordings.slice(0, 100).map((recording) => (
-                        <tr key={recording.id} className="hover:bg-white/[0.03]">
+                        <tr key={recording.id} className="hover:bg-violet-50/40">
                           <td className="px-4 py-3">
                             <StatusBadge tone={recording.direction === 'inbound' ? 'info' : 'success'}>
                               {recording.direction === 'inbound' ? 'Inbound' : 'Outbound'}
                             </StatusBadge>
                           </td>
-                          <td className="px-4 py-3 font-mono text-xs text-slate-200">{recording.from_number || '-'}</td>
-                          <td className="px-4 py-3 font-mono text-xs text-slate-200">{recording.to_number || selectedPhoneValue || '-'}</td>
-                          <td className="px-4 py-3 text-slate-300">{formatDuration(recording.duration)}</td>
+                          <td className="px-4 py-3 font-mono text-slate-700">{recording.from_number || '-'}</td>
+                          <td className="px-4 py-3 font-mono text-slate-700">{recording.to_number || selectedPhoneValue || '-'}</td>
+                          <td className="px-4 py-3 text-slate-700">{formatDuration(recording.duration)}</td>
                           <td className="px-4 py-3">
                             <StatusBadge tone={String(recording.status || '').toLowerCase().includes('fail') ? 'warning' : 'neutral'}>
                               {recording.status || 'completed'}
                             </StatusBadge>
                           </td>
-                          <td className="px-4 py-3 text-slate-400">{formatDateTime(recording.started_at || recording.recording_date)}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatDateTime(recording.started_at || recording.recording_date)}</td>
                           <td className="px-4 py-3 text-right">
                             {recording.id ? (
                               <a href={recordingDownloadUrl(recording.id)} target="_blank" rel="noreferrer" className="vs-button-secondary inline-flex">

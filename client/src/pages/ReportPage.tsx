@@ -403,7 +403,7 @@ function ReportTable({
   if (rows.length === 0) return <div className="p-5"><EmptyStatePanel title="No matching data" description="No real records matched the current filters." /></div>;
 
   return (
-    <div className="vs-table-shell overflow-auto">
+    <div className="overflow-auto">
       <table className="w-full min-w-[980px] text-sm">
         <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-slate-500">
           <tr>{displayColumns.map((column) => <th key={column} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]">{column.replace(/_/g, ' ')}</th>)}</tr>

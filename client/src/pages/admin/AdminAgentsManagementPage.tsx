@@ -46,10 +46,10 @@ function fmtDate(value?: string | null) {
 }
 
 function statTone(kind: 'default' | 'success' | 'warning' | 'accent') {
-  if (kind === 'success') return 'text-emerald-300 border-emerald-500/20 bg-emerald-500/10';
-  if (kind === 'warning') return 'text-amber-300 border-amber-500/20 bg-amber-500/10';
-  if (kind === 'accent') return 'text-cyan-300 border-cyan-500/20 bg-cyan-500/10';
-  return 'text-slate-200 border-white/10 bg-white/[0.03]';
+  if (kind === 'success') return 'text-emerald-700 border-emerald-200 bg-emerald-50';
+  if (kind === 'warning') return 'text-amber-700 border-amber-200 bg-amber-50';
+  if (kind === 'accent') return 'text-sky-700 border-sky-200 bg-sky-50';
+  return 'text-slate-700 border-slate-200 bg-white';
 }
 
 const MANAGED_ROLES = ['agent', 'org_manager'];
@@ -488,33 +488,33 @@ const AdminAgentsManagementPage: FC = () => {
         <AdminTopNav />
 
         <section className={`${surfaceClass} overflow-hidden`}>
-          <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_35%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.14),transparent_28%)] px-6 py-6">
+          <div className="border-b border-slate-200 bg-gradient-to-br from-white via-white to-violet-50 px-6 py-6">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
               <div className="max-w-2xl">
-                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">
+                <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-bold uppercase text-violet-700 shadow-sm">
                   Agent Operations
                 </div>
-                <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white">Assignments, extensions, and live status in one place</h2>
-                <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">
+                <h2 className="mt-4 text-3xl font-bold text-slate-950">Assignments, extensions, and live status in one place</h2>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600">
                   Manage agent coverage, import real MightyCall extensions, and watch who is active right now without bouncing between separate tools.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:min-w-[520px]">
                 <div className={`rounded-2xl border px-4 py-4 ${statTone('default')}`}>
-                  <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Assignments</div>
-                  <div className="mt-2 text-2xl font-semibold text-white">{summary.total}</div>
+                  <div className="text-xs font-bold uppercase text-slate-600">Assignments</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-950">{summary.total}</div>
                 </div>
                 <div className={`rounded-2xl border px-4 py-4 ${statTone('accent')}`}>
-                  <div className="text-xs uppercase tracking-[0.18em] text-cyan-200/70">On Call</div>
-                  <div className="mt-2 text-2xl font-semibold text-cyan-200">{summary.onCall}</div>
+                  <div className="text-xs font-bold uppercase text-sky-700">On Call</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-950">{summary.onCall}</div>
                 </div>
                 <div className={`rounded-2xl border px-4 py-4 ${statTone('success')}`}>
-                  <div className="text-xs uppercase tracking-[0.18em] text-emerald-200/70">Agents</div>
-                  <div className="mt-2 text-2xl font-semibold text-emerald-200">{summary.agents}</div>
+                  <div className="text-xs font-bold uppercase text-emerald-700">Agents</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-950">{summary.agents}</div>
                 </div>
                 <div className={`rounded-2xl border px-4 py-4 ${statTone('warning')}`}>
-                  <div className="text-xs uppercase tracking-[0.18em] text-amber-200/70">Extensions</div>
-                  <div className="mt-2 text-2xl font-semibold text-amber-200">{summary.assignedExtensions}</div>
+                  <div className="text-xs font-bold uppercase text-amber-700">Extensions</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-950">{summary.assignedExtensions}</div>
                 </div>
               </div>
             </div>
@@ -523,8 +523,8 @@ const AdminAgentsManagementPage: FC = () => {
           <div className="px-6 py-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-white">Create Assignment</h2>
-              <p className="mt-1 text-sm text-slate-400">Assign users to organizations as agents or managers with a MightyCall extension.</p>
+              <h2 className="text-lg font-semibold text-slate-950">Create Assignment</h2>
+              <p className="mt-1 text-sm text-slate-600">Assign users to organizations as agents or managers with a MightyCall extension.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -533,7 +533,7 @@ const AdminAgentsManagementPage: FC = () => {
                   if (activeOrgId || createOrgId) refreshExtensionsForOrg(activeOrgId || createOrgId);
                 }}
                 disabled={(globalExtensionsLoading || extensionsLoadingByOrg[activeOrgId || createOrgId]) || !(activeOrgId || createOrgId)}
-                className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-cyan-200 disabled:opacity-50"
+                className="vs-button-secondary"
               >
                 {(globalExtensionsLoading || extensionsLoadingByOrg[activeOrgId || createOrgId]) ? 'Refreshing extensions...' : 'Refresh Extensions'}
               </button>
@@ -547,7 +547,7 @@ const AdminAgentsManagementPage: FC = () => {
               <button
                 onClick={loadLiveStatuses}
                 disabled={liveLoading}
-                className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-cyan-400/40 hover:bg-cyan-400/10 hover:text-cyan-200 disabled:opacity-50"
+                className="vs-button-secondary"
               >
                 {liveLoading ? 'Refreshing live...' : 'Refresh Live Status'}
               </button>
@@ -555,23 +555,23 @@ const AdminAgentsManagementPage: FC = () => {
           </div>
 
           <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4">
-            <select value={createUserId} onChange={(e) => setCreateUserId(e.target.value)} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50 focus:bg-slate-900">
+            <select value={createUserId} onChange={(e) => setCreateUserId(e.target.value)} className="vs-input">
               <option value="">Select user</option>
               {unassignedUsers.map((row) => (
                 <option key={row.id} value={row.id}>{row.email}</option>
               ))}
             </select>
-            <select value={createOrgId} onChange={(e) => setCreateOrgId(e.target.value)} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50 focus:bg-slate-900">
+            <select value={createOrgId} onChange={(e) => setCreateOrgId(e.target.value)} className="vs-input">
               <option value="">Select org</option>
               {orgs.map((row) => (
                 <option key={row.id} value={row.id}>{row.name}</option>
               ))}
             </select>
-            <select value={createRole} onChange={(e) => setCreateRole(e.target.value)} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50 focus:bg-slate-900">
+            <select value={createRole} onChange={(e) => setCreateRole(e.target.value)} className="vs-input">
               <option value="agent">Agent</option>
               <option value="org_manager">Org Manager</option>
             </select>
-            <select value={createExtension} onChange={(e) => setCreateExtension(e.target.value)} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50 focus:bg-slate-900">
+            <select value={createExtension} onChange={(e) => setCreateExtension(e.target.value)} className="vs-input">
               <option value="">{(globalExtensionsLoading || extensionsLoadingByOrg[createOrgId]) ? 'Loading extensions...' : 'Select extension'}</option>
               {createExtensionOptions.map((option) => (
                 <option key={`${option.source_org_id || 'global'}:${option.extension}`} value={option.extension}>
@@ -586,7 +586,7 @@ const AdminAgentsManagementPage: FC = () => {
             <button
               onClick={handleCreateAssignment}
               disabled={savingCreate}
-              className="rounded-2xl bg-[linear-gradient(135deg,#06b6d4,#0f766e)] px-5 py-3 text-sm font-semibold text-white shadow-[0_12px_30px_rgba(8,145,178,0.35)] transition hover:brightness-110 disabled:opacity-50"
+              className="vs-button-primary"
             >
               {savingCreate ? 'Saving...' : 'Add Agent Assignment'}
             </button>
@@ -595,11 +595,11 @@ const AdminAgentsManagementPage: FC = () => {
             </div>
           </div>
 
-          <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-white">Manual Import</div>
-                <div className="text-xs text-slate-400">Pull in a missing extension from MightyCall when it is not yet in the shared inventory.</div>
+                <div className="text-sm font-semibold text-slate-950">Manual Import</div>
+                <div className="text-sm text-slate-600">Pull in a missing extension from MightyCall when it is not yet in the shared inventory.</div>
               </div>
             </div>
           <div className="flex flex-col gap-3 md:flex-row">
@@ -607,12 +607,12 @@ const AdminAgentsManagementPage: FC = () => {
               value={manualExtension}
               onChange={(e) => setManualExtension(e.target.value)}
               placeholder="Import missing extension from MightyCall"
-              className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-400/50 focus:bg-slate-900 md:w-80"
+              className="vs-input md:w-80"
             />
             <button
               onClick={handleManualImport}
               disabled={manualImportLoading}
-              className="rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-300 transition hover:border-cyan-300/60 hover:bg-cyan-400/15 hover:text-cyan-200 disabled:opacity-50"
+              className="vs-button-outline"
             >
               {manualImportLoading ? 'Importing...' : 'Import Extension'}
             </button>
@@ -666,12 +666,12 @@ const AdminAgentsManagementPage: FC = () => {
         )}
 
         <section className={`${surfaceClass} overflow-hidden`}>
-          <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
             <div>
-              <div className="text-sm font-semibold text-white">Agent Assignments</div>
-              <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-500">Live roster</div>
+              <div className="text-sm font-semibold text-slate-950">Agent Assignments</div>
+              <div className="mt-1 text-xs font-bold uppercase text-slate-600">Live roster</div>
             </div>
-            <div className="text-xs text-slate-400">
+            <div className="text-sm text-slate-600">
               {refreshedAt ? `Live status updated ${fmtDate(refreshedAt)}` : 'Live status not loaded yet'}
             </div>
           </div>
@@ -685,9 +685,9 @@ const AdminAgentsManagementPage: FC = () => {
               <EmptyStatePanel title="No agent assignments found" description="Create an assignment above to connect a user, organization, role, and MightyCall extension." />
             </div>
           ) : (
-            <div className="overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-slate-950/95 backdrop-blur border-b border-white/10 text-slate-400">
+            <div className="vs-table-shell overflow-auto">
+              <table className="w-full min-w-[1180px] text-sm">
+                <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-slate-600">
                   <tr>
                     <th className="px-4 py-3 text-left">User</th>
                     <th className="px-4 py-3 text-left">Org</th>
@@ -701,7 +701,7 @@ const AdminAgentsManagementPage: FC = () => {
                     <th className="px-4 py-3 text-left">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
+                <tbody className="divide-y divide-slate-100 bg-white">
                   {filteredAssignments.map((row) => {
                     const key = `${row.user_id}:${row.org_id}`;
                     const isEditing = editingKey === key;
@@ -709,24 +709,24 @@ const AdminAgentsManagementPage: FC = () => {
                     const options = globalExtensionOptions;
 
                     return (
-                      <tr key={key} className="transition hover:bg-white/[0.03]">
-                        <td className="px-4 py-3 text-slate-100">
+                      <tr key={key} className="transition hover:bg-violet-50/40">
+                        <td className="px-4 py-3 text-slate-900">
                           <div className="font-medium">{userEmailById.get(row.user_id) || row.user_id}</div>
                         </td>
-                        <td className="px-4 py-3 text-slate-300">{orgNameById.get(row.org_id) || row.org_id}</td>
+                        <td className="px-4 py-3 text-slate-700">{orgNameById.get(row.org_id) || row.org_id}</td>
                         <td className="px-4 py-3">
                           {isEditing ? (
-                            <select value={editRole} onChange={(e) => setEditRole(e.target.value)} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-slate-100">
+                            <select value={editRole} onChange={(e) => setEditRole(e.target.value)} className="vs-input">
                               <option value="agent">Agent</option>
                               <option value="org_manager">Org Manager</option>
                             </select>
                           ) : (
-                            <span className="inline-flex rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-300">{row.role}</span>
+                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-bold uppercase text-slate-700">{row.role}</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
                           {isEditing ? (
-                            <select value={editExtension} onChange={(e) => setEditExtension(e.target.value)} className="min-w-[220px] rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-slate-100">
+                            <select value={editExtension} onChange={(e) => setEditExtension(e.target.value)} className="vs-input min-w-[220px]">
                               <option value="">{(globalExtensionsLoading || extensionsLoadingByOrg[row.org_id]) ? 'Loading extensions...' : 'Select extension'}</option>
                               {options.map((option) => (
                                 <option key={`${option.source_org_id || row.org_id}:${option.extension}`} value={option.extension}>
@@ -736,28 +736,28 @@ const AdminAgentsManagementPage: FC = () => {
                               ))}
                             </select>
                           ) : (
-                            <span className="font-medium text-slate-200">{row.mightycall_extension || '-'}</span>
+                            <span className="font-medium text-slate-700">{row.mightycall_extension || '-'}</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs text-slate-300">{row.assigned_number || row.assigned_phone_number || '-'}</td>
+                        <td className="px-4 py-3 font-mono text-slate-700">{row.assigned_number || row.assigned_phone_number || '-'}</td>
                         <td className="px-4 py-3">
                           <StatusBadge tone={live?.on_call ? 'info' : live?.status ? 'neutral' : 'warning'}>
                             {live?.on_call ? 'On Call' : (live?.status || 'Unknown')}
                           </StatusBadge>
                         </td>
-                        <td className="px-4 py-3 text-slate-300 break-words">{live?.counterpart || '-'}</td>
-                        <td className="px-4 py-3 text-slate-300">{typeof row.recent_call_count === 'number' ? row.recent_call_count : '-'}</td>
-                        <td className="px-4 py-3 text-slate-400">{fmtDate(live?.started_at)}</td>
+                        <td className="px-4 py-3 text-slate-700 break-words">{live?.counterpart || '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">{typeof row.recent_call_count === 'number' ? row.recent_call_count : '-'}</td>
+                        <td className="px-4 py-3 text-slate-600">{fmtDate(live?.started_at)}</td>
                         <td className="px-4 py-3">
                           {isEditing ? (
                             <div className="flex gap-2">
-                              <button onClick={() => saveEdit(row)} disabled={savingEdit} className="rounded-xl bg-[linear-gradient(135deg,#06b6d4,#0f766e)] px-3 py-2 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-50">Save</button>
-                              <button onClick={() => setEditingKey(null)} className="rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-200 hover:bg-white/[0.04]">Cancel</button>
+                              <button onClick={() => saveEdit(row)} disabled={savingEdit} className="vs-button-primary !px-3 !py-1.5 !text-xs">Save</button>
+                              <button onClick={() => setEditingKey(null)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Cancel</button>
                             </div>
                           ) : (
                             <div className="flex gap-2">
-                              <button onClick={() => startEditing(row)} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/[0.04]">Edit</button>
-                              <button onClick={() => removeAssignment(row)} className="rounded-xl border border-rose-500/20 px-3 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/10">Remove</button>
+                              <button onClick={() => startEditing(row)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Edit</button>
+                              <button onClick={() => removeAssignment(row)} className="vs-button-destructive !px-3 !py-1.5 !text-xs">Remove</button>
                             </div>
                           )}
                         </td>
