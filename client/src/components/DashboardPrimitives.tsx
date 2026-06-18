@@ -18,16 +18,16 @@ export function DashboardShellHeader({
   meta?: ReactNode;
 }) {
   return (
-    <header className="border-b border-slate-200 bg-transparent">
+    <header className="border-b border-slate-200/80 bg-transparent">
       <div className="px-4 py-6 sm:px-5 lg:px-6 lg:py-8">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
             {eyebrow && (
-              <div className="inline-flex items-center rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-700">
+              <div className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] font-bold uppercase text-violet-700 shadow-sm">
                 {eyebrow}
               </div>
             )}
-            <h1 className="mt-3 text-3xl font-semibold text-slate-950 lg:text-4xl">{title}</h1>
+            <h1 className="mt-3 text-3xl font-bold text-slate-950 lg:text-4xl">{title}</h1>
             {description && (
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{description}</p>
             )}
@@ -61,7 +61,7 @@ export function SectionCard({
   return (
     <section className={cx('vs-surface overflow-hidden', className)}>
       {(title || actions) && (
-        <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-slate-200/80 bg-gradient-to-b from-white to-slate-50/70 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             {title && <h2 className="text-base font-semibold text-slate-950">{title}</h2>}
             {description && <p className="mt-1 text-sm text-slate-600">{description}</p>}
@@ -97,11 +97,20 @@ export function MetricStatCard({
   };
 
   return (
-    <div className={cx('rounded-lg border p-5 shadow-sm', tones[accent])}>
+    <div className={cx('group relative overflow-hidden rounded-2xl border bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_16px_38px_rgba(15,23,42,0.07)] ring-1 ring-white transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(15,23,42,0.08),0_22px_52px_rgba(15,23,42,0.10)]', tones[accent])}>
+      <div className={cx(
+        'absolute inset-x-0 top-0 h-1',
+        accent === 'violet' && 'bg-violet-500',
+        accent === 'cyan' && 'bg-sky-500',
+        accent === 'emerald' && 'bg-emerald-500',
+        accent === 'amber' && 'bg-amber-500',
+        accent === 'rose' && 'bg-rose-500',
+        accent === 'neutral' && 'bg-slate-300',
+      )} />
       <div className="flex items-start justify-between gap-3">
-        <div className="text-[12px] font-medium text-slate-600">{label}</div>
+        <div className="text-[12px] font-semibold text-slate-600">{label}</div>
         <div className={cx(
-          'flex h-8 w-8 items-center justify-center rounded-md text-xs font-semibold',
+          'flex h-8 w-8 items-center justify-center rounded-xl text-xs font-bold shadow-sm ring-1 ring-white',
           accent === 'violet' && 'bg-violet-100 text-violet-700',
           accent === 'cyan' && 'bg-sky-100 text-sky-700',
           accent === 'emerald' && 'bg-emerald-100 text-emerald-700',
@@ -113,7 +122,7 @@ export function MetricStatCard({
         </div>
       </div>
       <div className="mt-5 flex items-end justify-between gap-3">
-        <div className="text-2xl font-semibold text-slate-950">{value}</div>
+        <div className="text-2xl font-bold text-slate-950">{value}</div>
         {trend && <div className="pb-1 text-xs font-medium text-slate-500">{trend}</div>}
       </div>
       {hint && <div className="mt-2 text-xs leading-5 text-slate-500">{hint}</div>}
@@ -138,7 +147,7 @@ export function StatusBadge({
   };
 
   return (
-    <span className={cx('inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em]', tones[tone])}>
+    <span className={cx('inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase shadow-sm', tones[tone])}>
       {children}
     </span>
   );
@@ -172,7 +181,7 @@ export function FilterBar({
   className?: string;
 }) {
   return (
-    <div className={cx('flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-center', className)}>
+    <div className={cx('flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_16px_36px_rgba(15,23,42,0.06)] ring-1 ring-white sm:flex-row sm:flex-wrap sm:items-center', className)}>
       {children}
     </div>
   );
@@ -199,7 +208,7 @@ export function SearchInput({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
+        className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-8 pr-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
       />
     </label>
   );
@@ -224,7 +233,7 @@ export function DateRangeSelector({
           type="date"
           value={start}
           onChange={(event) => onStartChange(event.target.value)}
-          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none transition hover:border-slate-300 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
         />
       </label>
       <label className="block">
@@ -233,7 +242,7 @@ export function DateRangeSelector({
           type="date"
           value={end}
           onChange={(event) => onEndChange(event.target.value)}
-          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none transition hover:border-slate-300 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
         />
       </label>
     </div>
@@ -256,12 +265,12 @@ export function DataTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05),0_16px_36px_rgba(15,23,42,0.06)] ring-1 ring-white">
       <table className="min-w-full divide-y divide-slate-200 text-sm">
-        <thead className="bg-slate-50">
+        <thead className="bg-slate-50/95">
           <tr>
             {columns.map((column) => (
-              <th key={column.key} scope="col" className={cx('px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500', column.className)}>
+              <th key={column.key} scope="col" className={cx('px-4 py-3 text-left text-xs font-bold uppercase text-slate-500', column.className)}>
                 {column.header}
               </th>
             ))}
@@ -269,7 +278,7 @@ export function DataTable({
         </thead>
         <tbody className="divide-y divide-slate-100">
           {rows.map((row, index) => (
-            <tr key={getRowKey(row, index)} className="transition hover:bg-violet-50/40">
+            <tr key={getRowKey(row, index)} className="transition hover:bg-violet-50/50">
               {columns.map((column) => (
                 <td key={column.key} className={cx('px-4 py-3 text-slate-700', column.className)}>
                   {column.render(row)}
@@ -293,7 +302,7 @@ export function EmptyStatePanel({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center shadow-sm">
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-gradient-to-b from-white to-slate-50 px-6 py-10 text-center shadow-sm ring-1 ring-white">
       <div className="text-base font-semibold text-slate-950">{title}</div>
       <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-600">{description}</p>
       {action && <div className="mt-4 flex justify-center">{action}</div>}
@@ -311,7 +320,7 @@ export function ErrorStatePanel({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-rose-200 bg-rose-50 px-6 py-8 text-center shadow-sm">
+    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-8 text-center shadow-sm ring-1 ring-white">
       <div className="text-base font-semibold text-rose-900">{title}</div>
       <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-rose-700">{description}</p>
       {action && <div className="mt-4 flex justify-center">{action}</div>}
@@ -324,5 +333,5 @@ export function LoadingSkeleton({
 }: {
   className?: string;
 }) {
-  return <div className={cx('animate-pulse rounded-lg bg-slate-200', className)} />;
+  return <div className={cx('animate-pulse rounded-2xl bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200', className)} />;
 }

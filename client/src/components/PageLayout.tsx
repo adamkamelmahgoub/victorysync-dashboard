@@ -30,7 +30,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   };
 
   const defaultMeta = (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm xl:text-right">
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm ring-1 ring-white xl:text-right">
       <div className="text-[11px] font-semibold uppercase text-slate-500">Today</div>
       <div className="mt-1 text-sm font-medium text-slate-900">{new Date().toLocaleDateString()}</div>
     </div>
@@ -40,15 +40,15 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
     <div className="min-h-screen bg-[var(--vs-bg)] text-[var(--vs-text)]">
       <Sidebar isAdmin={isAdmin} currentPath={location.pathname} />
 
-      <main className="min-h-screen pt-14 lg:ml-[260px] lg:pt-0">
-        <div className="sticky top-14 z-50 border-b border-slate-200 bg-white/90 px-4 backdrop-blur-xl lg:top-0 lg:px-6">
+      <main className="min-h-screen pt-14 lg:ml-[280px] lg:pt-0">
+        <div className="sticky top-14 z-50 border-b border-slate-200/80 bg-white/82 px-4 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl lg:top-0 lg:px-6">
           <div className="mx-auto flex h-16 max-w-[1680px] items-center justify-between gap-4">
             <div className="hidden min-w-0 items-center gap-3 lg:flex">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-sm font-bold text-violet-700">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-violet-200 bg-violet-50 text-sm font-bold text-violet-700 shadow-sm">
                 VS
               </div>
               <div className="min-w-0">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Command center</div>
+                <div className="text-[11px] font-bold uppercase text-slate-500">Command center</div>
                 <div className="truncate text-sm font-semibold text-slate-900">{selectedOrgName}</div>
               </div>
             </div>
@@ -81,16 +81,16 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
             </form>
 
             <div className="hidden items-center gap-3 md:flex">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+              <div className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 shadow-sm">
                 Systems online
               </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-sm font-semibold text-slate-800" title={userName}>
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 text-sm font-semibold text-slate-800 shadow-sm" title={userName}>
                 {userName.slice(0, 1).toUpperCase()}
               </div>
               <button
                 type="button"
                 onClick={() => void signOut()}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-rose-50 hover:text-rose-700"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-rose-50 hover:text-rose-700 active:translate-y-0"
               >
                 Logout
               </button>
