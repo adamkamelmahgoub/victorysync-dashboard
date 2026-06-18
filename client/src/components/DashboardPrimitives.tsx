@@ -80,52 +80,53 @@ export function MetricStatCard({
   hint,
   trend,
   accent = 'neutral',
+  icon,
+  loading = false,
+  unavailable = false,
 }: {
   label: string;
   value: ReactNode;
   hint?: ReactNode;
   trend?: ReactNode;
   accent?: 'neutral' | 'violet' | 'cyan' | 'emerald' | 'amber' | 'rose';
+  icon?: ReactNode;
+  loading?: boolean;
+  unavailable?: boolean;
 }) {
   const tones = {
-    neutral: 'border-slate-200 bg-white',
-    violet: 'border-violet-200 bg-violet-50',
-    cyan: 'border-sky-200 bg-sky-50',
-    emerald: 'border-emerald-200 bg-emerald-50',
-    amber: 'border-amber-200 bg-amber-50',
-    rose: 'border-rose-200 bg-rose-50',
+    neutral: 'border-slate-200 bg-white text-slate-700',
+    violet: 'border-violet-200 bg-violet-50 text-violet-700',
+    cyan: 'border-sky-200 bg-sky-50 text-sky-700',
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    amber: 'border-amber-200 bg-amber-50 text-amber-700',
+    rose: 'border-rose-200 bg-rose-50 text-rose-700',
   };
 
   return (
-    <div className={cx('group relative overflow-hidden rounded-2xl border bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_16px_38px_rgba(15,23,42,0.07)] ring-1 ring-white transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(15,23,42,0.08),0_22px_52px_rgba(15,23,42,0.10)]', tones[accent])}>
-      <div className={cx(
-        'absolute inset-x-0 top-0 h-1',
-        accent === 'violet' && 'bg-violet-500',
-        accent === 'cyan' && 'bg-sky-500',
-        accent === 'emerald' && 'bg-emerald-500',
-        accent === 'amber' && 'bg-amber-500',
-        accent === 'rose' && 'bg-rose-500',
-        accent === 'neutral' && 'bg-slate-300',
-      )} />
+    <div className="group relative min-h-[154px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_18px_44px_rgba(15,23,42,0.08)] ring-1 ring-white transition duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-[0_4px_14px_rgba(15,23,42,0.08),0_24px_56px_rgba(15,23,42,0.11)]">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-300/80 to-transparent" />
       <div className="flex items-start justify-between gap-3">
-        <div className="text-[12px] font-semibold text-slate-600">{label}</div>
-        <div className={cx(
-          'flex h-8 w-8 items-center justify-center rounded-xl text-xs font-bold shadow-sm ring-1 ring-white',
-          accent === 'violet' && 'bg-violet-100 text-violet-700',
-          accent === 'cyan' && 'bg-sky-100 text-sky-700',
-          accent === 'emerald' && 'bg-emerald-100 text-emerald-700',
-          accent === 'amber' && 'bg-amber-100 text-amber-700',
-          accent === 'rose' && 'bg-rose-100 text-rose-700',
-          accent === 'neutral' && 'bg-violet-100 text-violet-700',
-        )}>
-          {accent === 'cyan' ? 'UP' : accent === 'emerald' ? 'OK' : accent === 'amber' ? '!' : accent === 'rose' ? '!' : 'VS'}
+        <div className="min-w-0">
+          <div className="text-xs font-bold uppercase text-slate-600">{label}</div>
+          {hint && <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{hint}</div>}
+        </div>
+        <div className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-black shadow-sm', tones[accent])}>
+          {icon || (accent === 'cyan' ? 'UP' : accent === 'emerald' ? 'OK' : accent === 'amber' ? '!' : accent === 'rose' ? '!' : 'VS')}
         </div>
       </div>
-      <div className="mt-5 flex items-end justify-between gap-3">
-        <div className="text-2xl font-bold text-slate-950">{value}</div>
-        {trend && <div className="pb-1 text-xs font-medium text-slate-500">{trend}</div>}
+      <div className="mt-5 flex min-h-[42px] items-end justify-between gap-3">
+        {loading ? (
+          <LoadingSkeleton className="h-10 w-32 rounded-xl" />
+        ) : unavailable ? (
+          <div>
+            <div className="text-2xl font-black leading-none text-slate-400">Unavailable</div>
+            <div className="mt-1 text-xs font-medium text-slate-500">No source data returned</div>
+          </div>
+        ) : (
+          <div className="break-words text-3xl font-black leading-none text-slate-950">{value}</div>
+        )}
+        {!loading && trend && <div className="pb-1 text-xs font-bold text-emerald-700">{trend}</div>}
       </div>
-      {hint && <div className="mt-2 text-xs leading-5 text-slate-500">{hint}</div>}
     </div>
   );
 }

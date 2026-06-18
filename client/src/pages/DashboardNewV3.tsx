@@ -17,7 +17,7 @@ import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
 import { getLiveAgentStatus } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
 import { answerRate as calculateAnswerRate } from '../lib/reportingMetrics';
-import { EmptyStatePanel } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, LoadingSkeleton, MetricStatCard } from '../components/DashboardPrimitives';
 import { buildApiUrl } from '../config';
 
 type LiveAgentStatus = {
@@ -107,41 +107,6 @@ function Panel({
       </div>
       {children}
     </section>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  label: string;
-  value: ReactNode;
-  detail: ReactNode;
-  tone: 'blue' | 'teal' | 'orange' | 'violet';
-}) {
-  const tones = {
-    blue: 'bg-sky-50 text-sky-700',
-    teal: 'bg-emerald-50 text-emerald-700',
-    orange: 'bg-amber-50 text-amber-700',
-    violet: 'bg-violet-50 text-violet-700',
-  };
-
-  return (
-    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-5 shadow-[0_1px_2px_rgba(15,23,42,0.06),0_18px_44px_rgba(15,23,42,0.08)] ring-1 ring-white transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_14px_rgba(15,23,42,0.08),0_24px_56px_rgba(15,23,42,0.11)]">
-      <div className={`absolute inset-x-0 top-0 h-1 ${tone === 'blue' ? 'bg-sky-500' : tone === 'teal' ? 'bg-emerald-500' : tone === 'orange' ? 'bg-amber-500' : 'bg-violet-500'}`} />
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase text-slate-500">{label}</div>
-          <div className="mt-5 text-3xl font-bold leading-none text-slate-950">{value}</div>
-        </div>
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xs font-bold shadow-sm ring-1 ring-white ${tones[tone]}`}>
-          {tone === 'blue' ? 'A' : tone === 'teal' ? 'L' : tone === 'orange' ? 'W' : 'C'}
-        </div>
-      </div>
-      <div className="mt-4 text-sm text-slate-500">{detail}</div>
-    </div>
   );
 }
 
@@ -371,21 +336,24 @@ const DashboardNewV3: FC = () => {
         </section>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Total calls" value={reportLoading ? '...' : formatNumber(total)} detail="All calls in the selected date range." tone="blue" />
-          <MetricCard label="Answered calls" value={reportLoading ? '...' : formatNumber(answered)} detail={`${answerRate}% answer rate from report data.`} tone="teal" />
-          <MetricCard label="Missed calls" value={reportLoading ? '...' : formatNumber(missed)} detail="Missed outcomes in the selected date range." tone="orange" />
-          <MetricCard label="Transfers" value={reportLoading ? '...' : formatNumber(transfers)} detail="Transfer rows or transfer metadata." tone="violet" />
-          <MetricCard label="Avg handle time" value={reportLoading ? '...' : formatSeconds(avgDuration)} detail="Average call duration." tone="blue" />
-          <MetricCard label="SMS count" value={reportLoading ? '...' : formatNumber(sms)} detail="Inbound and outbound SMS messages." tone="teal" />
-          <MetricCard label="Recordings" value={reportLoading ? '...' : formatNumber(recordings)} detail="Available recording records." tone="violet" />
-          <MetricCard label="Active agents" value={liveLoading ? '...' : formatNumber(liveAgents.length)} detail={`${formatNumber(onCall)} on call, ${formatNumber(available)} available.`} tone="orange" />
+          <MetricStatCard label="Total calls" value={formatNumber(total)} hint="All calls returned by the reports API for this date range." accent="cyan" icon="TC" loading={reportLoading} />
+          <MetricStatCard label="Answered calls" value={formatNumber(answered)} hint="Connected or completed call outcomes from report data." accent="emerald" icon="AN" loading={reportLoading} />
+          <MetricStatCard label="Missed calls" value={formatNumber(missed)} hint="Missed, failed, or unanswered outcomes in scope." accent="amber" icon="MS" loading={reportLoading} />
+          <MetricStatCard label="Transfers" value={formatNumber(transfers)} hint="Transfer rows or transfer metadata from call records." accent="violet" icon="TR" loading={reportLoading} />
+          <MetricStatCard label="Average handle time" value={formatSeconds(avgDuration)} hint="Average call duration calculated from report records." accent="cyan" icon="AH" loading={reportLoading} />
+          <MetricStatCard label="Answer rate" value={`${answerRate}%`} hint={`${formatNumber(answered)} answered out of ${formatNumber(total)} total calls.`} accent="emerald" icon="AR" loading={reportLoading} unavailable={!reportLoading && total === 0} />
+          <MetricStatCard label="SMS count" value={formatNumber(sms)} hint="Inbound and outbound SMS messages from the reports overview." accent="neutral" icon="SM" loading={reportLoading} />
+          <MetricStatCard label="Recordings" value={formatNumber(recordings)} hint="Available recording records in the selected period." accent="violet" icon="RC" loading={reportLoading} />
+          <MetricStatCard label="Active agents" value={formatNumber(liveAgents.length)} hint="Agents/extensions returned by the live status endpoint." accent="neutral" icon="AG" loading={liveLoading && liveAgents.length === 0} />
+          <MetricStatCard label="On-call agents" value={formatNumber(onCall)} hint="Agents currently mapped to ringing, dialing, connected, or on-call states." accent="emerald" icon="OC" loading={liveLoading && liveAgents.length === 0} />
+          <MetricStatCard label="Available agents" value={formatNumber(available)} hint="Live agents not currently mapped to active call states." accent="cyan" icon="AV" loading={liveLoading && liveAgents.length === 0} />
         </div>
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.55fr,0.95fr]">
           <Panel title="Calls By Hour" eyebrow="Report data">
             <div className="h-[360px] p-5">
               {reportLoading ? (
-                <div className="h-full animate-pulse rounded-xl bg-slate-200" />
+                <LoadingSkeleton className="h-full rounded-xl" />
               ) : callsByHour.length === 0 ? (
                 <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center text-sm text-slate-600">
                   No hourly call data is available for this date range yet.
@@ -407,7 +375,7 @@ const DashboardNewV3: FC = () => {
           <Panel title="Calls By Status" eyebrow="Breakdown">
             <div className="p-5">
               {reportLoading ? (
-                <div className="h-64 animate-pulse rounded-xl bg-slate-200" />
+                <LoadingSkeleton className="h-64 rounded-xl" />
               ) : callsByStatus.length === 0 ? (
                 <EmptyStatePanel title="No status data yet" description="Call status counts will appear once matching call rows are returned by the reports API." />
               ) : (
@@ -452,7 +420,7 @@ const DashboardNewV3: FC = () => {
           <Panel title="Calls By Assigned Number" eyebrow="Numbers">
             <div className="h-72 p-5">
               {reportLoading ? (
-                <div className="h-full animate-pulse rounded-xl bg-slate-200" />
+                <LoadingSkeleton className="h-full rounded-xl" />
               ) : callsByNumber.length === 0 ? (
                 <EmptyStatePanel title="No number data yet" description="Assigned number breakdown appears when calls have a matching business number." />
               ) : (
@@ -472,7 +440,7 @@ const DashboardNewV3: FC = () => {
           <Panel title="Call Direction Breakdown" eyebrow="Direction">
             <div className="h-72 p-5">
               {reportLoading ? (
-                <div className="h-full animate-pulse rounded-xl bg-slate-200" />
+                <LoadingSkeleton className="h-full rounded-xl" />
               ) : directionBreakdown.length === 0 ? (
                 <EmptyStatePanel title="No direction data yet" description="Inbound and outbound counts appear when call direction is returned by the reports API." />
               ) : (
@@ -493,7 +461,7 @@ const DashboardNewV3: FC = () => {
           <Panel title="Agent Activity" eyebrow="Agents">
             <div className="h-72 p-5">
               {reportLoading ? (
-                <div className="h-full animate-pulse rounded-xl bg-slate-200" />
+                <LoadingSkeleton className="h-full rounded-xl" />
               ) : agentActivity.length === 0 ? (
                 <EmptyStatePanel title="No agent activity yet" description="Agent activity appears when calls, recordings, or SMS can be mapped to an agent or extension." />
               ) : (
