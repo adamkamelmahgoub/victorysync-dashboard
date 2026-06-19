@@ -97,6 +97,8 @@ import {
   notifyDashboardUpdate,
   notifyInvoiceCreated,
   notifyPaymentReminder,
+  notifyUserAccountUpdate,
+  notifyUserLogin,
   sendEmail,
 } from './services/emailNotifications';
 
@@ -168,6 +170,46 @@ function logStructured(level: 'info' | 'warn' | 'error', event: string, meta: Re
   if (level === 'error') console.error(line);
   else if (level === 'warn') console.warn(line);
   else console.log(line);
+}
+
+function getRequestIpAddress(req: express.Request) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwarded || String(req.headers['x-real-ip'] || '').trim() || req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+function decodeHeaderValue(value: unknown) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function getRequestLocation(req: express.Request) {
+  const city = decodeHeaderValue(req.headers['x-vercel-ip-city'] || req.headers['cf-ipcity']);
+  const region = decodeHeaderValue(req.headers['x-vercel-ip-country-region'] || req.headers['cf-region']);
+  const country = decodeHeaderValue(req.headers['x-vercel-ip-country'] || req.headers['cf-ipcountry']);
+  const parts = [city, region, country].filter(Boolean);
+  return parts.length ? parts.join(', ') : 'Unavailable';
+}
+
+function getSecurityNotificationMeta(req: express.Request) {
+  return {
+    ipAddress: getRequestIpAddress(req),
+    location: getRequestLocation(req),
+    userAgent: String(req.headers['user-agent'] || 'Unavailable').slice(0, 260),
+    occurredAt: new Date().toISOString(),
+  };
+}
+
+function queueAccountUpdateEmail(req: express.Request, userId: string, updateType: string) {
+  void notifyUserAccountUpdate({
+    userId,
+    updateType,
+    ...getSecurityNotificationMeta(req),
+  }).catch((err: any) => console.warn('account_update_email_failed:', fmtErr(err)));
 }
 
 // ─── In-memory rate limiter ───────────────────────────────────────────────────
@@ -4945,6 +4987,7 @@ app.post('/api/user/mfa/:factorId/verify', async (req, res) => {
       .select('id, verified, enabled_at, created_at, updated_at')
       .maybeSingle();
     if (updateError) throw updateError;
+    queueAccountUpdateEmail(req, String(actorId), 'Authenticator app 2FA enabled');
     res.json({ factor: data });
   } catch (err: any) {
     console.error('mfa_verify_failed:', fmtErr(err));
@@ -4989,6 +5032,7 @@ app.post('/api/user/mfa/email/enroll', async (req, res) => {
     }
 
     await sendMfaEmailCode({ email, code });
+    queueAccountUpdateEmail(req, String(actorId), 'Email 2FA setup started');
     res.json({ factor: { id: data?.id, type: 'email', email, code_expires_at: data?.code_expires_at || expiresAt } });
   } catch (err: any) {
     console.error('mfa_email_enroll_failed:', fmtErr(err));
@@ -5031,6 +5075,7 @@ app.post('/api/user/email-mfa/verify', async (req, res) => {
       .select('id, email, verified, enabled_at, created_at, updated_at')
       .maybeSingle();
     if (updateError) throw updateError;
+    queueAccountUpdateEmail(req, String(actorId), 'Email 2FA enabled');
     res.json({ factor: { ...data, type: 'email', label: 'Email code' } });
   } catch (err: any) {
     console.error('mfa_email_verify_failed:', fmtErr(err));
@@ -5141,6 +5186,23 @@ app.post('/api/user/mfa-login/verify', async (req, res) => {
   }
 });
 
+app.post('/api/user/security/login-notification', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const method = String(req.body?.method || 'Password sign-in').slice(0, 80);
+    const result = await notifyUserLogin({
+      userId: String(actorId),
+      method,
+      ...getSecurityNotificationMeta(req),
+    });
+    res.json({ success: true, notification: result });
+  } catch (err: any) {
+    console.error('login_notification_failed:', fmtErr(err));
+    res.status(500).json({ error: 'login_notification_failed' });
+  }
+});
+
 app.delete('/api/user/mfa/:factorId', async (req, res) => {
   try {
     const actorId = req.actorId || req.header('x-user-id') || null;
@@ -5165,6 +5227,7 @@ app.delete('/api/user/mfa/:factorId', async (req, res) => {
       const message = String(emailError.message || '').toLowerCase();
       if (!message.includes('relation') && !message.includes('does not exist')) throw emailError;
     }
+    queueAccountUpdateEmail(req, String(actorId), 'Two-factor authentication factor removed');
     res.json({ success: true });
   } catch (err: any) {
     console.error('mfa_delete_failed:', fmtErr(err));
@@ -7719,6 +7782,7 @@ app.put('/api/user/profile', async (req, res) => {
 
     if (error) throw error;
 
+    queueAccountUpdateEmail(req, String(userId), 'Profile settings updated');
     res.json({
       user: {
         id: data.user.id,
@@ -17476,6 +17540,7 @@ app.post('/api/user/change-password', async (req, res) => {
 
     if (error) throw error;
 
+    queueAccountUpdateEmail(req, String(userId), 'Password changed');
     res.json({ success: true, message: 'password_changed' });
   } catch (err: any) {
     console.error('password_change_failed:', fmtErr(err));
@@ -17500,6 +17565,7 @@ app.post('/api/user/upload-profile-pic', async (req, res) => {
 
     if (error) throw error;
 
+    queueAccountUpdateEmail(req, String(userId), 'Profile picture updated');
     res.json({ success: true, url: image_data });
   } catch (err: any) {
     console.error('profile_pic_upload_failed:', fmtErr(err));

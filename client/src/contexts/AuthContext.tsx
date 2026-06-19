@@ -194,6 +194,18 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     return (data?.factors || []).filter((factor: MfaFactor) => factor?.verified);
   };
 
+  const notifyLoginCompleted = async (method: string) => {
+    try {
+      await fetch(buildApiUrl("/api/user/security/login-notification"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method }),
+      });
+    } catch {
+      // Login notifications are best-effort; never block the user from the dashboard.
+    }
+  };
+
   useEffect(() => {
     // Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -292,6 +304,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       }
 
       await hydrateUserContext();
+      void notifyLoginCompleted("Password sign-in");
       return {};
     } catch (err: any) {
       console.error("Error hydrating auth after sign-in:", err);
@@ -339,6 +352,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       setMfaVerifiedSession(pendingMfa.userId);
       setLoading(true);
       await hydrateUserContext();
+      void notifyLoginCompleted(method === "email" ? "Password + email 2FA" : "Password + authenticator 2FA");
       return {};
     } catch (err: any) {
       const message = err?.message || "Two-factor verification succeeded, but dashboard access could not be loaded.";

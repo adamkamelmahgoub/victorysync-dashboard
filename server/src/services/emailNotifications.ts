@@ -368,6 +368,76 @@ export async function notifySubscriptionChanged(params: {
   });
 }
 
+async function getUserAccountEmail(userId: string | null | undefined) {
+  if (!userId) return null;
+  try {
+    const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (data?.user?.email) return cleanEmail(data.user.email);
+  } catch {
+    // Fall back to profile email below.
+  }
+  try {
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('email')
+      .eq('id', userId)
+      .maybeSingle();
+    return cleanEmail((data as any)?.email);
+  } catch {
+    return null;
+  }
+}
+
+type SecurityEventDetails = {
+  userId: string;
+  ipAddress?: string | null;
+  location?: string | null;
+  userAgent?: string | null;
+  occurredAt?: string | null;
+  method?: string | null;
+  updateType?: string | null;
+};
+
+export async function notifyUserLogin(params: SecurityEventDetails) {
+  const recipient = await getUserAccountEmail(params.userId);
+  if (!recipient) return { skipped: true, reason: 'user_email_not_found' };
+  return notifyRecipientsForCategory([recipient], 'account_emails', {
+    subject: 'New VictorySync login',
+    eyebrow: 'Account security',
+    title: 'New login to your VictorySync account',
+    intro: 'A new login to your VictorySync account was completed. If this was not you, change your password and contact your VictorySync administrator.',
+    details: {
+      Time: params.occurredAt || new Date().toISOString(),
+      'IP address': params.ipAddress || 'Unavailable',
+      Location: params.location || 'Unavailable',
+      Method: params.method || 'Password sign-in',
+      Device: params.userAgent || 'Unavailable',
+    },
+    actionLabel: 'Review account settings',
+    actionUrl: appUrl('/settings'),
+  });
+}
+
+export async function notifyUserAccountUpdate(params: SecurityEventDetails) {
+  const recipient = await getUserAccountEmail(params.userId);
+  if (!recipient) return { skipped: true, reason: 'user_email_not_found' };
+  return notifyRecipientsForCategory([recipient], 'account_emails', {
+    subject: 'VictorySync account updated',
+    eyebrow: 'Account update',
+    title: 'Your VictorySync account was updated',
+    intro: 'A security or profile setting on your VictorySync account was changed. If this was not you, change your password and contact your VictorySync administrator.',
+    details: {
+      Update: params.updateType || 'Account setting',
+      Time: params.occurredAt || new Date().toISOString(),
+      'IP address': params.ipAddress || 'Unavailable',
+      Location: params.location || 'Unavailable',
+      Device: params.userAgent || 'Unavailable',
+    },
+    actionLabel: 'Open account settings',
+    actionUrl: appUrl('/settings'),
+  });
+}
+
 function shouldNotifyDashboardUpdates() {
   const value = String(process.env.EMAIL_NOTIFY_DASHBOARD_UPDATES || '').toLowerCase();
   return enabled() && value !== 'false';
