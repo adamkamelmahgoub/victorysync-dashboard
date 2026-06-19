@@ -31,6 +31,7 @@ export default function AdminInviteCodesPage() {
   const [issueOrgId, setIssueOrgId] = useState('');
   const [issueEmail, setIssueEmail] = useState('');
   const [issueRole, setIssueRole] = useState('agent');
+  const [issueScope, setIssueScope] = useState<'org' | 'platform'>('org');
   const [issuing, setIssuing] = useState(false);
 
   const headers = useMemo(() => ({ 'x-user-id': user?.id || '' }), [user?.id]);
@@ -91,30 +92,43 @@ export default function AdminInviteCodesPage() {
 
   const issueInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!issueOrgId || !issueEmail.trim()) {
-      setError('Organization and email are required.');
+    if (!issueEmail.trim()) {
+      setError('Email is required.');
+      return;
+    }
+    if (issueScope === 'org' && !issueOrgId) {
+      setError('Organization is required for organization invites.');
       return;
     }
     try {
       setIssuing(true);
       setError(null);
-      const resp = await fetch(buildApiUrl('/api/admin/invite-codes'), {
+      const isPlatformInvite = issueScope === 'platform';
+      const resp = await fetch(buildApiUrl(isPlatformInvite ? '/api/admin/platform-invites' : '/api/admin/invite-codes'), {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orgId: issueOrgId,
-          email: issueEmail.trim(),
-          role: issueRole,
-        }),
+        body: JSON.stringify(isPlatformInvite
+          ? {
+              email: issueEmail.trim(),
+              globalRole: issueRole,
+            }
+          : {
+              orgId: issueOrgId,
+              email: issueEmail.trim(),
+              role: issueRole,
+            }),
       });
       const json = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(json.detail || 'Failed to issue invite code');
+      if (!resp.ok) throw new Error(json.detail || 'Failed to issue invite');
       const code = json?.invite?.invite_code;
-      setSuccess(code ? `Invite code issued: ${code}` : 'Invite code issued');
+      setSuccess(isPlatformInvite
+        ? (json?.email_sent ? 'Dashboard invite sent' : 'Dashboard access granted to existing user')
+        : (code ? `Invite code issued: ${code}` : 'Invite code issued'));
       setIssueEmail('');
+      if (isPlatformInvite) setIssueRole('platform_manager');
       await loadInvites();
     } catch (e: any) {
-      setError(e?.message || 'Failed to issue invite code');
+      setError(e?.message || 'Failed to issue invite');
     } finally {
       setIssuing(false);
     }
@@ -147,21 +161,38 @@ export default function AdminInviteCodesPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <section className="xl:col-span-1 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
-          <h2 className="text-lg font-semibold text-white mb-4">Issue New Invite Code</h2>
+          <h2 className="text-lg font-semibold text-white mb-4">Issue New Invite</h2>
           <form onSubmit={issueInvite} className="space-y-3">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Organization</label>
+              <label className="block text-xs text-slate-400 mb-1">Invite type</label>
               <select
-                value={issueOrgId}
-                onChange={(e) => setIssueOrgId(e.target.value)}
+                value={issueScope}
+                onChange={(e) => {
+                  const next = e.target.value as 'org' | 'platform';
+                  setIssueScope(next);
+                  setIssueRole(next === 'platform' ? 'platform_manager' : 'agent');
+                }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
               >
-                <option value="">Select organization</option>
-                {orgs.map((o) => (
-                  <option key={o.id} value={o.id}>{o.name} ({o.id})</option>
-                ))}
+                <option value="org">Organization user</option>
+                <option value="platform">Dashboard admin / manager</option>
               </select>
             </div>
+            {issueScope === 'org' && (
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Organization</label>
+                <select
+                  value={issueOrgId}
+                  onChange={(e) => setIssueOrgId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
+                >
+                  <option value="">Select organization</option>
+                  {orgs.map((o) => (
+                    <option key={o.id} value={o.id}>{o.name} ({o.id})</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-xs text-slate-400 mb-1">Email</label>
               <input
@@ -179,9 +210,18 @@ export default function AdminInviteCodesPage() {
                 onChange={(e) => setIssueRole(e.target.value)}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
               >
-                <option value="org_admin">Org Admin</option>
-                <option value="org_manager">Org Manager</option>
-                <option value="agent">Agent</option>
+                {issueScope === 'platform' ? (
+                  <>
+                    <option value="platform_manager">Dashboard Manager</option>
+                    <option value="platform_admin">Dashboard Admin</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="agent">Agent</option>
+                    <option value="org_manager">Org Manager</option>
+                    <option value="org_admin">Org Admin</option>
+                  </>
+                )}
               </select>
             </div>
             <button
@@ -189,7 +229,7 @@ export default function AdminInviteCodesPage() {
               disabled={issuing}
               className="w-full rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-60"
             >
-              {issuing ? 'Issuing...' : 'Issue Invite Code'}
+              {issuing ? 'Sending...' : issueScope === 'platform' ? 'Send Dashboard Invite' : 'Issue Invite Code'}
             </button>
           </form>
         </section>
@@ -273,4 +313,3 @@ export default function AdminInviteCodesPage() {
     </PageLayout>
   );
 }
-

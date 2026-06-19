@@ -46,6 +46,7 @@ export const AdminUsersPage: FC = () => {
   const [createEmail, setCreateEmail] = useState("");
   const [createOrgId, setCreateOrgId] = useState("");
   const [createRole, setCreateRole] = useState("agent");
+  const [createScope, setCreateScope] = useState<"org" | "platform">("org");
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
@@ -165,22 +166,28 @@ export const AdminUsersPage: FC = () => {
     setCreateError(null);
     setCreateSuccess(false);
 
-    if (!createEmail || !createOrgId || !createRole) {
-      setCreateError('All fields are required');
+    if (!createEmail || !createRole || (createScope === "org" && !createOrgId)) {
+      setCreateError(createScope === "org" ? 'Email, organization, and role are required' : 'Email and dashboard role are required');
       return;
     }
 
     try {
       setCreateLoading(true);
 
-      const res = await fetch(buildApiUrl('/api/admin/users'), {
+      const isPlatformInvite = createScope === "platform";
+      const res = await fetch(buildApiUrl(isPlatformInvite ? '/api/admin/platform-invites' : '/api/admin/users'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
-        body: JSON.stringify({
-          email: createEmail,
-          orgId: createOrgId,
-          role: createRole,
-        }),
+        body: JSON.stringify(isPlatformInvite
+          ? {
+              email: createEmail,
+              globalRole: createRole,
+            }
+          : {
+              email: createEmail,
+              orgId: createOrgId,
+              role: createRole,
+            }),
       });
 
       if (!res.ok) {
@@ -191,7 +198,7 @@ export const AdminUsersPage: FC = () => {
       setCreateSuccess(true);
       setCreateEmail('');
       setCreateOrgId(orgs.length > 0 ? orgs[0].id : '');
-      setCreateRole('agent');
+      setCreateRole(createScope === "platform" ? 'platform_manager' : 'agent');
 
       // Refresh admin users list from backend
       try {
@@ -474,6 +481,25 @@ export const AdminUsersPage: FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Invite type
+                  </label>
+                  <select
+                    value={createScope}
+                    onChange={(e) => {
+                      const next = e.target.value as "org" | "platform";
+                      setCreateScope(next);
+                      setCreateRole(next === "platform" ? "platform_manager" : "agent");
+                    }}
+                    className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  >
+                    <option value="org">Organization user</option>
+                    <option value="platform">Dashboard admin / manager</option>
+                  </select>
+                </div>
+
+                {createScope === "org" && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Organization
                   </label>
                   {orgsLoading ? (
@@ -493,6 +519,7 @@ export const AdminUsersPage: FC = () => {
                     </select>
                   )}
                 </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -503,10 +530,18 @@ export const AdminUsersPage: FC = () => {
                     onChange={(e) => setCreateRole(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
                   >
-                    <option value="agent">Agent</option>
-                    <option value="org_manager">Org Manager</option>
-                    <option value="org_admin">Org Admin</option>
-                    <option value="admin">Admin</option>
+                    {createScope === "platform" ? (
+                      <>
+                        <option value="platform_manager">Dashboard Manager</option>
+                        <option value="platform_admin">Dashboard Admin</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="agent">Agent</option>
+                        <option value="org_manager">Org Manager</option>
+                        <option value="org_admin">Org Admin</option>
+                      </>
+                    )}
                   </select>
                 </div>
 

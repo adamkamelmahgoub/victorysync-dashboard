@@ -379,7 +379,13 @@ function normalizeEmail(v: any): string {
 }
 
 function inviteCodeSecret(): string {
-  const secret = process.env.INVITE_CODE_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'victorysync-invite-dev');
+  const secret =
+    process.env.INVITE_CODE_SECRET ||
+    process.env.MFA_SECRET_KEY ||
+    process.env.SERVICE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    (process.env.NODE_ENV === 'production' ? '' : 'victorysync-invite-dev');
   if (!secret) throw new Error('invite_code_secret_not_configured');
   return String(secret);
 }
@@ -455,6 +461,35 @@ async function sendDashboardInviteEmail(params: {
     `,
     text: `You're invited to VictorySync${params.orgName ? ` for ${params.orgName}` : ''}.\n\nOrganization ID: ${params.orgId}\nInvite code: ${params.inviteCode}\nRole: ${params.role}\n\nOpen ${inviteUrl} and choose Use invite. After that, VictorySync will send a separate verification code.`,
   });
+}
+
+async function findAuthUserByEmail(email: string) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+  let page = 1;
+  while (page <= 20) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw error;
+    const users = data?.users || [];
+    const found = users.find((item: any) => normalizeEmail(item?.email) === normalized);
+    if (found) return found;
+    if (users.length < 1000) break;
+    page += 1;
+  }
+  return null;
+}
+
+async function upsertPlatformProfile(userId: string, email: string, globalRole: string) {
+  const payload = {
+    id: userId,
+    email: normalizeEmail(email),
+    global_role: globalRole,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabaseAdmin
+    .from('profiles')
+    .upsert(payload, { onConflict: 'id' });
+  if (error) throw error;
 }
 
 const TOTP_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -11046,6 +11081,89 @@ app.post('/api/admin/invite-codes', async (req, res) => {
   } catch (e: any) {
     console.error('admin_issue_invite_code_failed:', fmtErr(e));
     return res.status(500).json({ error: 'admin_issue_invite_code_failed', detail: fmtErr(e) ?? 'unknown_error' });
+  }
+});
+
+// POST /api/admin/platform-invites - platform admin invites dashboard-level admins/managers.
+app.post('/api/admin/platform-invites', async (req, res) => {
+  try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
+    const { email, globalRole } = req.body || {};
+    const normalizedEmail = normalizeEmail(email);
+    const role = String(globalRole || 'platform_manager').trim();
+    const validRoles = ['platform_manager', 'platform_admin'];
+    if (!normalizedEmail) return res.status(400).json({ error: 'invalid_email' });
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ error: 'invalid_global_role', detail: `globalRole must be one of: ${validRoles.join(', ')}` });
+    }
+
+    let authUser = await findAuthUserByEmail(normalizedEmail);
+    let inviteSent = false;
+    let inviteError: string | null = null;
+
+    if (!authUser) {
+      const redirectTo = `${String(process.env.EMAIL_APP_URL || process.env.FRONTEND_ORIGIN || process.env.APP_URL || process.env.DASHBOARD_URL || 'https://dashboard.victorysync.com').replace(/\/$/, '')}/login`;
+      const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(normalizedEmail, {
+        redirectTo,
+        data: {
+          role: role === 'platform_admin' ? 'admin' : 'manager',
+          global_role: role,
+          invited_by: actorId,
+        },
+      } as any);
+      if (error) {
+        inviteError = error.message || 'supabase_invite_failed';
+        const msg = String(error.message || '').toLowerCase();
+        if (!msg.includes('already')) throw error;
+        authUser = await findAuthUserByEmail(normalizedEmail);
+      } else {
+        authUser = data?.user || null;
+        inviteSent = true;
+      }
+    }
+
+    if (!authUser?.id) {
+      return res.status(500).json({ error: 'platform_invite_failed', detail: inviteError || 'No auth user was returned for this invite.' });
+    }
+
+    await upsertPlatformProfile(authUser.id, normalizedEmail, role);
+    try {
+      await supabaseAdmin.auth.admin.updateUserById(authUser.id, {
+        user_metadata: {
+          ...(authUser.user_metadata || {}),
+          role: role === 'platform_admin' ? 'admin' : 'manager',
+          global_role: role,
+        },
+      });
+    } catch (metadataErr: any) {
+      console.warn('platform_invite_metadata_update_failed:', fmtErr(metadataErr));
+    }
+
+    await writeAuditLog({
+      actor_id: actorId,
+      action: 'platform_user.invited',
+      entity_type: 'auth_user',
+      entity_id: authUser.id,
+      metadata: { email: normalizedEmail, global_role: role, invite_sent: inviteSent },
+    });
+
+    res.status(201).json({
+      invite: {
+        user_id: authUser.id,
+        email: normalizedEmail,
+        global_role: role,
+        invite_sent: inviteSent,
+        existing_user: !inviteSent,
+      },
+      email_sent: inviteSent,
+      email_error: inviteError,
+    });
+  } catch (e: any) {
+    console.error('admin_platform_invite_failed:', fmtErr(e));
+    res.status(500).json({ error: 'admin_platform_invite_failed', detail: fmtErr(e) ?? 'unknown_error' });
   }
 });
 
