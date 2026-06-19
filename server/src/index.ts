@@ -378,6 +378,98 @@ async function sendInviteVerificationEmail(params: { email: string; orgName?: st
   });
 }
 
+const TOTP_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+function base32Encode(buffer: Buffer) {
+  let bits = 0;
+  let value = 0;
+  let output = '';
+  for (const byte of buffer) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += TOTP_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) output += TOTP_ALPHABET[(value << (5 - bits)) & 31];
+  return output;
+}
+
+function base32Decode(input: string) {
+  const clean = String(input || '').replace(/=+$/g, '').replace(/\s+/g, '').toUpperCase();
+  let bits = 0;
+  let value = 0;
+  const bytes: number[] = [];
+  for (const char of clean) {
+    const index = TOTP_ALPHABET.indexOf(char);
+    if (index < 0) continue;
+    value = (value << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+function mfaEncryptionKey() {
+  const material = process.env.MFA_SECRET_KEY || process.env.INVITE_CODE_SECRET || process.env.SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY || 'victorysync-local-mfa-key';
+  return crypto.createHash('sha256').update(String(material)).digest();
+}
+
+function encryptMfaSecret(secret: string) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', mfaEncryptionKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    secret_ciphertext: ciphertext.toString('base64'),
+    secret_iv: iv.toString('base64'),
+    secret_tag: tag.toString('base64'),
+  };
+}
+
+function decryptMfaSecret(row: any) {
+  const decipher = crypto.createDecipheriv(
+    'aes-256-gcm',
+    mfaEncryptionKey(),
+    Buffer.from(String(row.secret_iv || ''), 'base64')
+  );
+  decipher.setAuthTag(Buffer.from(String(row.secret_tag || ''), 'base64'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(String(row.secret_ciphertext || ''), 'base64')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
+function hotp(secret: string, counter: number) {
+  const key = base32Decode(secret);
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64BE(BigInt(counter), 0);
+  const hmac = crypto.createHmac('sha1', key).update(buffer).digest();
+  const offset = hmac[hmac.length - 1] & 0xf;
+  const code = ((hmac[offset] & 0x7f) << 24)
+    | ((hmac[offset + 1] & 0xff) << 16)
+    | ((hmac[offset + 2] & 0xff) << 8)
+    | (hmac[offset + 3] & 0xff);
+  return String(code % 1000000).padStart(6, '0');
+}
+
+function verifyTotp(secret: string, code: string) {
+  const clean = String(code || '').replace(/\D/g, '');
+  if (!/^\d{6}$/.test(clean)) return false;
+  const counter = Math.floor(Date.now() / 30000);
+  return [-1, 0, 1].some((window) => hotp(secret, counter + window) === clean);
+}
+
+function totpUri(email: string, secret: string) {
+  const label = encodeURIComponent(`VictorySync:${email || 'user'}`);
+  const issuer = encodeURIComponent('VictorySync');
+  return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
+}
+
 const IMMUTABLE_SUPER_ADMIN_EMAIL = 'adam@victorysync.com';
 async function isImmutableSuperAdminUser(userId: string | null | undefined): Promise<boolean> {
   if (!userId) return false;
@@ -4652,6 +4744,123 @@ app.put('/api/admin/orgs/:orgId/billing-lock', async (req, res) => {
   } catch (err: any) {
     console.error('admin_billing_lock_update_failed:', fmtErr(err));
     res.status(500).json({ error: 'admin_billing_lock_update_failed' });
+  }
+});
+
+app.get('/api/user/mfa/factors', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const { data, error } = await supabaseAdmin
+      .from('user_mfa_totp')
+      .select('id, verified, enabled_at, created_at, updated_at')
+      .eq('user_id', String(actorId))
+      .order('created_at', { ascending: false });
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.json({ factors: [], migration_required: true });
+      }
+      throw error;
+    }
+    res.json({ factors: data || [] });
+  } catch (err: any) {
+    console.error('mfa_factors_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mfa_factors_failed' });
+  }
+});
+
+app.post('/api/user/mfa/enroll', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(String(actorId));
+    const email = authUser?.user?.email || '';
+    const secret = base32Encode(crypto.randomBytes(20));
+    const encrypted = encryptMfaSecret(secret);
+
+    const { data, error } = await supabaseAdmin
+      .from('user_mfa_totp')
+      .insert({
+        user_id: String(actorId),
+        ...encrypted,
+        verified: false,
+      })
+      .select('id, created_at')
+      .maybeSingle();
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.status(503).json({ error: 'mfa_migration_required' });
+      }
+      throw error;
+    }
+
+    res.json({
+      factor: {
+        id: data?.id,
+        secret,
+        otpauth_uri: totpUri(email, secret),
+      },
+    });
+  } catch (err: any) {
+    console.error('mfa_enroll_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mfa_enroll_failed' });
+  }
+});
+
+app.post('/api/user/mfa/:factorId/verify', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const factorId = String(req.params.factorId || '').trim();
+    const code = String(req.body?.code || '').trim();
+    if (!factorId || !code) return res.status(400).json({ error: 'factor_id_and_code_required' });
+
+    const { data: row, error } = await supabaseAdmin
+      .from('user_mfa_totp')
+      .select('*')
+      .eq('id', factorId)
+      .eq('user_id', String(actorId))
+      .maybeSingle();
+    if (error) throw error;
+    if (!row) return res.status(404).json({ error: 'mfa_factor_not_found' });
+
+    const secret = decryptMfaSecret(row);
+    if (!verifyTotp(secret, code)) return res.status(400).json({ error: 'invalid_mfa_code' });
+
+    const { data, error: updateError } = await supabaseAdmin
+      .from('user_mfa_totp')
+      .update({ verified: true, enabled_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', factorId)
+      .eq('user_id', String(actorId))
+      .select('id, verified, enabled_at, created_at, updated_at')
+      .maybeSingle();
+    if (updateError) throw updateError;
+    res.json({ factor: data });
+  } catch (err: any) {
+    console.error('mfa_verify_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mfa_verify_failed' });
+  }
+});
+
+app.delete('/api/user/mfa/:factorId', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const factorId = String(req.params.factorId || '').trim();
+    if (!factorId) return res.status(400).json({ error: 'factor_id_required' });
+    const { error } = await supabaseAdmin
+      .from('user_mfa_totp')
+      .delete()
+      .eq('id', factorId)
+      .eq('user_id', String(actorId));
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('mfa_delete_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mfa_delete_failed' });
   }
 });
 

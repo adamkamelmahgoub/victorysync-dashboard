@@ -4,7 +4,6 @@ import { PageLayout } from '../components/PageLayout';
 import StripePortalButton from '../components/StripePortalButton';
 import { buildApiUrl } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
-import { supabase } from '../lib/supabaseClient';
 import {
   getSelectedLeadAlarmIds,
   LEAD_ALARM_OPTIONS,
@@ -29,7 +28,7 @@ export default function UserSettingsPage() {
   const [showNewKeyPlaintext, setShowNewKeyPlaintext] = useState<string | null>(null);
   const [leadAlarmIds, setLeadAlarmIds] = useState<LeadAlarmId[]>([]);
   const [mfaFactors, setMfaFactors] = useState<any[]>([]);
-  const [mfaEnroll, setMfaEnroll] = useState<{ factorId: string; qrCode?: string; secret?: string } | null>(null);
+  const [mfaEnroll, setMfaEnroll] = useState<{ factorId: string; otpauthUri?: string; secret?: string } | null>(null);
   const [mfaCode, setMfaCode] = useState('');
   const [mfaLoading, setMfaLoading] = useState(false);
 
@@ -170,28 +169,39 @@ export default function UserSettingsPage() {
 
   const loadMfaFactors = async () => {
     try {
-      const { data, error } = await (supabase.auth.mfa as any).listFactors();
-      if (error) throw error;
-      setMfaFactors([...(data?.totp || []), ...(data?.phone || [])]);
+      if (!user?.id) return;
+      const response = await fetch(buildApiUrl('/api/user/mfa/factors'), {
+        headers: { 'x-user-id': user.id },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Unable to load 2FA factors');
+      setMfaFactors(payload.factors || []);
     } catch {
       setMfaFactors([]);
     }
   };
 
   const startMfaEnroll = async () => {
+    if (!user?.id) return;
     setMfaLoading(true);
     setMessage(null);
     try {
-      const { data, error } = await (supabase.auth.mfa as any).enroll({ factorType: 'totp', friendlyName: 'VictorySync dashboard' });
-      if (error) throw error;
-      setMfaEnroll({
-        factorId: data.id,
-        qrCode: data.totp?.qr_code,
-        secret: data.totp?.secret,
+      const response = await fetch(buildApiUrl('/api/user/mfa/enroll'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({}),
       });
-      setMessage('Scan the QR code and enter the 6-digit authenticator code to finish enabling 2FA.');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Unable to start 2FA setup');
+      const factor = payload.factor || {};
+      setMfaEnroll({
+        factorId: factor.id,
+        otpauthUri: factor.otpauth_uri,
+        secret: factor.secret,
+      });
+      setMessage('Add the setup key to your authenticator app, then enter the 6-digit code to finish enabling 2FA.');
     } catch (err: any) {
-      setMessage(err?.message || 'Unable to start 2FA setup. Make sure MFA is enabled in Supabase.');
+      setMessage(err?.message || 'Unable to start 2FA setup.');
     } finally {
       setMfaLoading(false);
     }
@@ -202,14 +212,14 @@ export default function UserSettingsPage() {
     setMfaLoading(true);
     setMessage(null);
     try {
-      const challenge = await (supabase.auth.mfa as any).challenge({ factorId: mfaEnroll.factorId });
-      if (challenge.error) throw challenge.error;
-      const verify = await (supabase.auth.mfa as any).verify({
-        factorId: mfaEnroll.factorId,
-        challengeId: challenge.data.id,
-        code: mfaCode.trim(),
+      if (!user?.id) return;
+      const response = await fetch(buildApiUrl(`/api/user/mfa/${encodeURIComponent(mfaEnroll.factorId)}/verify`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({ code: mfaCode.trim() }),
       });
-      if (verify.error) throw verify.error;
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error === 'invalid_mfa_code' ? 'Invalid 2FA code' : payload.error || 'Unable to verify 2FA code');
       setMfaEnroll(null);
       setMfaCode('');
       await loadMfaFactors();
@@ -225,8 +235,13 @@ export default function UserSettingsPage() {
     if (!confirm('Disable this 2FA factor?')) return;
     setMfaLoading(true);
     try {
-      const { error } = await (supabase.auth.mfa as any).unenroll({ factorId });
-      if (error) throw error;
+      if (!user?.id) return;
+      const response = await fetch(buildApiUrl(`/api/user/mfa/${encodeURIComponent(factorId)}`), {
+        method: 'DELETE',
+        headers: { 'x-user-id': user.id },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Unable to disable 2FA');
       await loadMfaFactors();
       setMessage('2FA factor disabled');
     } catch (err: any) {
@@ -463,20 +478,27 @@ export default function UserSettingsPage() {
 
           {mfaEnroll && (
             <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50 p-4">
-              <div className="grid gap-4 md:grid-cols-[180px,1fr] md:items-center">
-                <div className="rounded-xl border border-violet-200 bg-white p-3">
-                  {mfaEnroll.qrCode ? (
-                    <img src={mfaEnroll.qrCode} alt="2FA QR code" className="h-36 w-36" />
-                  ) : (
-                    <div className="text-xs text-slate-600">QR unavailable. Use the setup key.</div>
-                  )}
-                </div>
-                <div>
+              <div className="grid gap-4 lg:grid-cols-[1fr,1fr] lg:items-start">
+                <div className="rounded-xl border border-violet-200 bg-white p-4">
+                  <div className="text-xs font-bold uppercase tracking-[0.16em] text-violet-700">Setup key</div>
                   {mfaEnroll.secret && (
-                    <div className="mb-3 rounded-xl border border-violet-200 bg-white px-3 py-2 font-mono text-xs text-slate-700">
+                    <div className="mt-3 break-all rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 font-mono text-sm font-semibold text-slate-900">
                       {mfaEnroll.secret}
                     </div>
                   )}
+                  <p className="mt-3 text-sm leading-6 text-slate-700">
+                    Add this setup key in Google Authenticator, 1Password, Microsoft Authenticator, Authy, or another TOTP app.
+                  </p>
+                  {mfaEnroll.otpauthUri && (
+                    <button
+                      onClick={() => copyToClipboard(mfaEnroll.otpauthUri || '')}
+                      className="vs-button-secondary mt-3"
+                    >
+                      Copy authenticator URI
+                    </button>
+                  )}
+                </div>
+                <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-700">Authenticator code</label>
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <input
@@ -504,8 +526,10 @@ export default function UserSettingsPage() {
               mfaFactors.map((factor) => (
                 <div key={factor.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3">
                   <div>
-                    <div className="text-sm font-semibold text-slate-950">{factor.friendly_name || factor.factor_type || 'Authenticator app'}</div>
-                    <div className="text-xs text-slate-500">Status: {factor.status || 'unknown'}</div>
+                    <div className="text-sm font-semibold text-slate-950">Authenticator app</div>
+                    <div className="text-xs text-slate-500">
+                      Status: {factor.verified ? 'enabled' : 'pending'}{factor.enabled_at ? ` · Enabled ${new Date(factor.enabled_at).toLocaleDateString()}` : ''}
+                    </div>
                   </div>
                   <button onClick={() => removeMfaFactor(factor.id)} disabled={mfaLoading} className="vs-button-secondary !px-3 !py-1.5 !text-xs">
                     Disable

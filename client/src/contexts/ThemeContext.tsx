@@ -41,6 +41,7 @@ export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
           headers: { 'x-user-id': user.id }
         });
         if (!response.ok) return;
+        const data = await response.json().catch(() => ({}));
         const next = data?.user?.theme === 'dark' ? 'dark' : readStoredTheme();
         if (!cancelled) setThemeState(next);
       } catch {

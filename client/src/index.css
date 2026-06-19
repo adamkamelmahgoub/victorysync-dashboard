@@ -206,10 +206,30 @@ body {
   transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease;
 }
 
+:root[data-theme='dark'] .vs-surface {
+  background:
+    linear-gradient(180deg, rgba(17, 24, 39, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%),
+    linear-gradient(135deg, rgba(167, 139, 250, 0.08), rgba(6, 182, 212, 0.04));
+  border-color: rgba(148, 163, 184, 0.24);
+  box-shadow: var(--vs-shadow);
+}
+
+:root[data-theme='dark'] .vs-surface-muted {
+  background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
 .vs-surface:hover,
 .vs-surface-muted:hover {
   border-color: rgba(124, 58, 237, 0.22);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 24px 58px rgba(15, 23, 42, 0.10), 0 0 0 1px rgba(255,255,255,0.72) inset;
+}
+
+:root[data-theme='dark'] .vs-surface:hover,
+:root[data-theme='dark'] .vs-surface-muted:hover {
+  border-color: rgba(167, 139, 250, 0.36);
+  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.32);
 }
 
 .vs-input {
@@ -234,6 +254,21 @@ body {
   transform: translateY(0);
 }
 
+:root[data-theme='dark'] .vs-input,
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] textarea {
+  background-color: #111827;
+  color: #f8fafc;
+  border-color: rgba(148, 163, 184, 0.28);
+  color-scheme: dark;
+}
+
+:root[data-theme='dark'] input::placeholder,
+:root[data-theme='dark'] textarea::placeholder {
+  color: #94a3b8;
+}
+
 .vs-button-secondary {
   @apply px-3 py-2 text-sm font-semibold transition disabled:opacity-50;
   border-radius: var(--radius-button);
@@ -254,6 +289,20 @@ body {
 .vs-button-secondary:active {
   transform: translateY(0);
   box-shadow: 0 1px 0 rgba(255,255,255,0.86) inset, 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+:root[data-theme='dark'] .vs-button-secondary,
+:root[data-theme='dark'] .vs-button-outline {
+  background: linear-gradient(180deg, #1f2937 0%, #111827 100%);
+  border-color: rgba(148, 163, 184, 0.30);
+  color: #f8fafc;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 12px 28px rgba(0,0,0,0.24);
+}
+
+:root[data-theme='dark'] .vs-button-secondary:hover,
+:root[data-theme='dark'] .vs-button-outline:hover {
+  background: linear-gradient(180deg, #273449 0%, #1f2937 100%);
+  border-color: rgba(167, 139, 250, 0.38);
 }
 
 .vs-button-primary {
@@ -560,28 +609,28 @@ tbody tr:hover {
   letter-spacing: 0 !important;
 }
 
-.bg-slate-950,
-.bg-slate-950\/40,
-.bg-slate-950\/50,
-.bg-slate-950\/60,
-.bg-slate-950\/70,
-.bg-slate-950\/72,
-.bg-slate-950\/80,
-.bg-slate-900,
-.bg-slate-900\/40,
-.bg-slate-900\/50,
-.bg-slate-900\/60,
-.bg-slate-900\/70,
-.bg-slate-900\/80,
-.bg-slate-900\/95,
-.bg-slate-800,
-.bg-slate-800\/20,
-.bg-slate-800\/30,
-.bg-slate-800\/40,
-.bg-slate-800\/50,
-.bg-slate-800\/60,
-.bg-slate-800\/70,
-.bg-slate-800\/80 {
+:root[data-theme='light'] .bg-slate-950,
+:root[data-theme='light'] .bg-slate-950\/40,
+:root[data-theme='light'] .bg-slate-950\/50,
+:root[data-theme='light'] .bg-slate-950\/60,
+:root[data-theme='light'] .bg-slate-950\/70,
+:root[data-theme='light'] .bg-slate-950\/72,
+:root[data-theme='light'] .bg-slate-950\/80,
+:root[data-theme='light'] .bg-slate-900,
+:root[data-theme='light'] .bg-slate-900\/40,
+:root[data-theme='light'] .bg-slate-900\/50,
+:root[data-theme='light'] .bg-slate-900\/60,
+:root[data-theme='light'] .bg-slate-900\/70,
+:root[data-theme='light'] .bg-slate-900\/80,
+:root[data-theme='light'] .bg-slate-900\/95,
+:root[data-theme='light'] .bg-slate-800,
+:root[data-theme='light'] .bg-slate-800\/20,
+:root[data-theme='light'] .bg-slate-800\/30,
+:root[data-theme='light'] .bg-slate-800\/40,
+:root[data-theme='light'] .bg-slate-800\/50,
+:root[data-theme='light'] .bg-slate-800\/60,
+:root[data-theme='light'] .bg-slate-800\/70,
+:root[data-theme='light'] .bg-slate-800\/80 {
   background-color: #ffffff !important;
 }
 
@@ -600,8 +649,7 @@ tbody tr:hover {
   box-shadow: var(--vs-shadow) !important;
 }
 
-:root[data-theme='light'] body,
-:root[data-theme='dark'] body {
+:root[data-theme='light'] body {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(245, 245, 247, 0.98) 34%, #f2f3f6 100%),
     radial-gradient(circle at 18% -10%, rgba(124, 58, 237, 0.10), transparent 26%);
@@ -611,21 +659,13 @@ tbody tr:hover {
 :root[data-theme='light'] .text-slate-50,
 :root[data-theme='light'] .text-slate-100,
 :root[data-theme='light'] .text-slate-200,
-:root[data-theme='light'] .text-slate-300,
-:root[data-theme='dark'] .text-white,
-:root[data-theme='dark'] .text-slate-50,
-:root[data-theme='dark'] .text-slate-100,
-:root[data-theme='dark'] .text-slate-200,
-:root[data-theme='dark'] .text-slate-300 {
+:root[data-theme='light'] .text-slate-300 {
   color: #0f172a !important;
 }
 
 :root[data-theme='light'] .text-slate-400,
 :root[data-theme='light'] .text-slate-500,
 :root[data-theme='light'] .text-slate-600,
-:root[data-theme='dark'] .text-slate-400,
-:root[data-theme='dark'] .text-slate-500,
-:root[data-theme='dark'] .text-slate-600,
 .text-gray-400,
 .text-gray-500 {
   color: #4b5563 !important;
@@ -649,20 +689,7 @@ tbody tr:hover {
 :root[data-theme='light'] .bg-slate-800\/60,
 :root[data-theme='light'] .bg-slate-800\/70,
 :root[data-theme='light'] .bg-slate-700,
-:root[data-theme='light'] .bg-slate-700\/50,
-:root[data-theme='dark'] .bg-slate-900\/80,
-:root[data-theme='dark'] .bg-slate-900\/95,
-:root[data-theme='dark'] .bg-slate-900\/60,
-:root[data-theme='dark'] .bg-slate-900,
-:root[data-theme='dark'] .bg-slate-800,
-:root[data-theme='dark'] .bg-slate-800\/50,
-:root[data-theme='dark'] .bg-slate-800\/30,
-:root[data-theme='dark'] .bg-slate-800\/20,
-:root[data-theme='dark'] .bg-slate-800\/40,
-:root[data-theme='dark'] .bg-slate-800\/60,
-:root[data-theme='dark'] .bg-slate-800\/70,
-:root[data-theme='dark'] .bg-slate-700,
-:root[data-theme='dark'] .bg-slate-700\/50 {
+:root[data-theme='light'] .bg-slate-700\/50 {
   background: rgba(255, 255, 255, 0.88) !important;
 }
 
@@ -690,17 +717,7 @@ tbody tr:hover {
 :root[data-theme='light'] .bg-slate-950\/80,
 :root[data-theme='light'] .bg-black\/20,
 :root[data-theme='light'] .bg-black\/30,
-:root[data-theme='light'] .bg-black\/40,
-:root[data-theme='dark'] .bg-slate-950,
-:root[data-theme='dark'] .bg-slate-950\/40,
-:root[data-theme='dark'] .bg-slate-950\/50,
-:root[data-theme='dark'] .bg-slate-950\/60,
-:root[data-theme='dark'] .bg-slate-950\/70,
-:root[data-theme='dark'] .bg-slate-950\/72,
-:root[data-theme='dark'] .bg-slate-950\/80,
-:root[data-theme='dark'] .bg-black\/20,
-:root[data-theme='dark'] .bg-black\/30,
-:root[data-theme='dark'] .bg-black\/40 {
+:root[data-theme='light'] .bg-black\/40 {
   background: rgba(255, 255, 255, 0.94) !important;
 }
 
@@ -762,20 +779,28 @@ tbody tr:hover {
   border-bottom-color: rgba(148, 163, 184, 0.16) !important;
 }
 
+:root[data-theme='dark'] aside {
+  background: #0b1220 !important;
+  border-right-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+:root[data-theme='dark'] header {
+  background: rgba(15, 23, 42, 0.90) !important;
+  border-bottom-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+:root[data-theme='dark'] thead,
+:root[data-theme='dark'] tbody tr:hover {
+  background: rgba(30, 41, 59, 0.72) !important;
+}
+
 :root[data-theme='light'] [class*="bg-[#0b1020]"],
 :root[data-theme='light'] [class*="bg-[#0f172a]"],
 :root[data-theme='light'] [class*="bg-[#15171b]"],
 :root[data-theme='light'] [class*="bg-[#070a13]"],
 :root[data-theme='light'] [class*="bg-[#090d18]"],
 :root[data-theme='light'] [class*="bg-[#030711]"],
-:root[data-theme='light'] [class*="bg-[#07111f]"],
-:root[data-theme='dark'] [class*="bg-[#0b1020]"],
-:root[data-theme='dark'] [class*="bg-[#0f172a]"],
-:root[data-theme='dark'] [class*="bg-[#15171b]"],
-:root[data-theme='dark'] [class*="bg-[#070a13]"],
-:root[data-theme='dark'] [class*="bg-[#090d18]"],
-:root[data-theme='dark'] [class*="bg-[#030711]"],
-:root[data-theme='dark'] [class*="bg-[#07111f]"] {
+:root[data-theme='light'] [class*="bg-[#07111f]"] {
   background: #ffffff !important;
 }
 
@@ -877,4 +902,32 @@ table th {
 
 table td {
   color: #374151;
+}
+
+:root[data-theme='dark'] .recharts-cartesian-axis-tick-value,
+:root[data-theme='dark'] .recharts-legend-item-text,
+:root[data-theme='dark'] .recharts-label,
+:root[data-theme='dark'] .recharts-text {
+  fill: #cbd5e1 !important;
+  color: #cbd5e1 !important;
+}
+
+:root[data-theme='dark'] .recharts-cartesian-grid line {
+  stroke: rgba(148, 163, 184, 0.24) !important;
+}
+
+:root[data-theme='dark'] .recharts-default-tooltip {
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  background: #111827 !important;
+  color: #f8fafc !important;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34) !important;
+}
+
+:root[data-theme='dark'] .recharts-tooltip-label,
+:root[data-theme='dark'] .recharts-tooltip-item,
+:root[data-theme='dark'] .recharts-tooltip-item-name,
+:root[data-theme='dark'] .recharts-tooltip-item-value,
+:root[data-theme='dark'] table th,
+:root[data-theme='dark'] table td {
+  color: #e2e8f0 !important;
 }
