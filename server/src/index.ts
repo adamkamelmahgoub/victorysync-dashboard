@@ -4776,6 +4776,9 @@ app.post('/api/user/mfa/enroll', async (req, res) => {
   try {
     const actorId = req.actorId || req.header('x-user-id') || null;
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(actorId))) {
+      return res.status(400).json({ error: 'invalid_user_session', detail: 'Sign out and sign back in before enabling 2FA.' });
+    }
 
     const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(String(actorId));
     const email = authUser?.user?.email || '';
@@ -4794,7 +4797,10 @@ app.post('/api/user/mfa/enroll', async (req, res) => {
     if (error) {
       const message = String(error.message || '').toLowerCase();
       if (message.includes('relation') || message.includes('does not exist')) {
-        return res.status(503).json({ error: 'mfa_migration_required' });
+        return res.status(503).json({ error: 'mfa_migration_required', detail: 'Apply Supabase migration 034_user_mfa_totp.sql before enabling 2FA.' });
+      }
+      if (error.code === '22P02' || message.includes('invalid input syntax')) {
+        return res.status(400).json({ error: 'invalid_user_session', detail: 'Sign out and sign back in before enabling 2FA.' });
       }
       throw error;
     }
@@ -4808,7 +4814,7 @@ app.post('/api/user/mfa/enroll', async (req, res) => {
     });
   } catch (err: any) {
     console.error('mfa_enroll_failed:', fmtErr(err));
-    res.status(500).json({ error: 'mfa_enroll_failed' });
+    res.status(500).json({ error: 'mfa_enroll_failed', detail: '2FA enrollment could not be started. Check the MFA migration and server auth configuration.' });
   }
 });
 
@@ -14927,6 +14933,63 @@ app.get("/s/series", async (req, res) => {
       }
     });
 
+      async function fetchRecordingAsset(recordingUrl: string, orgId?: string | null) {
+        const baseHeaders = {
+          Accept: 'audio/*,application/octet-stream,*/*',
+          'User-Agent': 'Mozilla/5.0 VictorySync Recording Proxy',
+        };
+        const direct = await fetch(recordingUrl, { headers: baseHeaders } as any);
+        if (direct.ok || ![401, 403].includes(direct.status)) return direct;
+
+        let overrideCreds: any = undefined;
+        if (orgId) {
+          try {
+            const { getOrgIntegration } = await import('./lib/integrationsStore');
+            const integ = await getOrgIntegration(orgId, 'mightycall');
+            if (integ?.credentials) {
+              overrideCreds = {
+                clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
+                clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+              };
+            }
+          } catch (err: any) {
+            console.warn('[recordings/download] org MightyCall credential lookup failed:', fmtErr(err));
+          }
+        }
+
+        const token = await getMightyCallAccessToken(overrideCreds).catch((err: any) => {
+          console.warn('[recordings/download] MightyCall token lookup failed:', fmtErr(err));
+          return null;
+        });
+        if (!token) return direct;
+
+        return fetch(recordingUrl, {
+          headers: {
+            ...baseHeaders,
+            Authorization: `Bearer ${token}`,
+            'x-api-key': overrideCreds?.clientId || process.env.MIGHTYCALL_API_KEY || '',
+          },
+        } as any);
+      }
+
+      function streamRecordingResponse(req: express.Request, res: express.Response, id: string, fetched: any) {
+        const contentType = fetched.headers.get('content-type') || 'audio/mpeg';
+        const filename = `${id}.mp3`;
+        const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
+        res.setHeader('Cache-Control', 'private, max-age=300');
+
+        if (fetched.body && typeof fetched.body.pipe === 'function') {
+          fetched.body.pipe(res);
+        } else if (fetched.body && typeof (Readable as any).fromWeb === 'function') {
+          const nodeStream = Readable.fromWeb(fetched.body);
+          nodeStream.pipe(res);
+        } else {
+          return fetched.arrayBuffer().then((buffer: ArrayBuffer) => res.send(Buffer.from(buffer)));
+        }
+      }
+
       // Stream/download a single recording by call id. Proxies the remote `recording_url` so
       // frontend can fetch with `x-user-id` header and not expose external URLs or auth.
       app.get('/api/recordings/:id/download', async (req, res) => {
@@ -14975,32 +15038,12 @@ app.get("/s/series", async (req, res) => {
             }
             if ((await isOrgAdmin(actorId, orgId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'))) {
               const recordingUrl = recording.recording_url;
-              const fetched = await fetch(recordingUrl, {
-                headers: {
-                  Accept: 'audio/*,application/octet-stream,*/*',
-                  'User-Agent': 'Mozilla/5.0 VictorySync Recording Proxy',
-                },
-              } as any);
+              const fetched = await fetchRecordingAsset(recordingUrl, orgId);
               if (!fetched.ok) {
                 console.error('[recordings/download] remote fetch failed:', fetched.status);
                 return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
               }
-              const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
-	              const filename = `${id}.mp3`;
-	              const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
-	              res.setHeader('Content-Type', contentType);
-	              res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
-	              if ((fetched as any).body && typeof (fetched as any).body.pipe === 'function') {
-	                (fetched as any).body.pipe(res);
-	              } else if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
-	                const nodeStream = Readable.fromWeb((fetched as any).body);
-	                nodeStream.pipe(res);
-	              } else {
-	                const buf = typeof (fetched as any).buffer === 'function'
-	                  ? await (fetched as any).buffer()
-	                  : Buffer.from(await (fetched as any).arrayBuffer());
-	                res.send(buf);
-	              }
+              await streamRecordingResponse(req, res, id, fetched);
               return;
             }
             const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(orgId, actorId);
@@ -15024,36 +15067,13 @@ app.get("/s/series", async (req, res) => {
 
           const recordingUrl = recording.recording_url;
           // Fetch remote asset
-          const fetched = await fetch(recordingUrl, {
-            headers: {
-              Accept: 'audio/*,application/octet-stream,*/*',
-              'User-Agent': 'Mozilla/5.0 VictorySync Recording Proxy',
-            },
-          } as any);
+          const fetched = await fetchRecordingAsset(recordingUrl, recording.org_id);
           if (!fetched.ok) {
             console.error('[recordings/download] remote fetch failed:', fetched.status);
             return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
           }
 
-          // Convert Web stream to Node stream when possible and pipe to response
-          const contentType = fetched.headers.get('content-type') || 'application/octet-stream';
-	          const filename = `${id}.mp3`;
-	          const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
-	          res.setHeader('Content-Type', contentType);
-	          res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
-
-	          if ((fetched as any).body && typeof (fetched as any).body.pipe === 'function') {
-	            (fetched as any).body.pipe(res);
-	          } else if ((fetched as any).body && typeof (Readable as any).fromWeb === 'function') {
-	            const nodeStream = Readable.fromWeb((fetched as any).body);
-	            nodeStream.pipe(res);
-	          } else {
-	            // Fallback: buffer into memory and send (may be larger for big files)
-	            const buf = typeof (fetched as any).buffer === 'function'
-	              ? await (fetched as any).buffer()
-	              : Buffer.from(await (fetched as any).arrayBuffer());
-	            res.send(buf);
-	          }
+          await streamRecordingResponse(req, res, id, fetched);
         } catch (e: any) {
           console.error('[recordings/download] error:', e?.message ?? e);
           res.status(500).json({ error: 'download_failed', detail: e?.message ?? String(e) });

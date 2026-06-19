@@ -192,7 +192,17 @@ export default function UserSettingsPage() {
         body: JSON.stringify({}),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'Unable to start 2FA setup');
+      if (!response.ok) {
+        const fallback =
+          payload.error === 'mfa_migration_required'
+            ? '2FA setup is not ready yet. Apply the MFA database migration, then try again.'
+            : payload.error === 'invalid_user_session'
+              ? 'Sign out and sign back in before enabling 2FA.'
+              : payload.error === 'unauthenticated'
+                ? 'Your session expired. Sign in again before enabling 2FA.'
+                : 'Unable to start 2FA setup';
+        throw new Error(payload.detail || fallback);
+      }
       const factor = payload.factor || {};
       setMfaEnroll({
         factorId: factor.id,

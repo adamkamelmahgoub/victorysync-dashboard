@@ -48,6 +48,8 @@ export function normalizeCallDirection(value: unknown, fromNumber?: unknown, own
   if (text.includes('internal')) return 'internal';
   if (text.includes('out')) return 'outbound';
   if (text.includes('in')) return 'inbound';
+  if (text === 'sent' || text === 'api' || text === 'external') return 'outbound';
+  if (text === 'received') return 'inbound';
   const fromDigits = normalizePhoneDigits(fromNumber);
   if (ownedDigits && fromDigits) return ownedDigits.has(fromDigits) ? 'outbound' : 'inbound';
   return 'unknown';

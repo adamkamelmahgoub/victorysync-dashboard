@@ -97,9 +97,37 @@ function statusOf(row: any): string {
 }
 
 function directionOf(row: any): string {
-  const raw = String(row?.direction || row?.current_call_direction || row?.metadata?.direction || row?.metadata?.origin || row?.raw_payload?.origin || '').toLowerCase();
+  const raw = String(
+    row?.direction ||
+    row?.current_call_direction ||
+    row?.call_direction ||
+    row?.callDirection ||
+    row?.origin ||
+    row?.requestOrigin ||
+    row?.metadata?.direction ||
+    row?.metadata?.callDirection ||
+    row?.metadata?.call_direction ||
+    row?.metadata?.origin ||
+    row?.metadata?.requestOrigin ||
+    row?.metadata?.callInfo?.direction ||
+    row?.metadata?.callInfo?.origin ||
+    row?.metadata?.communication?.direction ||
+    row?.metadata?.communication?.origin ||
+    row?.raw_payload?.direction ||
+    row?.raw_payload?.callDirection ||
+    row?.raw_payload?.call_direction ||
+    row?.raw_payload?.origin ||
+    row?.raw_payload?.requestOrigin ||
+    row?.raw_payload?.callInfo?.direction ||
+    row?.raw_payload?.callInfo?.origin ||
+    row?.raw_payload?.communication?.direction ||
+    row?.raw_payload?.communication?.origin ||
+    ''
+  ).toLowerCase();
   if (raw.includes('out')) return 'outbound';
   if (raw.includes('in')) return 'inbound';
+  if (raw === 'external' || raw === 'sent' || raw === 'api') return 'outbound';
+  if (raw === 'internal' || raw === 'received') return 'inbound';
   return raw;
 }
 
@@ -123,10 +151,25 @@ function inferDirectionFromOwnedNumbers(row: any, ownedDigits: Set<string>): 'in
   const explicit = directionOf(row);
   const origin = String(
     row?.origin ||
+    row?.requestOrigin ||
+    row?.callDirection ||
+    row?.call_direction ||
     row?.message_origin ||
+    row?.metadata?.direction ||
+    row?.metadata?.callDirection ||
+    row?.metadata?.call_direction ||
     row?.metadata?.origin ||
+    row?.metadata?.requestOrigin ||
+    row?.metadata?.callInfo?.direction ||
+    row?.metadata?.callInfo?.origin ||
     row?.metadata?.messageInfo?.origin ||
+    row?.raw_payload?.direction ||
+    row?.raw_payload?.callDirection ||
+    row?.raw_payload?.call_direction ||
     row?.raw_payload?.origin ||
+    row?.raw_payload?.requestOrigin ||
+    row?.raw_payload?.callInfo?.direction ||
+    row?.raw_payload?.callInfo?.origin ||
     ''
   ).toLowerCase();
   if (origin.includes('out')) return 'outbound';

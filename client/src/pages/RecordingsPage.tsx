@@ -165,11 +165,12 @@ export function RecordingsPage() {
       return;
     }
     try {
-	      const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download?inline=1`), {
+	      const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(recording.id)}/download?inline=1`), {
         headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
-        setError('Failed to download recording');
+        const payload = await response.json().catch(() => ({}));
+        setError(payload.detail || payload.error || 'Failed to download recording');
         return;
       }
       const blob = await response.blob();
@@ -188,11 +189,12 @@ export function RecordingsPage() {
 
   const handlePlay = async (recording: Recording) => {
     try {
-      const response = await fetch(buildApiUrl(`/api/recordings/${recording.id}/download`), {
+      const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(recording.id)}/download`), {
         headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
-        setError('Failed to open recording');
+        const payload = await response.json().catch(() => ({}));
+        setError(payload.detail || payload.error || 'Failed to open recording');
         return;
       }
       const blob = await response.blob();

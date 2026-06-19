@@ -11,6 +11,7 @@ import {
   formatPhoneNumber,
   formatSeconds,
   isoDateDaysAgo,
+  normalizeCallDirection,
   normalizeCallStatus,
 } from '../lib/reportingMetrics';
 
@@ -34,10 +35,25 @@ function statusTone(value?: string | null): 'neutral' | 'success' | 'warning' | 
 }
 
 function directionOf(row: CallRow) {
-  const raw = String(row.direction || row.current_call_direction || row.metadata?.direction || '').toLowerCase();
-  if (raw.includes('out')) return 'outbound';
-  if (raw.includes('in')) return 'inbound';
-  return raw || 'unknown';
+  const metadata = row.metadata || row.raw_payload || {};
+  const raw =
+    row.direction ||
+    row.current_call_direction ||
+    row.call_direction ||
+    row.callDirection ||
+    row.origin ||
+    row.requestOrigin ||
+    metadata.direction ||
+    metadata.callDirection ||
+    metadata.call_direction ||
+    metadata.origin ||
+    metadata.requestOrigin ||
+    metadata.callInfo?.direction ||
+    metadata.callInfo?.origin ||
+    metadata.communication?.direction ||
+    metadata.communication?.origin ||
+    '';
+  return normalizeCallDirection(raw, row.from_number || metadata.from_number || metadata.from, undefined);
 }
 
 function statusOf(row: CallRow) {
@@ -180,15 +196,17 @@ export default function CallsPage() {
   }, [rows]);
 
   const openRecording = async (row: CallRow) => {
-    if (!user?.id || !row.id) {
+    const recordingId = row.recording_id || row.recordingId || row.mightycall_recording_id || row.id;
+    if (!user?.id || !recordingId) {
       setError('Recording is not available for this call.');
       return;
     }
-    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(row.id))}/download?inline=1`), {
+    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`), {
       headers: { 'x-user-id': user.id },
     });
     if (!response.ok) {
-      setError('Recording is not available for this call.');
+      const payload = await response.json().catch(() => ({}));
+      setError(payload.detail || payload.error || 'Recording is not available for this call.');
       return;
     }
     const blob = await response.blob();
