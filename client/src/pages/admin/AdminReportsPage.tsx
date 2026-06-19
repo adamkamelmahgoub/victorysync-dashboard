@@ -39,7 +39,7 @@ type ReportDetailResponse = {
   numbers: string[];
   all_numbers_called?: string[];
   related: {
-    calls: Array<{ id: string; from_number?: string; to_number?: string; status?: string; duration_seconds?: number; started_at?: string }>;
+    calls: Array<{ id: string; from_number?: string; to_number?: string; direction?: string; status?: string; duration_seconds?: number; started_at?: string; recording_id?: string | null; recording_url?: string | null; has_recording?: boolean }>;
     recordings: Array<{ id: string; from_number?: string; to_number?: string; duration_seconds?: number; recording_date?: string; recording_url?: string }>;
     sms: Array<{ id: string; from_number?: string; to_number?: string; direction?: string; status?: string; created_at?: string; message_text?: string }>;
   };
@@ -217,6 +217,22 @@ const AdminReportsPage: FC = () => {
     }
   };
 
+  const openRecording = async (row: { id: string; recording_id?: string | null; recording_url?: string | null }) => {
+    const recordingId = row.recording_id || (row.recording_url ? row.id : null);
+    if (!userId || !recordingId) return;
+    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`), {
+      headers: { 'x-user-id': userId },
+    });
+    if (!response.ok) {
+      setDetailError('Recording is not available for this call.');
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
   useEffect(() => { fetchOrgs(); }, [userId]);
   useEffect(() => { loadReports(true, { syncFirst: true }); }, [filterOrgId, filterType, userId]);
   useEffect(() => {
@@ -336,12 +352,12 @@ const AdminReportsPage: FC = () => {
                 <div className="overflow-auto rounded-3xl border border-white/8">
                   {detailTab === 'calls' && (
                     <table className="w-full text-xs">
-                      <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500"><tr><th className="px-3 py-3 text-left">From</th><th className="px-3 py-3 text-left">To</th><th className="px-3 py-3 text-left">Status</th><th className="px-3 py-3 text-left">Duration</th><th className="px-3 py-3 text-left">Started</th></tr></thead>
+                      <thead className="sticky top-0 border-b border-white/8 bg-[rgba(2,6,23,0.96)] text-slate-500"><tr><th className="px-3 py-3 text-left">From</th><th className="px-3 py-3 text-left">To</th><th className="px-3 py-3 text-left">Direction</th><th className="px-3 py-3 text-left">Status</th><th className="px-3 py-3 text-left">Duration</th><th className="px-3 py-3 text-left">Recording</th><th className="px-3 py-3 text-left">Started</th></tr></thead>
                       <tbody className="divide-y divide-white/6">
                         {detail.related.calls.length === 0 ? (
-                          <tr><td className="px-3 py-4 text-slate-400" colSpan={5}>No related calls found for this report.</td></tr>
+                          <tr><td className="px-3 py-4 text-slate-400" colSpan={7}>No related calls found for this report.</td></tr>
                         ) : detail.related.calls.map((c) => (
-                          <tr key={c.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.to_number, detail.report.to_number)}</td><td className="px-3 py-3"><StatusBadge tone={String(c.status || '').toLowerCase().includes('miss') ? 'warning' : 'neutral'}>{c.status || '-'}</StatusBadge></td><td className="px-3 py-3 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td><td className="px-3 py-3 text-slate-500">{fmtDate(c.started_at)}</td></tr>
+                          <tr key={c.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.to_number, detail.report.to_number)}</td><td className="px-3 py-3"><StatusBadge tone={String(c.direction || '').toLowerCase().includes('out') || String(c.direction || '').toLowerCase().includes('in') ? 'info' : 'neutral'}>{c.direction || 'unknown'}</StatusBadge></td><td className="px-3 py-3"><StatusBadge tone={String(c.status || '').toLowerCase().includes('miss') ? 'warning' : 'neutral'}>{c.status || '-'}</StatusBadge></td><td className="px-3 py-3 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td><td className="px-3 py-3">{c.recording_url || c.has_recording ? <button type="button" className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => void openRecording(c)}>Open</button> : <span className="text-slate-500">Unavailable</span>}</td><td className="px-3 py-3 text-slate-500">{fmtDate(c.started_at)}</td></tr>
                         ))}
                       </tbody>
                     </table>

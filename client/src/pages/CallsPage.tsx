@@ -18,6 +18,7 @@ import {
 type CallRow = Record<string, any>;
 
 const PAGE_SIZE = 100;
+const FIVE_YEAR_DAYS = 5 * 366;
 
 function fmtDate(value?: string | null) {
   if (!value) return '-';
@@ -103,7 +104,7 @@ export default function CallsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(FIVE_YEAR_DAYS));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [direction, setDirection] = useState('all');
@@ -196,7 +197,7 @@ export default function CallsPage() {
   }, [rows]);
 
   const openRecording = async (row: CallRow) => {
-    const recordingId = row.recording_id || row.recordingId || row.mightycall_recording_id || row.id;
+    const recordingId = row.recording_id || row.recordingId || row.mightycall_recording_id || (row.recording_url ? row.id : null);
     if (!user?.id || !recordingId) {
       setError('Recording is not available for this call.');
       return;
@@ -268,7 +269,7 @@ export default function CallsPage() {
               setAgent('');
               setDirection('all');
               setStatus('all');
-              setStartDate(isoDateDaysAgo(30));
+              setStartDate(isoDateDaysAgo(FIVE_YEAR_DAYS));
               setEndDate(new Date().toISOString().slice(0, 10));
             }}>Reset</button>
             <button className="vs-button-primary h-10" onClick={() => loadCalls(true)}>Apply</button>

@@ -58,6 +58,8 @@ function isoDateDaysAgo(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+const FIVE_YEAR_DAYS = 5 * 366;
+
 function safeNumber(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -121,7 +123,7 @@ const DashboardNewV3: FC = () => {
   const [liveError, setLiveError] = useState<string | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveRefreshedAt, setLiveRefreshedAt] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(FIVE_YEAR_DAYS));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [reportOverview, setReportOverview] = useState<Record<string, any>>({});
   const [reportCalls, setReportCalls] = useState<Array<Record<string, any>>>([]);

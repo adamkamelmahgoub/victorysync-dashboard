@@ -15,6 +15,16 @@ type ReportScope = {
 };
 
 const router = express.Router();
+const FIVE_YEAR_LOOKBACK_MS = 5 * 366 * 24 * 60 * 60 * 1000;
+
+function resolveReportDateRange(req: express.Request, endOfDayColumn = true) {
+  const end = asDateParam(req.query.end_date || req.query.to, endOfDayColumn) || new Date().toISOString();
+  const endMs = Date.parse(end);
+  const earliest = new Date((Number.isFinite(endMs) ? endMs : Date.now()) - FIVE_YEAR_LOOKBACK_MS).toISOString();
+  const requestedStart = asDateParam(req.query.start_date || req.query.from);
+  const start = !requestedStart || Date.parse(requestedStart) < Date.parse(earliest) ? earliest : requestedStart;
+  return { start, end };
+}
 
 function csvParam(value: unknown): string[] {
   return String(value || '')
@@ -455,7 +465,7 @@ async function resolveScope(req: express.Request): Promise<ReportScope> {
   };
 }
 
-function applyCommonFilters(rows: any[], req: express.Request, scope: ReportScope, options: { skipDirection?: boolean } = {}) {
+function applyCommonFilters(rows: any[], req: express.Request, scope: ReportScope, options: { skipDirection?: boolean; skipStatus?: boolean; skipAgent?: boolean; skipSearch?: boolean } = {}) {
   const direction = String(req.query.direction || '').toLowerCase();
   const status = String(req.query.status || '').toLowerCase();
   const agent = String(req.query.agent || req.query.extension || '').replace(/\D/g, '');
@@ -474,11 +484,11 @@ function applyCommonFilters(rows: any[], req: express.Request, scope: ReportScop
     }
     if (scope.isPlatformAdmin && scope.requestedPhoneDigits.size > 0 && !rowMatchesDigits(row, scope.requestedPhoneDigits)) return false;
     if (!options.skipDirection && direction && direction !== 'all' && directionOf(row) !== direction) return false;
-    if (status && status !== 'all' && statusOf(row) !== status) return false;
-    if (agent) {
+    if (!options.skipStatus && status && status !== 'all' && statusOf(row) !== status) return false;
+    if (!options.skipAgent && agent) {
       if (rowAgentExtension(row) !== agent) return false;
     }
-    if (search) {
+    if (!options.skipSearch && search) {
       const haystack = [
         ...rowNumbers(row),
         row?.message_text,
@@ -493,10 +503,9 @@ function applyCommonFilters(rows: any[], req: express.Request, scope: ReportScop
   });
 }
 
-async function fetchTableRows(table: string, dateColumn: string, req: express.Request, scope: ReportScope, max = 10000, options: { skipDirection?: boolean } = {}) {
+async function fetchTableRows(table: string, dateColumn: string, req: express.Request, scope: ReportScope, max = 10000, options: { skipDirection?: boolean; skipStatus?: boolean; skipAgent?: boolean; skipSearch?: boolean } = {}) {
   if (!scope.isPlatformAdmin && scope.orgIds.length === 0) return [];
-  const start = asDateParam(req.query.start_date || req.query.from);
-  const end = asDateParam(req.query.end_date || req.query.to, true);
+  const { start, end } = resolveReportDateRange(req);
   let query = supabaseAdmin.from(table).select('*');
   if (scope.orgIds.length > 0) query = query.in('org_id', scope.orgIds);
   if (start) query = query.gte(dateColumn, start);
@@ -639,8 +648,7 @@ function groupAgentStats(calls: any[], transfers: any[], identities: Awaited<Ret
 
 async function fetchLegacyMightyCallReports(reportType: string, req: express.Request, scope: ReportScope) {
   if (!scope.isPlatformAdmin && scope.orgIds.length === 0) return [];
-  const start = asDateParam(req.query.start_date || req.query.from);
-  const end = asDateParam(req.query.end_date || req.query.to, true);
+  const { start, end } = resolveReportDateRange(req);
   let query = supabaseAdmin.from('mightycall_reports').select('*').eq('report_type', reportType);
   if (scope.orgIds.length > 0) query = query.in('org_id', scope.orgIds);
   if (start) query = query.gte('report_date', start.slice(0, 10));
@@ -824,6 +832,64 @@ function normalizeCallRows(rows: any[], ownedDigits: Set<string>) {
       direction: direction === 'unknown' ? (row.direction || 'unknown') : direction,
       status: normalizeReportCallStatus(row),
       duration_seconds: durationSeconds || safeNumber(row?.duration_seconds),
+    };
+  });
+}
+
+function callRecordingMatchKeys(row: any) {
+  return [
+    row?.id,
+    row?.external_id,
+    row?.external_call_id,
+    row?.call_id,
+    row?.recording_url,
+    row?.metadata?.call_id,
+    row?.metadata?.external_id,
+    row?.metadata?.external_call_id,
+    row?.metadata?.recording_url,
+    row?.raw_payload?.call_id,
+    row?.raw_payload?.external_id,
+    row?.raw_payload?.external_call_id,
+    row?.raw_payload?.recording_url,
+  ].map((value) => String(value || '').trim()).filter(Boolean);
+}
+
+async function enrichCallsWithRecordingLinks(rows: any[], req: express.Request, scope: ReportScope, ownedDigits: Set<string>) {
+  if (rows.length === 0) return rows;
+  const recordings = normalizeRecordingRows(
+    await fetchTableRows('mightycall_recordings', 'recording_date', req, scope, 10000, { skipDirection: true, skipStatus: true, skipAgent: true, skipSearch: true }),
+    ownedDigits
+  );
+  if (recordings.length === 0) {
+    return rows.map((row) => ({
+      ...row,
+      has_recording: Boolean(row.recording_url || row.has_recording),
+      recording_id: row.recording_id || row.mightycall_recording_id || null,
+    }));
+  }
+
+  const byKey = new Map<string, any>();
+  for (const recording of recordings) {
+    for (const key of callRecordingMatchKeys(recording)) {
+      if (!byKey.has(key)) byKey.set(key, recording);
+    }
+  }
+
+  return rows.map((row) => {
+    const existingUrl = row.recording_url || row.metadata?.recording_url || row.raw_payload?.recording_url || null;
+    let recording = null;
+    for (const key of callRecordingMatchKeys(row)) {
+      recording = byKey.get(key);
+      if (recording) break;
+    }
+    if (!recording && existingUrl) {
+      recording = recordings.find((item) => item.recording_url === existingUrl) || null;
+    }
+    return {
+      ...row,
+      recording_id: row.recording_id || row.mightycall_recording_id || recording?.id || null,
+      recording_url: existingUrl || recording?.recording_url || null,
+      has_recording: Boolean(existingUrl || recording?.recording_url || row.has_recording),
     };
   });
 }
@@ -1027,7 +1093,12 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
 router.get('/calls', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = ownedDigitsForScope(phones, scope);
-  let rows = normalizeCallRows(await fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }), ownedDigits);
+  let rows = await enrichCallsWithRecordingLinks(
+    normalizeCallRows(await fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }), ownedDigits),
+    req,
+    scope,
+    ownedDigits
+  );
   if (rows.length === 0) rows = legacyCallRows(await fetchLegacyMightyCallReports('calls', req, scope));
   const requestedDirection = String(req.query.direction || '').toLowerCase();
   if (requestedDirection && requestedDirection !== 'all') rows = rows.filter((row) => directionOf(row) === requestedDirection);

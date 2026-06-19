@@ -14753,7 +14753,7 @@ app.get("/s/series", async (req, res) => {
         try {
           let q = supabaseAdmin
             .from('calls')
-            .select('id, from_number, to_number, from_number_digits, to_number_digits, status, duration_seconds, started_at, ended_at')
+            .select('id, external_id, external_call_id, from_number, to_number, from_number_digits, to_number_digits, business_number, direction, status, duration_seconds, started_at, ended_at, agent_extension, recording_url')
             .eq('org_id', report.org_id)
             .order('started_at', { ascending: false })
             .limit(relatedLimit);
@@ -14768,7 +14768,7 @@ app.get("/s/series", async (req, res) => {
           if (relatedCalls.length === 0 && hasCandidateNumbers) {
             const { data: relaxedCalls } = await supabaseAdmin
               .from('calls')
-              .select('id, from_number, to_number, from_number_digits, to_number_digits, status, duration_seconds, started_at, ended_at')
+              .select('id, external_id, external_call_id, from_number, to_number, from_number_digits, to_number_digits, business_number, direction, status, duration_seconds, started_at, ended_at, agent_extension, recording_url')
               .eq('org_id', report.org_id)
               .order('started_at', { ascending: false })
               .limit(Math.min(relatedLimit * 4, 20000));
@@ -14905,7 +14905,7 @@ app.get("/s/series", async (req, res) => {
 
             const { data: refetchedCalls } = await supabaseAdmin
               .from('calls')
-              .select('id, from_number, to_number, from_number_digits, to_number_digits, status, duration_seconds, started_at, ended_at')
+              .select('id, external_id, external_call_id, from_number, to_number, from_number_digits, to_number_digits, business_number, direction, status, duration_seconds, started_at, ended_at, agent_extension, recording_url')
               .eq('org_id', report.org_id)
               .gte('started_at', fromWide)
               .lte('started_at', toWide)
@@ -15009,10 +15009,12 @@ app.get("/s/series", async (req, res) => {
                 to_number: to,
                 from_number_digits: normalizePhoneDigits(from || ''),
                 to_number_digits: normalizePhoneDigits(to || ''),
+                direction: String(c?.direction || c?.callDirection || c?.origin || '').toLowerCase() || null,
                 status: String(c?.status || c?.callStatus || c?.state || '').toLowerCase() || null,
                 duration_seconds: Number(c?.duration ?? c?.durationSeconds ?? c?.callDuration ?? 0) || 0,
                 started_at: c?.dateTimeUtc || c?.started_at || c?.start_time || c?.created || null,
-                ended_at: c?.endedAt || c?.ended_at || c?.end_time || null
+                ended_at: c?.endedAt || c?.ended_at || c?.end_time || null,
+                recording_url: c?.recording_url || c?.recordingUrl || c?.recording?.url || c?.recording?.link || null
               };
             });
 
@@ -15081,10 +15083,12 @@ app.get("/s/series", async (req, res) => {
                 to_number: to,
                 from_number_digits: normalizePhoneDigits(from || ''),
                 to_number_digits: normalizePhoneDigits(to || ''),
+                direction: String(row?.direction || row?.callDirection || row?.origin || '').toLowerCase() || null,
                 status: String(row?.status || row?.state || row?.callStatus || '').toLowerCase() || null,
                 duration_seconds: Number(row?.duration ?? row?.durationSeconds ?? row?.callDuration ?? 0) || 0,
                 started_at: row?.created || row?.dateTimeUtc || null,
-                ended_at: row?.endedAt || row?.ended_at || null
+                ended_at: row?.endedAt || row?.ended_at || null,
+                recording_url: row?.recording_url || row?.recordingUrl || row?.recording?.url || row?.recording?.link || null
               };
             });
 
@@ -15122,6 +15126,7 @@ app.get("/s/series", async (req, res) => {
               from_number_digits: null,
               to_number_digits: normalizePhoneDigits(baseNumber || ''),
               status: answered ? 'answered' : 'missed',
+              direction: 'unknown',
               duration_seconds: answered ? perCallDuration : 0,
               started_at: `${reportDate}T12:00:00Z`,
               ended_at: null,
@@ -15130,6 +15135,51 @@ app.get("/s/series", async (req, res) => {
           }
           relatedCalls = synthesized;
         }
+
+        const inferRelatedCallDirection = (call: any) => {
+          const rawDirection = String(call?.direction || call?.metadata?.direction || call?.raw_payload?.direction || '').toLowerCase();
+          if (rawDirection.includes('out')) return 'outbound';
+          if (rawDirection.includes('in')) return 'inbound';
+          const fromDigits = normalizePhoneDigits(call?.from_number || '');
+          const toDigits = normalizePhoneDigits(call?.to_number || '');
+          const businessDigits = normalizePhoneDigits(call?.business_number || '');
+          const candidateDigits = new Set(candidateNumbers.map((number) => normalizePhoneDigits(number)).filter(Boolean) as string[]);
+          if ((fromDigits && candidateDigits.has(fromDigits)) || (businessDigits && fromDigits && businessDigits === fromDigits)) return 'outbound';
+          if ((toDigits && candidateDigits.has(toDigits)) || (businessDigits && toDigits && businessDigits === toDigits)) return 'inbound';
+          return 'unknown';
+        };
+
+        const sameDay = (a?: string | null, b?: string | null) => {
+          if (!a || !b) return false;
+          const da = new Date(a);
+          const db = new Date(b);
+          if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
+          return da.toISOString().slice(0, 10) === db.toISOString().slice(0, 10);
+        };
+
+        relatedCalls = relatedCalls.map((call: any) => {
+          const existingRecordingUrl = call?.recording_url || null;
+          const match = relatedRecordings.find((recording: any) => {
+            if (existingRecordingUrl && recording?.recording_url === existingRecordingUrl) return true;
+            const callFrom = normalizePhoneDigits(call?.from_number || '');
+            const callTo = normalizePhoneDigits(call?.to_number || '');
+            const recFrom = normalizePhoneDigits(recording?.from_number || '');
+            const recTo = normalizePhoneDigits(recording?.to_number || '');
+            const sameNumbers = (
+              (!!callFrom && callFrom === recFrom && !!callTo && callTo === recTo) ||
+              (!!callFrom && callFrom === recTo && !!callTo && callTo === recFrom)
+            );
+            return sameNumbers && sameDay(call?.started_at, recording?.recording_date);
+          });
+          return {
+            ...call,
+            direction: inferRelatedCallDirection(call),
+            duration_seconds: Number(call?.duration_seconds || call?.duration || 0) || 0,
+            recording_id: call?.recording_id || match?.id || null,
+            recording_url: existingRecordingUrl || match?.recording_url || null,
+            has_recording: Boolean(existingRecordingUrl || match?.recording_url),
+          };
+        });
 
         // KPI source of truth: real call rows within report scope (after visibility filters).
         const normalizedStatus = (s: any) => String(s || '').toLowerCase().trim();
@@ -15176,6 +15226,7 @@ app.get("/s/series", async (req, res) => {
             from_number: null,
             to_number: baseNumber,
             status: rawAnsweredCalls > 0 ? 'answered' : 'missed',
+            direction: 'unknown',
             duration_seconds: rawTotalDuration > 0 ? Math.round(rawTotalDuration / rawTotalCalls) : 0,
             started_at: `${reportDate}T12:00:00Z`,
             ended_at: null,

@@ -11,6 +11,7 @@ type ReportTab = 'overview' | 'calls' | 'recordings' | 'sms' | 'transfers' | 'nu
 type PhoneOption = { id: string; org_id: string; number: string; label?: string | null; digits: string };
 type Overview = Record<string, any>;
 type Row = Record<string, any>;
+const FIVE_YEAR_DAYS = 5 * 366;
 
 const tabLabels: Array<{ id: ReportTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
@@ -84,7 +85,7 @@ export default function ReportPage() {
   const activeOrgId = isPlatformAdmin ? selectedOrgId : (selectedOrgId || org?.id || orgs[0]?.id || null);
 
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(FIVE_YEAR_DAYS));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [selectedNumber, setSelectedNumber] = useState('');
   const [agent, setAgent] = useState('');
@@ -201,7 +202,7 @@ export default function ReportPage() {
   }, [overview]);
 
   const resetFilters = () => {
-    setStartDate(isoDateDaysAgo(30));
+    setStartDate(isoDateDaysAgo(FIVE_YEAR_DAYS));
     setEndDate(new Date().toISOString().slice(0, 10));
     setSelectedNumber('');
     setAgent('');
@@ -242,8 +243,9 @@ export default function ReportPage() {
   };
 
   const openRecording = async (row: Row) => {
-    if (!user?.id || !row.id) return;
-    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(row.id))}/download?inline=1`), {
+    const recordingId = row.recording_id || row.mightycall_recording_id || (row.recording_url ? row.id : null);
+    if (!user?.id || !recordingId) return;
+    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`), {
       headers: { 'x-user-id': user.id },
     });
     if (!response.ok) throw new Error('Recording link failed');
