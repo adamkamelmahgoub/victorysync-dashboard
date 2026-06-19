@@ -10,19 +10,37 @@ type AppUser = {
   user_metadata?: Record<string, any>;
 };
 
+type MfaFactor = {
+  id: string;
+  type: "totp" | "email";
+  label?: string;
+  email?: string;
+  verified?: boolean;
+  enabled_at?: string | null;
+};
+
+type PendingMfaChallenge = {
+  userId: string;
+  email?: string | null;
+  factors: MfaFactor[];
+};
+
 type AuthContextValue = {
   user: AppUser | null;
   orgs: Array<{ id: string; name: string; logo_url?: string | null }>;
   selectedOrgId: string | null;
   loading: boolean;
   authError: string | null;
+  pendingMfa: PendingMfaChallenge | null;
   globalRole: string | null;
   featureAccess: Record<string, boolean>;
   featureAccessLoaded: boolean;
   profile: { full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null;
   refreshProfile: () => Promise<void>;
   refreshFeatures: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<{ error?: string }>;
+  signIn: (email: string, password: string) => Promise<{ error?: string; mfaRequired?: boolean; factors?: MfaFactor[]; email?: string | null }>;
+  sendMfaEmailCode: () => Promise<{ error?: string }>;
+  verifyMfa: (code: string, method: "totp" | "email") => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   setSelectedOrgId: (id: string | null) => void;
 };
@@ -50,19 +68,47 @@ async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs =
   }
 }
 
+function mfaSessionKey(userId: string) {
+  return `victorysync:mfa-verified:${userId}`;
+}
+
+function hasMfaVerifiedSession(userId: string) {
+  try {
+    return window.sessionStorage.getItem(mfaSessionKey(userId)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function setMfaVerifiedSession(userId: string) {
+  try {
+    window.sessionStorage.setItem(mfaSessionKey(userId), "true");
+  } catch {}
+}
+
+function clearMfaVerifiedSession(userId?: string | null) {
+  if (!userId) return;
+  try {
+    window.sessionStorage.removeItem(mfaSessionKey(userId));
+  } catch {}
+}
+
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AppUser | null>(null);
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string; logo_url?: string | null }>>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [pendingMfa, setPendingMfa] = useState<PendingMfaChallenge | null>(null);
   const [globalRole, setGlobalRole] = useState<string | null>(null);
   const [featureAccess, setFeatureAccess] = useState<Record<string, boolean>>({});
   const [featureAccessLoaded, setFeatureAccessLoaded] = useState(false);
   const [profile, setProfile] = useState<{ full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
+  const passwordSignInInProgressRef = useRef(false);
+  const mfaGateUserIdRef = useRef<string | null>(null);
 
-  const resetAuthState = () => {
+  const resetAuthState = (clearMfa = true) => {
     setUser(null);
     setOrgs([]);
     setSelectedOrgId(null);
@@ -71,6 +117,10 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     setFeatureAccessLoaded(true);
     setProfile(null);
     setAuthError(null);
+    if (clearMfa) {
+      setPendingMfa(null);
+      mfaGateUserIdRef.current = null;
+    }
   };
 
   const loadFeatures = async (nextUser: AppUser | null = user, orgId: string | null = selectedOrgId) => {
@@ -135,12 +185,30 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     }
   };
 
+  const loadVerifiedMfaFactors = async (userId: string): Promise<MfaFactor[]> => {
+    const data = await fetchJsonWithTimeout(
+      buildApiUrl("/api/user/mfa/factors"),
+      { headers: { "x-user-id": userId } },
+      5000
+    );
+    return (data?.factors || []).filter((factor: MfaFactor) => factor?.verified);
+  };
+
   useEffect(() => {
     // Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setLoading(true);
-        hydrateUserContext()
+        loadVerifiedMfaFactors(session.user.id)
+          .then((factors) => {
+            if (factors.length > 0 && !hasMfaVerifiedSession(session.user.id)) {
+              mfaGateUserIdRef.current = session.user.id;
+              resetAuthState(false);
+              setPendingMfa({ userId: session.user.id, email: session.user.email || null, factors });
+              return null;
+            }
+            return hydrateUserContext();
+          })
           .catch((err) => {
             console.error("Error initializing auth:", err);
             setAuthError(err?.message || "Unable to restore your session.");
@@ -159,6 +227,8 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     // caused the "Loading…" flash every time the user switched apps).
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') return;
+      if (event === 'SIGNED_IN' && passwordSignInInProgressRef.current) return;
+      if (session?.user?.id && mfaGateUserIdRef.current === session.user.id) return;
       if (session?.user) {
         const sameUser = currentUserIdRef.current === session.user.id;
         if (sameUser) {
@@ -188,11 +258,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     void loadFeatures(user, selectedOrgId);
   }, [user?.id, selectedOrgId]);
 
-  const signIn = async (email: string, password: string): Promise<{ error?: string }> => {
+  const signIn = async (email: string, password: string): Promise<{ error?: string; mfaRequired?: boolean; factors?: MfaFactor[]; email?: string | null }> => {
     setLoading(true);
     setAuthError(null);
+    setPendingMfa(null);
+    passwordSignInInProgressRef.current = true;
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     if (error) {
+      passwordSignInInProgressRef.current = false;
       const message = /invalid login credentials/i.test(error.message)
         ? "The email or password is incorrect."
         : error.message || "Unable to sign in. Please try again.";
@@ -202,11 +275,73 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     }
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const sessionUser = session?.user;
+      if (!sessionUser?.id) {
+        throw new Error("We could not start your authenticated session. Please try again.");
+      }
+
+      const factors = await loadVerifiedMfaFactors(sessionUser.id);
+      if (factors.length > 0) {
+        clearMfaVerifiedSession(sessionUser.id);
+        mfaGateUserIdRef.current = sessionUser.id;
+        resetAuthState(false);
+        setPendingMfa({ userId: sessionUser.id, email: sessionUser.email || email.trim().toLowerCase(), factors });
+        setLoading(false);
+        return { mfaRequired: true, factors, email: sessionUser.email || email.trim().toLowerCase() };
+      }
+
       await hydrateUserContext();
       return {};
     } catch (err: any) {
       console.error("Error hydrating auth after sign-in:", err);
       const message = err?.message || "Signed in, but failed to load your dashboard access.";
+      setAuthError(message);
+      return { error: message };
+    } finally {
+      passwordSignInInProgressRef.current = false;
+      setLoading(false);
+    }
+  };
+
+  const sendMfaEmailCode = async (): Promise<{ error?: string }> => {
+    if (!pendingMfa) return { error: "Sign in again before requesting a two-factor email code." };
+    const hasEmailFactor = pendingMfa.factors.some((factor) => factor.type === "email");
+    if (!hasEmailFactor) return { error: "Email two-factor authentication is not enabled for this account." };
+
+    const response = await fetch(buildApiUrl("/api/user/mfa-login/email/send"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-user-id": pendingMfa.userId },
+      body: JSON.stringify({}),
+    }).catch(() => null);
+    const data = await response?.json().catch(() => ({}));
+    if (!response?.ok) {
+      return { error: data?.detail || data?.error || "Unable to send the email code. Please try again." };
+    }
+    return {};
+  };
+
+  const verifyMfa = async (code: string, method: "totp" | "email"): Promise<{ error?: string }> => {
+    if (!pendingMfa) return { error: "Sign in again before verifying your two-factor code." };
+    const response = await fetch(buildApiUrl("/api/user/mfa-login/verify"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-user-id": pendingMfa.userId },
+      body: JSON.stringify({ code, method }),
+    }).catch(() => null);
+    const data = await response?.json().catch(() => ({}));
+    if (!response?.ok) {
+      return { error: data?.detail || data?.error || "The two-factor code could not be verified." };
+    }
+
+    try {
+      mfaGateUserIdRef.current = null;
+      setPendingMfa(null);
+      setMfaVerifiedSession(pendingMfa.userId);
+      setLoading(true);
+      await hydrateUserContext();
+      return {};
+    } catch (err: any) {
+      const message = err?.message || "Two-factor verification succeeded, but dashboard access could not be loaded.";
       setAuthError(message);
       return { error: message };
     } finally {
@@ -217,11 +352,13 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const signOut = async () => {
     try {
       postLog("/api/logs/auth", { event_type: "logout", email: user?.email || null });
+      clearMfaVerifiedSession(user?.id || pendingMfa?.userId || currentUserIdRef.current);
       await supabase.auth.signOut();
       resetAuthState();
       currentUserIdRef.current = null;
     } catch (err) {
       console.error("Sign out error:", err);
+      clearMfaVerifiedSession(user?.id || pendingMfa?.userId || currentUserIdRef.current);
       resetAuthState();
       currentUserIdRef.current = null;
     }
@@ -242,7 +379,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, authError, globalRole, featureAccess, featureAccessLoaded, profile, refreshProfile, refreshFeatures, signIn, signOut, setSelectedOrgId }}>
+    <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, authError, pendingMfa, globalRole, featureAccess, featureAccessLoaded, profile, refreshProfile, refreshFeatures, signIn, sendMfaEmailCode, verifyMfa, signOut, setSelectedOrgId }}>
       {children}
     </AuthContext.Provider>
   );

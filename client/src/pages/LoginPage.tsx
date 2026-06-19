@@ -17,7 +17,7 @@ interface ValidatedInvite {
 }
 
 export const LoginPage: FC = () => {
-  const { signIn, user, globalRole, authError, loading: authLoading } = useAuth();
+  const { signIn, sendMfaEmailCode, verifyMfa, pendingMfa, signOut, user, globalRole, authError, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const redirectTo = (location.state as any)?.from?.pathname || (globalRole === "platform_admin" ? "/admin" : "/dashboard");
@@ -28,6 +28,11 @@ export const LoginPage: FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [signinError, setSigninError] = useState<string | null>(null);
   const [signinLoading, setSigninLoading] = useState(false);
+  const [mfaMethod, setMfaMethod] = useState<"totp" | "email">("totp");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaMessage, setMfaMessage] = useState<string | null>(null);
+  const [mfaEmailSent, setMfaEmailSent] = useState(false);
+  const [mfaLoading, setMfaLoading] = useState(false);
 
   const [inviteStep, setInviteStep] = useState<InviteStep>("code");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -44,9 +49,9 @@ export const LoginPage: FC = () => {
   const [validatedInvite, setValidatedInvite] = useState<ValidatedInvite | null>(null);
 
   useEffect(() => {
-    if (!user || authLoading) return;
+    if (!user || authLoading || pendingMfa) return;
     navigate(globalRole === "platform_admin" ? "/admin" : redirectTo, { replace: true });
-  }, [authLoading, globalRole, navigate, redirectTo, user]);
+  }, [authLoading, globalRole, navigate, pendingMfa, redirectTo, user]);
 
   useEffect(() => {
     const message = (location.state as any)?.authError || authError;
@@ -56,6 +61,9 @@ export const LoginPage: FC = () => {
   const switchMode = (nextMode: Mode) => {
     setMode(nextMode);
     setSigninError(null);
+    setMfaCode("");
+    setMfaMessage(null);
+    setMfaEmailSent(false);
     setInviteError(null);
     setInviteStep("code");
     setValidatedInvite(null);
@@ -64,10 +72,55 @@ export const LoginPage: FC = () => {
   const handleSignIn = async (event: FormEvent) => {
     event.preventDefault();
     setSigninError(null);
+    setMfaMessage(null);
+    setMfaCode("");
+    setMfaEmailSent(false);
     setSigninLoading(true);
-    const { error } = await signIn(email, password);
+    const result = await signIn(email, password);
     setSigninLoading(false);
+    if (result.error) setSigninError(result.error);
+    if (result.mfaRequired) {
+      const hasTotp = result.factors?.some((factor) => factor.type === "totp");
+      setMfaMethod(hasTotp ? "totp" : "email");
+      setSigninError(null);
+    }
+  };
+
+  const handleSendMfaEmail = async () => {
+    setSigninError(null);
+    setMfaMessage(null);
+    setMfaLoading(true);
+    const { error } = await sendMfaEmailCode();
+    setMfaLoading(false);
+    if (error) {
+      setSigninError(error);
+      return;
+    }
+    setMfaEmailSent(true);
+    setMfaMessage("We sent a new 6-digit code to your account email.");
+  };
+
+  const handleVerifyMfa = async (event: FormEvent) => {
+    event.preventDefault();
+    setSigninError(null);
+    setMfaMessage(null);
+    const cleanCode = mfaCode.replace(/\D/g, "");
+    if (!/^\d{6}$/.test(cleanCode)) {
+      setSigninError("Enter the 6-digit two-factor code.");
+      return;
+    }
+    setMfaLoading(true);
+    const { error } = await verifyMfa(cleanCode, mfaMethod);
+    setMfaLoading(false);
     if (error) setSigninError(error);
+  };
+
+  const handleDifferentAccount = async () => {
+    setSigninError(null);
+    setMfaCode("");
+    setMfaMessage(null);
+    setMfaEmailSent(false);
+    await signOut();
   };
 
   const handleValidateInvite = async (event: FormEvent) => {
@@ -169,25 +222,94 @@ export const LoginPage: FC = () => {
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-700">VictorySync</div>
               <h1 className="mt-3 text-2xl font-semibold text-slate-950">
-                {mode === "signin" ? "Sign in to your dashboard" : inviteStep === "done" ? "Account created" : "Join your workspace"}
+                {pendingMfa ? "Verify your sign in" : mode === "signin" ? "Sign in to your dashboard" : inviteStep === "done" ? "Account created" : "Join your workspace"}
               </h1>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                {mode === "signin"
+                {pendingMfa
+                  ? "Enter your second factor before VictorySync opens your workspace."
+                  : mode === "signin"
                   ? "Use your VictorySync account to access operations, reports, recordings, and billing."
                   : "Invite signup is available only for users with a valid organization invite."}
               </p>
             </div>
 
-            <div className="mt-6 grid grid-cols-2 rounded-2xl border border-slate-200 bg-slate-100/80 p-1 shadow-inner">
+            {!pendingMfa && <div className="mt-6 grid grid-cols-2 rounded-2xl border border-slate-200 bg-slate-100/80 p-1 shadow-inner">
               <button type="button" onClick={() => switchMode("signin")} className={mode === "signin" ? "rounded-xl bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm ring-1 ring-violet-100" : "rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white/70 hover:text-slate-950"}>
                 Sign in
               </button>
               <button type="button" onClick={() => switchMode("invite")} className={mode === "invite" ? "rounded-xl bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm ring-1 ring-violet-100" : "rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white/70 hover:text-slate-950"}>
                 Use invite
               </button>
-            </div>
+            </div>}
 
-            {mode === "signin" && (
+            {pendingMfa && (
+              <form onSubmit={handleVerifyMfa} className="mt-6 space-y-4">
+                <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm leading-6 text-violet-950">
+                  Password accepted for <span className="font-semibold">{pendingMfa.email || email}</span>. Complete two-factor verification to continue.
+                </div>
+
+                <div className="grid gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Verification method</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={!pendingMfa.factors.some((factor) => factor.type === "totp")}
+                      onClick={() => {
+                        setMfaMethod("totp");
+                        setSigninError(null);
+                        setMfaMessage(null);
+                      }}
+                      className={mfaMethod === "totp" ? "vs-button-primary" : "vs-button-secondary"}
+                    >
+                      Auth app
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!pendingMfa.factors.some((factor) => factor.type === "email")}
+                      onClick={() => {
+                        setMfaMethod("email");
+                        setSigninError(null);
+                        setMfaMessage(null);
+                      }}
+                      className={mfaMethod === "email" ? "vs-button-primary" : "vs-button-secondary"}
+                    >
+                      Email code
+                    </button>
+                  </div>
+                </div>
+
+                {mfaMethod === "email" && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-sm leading-6 text-slate-700">Send a one-time code to your account email, then enter it below.</p>
+                    <button type="button" onClick={handleSendMfaEmail} disabled={mfaLoading} className="vs-button-secondary mt-3 w-full">
+                      {mfaLoading ? "Sending..." : mfaEmailSent ? "Send another email code" : "Send email code"}
+                    </button>
+                  </div>
+                )}
+
+                <Field label={mfaMethod === "email" ? "Email code" : "Authenticator code"}>
+                  <input
+                    className="vs-input w-full text-center text-lg font-semibold tracking-[0.22em]"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    required
+                    value={mfaCode}
+                    onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                  />
+                </Field>
+                {mfaMessage && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{mfaMessage}</div>}
+                {signinError && <ErrorBanner>{signinError}</ErrorBanner>}
+                <button type="submit" disabled={mfaLoading || authLoading} className="vs-button-primary w-full">
+                  {mfaLoading || authLoading ? "Verifying..." : "Verify and continue"}
+                </button>
+                <button type="button" onClick={handleDifferentAccount} className="vs-button-secondary w-full">
+                  Use a different account
+                </button>
+              </form>
+            )}
+
+            {!pendingMfa && mode === "signin" && (
               <form onSubmit={handleSignIn} className="mt-6 space-y-4">
                 <Field label="Email">
                   <input className="vs-input w-full" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@company.com" />

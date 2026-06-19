@@ -5038,6 +5038,109 @@ app.post('/api/user/email-mfa/verify', async (req, res) => {
   }
 });
 
+app.post('/api/user/mfa-login/email/send', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { data: row, error } = await supabaseAdmin
+      .from('user_mfa_email')
+      .select('id, email, verified')
+      .eq('user_id', String(actorId))
+      .eq('verified', true)
+      .maybeSingle();
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.status(503).json({ error: 'mfa_email_migration_required' });
+      }
+      throw error;
+    }
+    if (!row?.email) {
+      return res.status(404).json({ error: 'mfa_email_not_enabled', detail: 'Email two-factor authentication is not enabled for this account.' });
+    }
+
+    const code = generateMfaEmailCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const { error: updateError } = await supabaseAdmin
+      .from('user_mfa_email')
+      .update({
+        code_hash: hashMfaEmailCode(String(actorId), code),
+        code_expires_at: expiresAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id)
+      .eq('user_id', String(actorId));
+    if (updateError) throw updateError;
+
+    await sendMfaEmailCode({ email: String(row.email), code });
+    res.json({ success: true, expires_at: expiresAt });
+  } catch (err: any) {
+    console.error('mfa_login_email_send_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mfa_login_email_send_failed', detail: 'Unable to send a two-factor email code right now.' });
+  }
+});
+
+app.post('/api/user/mfa-login/verify', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const method = String(req.body?.method || 'totp').toLowerCase() === 'email' ? 'email' : 'totp';
+    const code = String(req.body?.code || '').replace(/\D/g, '');
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({ error: 'invalid_mfa_code', detail: 'Enter the 6-digit two-factor code.' });
+    }
+
+    if (method === 'email') {
+      const { data: row, error } = await supabaseAdmin
+        .from('user_mfa_email')
+        .select('*')
+        .eq('user_id', String(actorId))
+        .eq('verified', true)
+        .maybeSingle();
+      if (error) throw error;
+      if (!row) return res.status(404).json({ error: 'mfa_factor_not_found', detail: 'Email two-factor authentication is not enabled for this account.' });
+      if (!row.code_hash || !row.code_expires_at || new Date(row.code_expires_at).getTime() < Date.now()) {
+        return res.status(400).json({ error: 'mfa_code_expired', detail: 'That email code expired. Send a new code and try again.' });
+      }
+      if (hashMfaEmailCode(String(actorId), code) !== row.code_hash) {
+        return res.status(400).json({ error: 'invalid_mfa_code', detail: 'Invalid email code. Check the latest VictorySync email and try again.' });
+      }
+      await supabaseAdmin
+        .from('user_mfa_email')
+        .update({ code_hash: null, code_expires_at: null, updated_at: new Date().toISOString() })
+        .eq('id', row.id)
+        .eq('user_id', String(actorId));
+      return res.json({ success: true, method: 'email' });
+    }
+
+    const { data: rows, error } = await supabaseAdmin
+      .from('user_mfa_totp')
+      .select('*')
+      .eq('user_id', String(actorId))
+      .eq('verified', true)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    for (const row of rows || []) {
+      try {
+        const secret = decryptMfaSecret(row);
+        if (verifyTotp(secret, code)) {
+          return res.json({ success: true, method: 'totp' });
+        }
+      } catch {}
+    }
+
+    return res.status(400).json({
+      error: 'invalid_mfa_code',
+      detail: 'Invalid authenticator code. Make sure your phone time is set automatically and try the current code.',
+      server_time: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('mfa_login_verify_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mfa_login_verify_failed', detail: 'Two-factor verification could not be completed.' });
+  }
+});
+
 app.delete('/api/user/mfa/:factorId', async (req, res) => {
   try {
     const actorId = req.actorId || req.header('x-user-id') || null;
