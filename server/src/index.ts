@@ -64,6 +64,7 @@ import mightyCallApiRouter from './routes/mightycallApi';
 import stripeBillingRouter, { stripeWebhookHandler } from './routes/stripeBilling';
 import notificationPreferencesRouter from './routes/notificationPreferences';
 import { startMightyCallPolling } from './mightycall/sync';
+import { getBillingAccessForOrgIds, isBillingLockAllowedPath } from './services/billingAccess';
 import { Readable } from 'stream';
 import { writeAuditLog } from './lib/audit';
 import { getMembershipDriftDetails, getMembershipDriftSummary } from './lib/memberships';
@@ -96,6 +97,7 @@ import {
   notifyDashboardUpdate,
   notifyInvoiceCreated,
   notifyPaymentReminder,
+  sendEmail,
 } from './services/emailNotifications';
 
 const DEFAULT_MIGHTYCALL_HISTORY_START = '2020-01-01';
@@ -344,6 +346,36 @@ function computeInviteCode(inv: { id: string; org_id: string; email: string; rol
   const payload = `${inv.id}|${inv.org_id}|${normalizeEmail(inv.email)}|${inv.role}|${inviteCodeSecret()}`;
   const raw = crypto.createHash('sha256').update(payload).digest('hex').toUpperCase().slice(0, 10);
   return `${raw.slice(0, 5)}-${raw.slice(5, 10)}`;
+}
+
+function hashInviteVerificationCode(orgId: string, email: string, code: string) {
+  return crypto
+    .createHash('sha256')
+    .update(`${orgId}|${normalizeEmail(email)}|${String(code || '').trim()}|${inviteCodeSecret()}`)
+    .digest('hex');
+}
+
+function generateInviteVerificationCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+async function sendInviteVerificationEmail(params: { email: string; orgName?: string | null; code: string }) {
+  return sendEmail({
+    to: [params.email],
+    subject: 'Your VictorySync verification code',
+    html: `
+      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;background:#f6f7f9;padding:28px;color:#111827;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:26px;box-shadow:0 18px 48px rgba(15,23,42,.08);">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6d28d9;">VictorySync signup</div>
+          <h1 style="margin:10px 0 0;font-size:22px;">Verify your invite</h1>
+          <p style="color:#4b5563;line-height:1.6;">Use this code to finish joining ${params.orgName || 'your VictorySync workspace'}.</p>
+          <div style="margin:22px 0;padding:18px;border-radius:14px;background:#f5f3ff;border:1px solid #ddd6fe;font-size:30px;font-weight:900;letter-spacing:.18em;text-align:center;color:#4c1d95;">${params.code}</div>
+          <p style="color:#6b7280;font-size:13px;line-height:1.6;">This code expires in 10 minutes. If you did not request this, you can ignore this email.</p>
+        </div>
+      </div>
+    `,
+    text: `Your VictorySync verification code is ${params.code}. It expires in 10 minutes.`,
+  });
 }
 
 const IMMUTABLE_SUPER_ADMIN_EMAIL = 'adam@victorysync.com';
@@ -4431,6 +4463,74 @@ app.get('/api/csrf-token', enforceAuthenticatedApi as any, (req, res) => {
 });
 app.use('/api', enforceAuthenticatedApi as any);
 
+app.get('/api/client/billing/access', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (await isPlatformAdmin(String(actorId))) {
+      return res.json({ locked: false, reason: null, org_ids: [], primary_org_id: null });
+    }
+    const orgIds = await getUserOrgIds(String(actorId));
+    const access = await getBillingAccessForOrgIds(orgIds);
+    return res.json({
+      locked: access.locked,
+      reason: access.reason,
+      org_ids: access.orgIds,
+      primary_org_id: access.primaryOrgId,
+    });
+  } catch (err: any) {
+    console.error('billing_access_failed:', fmtErr(err));
+    res.status(500).json({ error: 'billing_access_failed' });
+  }
+});
+
+app.get('/api/admin/billing/access-locks', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(String(actorId)))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('org_billing_locks')
+      .select('org_id, locked, reason, locked_by, locked_until, created_at, updated_at')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.json({ locks: [], migration_required: true });
+      }
+      throw error;
+    }
+
+    res.json({ locks: data || [] });
+  } catch (err: any) {
+    console.error('admin_billing_locks_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_billing_locks_failed' });
+  }
+});
+
+app.use('/api', async (req, res, next) => {
+  try {
+    if (isBillingLockAllowedPath(req.path)) return next();
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId || await isPlatformAdmin(String(actorId))) return next();
+    const orgIds = await getUserOrgIds(String(actorId));
+    const access = await getBillingAccessForOrgIds(orgIds);
+    if (!access.locked) return next();
+    return res.status(402).json({
+      error: 'billing_locked',
+      reason: access.reason || 'payment_required',
+      primary_org_id: access.primaryOrgId,
+      message: 'This client portal is locked until billing is resolved.',
+    });
+  } catch (err: any) {
+    console.error('billing_lock_check_failed:', fmtErr(err));
+    res.status(500).json({ error: 'billing_lock_check_failed' });
+  }
+});
+
 function featureKeyForApiPath(pathname: string): FeatureKey | null {
   if (pathname.startsWith('/admin') || pathname.startsWith('/logs') || pathname === '/me/features' || pathname === '/csrf-token') return null;
   if (pathname.startsWith('/live-status')) return 'live_status';
@@ -4504,6 +4604,56 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api/billing/stripe', stripeBillingRouter);
+
+app.put('/api/admin/orgs/:orgId/billing-lock', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(String(actorId)))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const orgId = String(req.params.orgId || '').trim();
+    if (!orgId) return res.status(400).json({ error: 'org_id_required' });
+
+    const locked = req.body?.locked === true;
+    const reason = String(req.body?.reason || (locked ? 'payment_required' : '')).trim().slice(0, 240) || null;
+    const lockedUntil = req.body?.locked_until ? String(req.body.locked_until) : null;
+
+    const { data: org, error: orgError } = await supabaseAdmin
+      .from('organizations')
+      .select('id')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (orgError) throw orgError;
+    if (!org) return res.status(404).json({ error: 'organization_not_found' });
+
+    const { data, error } = await supabaseAdmin
+      .from('org_billing_locks')
+      .upsert({
+        org_id: orgId,
+        locked,
+        reason: locked ? reason : null,
+        locked_by: locked ? String(actorId) : null,
+        locked_until: locked ? lockedUntil : null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'org_id' })
+      .select('org_id, locked, reason, locked_by, locked_until, created_at, updated_at')
+      .maybeSingle();
+
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.status(503).json({ error: 'billing_lock_migration_required' });
+      }
+      throw error;
+    }
+
+    res.json({ lock: data });
+  } catch (err: any) {
+    console.error('admin_billing_lock_update_failed:', fmtErr(err));
+    res.status(500).json({ error: 'admin_billing_lock_update_failed' });
+  }
+});
 
 app.post('/api/logs/activity', async (req, res) => {
   try {
@@ -6941,7 +7091,7 @@ app.get('/api/user/profile', async (req, res) => {
           full_name: profile?.full_name || fullName || '',
           phone_number: '',
           profile_pic_url: clerkUser.imageUrl || '',
-          theme: 'dark'
+          theme: 'light'
         },
         profile: { id: userId, global_role: profile?.global_role || null },
         organization
@@ -7011,7 +7161,7 @@ app.get('/api/user/profile', async (req, res) => {
         full_name: meta?.full_name || oauthFullName || '',
         phone_number: meta?.phone_number || '',
         profile_pic_url: meta?.profile_pic_url || oauthAvatarUrl || '',
-        theme: meta?.theme || 'dark',
+        theme: meta?.theme || 'light',
         can_upload_leads: profileRow?.can_upload_leads ?? false,
       },
       profile: { id: userId, global_role: globalRole },
@@ -7040,7 +7190,7 @@ app.put('/api/user/profile', async (req, res) => {
         ...currentMeta,
         full_name: full_name ?? currentMeta.full_name ?? '',
         phone_number: phone_number ?? currentMeta.phone_number ?? '',
-        theme: theme ?? currentMeta.theme ?? 'dark'
+        theme: theme ?? currentMeta.theme ?? 'light'
       }
     };
 
@@ -7059,7 +7209,7 @@ app.put('/api/user/profile', async (req, res) => {
         full_name: (data.user.user_metadata as any)?.full_name || '',
         phone_number: (data.user.user_metadata as any)?.phone_number || '',
         profile_pic_url: (data.user.user_metadata as any)?.profile_pic_url || '',
-        theme: (data.user.user_metadata as any)?.theme || 'dark'
+        theme: (data.user.user_metadata as any)?.theme || 'light'
       }
     });
   } catch (err: any) {
@@ -10401,8 +10551,32 @@ app.post('/api/auth/validate-invite', async (req, res) => {
       .eq('id', org_id)
       .maybeSingle();
 
+    const verificationCode = generateInviteVerificationCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    try {
+      await supabaseAdmin.from('invite_verification_codes').insert({
+        org_id,
+        email: normalized,
+        invite_id: match.id,
+        code_hash: hashInviteVerificationCode(org_id, normalized, verificationCode),
+        expires_at: expiresAt,
+      });
+      await sendInviteVerificationEmail({
+        email: normalized,
+        orgName: (org as any)?.name || null,
+        code: verificationCode,
+      });
+    } catch (emailErr: any) {
+      console.warn('invite_verification_send_failed:', fmtErr(emailErr));
+      return res.status(503).json({
+        error: 'verification_code_not_sent',
+        detail: 'Invite is valid, but the verification email could not be sent. Check email provider configuration.',
+      });
+    }
+
     res.json({
       valid: true,
+      verification_required: true,
       invite: {
         id: match.id,
         org_id: match.org_id,
@@ -10482,14 +10656,15 @@ app.post('/api/auth/validate-invite-by-email', async (req, res) => {
 // POST /api/auth/signup-with-invite - create account only when invite code matches email+org
 app.post('/api/auth/signup-with-invite', async (req, res) => {
   try {
-    const { email, password, orgId, inviteCode, fullName } = req.body || {};
+    const { email, password, orgId, inviteCode, verificationCode, fullName } = req.body || {};
     const normalized = normalizeEmail(email);
     const org_id = String(orgId || '').trim();
     const code = String(inviteCode || '').trim().toUpperCase();
+    const emailCode = String(verificationCode || '').trim();
     const pwd = String(password || '');
     const displayName = String(fullName || '').trim();
 
-    if (!normalized || !org_id || !code || !pwd) return res.status(400).json({ error: 'missing_required_fields' });
+    if (!normalized || !org_id || !code || !emailCode || !pwd) return res.status(400).json({ error: 'missing_required_fields' });
     if (pwd.length < 8) return res.status(400).json({ error: 'weak_password', detail: 'Password must be at least 8 characters' });
 
     const { data: invites, error } = await supabaseAdmin
@@ -10501,6 +10676,23 @@ app.post('/api/auth/signup-with-invite', async (req, res) => {
     if (error) throw error;
     const invite = (invites || []).find((inv: any) => computeInviteCode(inv) === code);
     if (!invite) return res.status(404).json({ error: 'invite_not_found_or_invalid_code' });
+
+    const hashedVerification = hashInviteVerificationCode(org_id, normalized, emailCode);
+    const { data: verificationRows, error: verificationErr } = await supabaseAdmin
+      .from('invite_verification_codes')
+      .select('id, attempts, expires_at, consumed_at')
+      .eq('org_id', org_id)
+      .eq('email', normalized)
+      .eq('invite_id', invite.id)
+      .eq('code_hash', hashedVerification)
+      .is('consumed_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (verificationErr) throw verificationErr;
+    const verification = (verificationRows || [])[0] as any;
+    if (!verification || Date.parse(verification.expires_at) < Date.now()) {
+      return res.status(400).json({ error: 'invalid_or_expired_verification_code' });
+    }
 
     // Create auth account with org-scoped metadata.
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
@@ -10528,6 +10720,12 @@ app.post('/api/auth/signup-with-invite', async (req, res) => {
     try { await supabaseAdmin.from('organization_members').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
 
     // Consume invite after successful signup.
+    try {
+      await supabaseAdmin
+        .from('invite_verification_codes')
+        .update({ consumed_at: new Date().toISOString() })
+        .eq('id', verification.id);
+    } catch {}
     try { await supabaseAdmin.from('org_invites').delete().eq('id', invite.id); } catch {}
     await insertLogSafely(supabaseAdmin, 'auth_logs', {
       user_id: userId,

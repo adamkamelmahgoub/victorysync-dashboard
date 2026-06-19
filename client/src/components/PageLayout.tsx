@@ -24,6 +24,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   const userName = profile?.full_name || user?.email || 'Signed in';
   const [topbarSearch, setTopbarSearch] = useState('');
   const [profileOpen, setProfileOpen] = useState(false);
+  const [billingAccess, setBillingAccess] = useState<{ locked: boolean; reason?: string | null; primary_org_id?: string | null } | null>(null);
   const [syncHealth, setSyncHealth] = useState<{ label: string; tone: 'ok' | 'syncing' | 'stale' }>({
     label: 'Sync online',
     tone: 'syncing',
@@ -32,6 +33,32 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   useEffect(() => {
     setProfileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!user?.id || isAdmin) {
+      setBillingAccess(null);
+      return;
+    }
+    let cancelled = false;
+    const loadAccess = async () => {
+      try {
+        const response = await fetch(buildApiUrl('/api/client/billing/access'), {
+          headers: { 'x-user-id': user.id },
+          cache: 'no-store',
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!cancelled && response.ok) setBillingAccess(payload);
+      } catch {
+        if (!cancelled) setBillingAccess(null);
+      }
+    };
+    void loadAccess();
+    const id = window.setInterval(loadAccess, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [isAdmin, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -82,6 +109,11 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
       <div className="mt-1 text-sm font-medium text-slate-900">{new Date().toLocaleDateString()}</div>
     </div>
   );
+
+  const billingAllowedPath =
+    location.pathname.startsWith('/billing') ||
+    location.pathname.startsWith('/account-settings') ||
+    location.pathname.startsWith('/support');
 
   return (
     <div className="min-h-screen bg-[var(--vs-bg)] text-[var(--vs-text)]">
@@ -216,7 +248,21 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
           </div>
 
           <div className="px-4 py-5 sm:px-5 lg:px-6 lg:py-6">
-            {children}
+            {billingAccess?.locked && !billingAllowedPath ? (
+              <div className="mx-auto max-w-3xl rounded-3xl border border-amber-200 bg-white p-8 text-center shadow-[0_22px_70px_rgba(15,23,42,0.12)]">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-2xl font-black text-amber-700 ring-1 ring-amber-200">
+                  $
+                </div>
+                <h2 className="mt-5 text-2xl font-black text-slate-950">Client portal locked</h2>
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  This workspace is locked until billing is resolved. You can still manage payment methods, pay invoices, and contact support.
+                </p>
+                <div className="mt-6 flex flex-wrap justify-center gap-3">
+                  <button type="button" onClick={() => navigate('/billing')} className="vs-button-primary">Resolve billing</button>
+                  <button type="button" onClick={() => navigate('/support')} className="vs-button-secondary">Contact support</button>
+                </div>
+              </div>
+            ) : children}
           </div>
         </div>
       </main>

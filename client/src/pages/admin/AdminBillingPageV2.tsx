@@ -65,6 +65,15 @@ type BillingPackage = {
   created_at?: string;
 };
 
+type BillingLock = {
+  org_id: string;
+  locked: boolean;
+  reason?: string | null;
+  locked_by?: string | null;
+  locked_until?: string | null;
+  updated_at?: string | null;
+};
+
 function Modal({ children }: { children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
@@ -127,7 +136,11 @@ export const AdminBillingPageV2: React.FC = () => {
   const [packages, setPackages] = useState<BillingPackage[]>([]);
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [billingLocks, setBillingLocks] = useState<BillingLock[]>([]);
   const [search, setSearch] = useState('');
+  const [lockOrgId, setLockOrgId] = useState('');
+  const [lockReason, setLockReason] = useState('payment_required');
+  const [lockAction, setLockAction] = useState<string | null>(null);
 
   const [showCreateRecord, setShowCreateRecord] = useState(false);
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
@@ -185,6 +198,8 @@ export const AdminBillingPageV2: React.FC = () => {
 
   const orgNameById = useMemo(() => new Map(orgs.map((org) => [org.id, org.name])), [orgs]);
   const userEmailById = useMemo(() => new Map(users.map((entry) => [entry.id, entry.email])), [users]);
+  const lockByOrgId = useMemo(() => new Map(billingLocks.map((entry) => [entry.org_id, entry])), [billingLocks]);
+  const activeBillingLocks = useMemo(() => billingLocks.filter((entry) => entry.locked), [billingLocks]);
 
   const parseJsonInput = (raw: string, fallback: any) => {
     if (!raw || !raw.trim()) return fallback;
@@ -218,15 +233,25 @@ export const AdminBillingPageV2: React.FC = () => {
     setPackages(payload.packages || []);
   };
 
+  const loadBillingLocks = async () => {
+    const response = await fetch(buildApiUrl('/api/admin/billing/access-locks'), { headers: { 'x-user-id': user?.id || '' } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'Failed to load billing locks');
+    setBillingLocks(payload.locks || []);
+  };
+
   const loadOptions = async () => {
-    const [orgResp, userResp] = await Promise.all([
+    const [orgResp, userResp, lockResp] = await Promise.all([
       fetch(buildApiUrl('/api/admin/orgs'), { headers: { 'x-user-id': user?.id || '' } }),
       fetch(buildApiUrl('/api/admin/users'), { headers: { 'x-user-id': user?.id || '' } }),
+      fetch(buildApiUrl('/api/admin/billing/access-locks'), { headers: { 'x-user-id': user?.id || '' } }),
     ]);
     if (!orgResp.ok) throw new Error('Failed to load organizations');
     if (!userResp.ok) throw new Error('Failed to load users');
     const orgJson = await orgResp.json();
     const userJson = await userResp.json();
+    const lockJson = await lockResp.json().catch(() => ({}));
+    if (!lockResp.ok) throw new Error(lockJson.error || 'Failed to load billing locks');
     setOrgs((orgJson.orgs || []).map((org: any) => ({ id: String(org.id), name: String(org.name || org.id) })));
     setUsers((userJson.users || []).map((entry: any) => ({
       id: String(entry.id),
@@ -234,6 +259,8 @@ export const AdminBillingPageV2: React.FC = () => {
       org_id: entry.org_id || null,
       role: entry.role || null,
     })));
+    setBillingLocks(lockJson.locks || []);
+    setLockOrgId((current) => current || String((orgJson.orgs || [])[0]?.id || ''));
   };
 
   const loadActiveTab = async () => {
@@ -265,6 +292,32 @@ export const AdminBillingPageV2: React.FC = () => {
     if (!user?.id) return;
     loadOptions().catch(() => {});
   }, [user?.id]);
+
+  const updateBillingLock = async (orgId: string, locked: boolean) => {
+    if (!orgId) {
+      setError('Select an organization first');
+      return;
+    }
+    setLockAction(orgId);
+    setError(null);
+    try {
+      const response = await fetch(buildApiUrl(`/api/admin/orgs/${encodeURIComponent(orgId)}/billing-lock`), {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({
+          locked,
+          reason: locked ? lockReason || 'payment_required' : null,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Failed to update billing lock');
+      await loadBillingLocks();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update billing lock');
+    } finally {
+      setLockAction(null);
+    }
+  };
 
   const createRecord = async () => {
     setSubmitting(true);
@@ -558,6 +611,98 @@ export const AdminBillingPageV2: React.FC = () => {
           <MetricStatCard label="Open Invoices" value={summary.outstandingInvoices} hint="Draft, sent, or overdue" accent="amber" />
           <MetricStatCard label="Active Packages" value={summary.activePackages} hint="Plans currently available" accent="emerald" />
         </div>
+
+        {isPlatformAdmin && (
+          <SectionCard
+            title="Client portal access"
+            description="Lock unpaid client workspaces from operational dashboard pages while keeping billing, account, and support available."
+          >
+            <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="grid gap-3 md:grid-cols-[1.2fr_1fr]">
+                  <Field label="Organization">
+                    <select value={lockOrgId} onChange={(e) => setLockOrgId(e.target.value)} className="vs-input w-full">
+                      <option value="">Select organization</option>
+                      {orgs.map((org) => {
+                        const lock = lockByOrgId.get(org.id);
+                        return (
+                          <option key={org.id} value={org.id}>
+                            {org.name}{lock?.locked ? ' - locked' : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </Field>
+                  <Field label="Lock reason">
+                    <input
+                      value={lockReason}
+                      onChange={(e) => setLockReason(e.target.value)}
+                      placeholder="payment_required"
+                      className="vs-input w-full"
+                    />
+                  </Field>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => updateBillingLock(lockOrgId, true)}
+                    disabled={!lockOrgId || lockAction === lockOrgId}
+                    className="vs-button-destructive"
+                  >
+                    {lockAction === lockOrgId ? 'Updating...' : 'Lock client portal'}
+                  </button>
+                  <button
+                    onClick={() => updateBillingLock(lockOrgId, false)}
+                    disabled={!lockOrgId || lockAction === lockOrgId}
+                    className="vs-button-secondary"
+                  >
+                    {lockAction === lockOrgId ? 'Updating...' : 'Unlock'}
+                  </button>
+                  {lockOrgId && (
+                    <StatusBadge tone={lockByOrgId.get(lockOrgId)?.locked ? 'warning' : 'success'}>
+                      {lockByOrgId.get(lockOrgId)?.locked ? 'Currently locked' : 'Access open'}
+                    </StatusBadge>
+                  )}
+                </div>
+                <p className="mt-3 text-xs leading-5 text-slate-600">
+                  Locked clients can still open billing, account settings, and support so they can resolve payment without accessing reports, calls, SMS, recordings, or admin data.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950">Locked organizations</div>
+                    <div className="mt-1 text-xs text-slate-600">{activeBillingLocks.length} active lock{activeBillingLocks.length === 1 ? '' : 's'}</div>
+                  </div>
+                  <button onClick={loadBillingLocks} className="vs-button-secondary">Refresh</button>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {activeBillingLocks.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-5 text-center text-sm text-slate-600">
+                      No client portals are manually locked.
+                    </div>
+                  ) : (
+                    activeBillingLocks.map((lock) => (
+                      <div key={lock.org_id} className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="font-semibold text-slate-950">{orgNameById.get(lock.org_id) || lock.org_id}</div>
+                          <div className="mt-1 text-xs text-amber-800">{lock.reason || 'payment_required'}</div>
+                        </div>
+                        <button
+                          onClick={() => updateBillingLock(lock.org_id, false)}
+                          disabled={lockAction === lock.org_id}
+                          className="vs-button-secondary"
+                        >
+                          Unlock
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+        )}
 
         <SectionCard title="Billing views" description="Move between financial records, invoice output, and package administration.">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

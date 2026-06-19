@@ -4,6 +4,7 @@ import { PageLayout } from '../components/PageLayout';
 import StripePortalButton from '../components/StripePortalButton';
 import { buildApiUrl } from '../config';
 import { useTheme } from '../contexts/ThemeContext';
+import { supabase } from '../lib/supabaseClient';
 import {
   getSelectedLeadAlarmIds,
   LEAD_ALARM_OPTIONS,
@@ -13,7 +14,7 @@ import {
 } from '../lib/leadAlarm';
 export default function UserSettingsPage() {
   const { user, selectedOrgId, refreshProfile } = useAuth();
-  const { setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -27,6 +28,10 @@ export default function UserSettingsPage() {
   const [newKeyLabel, setNewKeyLabel] = useState('');
   const [showNewKeyPlaintext, setShowNewKeyPlaintext] = useState<string | null>(null);
   const [leadAlarmIds, setLeadAlarmIds] = useState<LeadAlarmId[]>([]);
+  const [mfaFactors, setMfaFactors] = useState<any[]>([]);
+  const [mfaEnroll, setMfaEnroll] = useState<{ factorId: string; qrCode?: string; secret?: string } | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaLoading, setMfaLoading] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -43,6 +48,7 @@ export default function UserSettingsPage() {
   useEffect(() => {
     if (user) {
       fetchProfile();
+      loadMfaFactors();
       // loadApiKeys(); // TODO: user_api_keys table needs migration in production
     }
   }, [user, selectedOrgId]);
@@ -160,6 +166,74 @@ export default function UserSettingsPage() {
     navigator.clipboard.writeText(text);
     setMessage('Copied to clipboard!');
     setTimeout(() => setMessage(null), 2000);
+  };
+
+  const loadMfaFactors = async () => {
+    try {
+      const { data, error } = await (supabase.auth.mfa as any).listFactors();
+      if (error) throw error;
+      setMfaFactors([...(data?.totp || []), ...(data?.phone || [])]);
+    } catch {
+      setMfaFactors([]);
+    }
+  };
+
+  const startMfaEnroll = async () => {
+    setMfaLoading(true);
+    setMessage(null);
+    try {
+      const { data, error } = await (supabase.auth.mfa as any).enroll({ factorType: 'totp', friendlyName: 'VictorySync dashboard' });
+      if (error) throw error;
+      setMfaEnroll({
+        factorId: data.id,
+        qrCode: data.totp?.qr_code,
+        secret: data.totp?.secret,
+      });
+      setMessage('Scan the QR code and enter the 6-digit authenticator code to finish enabling 2FA.');
+    } catch (err: any) {
+      setMessage(err?.message || 'Unable to start 2FA setup. Make sure MFA is enabled in Supabase.');
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const verifyMfaEnroll = async () => {
+    if (!mfaEnroll) return;
+    setMfaLoading(true);
+    setMessage(null);
+    try {
+      const challenge = await (supabase.auth.mfa as any).challenge({ factorId: mfaEnroll.factorId });
+      if (challenge.error) throw challenge.error;
+      const verify = await (supabase.auth.mfa as any).verify({
+        factorId: mfaEnroll.factorId,
+        challengeId: challenge.data.id,
+        code: mfaCode.trim(),
+      });
+      if (verify.error) throw verify.error;
+      setMfaEnroll(null);
+      setMfaCode('');
+      await loadMfaFactors();
+      setMessage('2FA enabled successfully');
+    } catch (err: any) {
+      setMessage(err?.message || 'Invalid 2FA code');
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const removeMfaFactor = async (factorId: string) => {
+    if (!confirm('Disable this 2FA factor?')) return;
+    setMfaLoading(true);
+    try {
+      const { error } = await (supabase.auth.mfa as any).unenroll({ factorId });
+      if (error) throw error;
+      await loadMfaFactors();
+      setMessage('2FA factor disabled');
+    } catch (err: any) {
+      setMessage(err?.message || 'Unable to disable 2FA');
+    } finally {
+      setMfaLoading(false);
+    }
   };
 
   const toggleLeadAlarm = (id: LeadAlarmId) => {
@@ -355,16 +429,90 @@ export default function UserSettingsPage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-sm font-semibold text-slate-900">Theme</div>
-              <div className="mt-1 text-sm text-slate-600">VictorySync now uses a visibility-first light interface across the dashboard.</div>
+              <div className="mt-1 text-sm text-slate-600">Choose the dashboard appearance for this browser and account.</div>
             </div>
             <div className="inline-flex rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200">
               <button
                 onClick={() => void setTheme('light')}
-                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700"
+                className={`rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition ${theme === 'light' ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-slate-700 hover:bg-white'}`}
               >
                 Light
               </button>
+              <button
+                onClick={() => void setTheme('dark')}
+                className={`rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition ${theme === 'dark' ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-slate-700 hover:bg-white'}`}
+              >
+                Dark
+              </button>
             </div>
+          </div>
+        </div>
+
+        <div className="vs-surface p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">Two-factor authentication</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Add an authenticator app code requirement for stronger account security.
+              </p>
+            </div>
+            <button onClick={startMfaEnroll} disabled={mfaLoading || !!mfaEnroll} className="vs-button-secondary">
+              {mfaLoading ? 'Working...' : 'Enable 2FA'}
+            </button>
+          </div>
+
+          {mfaEnroll && (
+            <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <div className="grid gap-4 md:grid-cols-[180px,1fr] md:items-center">
+                <div className="rounded-xl border border-violet-200 bg-white p-3">
+                  {mfaEnroll.qrCode ? (
+                    <img src={mfaEnroll.qrCode} alt="2FA QR code" className="h-36 w-36" />
+                  ) : (
+                    <div className="text-xs text-slate-600">QR unavailable. Use the setup key.</div>
+                  )}
+                </div>
+                <div>
+                  {mfaEnroll.secret && (
+                    <div className="mb-3 rounded-xl border border-violet-200 bg-white px-3 py-2 font-mono text-xs text-slate-700">
+                      {mfaEnroll.secret}
+                    </div>
+                  )}
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Authenticator code</label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      className="vs-input tracking-[0.22em]"
+                      inputMode="numeric"
+                      value={mfaCode}
+                      onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                    />
+                    <button onClick={verifyMfaEnroll} disabled={mfaLoading || mfaCode.length < 6} className="vs-button-primary">
+                      Verify and enable
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 space-y-2">
+            {mfaFactors.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                No 2FA factors are enabled yet.
+              </div>
+            ) : (
+              mfaFactors.map((factor) => (
+                <div key={factor.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-950">{factor.friendly_name || factor.factor_type || 'Authenticator app'}</div>
+                    <div className="text-xs text-slate-500">Status: {factor.status || 'unknown'}</div>
+                  </div>
+                  <button onClick={() => removeMfaFactor(factor.id)} disabled={mfaLoading} className="vs-button-secondary !px-3 !py-1.5 !text-xs">
+                    Disable
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
 

@@ -34,6 +34,7 @@ export const LoginPage: FC = () => {
   const [inviteOrgId, setInviteOrgId] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [inviteName, setInviteName] = useState("");
+  const [inviteVerificationCode, setInviteVerificationCode] = useState("");
   const [invitePassword, setInvitePassword] = useState("");
   const [inviteConfirm, setInviteConfirm] = useState("");
   const [showInvitePassword, setShowInvitePassword] = useState(false);
@@ -93,6 +94,7 @@ export const LoginPage: FC = () => {
         return;
       }
       setValidatedInvite({ ...data.invite, inviteCode: code });
+      setInviteVerificationCode("");
       setInviteStep("password");
     } catch {
       setInviteError("Unable to validate the invite right now. Please try again.");
@@ -124,6 +126,7 @@ export const LoginPage: FC = () => {
           password: invitePassword,
           orgId: validatedInvite.org_id,
           inviteCode: validatedInvite.inviteCode,
+          verificationCode: inviteVerificationCode.trim(),
           fullName: inviteName.trim(),
         }),
       });
@@ -220,8 +223,18 @@ export const LoginPage: FC = () => {
             {mode === "invite" && inviteStep === "password" && validatedInvite && (
               <form onSubmit={handleCreateAccount} className="mt-6 space-y-4">
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                  Invite confirmed for <span className="font-semibold">{validatedInvite.org_name || validatedInvite.org_id}</span>
+                  Invite confirmed for <span className="font-semibold">{validatedInvite.org_name || validatedInvite.org_id}</span>. We sent a verification code to {validatedInvite.email}.
                 </div>
+                <Field label="Email verification code">
+                  <input
+                    className="vs-input w-full tracking-[0.22em]"
+                    inputMode="numeric"
+                    required
+                    value={inviteVerificationCode}
+                    onChange={(event) => setInviteVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                  />
+                </Field>
                 <Field label="Full name">
                   <input className="vs-input w-full" autoComplete="name" value={inviteName} onChange={(event) => setInviteName(event.target.value)} placeholder="Jane Smith" />
                 </Field>
