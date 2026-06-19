@@ -1706,6 +1706,7 @@ function normalizeSmsRowForOwnership(row: any, index: PhoneOwnershipIndex, targe
 }
 
 function normalizeRecordingRowForOwnership(row: any, index: PhoneOwnershipIndex, targetOrgIds: Set<string> | null) {
+  if (!row?.recording_url) return null;
   const metadata = parseJsonObject(row?.metadata || row?.raw_payload || row?.payload);
   const businessNumber =
     metadata?.businessNumber?.number ||
@@ -1862,6 +1863,7 @@ function normalizeLegacySmsRowForVisibility(row: any, targetOrgIds: Set<string> 
 }
 
 function normalizeLegacyRecordingRowForVisibility(row: any, targetOrgIds: Set<string> | null) {
+  if (!row?.recording_url) return null;
   const orgId = String(row?.org_id || '').trim();
   if (targetOrgIds && (!orgId || !targetOrgIds.has(orgId))) return null;
 
@@ -14780,38 +14782,9 @@ app.get("/s/series", async (req, res) => {
           .order('recording_date', { ascending: false, nullsFirst: false })
           .limit(fetchLimit);
 
-        // Fallback: if no recordings found or table error, pull from calls table
-        if (error || !data || data.length === 0) {
-          console.log('[mightycall/recordings] Falling back to calls table for recordings');
-          
-          // Query calls table and transform to recording format
-          let callsQuery = supabaseAdmin
-            .from('calls')
-            .select('id, org_id, from_number, to_number, status, started_at, ended_at, recording_url')
-            .order('started_at', { ascending: false })
-            .limit(fetchLimit);
-
-          const { data: calls, error: callsError } = await callsQuery;
-          
-          if (callsError) {
-            console.error('[mightycall/recordings] calls fallback error:', callsError);
-            return res.json({ recordings: [] });
-          }
-
-          // Transform calls to recording format
-          data = (calls || []).map((call: any) => ({
-            id: call.id,
-            org_id: call.org_id,
-            from_number: call.from_number,
-            to_number: call.to_number,
-            status: call.status,
-            started_at: call.started_at,
-            ended_at: call.ended_at,
-            duration: 0,
-            recording_url: call.recording_url || null,
-            created_at: call.started_at,
-            organizations: { name: 'Org', id: call.org_id }
-          }));
+        if (error) {
+          console.warn('[mightycall/recordings] mightycall_recordings query failed:', fmtErr(error));
+          data = [];
         } else if (data && data.length > 0) {
           // Post-process data to extract phone numbers from metadata if not present
           data = data.map((rec: any) => {
@@ -14858,40 +14831,14 @@ app.get("/s/series", async (req, res) => {
           )
           .filter(Boolean);
 
-        if (normalizedRecordingRows.length === 0) {
-          const { data: calls, error: callsError } = await supabaseAdmin
-            .from('calls')
-            .select('id, org_id, from_number, to_number, status, started_at, ended_at, recording_url')
-            .order('started_at', { ascending: false })
-            .limit(fetchLimit);
-
-          if (!callsError) {
-            normalizedRecordingRows = (calls || [])
-              .filter((call: any) => call?.recording_url)
-              .map((call: any) => ({
-                id: call.id,
-                org_id: call.org_id,
-                from_number: call.from_number,
-                to_number: call.to_number,
-                status: call.status,
-                started_at: call.started_at,
-                ended_at: call.ended_at,
-                duration: 0,
-                recording_url: call.recording_url || null,
-                created_at: call.started_at,
-                recording_date: call.started_at,
-                organizations: { name: 'Org', id: call.org_id },
-              }))
-              .map((row: any) =>
-                normalizeRecordingRowForOwnership(row, ownershipIndex, targetOrgSet) ||
-                normalizeLegacyRecordingRowForVisibility(row, targetOrgSet)
-              )
-              .filter(Boolean);
-          } else {
-            console.warn('[mightycall/recordings] calls fallback after ownership filter failed:', fmtErr(callsError));
-          }
-	        }
-	        data = normalizedRecordingRows;
+        const seenRecordingKeys = new Set<string>();
+        data = normalizedRecordingRows.filter((row: any) => {
+          const key = String(row.external_recording_id || row.external_id || row.call_id || row.recording_url || row.id || '').trim();
+          if (!key) return false;
+          if (seenRecordingKeys.has(key)) return false;
+          seenRecordingKeys.add(key);
+          return true;
+        });
 
 		        const recordingDirection = String(req.query.direction || '').toLowerCase();
 		        if (startDate || endDate || search || (recordingDirection && recordingDirection !== 'all')) {

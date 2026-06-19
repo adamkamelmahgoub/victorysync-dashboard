@@ -638,11 +638,15 @@ function legacyCallRows(reports: any[]) {
           to_number: sample.to_number || null,
           duration_seconds: safeNumber(sample.duration_seconds),
           status: sample.status || 'unknown',
-          direction: 'unknown',
-          metadata: { source: 'mightycall_reports', report_id: report.id },
+          direction: sample.direction || sample.origin || 'unknown',
+          business_number: sample.business_number || null,
+          external_call_id: sample.id || null,
+          recording_url: sample.recording_url || sample.recordingUrl || sample.recording?.link || sample.recording?.uri || null,
+          has_recording: Boolean(sample.recording_url || sample.recordingUrl || sample.recording?.link || sample.recording?.uri),
+          metadata: { source: 'mightycall_reports_sample', report_id: report.id, ...sample },
         });
       }
-    } else {
+    } else if (data.source === 'mightycall_reports_sample') {
       out.push({
         id: report.id,
         org_id: report.org_id,
@@ -725,7 +729,8 @@ function normalizeSmsDirections(rows: any[], ownedDigits: Set<string>) {
 }
 
 function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
-  return rows.map((row) => {
+  const seen = new Set<string>();
+  const normalized = rows.map((row) => {
     const metadata = row?.metadata || row?.raw_payload || {};
     const businessNumber = row.business_number || metadata?.businessNumber?.number || metadata?.phone_number || null;
     const clientNumber = metadata?.client?.address || metadata?.client?.number || metadata?.caller_number || row.from_number || metadata?.from_number || null;
@@ -744,7 +749,15 @@ function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
       direction: inferDirectionFromOwnedNumbers({ ...row, from_number: fromNumber, to_number: toNumber, business_number: businessNumber, metadata }, ownedDigits),
       duration_seconds: durationToSeconds(row.duration_seconds || metadata?.recording?.duration || metadata?.duration_seconds || metadata?.duration || metadata?.callDuration),
     };
+  }).filter((row) => {
+    if (!row.recording_url) return false;
+    const key = String(row.external_recording_id || row.external_id || row.call_id || row.recording_url || row.id || '').trim();
+    if (!key) return false;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
+  return normalized;
 }
 
 function normalizeCallRows(rows: any[], ownedDigits: Set<string>) {
@@ -906,7 +919,7 @@ function ownedDigitsForScope(phones: Array<{ digits: string }>, scope: ReportSco
 
 async function callRecordingRows(req: express.Request, scope: ReportScope) {
   const rows = await fetchTableRows('calls', 'started_at', req, scope);
-  return rows.filter((row) => row.recording_url || row.has_recording).map((row) => ({
+  return rows.filter((row) => row.recording_url).map((row) => ({
     id: row.id,
     org_id: row.org_id,
     external_id: row.external_id,

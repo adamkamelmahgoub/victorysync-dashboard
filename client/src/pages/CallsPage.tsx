@@ -85,8 +85,9 @@ export default function CallsPage() {
   const [rows, setRows] = useState<CallRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(14));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [direction, setDirection] = useState('all');
@@ -137,6 +138,28 @@ export default function CallsPage() {
     }
   };
 
+  const syncCalls = async () => {
+    if (!user?.id) return;
+    setSyncing(true);
+    setError(null);
+    try {
+      const q = new URLSearchParams();
+      if (activeOrgId) q.set('org_id', activeOrgId);
+      const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({ orgId: activeOrgId || null, startDate, endDate }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Failed to sync calls');
+      await loadCalls(true);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to sync calls');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   useEffect(() => {
     void loadCalls(true);
   }, [user?.id, activeOrgId, startDate, endDate, direction, status, searchParams]);
@@ -182,6 +205,7 @@ export default function CallsPage() {
       actions={(
         <div className="flex flex-wrap gap-2">
           <button className="vs-button-secondary" onClick={() => downloadCsv('victorysync-calls.csv', rows)} disabled={rows.length === 0}>Export CSV</button>
+          <button className="vs-button-secondary" onClick={() => syncCalls()} disabled={loading || syncing}>{syncing ? 'Syncing...' : 'Sync Calls'}</button>
           <button className="vs-button-primary" onClick={() => loadCalls(true)} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
         </div>
       )}
@@ -226,7 +250,7 @@ export default function CallsPage() {
               setAgent('');
               setDirection('all');
               setStatus('all');
-              setStartDate(isoDateDaysAgo(14));
+              setStartDate(isoDateDaysAgo(30));
               setEndDate(new Date().toISOString().slice(0, 10));
             }}>Reset</button>
             <button className="vs-button-primary h-10" onClick={() => loadCalls(true)}>Apply</button>
