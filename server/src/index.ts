@@ -378,6 +378,43 @@ async function sendInviteVerificationEmail(params: { email: string; orgName?: st
   });
 }
 
+async function sendDashboardInviteEmail(params: {
+  email: string;
+  orgId: string;
+  orgName?: string | null;
+  role: string;
+  inviteCode: string;
+}) {
+  const appUrl = String(process.env.EMAIL_APP_URL || process.env.FRONTEND_ORIGIN || process.env.APP_URL || process.env.DASHBOARD_URL || 'https://dashboard.victorysync.com').replace(/\/$/, '');
+  const inviteUrl = `${appUrl}/login?mode=invite`;
+  return sendEmail({
+    to: [params.email],
+    subject: `You're invited to VictorySync${params.orgName ? ` for ${params.orgName}` : ''}`,
+    html: `
+      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;background:#f6f7f9;padding:28px;color:#111827;">
+        <div style="max-width:620px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:26px;box-shadow:0 18px 48px rgba(15,23,42,.08);">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6d28d9;">VictorySync invite</div>
+          <h1 style="margin:10px 0 0;font-size:24px;">Join ${params.orgName || 'your VictorySync workspace'}</h1>
+          <p style="color:#4b5563;line-height:1.6;">You were invited as <strong>${params.role.replace(/_/g, ' ')}</strong>. Use the organization ID and invite code below to create your dashboard account.</p>
+          <div style="display:grid;gap:12px;margin:22px 0;">
+            <div style="padding:14px;border-radius:14px;background:#f9fafb;border:1px solid #e5e7eb;">
+              <div style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6b7280;">Organization ID</div>
+              <div style="margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:16px;font-weight:800;color:#111827;word-break:break-all;">${params.orgId}</div>
+            </div>
+            <div style="padding:14px;border-radius:14px;background:#f5f3ff;border:1px solid #ddd6fe;">
+              <div style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6d28d9;">Invite code</div>
+              <div style="margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:24px;font-weight:900;letter-spacing:.08em;color:#4c1d95;">${params.inviteCode}</div>
+            </div>
+          </div>
+          <a href="${inviteUrl}" style="display:inline-block;background:#6d28d9;color:#fff;text-decoration:none;font-weight:800;border-radius:12px;padding:12px 18px;">Open VictorySync signup</a>
+          <p style="color:#6b7280;font-size:13px;line-height:1.6;margin-top:18px;">After you enter this invite, VictorySync will send a separate email verification code before creating the account.</p>
+        </div>
+      </div>
+    `,
+    text: `You're invited to VictorySync${params.orgName ? ` for ${params.orgName}` : ''}.\n\nOrganization ID: ${params.orgId}\nInvite code: ${params.inviteCode}\nRole: ${params.role}\n\nOpen ${inviteUrl} and choose Use invite. After that, VictorySync will send a separate verification code.`,
+  });
+}
+
 const TOTP_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 function base32Encode(buffer: Buffer) {
@@ -10681,6 +10718,19 @@ app.post('/api/admin/org-owner-invites', async (req, res) => {
     if (!invite) return res.status(500).json({ error: 'invite_issue_failed' });
 
     const inviteCode = computeInviteCode(invite as any);
+    let emailSent = false;
+    try {
+      await sendDashboardInviteEmail({
+        email: invite.email,
+        orgId: invite.org_id,
+        orgName: (org as any).name || null,
+        role: invite.role,
+        inviteCode,
+      });
+      emailSent = true;
+    } catch (emailErr: any) {
+      console.warn('org_owner_invite_email_failed:', fmtErr(emailErr));
+    }
     res.status(201).json({
       invite: {
         id: invite.id,
@@ -10691,6 +10741,7 @@ app.post('/api/admin/org-owner-invites', async (req, res) => {
         role: invite.role,
         invite_code: inviteCode,
         invited_at: invite.invited_at,
+        email_sent: emailSent,
       }
     });
   } catch (e: any) {
@@ -10797,6 +10848,21 @@ app.post('/api/admin/invite-codes', async (req, res) => {
     if (invErr) throw invErr;
     if (!invite) return res.status(500).json({ error: 'invite_issue_failed' });
 
+    const inviteCode = computeInviteCode(invite as any);
+    let emailSent = false;
+    try {
+      await sendDashboardInviteEmail({
+        email: invite.email,
+        orgId: invite.org_id,
+        orgName: (org as any).name || null,
+        role: invite.role,
+        inviteCode,
+      });
+      emailSent = true;
+    } catch (emailErr: any) {
+      console.warn('admin_invite_code_email_failed:', fmtErr(emailErr));
+    }
+
     return res.status(201).json({
       invite: {
         id: invite.id,
@@ -10806,7 +10872,8 @@ app.post('/api/admin/invite-codes', async (req, res) => {
         role: invite.role,
         invited_at: invite.invited_at,
         invited_by: invite.invited_by || actorId,
-        invite_code: computeInviteCode(invite as any),
+        invite_code: inviteCode,
+        email_sent: emailSent,
       }
     });
   } catch (e: any) {
@@ -10873,6 +10940,19 @@ app.post('/api/orgs/:orgId/team-invites', async (req, res) => {
     if (!invite) return res.status(500).json({ error: 'invite_issue_failed' });
 
     const inviteCode = computeInviteCode(invite as any);
+    let emailSent = false;
+    try {
+      await sendDashboardInviteEmail({
+        email: invite.email,
+        orgId: invite.org_id,
+        orgName: (org as any).name || null,
+        role: invite.role,
+        inviteCode,
+      });
+      emailSent = true;
+    } catch (emailErr: any) {
+      console.warn('team_invite_email_failed:', fmtErr(emailErr));
+    }
     res.status(201).json({
       invite: {
         id: invite.id,
@@ -10882,6 +10962,7 @@ app.post('/api/orgs/:orgId/team-invites', async (req, res) => {
         role: invite.role,
         invite_code: inviteCode,
         invited_at: invite.invited_at,
+        email_sent: emailSent,
       }
     });
   } catch (e: any) {
@@ -11932,13 +12013,18 @@ app.get("/api/admin/users", async (req, res) => {
 // POST /api/admin/users - Create a new user with org and role
 app.post("/api/admin/users", async (req, res) => {
   try {
+    const actorId = req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!(await isPlatformAdmin(actorId))) return res.status(403).json({ error: 'forbidden' });
+
     const { email, password, orgId, role } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
     // Validate required fields
-    if (!email || !password || !orgId) {
+    if (!normalizedEmail || !orgId) {
       return res.status(400).json({
         error: "missing_required_fields",
-        detail: "email, password, and orgId are required",
+        detail: "email and orgId are required",
       });
     }
 
@@ -11952,27 +12038,76 @@ app.post("/api/admin/users", async (req, res) => {
       });
     }
 
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        org_id: orgId,
-        role: normalizedRole,
-      },
-    });
+    const { data: org, error: orgErr } = await supabaseAdmin
+      .from('organizations')
+      .select('id, name')
+      .eq('id', orgId)
+      .maybeSingle();
+    if (orgErr) throw orgErr;
+    if (!org) return res.status(404).json({ error: 'org_not_found' });
 
-    if (error) {
-      throw error;
+    const { data: invite, error: inviteErr } = await supabaseAdmin
+      .from('org_invites')
+      .upsert({ org_id: orgId, email: normalizedEmail, role: normalizedRole, invited_by: actorId }, { onConflict: 'org_id,email' })
+      .select('id, org_id, email, role, invited_at, invited_by')
+      .maybeSingle();
+    if (inviteErr) throw inviteErr;
+    if (!invite) return res.status(500).json({ error: 'invite_issue_failed' });
+
+    const inviteCode = computeInviteCode(invite as any);
+    let emailSent = false;
+    let emailError: string | null = null;
+    try {
+      await sendDashboardInviteEmail({
+        email: normalizedEmail,
+        orgId,
+        orgName: (org as any).name || null,
+        role: normalizedRole,
+        inviteCode,
+      });
+      emailSent = true;
+    } catch (err: any) {
+      emailError = fmtErr(err) || 'email_send_failed';
+      console.warn('admin_user_invite_email_failed:', emailError);
     }
 
-    res.json({
-      user: {
-        id: data.user.id,
-        email: data.user.email,
+    let createdUser: any = null;
+    if (password) {
+      const { data, error } = await supabaseAdmin.auth.admin.createUser({
+        email: normalizedEmail,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          org_id: orgId,
+          role: normalizedRole,
+        },
+      });
+      if (error) throw error;
+      createdUser = data.user;
+      const membership = { org_id: orgId, user_id: data.user.id, role: normalizedRole };
+      try { await supabaseAdmin.from('org_users').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
+      try { await supabaseAdmin.from('org_members').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
+      try { await supabaseAdmin.from('organization_members').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
+    }
+
+    res.status(201).json({
+      user: createdUser ? {
+        id: createdUser.id,
+        email: createdUser.email,
         org_id: orgId,
         role: normalizedRole,
+      } : null,
+      invite: {
+        id: invite.id,
+        org_id: orgId,
+        org_name: (org as any).name || null,
+        email: normalizedEmail,
+        role: normalizedRole,
+        invite_code: inviteCode,
+        invited_at: invite.invited_at,
       },
+      email_sent: emailSent,
+      email_error: emailError,
     });
   } catch (err: any) {
     console.error("admin_create_user_failed:", err?.message ?? err);

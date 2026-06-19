@@ -42,9 +42,8 @@ export const AdminUsersPage: FC = () => {
     }
   })();
 
-  // Left panel: Create new user form
+  // Left panel: Invite new user form
   const [createEmail, setCreateEmail] = useState("");
-  const [createPassword, setCreatePassword] = useState("");
   const [createOrgId, setCreateOrgId] = useState("");
   const [createRole, setCreateRole] = useState("agent");
   const [createError, setCreateError] = useState<string | null>(null);
@@ -160,13 +159,13 @@ export const AdminUsersPage: FC = () => {
     loadOrgUsers();
   }, []);
 
-  // Handle create new user
+  // Handle invite new user
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
     setCreateSuccess(false);
 
-    if (!createEmail || !createPassword || !createOrgId || !createRole) {
+    if (!createEmail || !createOrgId || !createRole) {
       setCreateError('All fields are required');
       return;
     }
@@ -179,7 +178,6 @@ export const AdminUsersPage: FC = () => {
         headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
         body: JSON.stringify({
           email: createEmail,
-          password: createPassword,
           orgId: createOrgId,
           role: createRole,
         }),
@@ -187,12 +185,11 @@ export const AdminUsersPage: FC = () => {
 
       if (!res.ok) {
         const json = await res.json();
-        throw new Error(json.detail || 'Failed to create user');
+        throw new Error(json.detail || 'Failed to send invite');
       }
 
       setCreateSuccess(true);
       setCreateEmail('');
-      setCreatePassword('');
       setCreateOrgId(orgs.length > 0 ? orgs[0].id : '');
       setCreateRole('agent');
 
@@ -209,8 +206,8 @@ export const AdminUsersPage: FC = () => {
 
       setTimeout(() => setCreateSuccess(false), 3000);
     } catch (err: any) {
-      console.error('Create user error:', err);
-      setCreateError(err?.message ?? 'Failed to create user');
+      console.error('Invite user error:', err);
+      setCreateError(err?.message ?? 'Failed to send invite');
     } finally {
       setCreateLoading(false);
     }
@@ -426,7 +423,7 @@ export const AdminUsersPage: FC = () => {
           <div>
             <h1 className="text-xl font-semibold">User Management</h1>
             <p className="text-xs text-slate-400 mt-1">
-              Create new users and manage organization assignments.
+              Invite new users and manage organization assignments.
             </p>
           </div>
           <button
@@ -440,11 +437,14 @@ export const AdminUsersPage: FC = () => {
         <AdminTopNav />
 
         <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          {/* LEFT PANEL: Create New User Form */}
+          {/* LEFT PANEL: Invite New User Form */}
           <div className="rounded-2xl bg-slate-900/80 ring-1 ring-slate-800 p-5 space-y-6 h-fit">
-            {/* Create new user form */}
+            {/* Invite new user form */}
             <div>
-              <h2 className="font-semibold text-sm mb-3">Create New User</h2>
+              <h2 className="font-semibold text-sm mb-3">Invite New User</h2>
+              <p className="mb-3 text-xs leading-5 text-slate-400">
+                Sends the organization ID and invite code to the user's email so they can finish signup securely.
+              </p>
 
               {createError && (
                 <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300 mb-3">
@@ -454,7 +454,7 @@ export const AdminUsersPage: FC = () => {
 
               {createSuccess && (
                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-300 mb-3">
-                  User created successfully
+                  Invite sent successfully
                 </div>
               )}
 
@@ -468,19 +468,6 @@ export const AdminUsersPage: FC = () => {
                     value={createEmail}
                     onChange={(e) => setCreateEmail(e.target.value)}
                     placeholder="user@example.com"
-                    className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 placeholder-slate-600 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    value={createPassword}
-                    onChange={(e) => setCreatePassword(e.target.value)}
-                    placeholder="••••••••"
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 placeholder-slate-600 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
                   />
                 </div>
@@ -528,7 +515,7 @@ export const AdminUsersPage: FC = () => {
                   disabled={createLoading}
                   className="w-full mt-4 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 text-white font-semibold rounded-lg text-sm transition"
                 >
-                  {createLoading ? 'Creating...' : 'Create User'}
+                  {createLoading ? 'Sending invite...' : 'Send Invite'}
                 </button>
               </form>
             </div>
