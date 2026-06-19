@@ -43,6 +43,36 @@ function firstString(...values: unknown[]): string | null {
   return null;
 }
 
+function firstValue(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (value == null) continue;
+    if (typeof value === 'string' && !value.trim()) continue;
+    return value;
+  }
+  return null;
+}
+
+function objectValue(value: unknown): any {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' ? value : {};
+}
+
+function rowMetadata(row: any): any {
+  return objectValue(row?.metadata);
+}
+
+function rowRawPayload(row: any): any {
+  return objectValue(row?.raw_payload);
+}
+
 function asDateParam(value: unknown, endOfDay = false): string | null {
   const text = String(value || '').trim();
   if (!text) return null;
@@ -58,6 +88,21 @@ function safeNumber(value: unknown): number {
 
 function durationToSeconds(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.round(value));
+  if (value && typeof value === 'object') {
+    const item: any = value;
+    const seconds = firstValue(
+      item.seconds,
+      item.totalSeconds,
+      item.durationSeconds,
+      item.duration_seconds,
+      item.value,
+      item.duration
+    );
+    const parsedSeconds = durationToSeconds(seconds);
+    if (parsedSeconds > 0) return parsedSeconds;
+    const millis = Number(firstValue(item.milliseconds, item.ms, item.totalMilliseconds));
+    if (Number.isFinite(millis) && millis > 0) return Math.max(0, Math.round(millis / 1000));
+  }
   const text = String(value || '').trim();
   if (!text) return 0;
   if (/^\d+(\.\d+)?$/.test(text)) return Math.max(0, Math.round(Number(text)));
@@ -65,7 +110,18 @@ function durationToSeconds(value: unknown): number {
   if (parts.length >= 2 && parts.every((part) => Number.isFinite(part))) {
     return Math.max(0, Math.round(parts.reduce((total, part) => total * 60 + part, 0)));
   }
+  const units = text.toLowerCase().match(/(?:(\d+(?:\.\d+)?)\s*h(?:ours?)?)?\s*(?:(\d+(?:\.\d+)?)\s*m(?:in(?:ute)?s?)?)?\s*(?:(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?)?/);
+  if (units && (units[1] || units[2] || units[3])) {
+    return Math.max(0, Math.round((Number(units[1] || 0) * 3600) + (Number(units[2] || 0) * 60) + Number(units[3] || 0)));
+  }
   return 0;
+}
+
+function secondsBetween(start: unknown, end: unknown): number {
+  const startMs = Date.parse(String(start || ''));
+  const endMs = Date.parse(String(end || ''));
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
+  return Math.round((endMs - startMs) / 1000);
 }
 
 function rowTimestamp(row: any): string | null {
@@ -195,6 +251,155 @@ function inferDirectionFromOwnedNumbers(row: any, ownedDigits: Set<string>): 'in
   if (hasOwnedFrom || hasBusinessFrom) return 'outbound';
   if (hasOwnedTo || hasBusinessTo) return 'inbound';
   return 'unknown';
+}
+
+function normalizeDirection(row: any, ownedDigits: Set<string>): 'inbound' | 'outbound' | 'unknown' {
+  const inferred = inferDirectionFromOwnedNumbers(row, ownedDigits);
+  if (inferred !== 'unknown') return inferred;
+  const explicit = directionOf(row);
+  if (explicit === 'inbound' || explicit === 'outbound') return explicit;
+  const raw = String(explicit || '').toLowerCase();
+  if (raw.includes('incoming') || raw.includes('received')) return 'inbound';
+  if (raw.includes('outgoing') || raw.includes('sent')) return 'outbound';
+  return 'unknown';
+}
+
+function recordingUrlOf(row: any): string | null {
+  const metadata = rowMetadata(row);
+  const raw = rowRawPayload(row);
+  const url = firstString(
+    row?.recording_url,
+    row?.recordingUrl,
+    row?.recording_link,
+    row?.recordingLink,
+    row?.download_url,
+    row?.downloadUrl,
+    row?.audio_url,
+    metadata?.recording_url,
+    metadata?.recordingUrl,
+    metadata?.recording_link,
+    metadata?.recordingLink,
+    metadata?.download_url,
+    metadata?.downloadUrl,
+    metadata?.audio_url,
+    metadata?.recording?.url,
+    metadata?.recording?.link,
+    metadata?.recording?.downloadUrl,
+    metadata?.recordings?.[0]?.url,
+    metadata?.recordings?.[0]?.link,
+    raw?.recording_url,
+    raw?.recordingUrl,
+    raw?.recording_link,
+    raw?.recordingLink,
+    raw?.download_url,
+    raw?.downloadUrl,
+    raw?.audio_url,
+    raw?.recording?.url,
+    raw?.recording?.link,
+    raw?.recording?.downloadUrl,
+    raw?.recordings?.[0]?.url,
+    raw?.recordings?.[0]?.link
+  );
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
+
+function recordingIdOf(row: any): string | null {
+  const metadata = rowMetadata(row);
+  const raw = rowRawPayload(row);
+  return firstString(
+    row?.recording_id,
+    row?.recordingId,
+    row?.external_recording_id,
+    row?.mightycall_recording_id,
+    metadata?.recording_id,
+    metadata?.recordingId,
+    metadata?.external_recording_id,
+    metadata?.recording?.id,
+    metadata?.recordings?.[0]?.id,
+    raw?.recording_id,
+    raw?.recordingId,
+    raw?.external_recording_id,
+    raw?.recording?.id,
+    raw?.recordings?.[0]?.id
+  );
+}
+
+function callDurationSeconds(row: any): number {
+  const metadata = rowMetadata(row);
+  const raw = rowRawPayload(row);
+  const direct = durationToSeconds(firstValue(
+    row?.duration_seconds,
+    row?.durationSeconds,
+    row?.duration,
+    row?.call_duration,
+    row?.callDuration,
+    row?.duration_in_seconds,
+    row?.durationInSeconds,
+    row?.talk_time,
+    row?.talkTime,
+    row?.billable_seconds,
+    metadata?.duration_seconds,
+    metadata?.durationSeconds,
+    metadata?.duration,
+    metadata?.call_duration,
+    metadata?.callDuration,
+    metadata?.duration_in_seconds,
+    metadata?.durationInSeconds,
+    metadata?.talk_time,
+    metadata?.talkTime,
+    metadata?.conversationDuration,
+    metadata?.callInfo?.duration,
+    metadata?.callInfo?.durationSeconds,
+    metadata?.callInfo?.duration_seconds,
+    metadata?.recording?.duration,
+    raw?.duration_seconds,
+    raw?.durationSeconds,
+    raw?.duration,
+    raw?.call_duration,
+    raw?.callDuration,
+    raw?.duration_in_seconds,
+    raw?.durationInSeconds,
+    raw?.talk_time,
+    raw?.talkTime,
+    raw?.conversationDuration,
+    raw?.callInfo?.duration,
+    raw?.callInfo?.durationSeconds,
+    raw?.recording?.duration
+  ));
+  if (direct > 0) return direct;
+  return secondsBetween(
+    firstValue(row?.answered_at, row?.connected_at, row?.started_at, metadata?.answered_at, metadata?.connected_at, metadata?.started_at, metadata?.callInfo?.startedAt, raw?.answered_at, raw?.connected_at, raw?.started_at, raw?.callInfo?.startedAt),
+    firstValue(row?.ended_at, row?.completed_at, metadata?.ended_at, metadata?.completed_at, metadata?.callInfo?.endedAt, raw?.ended_at, raw?.completed_at, raw?.callInfo?.endedAt)
+  );
+}
+
+function recordingDurationSeconds(row: any): number {
+  const metadata = rowMetadata(row);
+  const raw = rowRawPayload(row);
+  const direct = durationToSeconds(firstValue(
+    row?.duration_seconds,
+    row?.durationSeconds,
+    row?.duration,
+    row?.recording_duration,
+    row?.recordingDuration,
+    metadata?.duration_seconds,
+    metadata?.durationSeconds,
+    metadata?.duration,
+    metadata?.recording_duration,
+    metadata?.recordingDuration,
+    metadata?.recording?.duration,
+    metadata?.recording?.durationSeconds,
+    metadata?.callInfo?.duration,
+    raw?.duration_seconds,
+    raw?.durationSeconds,
+    raw?.duration,
+    raw?.recording_duration,
+    raw?.recordingDuration,
+    raw?.recording?.duration,
+    raw?.recording?.durationSeconds,
+    raw?.callInfo?.duration
+  ));
+  return direct || callDurationSeconds(row);
 }
 
 async function getUserOrgIds(actorId: string): Promise<string[]> {
@@ -782,30 +987,64 @@ function normalizeSmsDirections(rows: any[], ownedDigits: Set<string>) {
 function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
   const seen = new Set<string>();
   const normalized = rows.map((row) => {
-    const metadata = row?.metadata || row?.raw_payload || {};
-    const businessNumber = row.business_number || metadata?.businessNumber?.number || metadata?.phone_number || null;
-    const clientNumber = metadata?.client?.address || metadata?.client?.number || metadata?.caller_number || row.from_number || metadata?.from_number || null;
-    const origin = String(metadata?.origin || row.direction || '').toLowerCase();
+    const metadata = rowMetadata(row);
+    const raw = rowRawPayload(row);
+    const businessNumber = firstString(
+      row.business_number,
+      row.phone_number,
+      metadata?.business_number,
+      metadata?.businessNumber?.number,
+      metadata?.businessNumber,
+      metadata?.phone_number,
+      raw?.business_number,
+      raw?.businessNumber?.number,
+      raw?.businessNumber,
+      raw?.phone_number
+    );
+    const clientNumber = firstString(
+      metadata?.client?.address,
+      metadata?.client?.number,
+      raw?.client?.address,
+      raw?.client?.number,
+      metadata?.caller_number,
+      raw?.caller_number,
+      row.from_number,
+      metadata?.from_number,
+      raw?.from_number
+    );
+    const origin = String(firstString(metadata?.origin, raw?.origin, row.direction, metadata?.callDirection, raw?.callDirection) || '').toLowerCase();
     const fromNumber = origin.includes('out')
       ? (businessNumber || row.from_number || metadata?.from_number || null)
-      : (row.from_number || metadata?.from_number || metadata?.client?.address || null);
+      : firstString(row.from_number, metadata?.from_number, raw?.from_number, metadata?.client?.address, raw?.client?.address);
     const toNumber = origin.includes('out')
       ? (clientNumber || row.to_number || metadata?.to_number || null)
-      : (row.to_number || metadata?.to_number || metadata?.businessNumber?.number || null);
+      : firstString(row.to_number, metadata?.to_number, raw?.to_number, metadata?.businessNumber?.number, raw?.businessNumber?.number);
+    const recordingUrl = recordingUrlOf(row);
+    const direction = normalizeDirection({ ...row, from_number: fromNumber, to_number: toNumber, business_number: businessNumber, metadata, raw_payload: raw }, ownedDigits);
     return {
       ...row,
+      recording_id: recordingIdOf(row),
+      recording_url: recordingUrl,
       from_number: fromNumber,
       to_number: toNumber,
       business_number: businessNumber,
-      direction: inferDirectionFromOwnedNumbers({ ...row, from_number: fromNumber, to_number: toNumber, business_number: businessNumber, metadata }, ownedDigits),
-      duration_seconds: durationToSeconds(row.duration_seconds || metadata?.recording?.duration || metadata?.duration_seconds || metadata?.duration || metadata?.callDuration),
+      direction,
+      duration_seconds: recordingDurationSeconds({ ...row, metadata, raw_payload: raw }),
     };
   }).filter((row) => {
     if (!row.recording_url) return false;
-    const key = String(row.external_recording_id || row.external_id || row.call_id || row.recording_url || row.id || '').trim();
-    if (!key) return false;
-    if (seen.has(key)) return false;
-    seen.add(key);
+    const keys = [
+      row.external_recording_id,
+      row.recording_id,
+      row.external_id,
+      row.external_call_id,
+      row.call_id,
+      row.recording_url,
+      row.id,
+    ].map((value) => String(value || '').trim()).filter(Boolean);
+    if (keys.length === 0) return false;
+    if (keys.some((key) => seen.has(key))) return false;
+    keys.forEach((key) => seen.add(key));
     return true;
   });
   return normalized;
@@ -813,25 +1052,24 @@ function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
 
 function normalizeCallRows(rows: any[], ownedDigits: Set<string>) {
   return rows.map((row) => {
-    const metadata = row?.metadata || row?.raw_payload || {};
-    const direction = inferDirectionFromOwnedNumbers({
+    const metadata = rowMetadata(row);
+    const raw = rowRawPayload(row);
+    const direction = normalizeDirection({
       ...row,
       metadata,
-      raw_payload: row?.raw_payload || metadata,
+      raw_payload: raw,
     }, ownedDigits);
-    const durationSeconds = durationToSeconds(
-      row?.duration_seconds ??
-      row?.durationSeconds ??
-      row?.duration ??
-      metadata?.duration_seconds ??
-      metadata?.durationSeconds ??
-      metadata?.duration
-    );
+    const durationSeconds = callDurationSeconds({ ...row, metadata, raw_payload: raw });
+    const recordingUrl = recordingUrlOf({ ...row, metadata, raw_payload: raw });
+    const recordingId = recordingIdOf({ ...row, metadata, raw_payload: raw });
     return {
       ...row,
-      direction: direction === 'unknown' ? (row.direction || 'unknown') : direction,
+      direction,
       status: normalizeReportCallStatus(row),
-      duration_seconds: durationSeconds || safeNumber(row?.duration_seconds),
+      duration_seconds: durationSeconds,
+      recording_id: row.recording_id || row.mightycall_recording_id || recordingId || null,
+      recording_url: row.recording_url || recordingUrl || null,
+      has_recording: Boolean(row.has_recording || row.recording_url || recordingUrl || recordingId),
     };
   });
 }
@@ -876,7 +1114,7 @@ async function enrichCallsWithRecordingLinks(rows: any[], req: express.Request, 
   }
 
   return rows.map((row) => {
-    const existingUrl = row.recording_url || row.metadata?.recording_url || row.raw_payload?.recording_url || null;
+    const existingUrl = recordingUrlOf(row);
     let recording = null;
     for (const key of callRecordingMatchKeys(row)) {
       recording = byKey.get(key);
@@ -884,6 +1122,18 @@ async function enrichCallsWithRecordingLinks(rows: any[], req: express.Request, 
     }
     if (!recording && existingUrl) {
       recording = recordings.find((item) => item.recording_url === existingUrl) || null;
+    }
+    if (!recording) {
+      const rowTime = Date.parse(String(row.started_at || row.created_at || ''));
+      const rowFrom = normalizePhoneDigits(row.from_number);
+      const rowTo = normalizePhoneDigits(row.to_number);
+      recording = recordings.find((item) => {
+        const itemTime = Date.parse(String(item.recording_date || item.recorded_at || item.created_at || ''));
+        if (!Number.isFinite(rowTime) || !Number.isFinite(itemTime) || Math.abs(rowTime - itemTime) > 24 * 60 * 60 * 1000) return false;
+        const itemFrom = normalizePhoneDigits(item.from_number);
+        const itemTo = normalizePhoneDigits(item.to_number);
+        return (!!rowFrom && (rowFrom === itemFrom || rowFrom === itemTo)) || (!!rowTo && (rowTo === itemFrom || rowTo === itemTo));
+      }) || null;
     }
     return {
       ...row,
@@ -1027,7 +1277,9 @@ function ownedDigitsForScope(phones: Array<{ digits: string }>, scope: ReportSco
 }
 
 async function callRecordingRows(req: express.Request, scope: ReportScope) {
-  const rows = await fetchTableRows('calls', 'started_at', req, scope);
+  const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
+  const ownedDigits = ownedDigitsForScope(phones, scope);
+  const rows = normalizeCallRows(await fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true, skipStatus: true, skipAgent: true }), ownedDigits);
   return rows.filter((row) => row.recording_url).map((row) => ({
     id: row.id,
     org_id: row.org_id,
@@ -1039,8 +1291,9 @@ async function callRecordingRows(req: express.Request, scope: ReportScope) {
     to_number: row.to_number,
     business_number: row.business_number || row.to_number,
     direction: row.direction || 'unknown',
-    duration_seconds: row.duration_seconds || 0,
+    duration_seconds: row.duration_seconds || callDurationSeconds(row),
     recording_url: row.recording_url || null,
+    recording_id: row.recording_id || row.id,
     extension: row.extension || row.agent_extension || null,
     metadata: { source: 'calls.recording_url', call_id: row.id },
   }));
@@ -1109,9 +1362,11 @@ router.get('/calls', (req, res) => handle(req, res, async (scope) => {
 router.get('/recordings', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = ownedDigitsForScope(phones, scope);
-  let rows = await fetchTableRows('mightycall_recordings', 'recording_date', req, scope);
-  if (rows.length === 0) rows = await callRecordingRows(req, scope);
-  rows = normalizeRecordingRows(rows, ownedDigits);
+  const recordingTableRows = await fetchTableRows('mightycall_recordings', 'recording_date', req, scope, 10000, { skipDirection: true, skipStatus: true, skipAgent: true });
+  const callRows = await callRecordingRows(req, scope);
+  let rows = normalizeRecordingRows([...recordingTableRows, ...callRows], ownedDigits);
+  const requestedDirection = String(req.query.direction || '').toLowerCase();
+  if (requestedDirection && requestedDirection !== 'all') rows = rows.filter((row) => row.direction === requestedDirection);
   const page = paginate(req, rows);
   res.json({ recordings: page.rows, total: page.total, next_offset: page.next_offset });
 }));

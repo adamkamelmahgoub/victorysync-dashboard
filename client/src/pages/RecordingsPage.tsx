@@ -23,6 +23,8 @@ type Recording = {
   organization_name?: string | null;
 };
 
+const FIVE_YEAR_DAYS = 5 * 366;
+
 function isoDateDaysAgo(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
@@ -64,7 +66,7 @@ export function RecordingsPage() {
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [syncing, setSyncing] = useState(false);
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(30));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(FIVE_YEAR_DAYS));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [directionFilter, setDirectionFilter] = useState('all');
   const [playbackUrls, setPlaybackUrls] = useState<Record<string, string>>({});
@@ -296,12 +298,13 @@ export function RecordingsPage() {
             <div className="p-5"><EmptyStatePanel title={emptyCopy.title} description={emptyCopy.description} /></div>
           ) : (
             <div className="vs-table-shell max-h-[72vh] overflow-auto">
-              <table className="w-full min-w-[1040px] text-sm">
+              <table className="w-full min-w-[1120px] text-sm">
                 <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-slate-600">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Call date/time</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">From</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">To</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Direction</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Agent / extension</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Duration</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.18em]">Status</th>
@@ -315,6 +318,7 @@ export function RecordingsPage() {
                       <td className="px-4 py-3 text-slate-600">{fmtDate(recording.recording_date || recording.created_at)}</td>
                       <td className="px-4 py-3 font-mono text-slate-700">{recording.from_number || '-'}</td>
                       <td className="px-4 py-3 font-mono text-slate-700">{recording.to_number || '-'}</td>
+                      <td className="px-4 py-3"><StatusBadge tone={recording.direction === 'outbound' ? 'info' : recording.direction === 'inbound' ? 'success' : 'neutral'}>{recording.direction || 'unknown'}</StatusBadge></td>
                       <td className="px-4 py-3 text-slate-700">{recording.agent_name || recording.agent_extension || recording.extension || '-'}</td>
                       <td className="px-4 py-3 text-slate-700">{fmtDuration(secondsOf(recording))}</td>
                       <td className="px-4 py-3"><StatusBadge tone={String(recording.status || '').toLowerCase().includes('fail') ? 'warning' : 'neutral'}>{recording.status || 'available'}</StatusBadge></td>
