@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
 import StripePortalButton from '../components/StripePortalButton';
@@ -29,7 +30,10 @@ export default function UserSettingsPage() {
   const [leadAlarmIds, setLeadAlarmIds] = useState<LeadAlarmId[]>([]);
   const [mfaFactors, setMfaFactors] = useState<any[]>([]);
   const [mfaEnroll, setMfaEnroll] = useState<{ factorId: string; otpauthUri?: string; secret?: string } | null>(null);
+  const [mfaQrDataUrl, setMfaQrDataUrl] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState('');
+  const [emailMfaPending, setEmailMfaPending] = useState<{ factorId?: string; email?: string; expiresAt?: string } | null>(null);
+  const [emailMfaCode, setEmailMfaCode] = useState('');
   const [mfaLoading, setMfaLoading] = useState(false);
 
   // Form state
@@ -55,6 +59,31 @@ export default function UserSettingsPage() {
   useEffect(() => {
     setLeadAlarmIds(getSelectedLeadAlarmIds());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!mfaEnroll?.otpauthUri) {
+      setMfaQrDataUrl(null);
+      return;
+    }
+    QRCode.toDataURL(mfaEnroll.otpauthUri, {
+      margin: 1,
+      width: 220,
+      color: {
+        dark: '#111827',
+        light: '#ffffff',
+      },
+    })
+      .then((url) => {
+        if (!cancelled) setMfaQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setMfaQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mfaEnroll?.otpauthUri]);
 
   const fetchProfile = async () => {
     if (!user) return;
@@ -209,6 +238,7 @@ export default function UserSettingsPage() {
         otpauthUri: factor.otpauth_uri,
         secret: factor.secret,
       });
+      setMfaCode('');
       setMessage('Add the setup key to your authenticator app, then enter the 6-digit code to finish enabling 2FA.');
     } catch (err: any) {
       setMessage(err?.message || 'Unable to start 2FA setup.');
@@ -229,13 +259,70 @@ export default function UserSettingsPage() {
         body: JSON.stringify({ code: mfaCode.trim() }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error === 'invalid_mfa_code' ? 'Invalid 2FA code' : payload.error || 'Unable to verify 2FA code');
+      if (!response.ok) throw new Error(payload.detail || (payload.error === 'invalid_mfa_code' ? 'Invalid 2FA code. Scan the latest QR code and make sure your phone time is automatic.' : payload.error || 'Unable to verify 2FA code'));
       setMfaEnroll(null);
       setMfaCode('');
+      setMfaQrDataUrl(null);
       await loadMfaFactors();
       setMessage('2FA enabled successfully');
     } catch (err: any) {
       setMessage(err?.message || 'Invalid 2FA code');
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const startEmailMfaEnroll = async () => {
+    if (!user?.id) return;
+    setMfaLoading(true);
+    setMessage(null);
+    try {
+      const response = await fetch(buildApiUrl('/api/user/mfa/email/enroll'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({}),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const fallback =
+          payload.error === 'mfa_email_migration_required'
+            ? 'Email 2FA setup is not ready yet. Apply the email MFA database migration, then try again.'
+            : payload.error === 'invalid_user_session'
+              ? 'Sign out and sign back in before enabling email 2FA.'
+              : payload.error === 'email_required'
+                ? 'Your account needs an email address before email 2FA can be enabled.'
+                : 'Unable to send email 2FA code';
+        throw new Error(payload.detail || fallback);
+      }
+      const factor = payload.factor || {};
+      setEmailMfaPending({ factorId: factor.id, email: factor.email, expiresAt: factor.code_expires_at });
+      setEmailMfaCode('');
+      setMessage(`We sent a 6-digit code to ${factor.email || 'your email address'}. Enter it to enable email 2FA.`);
+    } catch (err: any) {
+      setMessage(err?.message || 'Unable to send email 2FA code.');
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  const verifyEmailMfaEnroll = async () => {
+    if (!emailMfaPending || !user?.id) return;
+    setMfaLoading(true);
+    setMessage(null);
+    try {
+      const response = await fetch(buildApiUrl('/api/user/email-mfa/verify'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({ code: emailMfaCode.trim() }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || payload.error || 'Unable to verify email code');
+      setEmailMfaPending(null);
+      setEmailMfaCode('');
+      await loadMfaFactors();
+      setMessage('Email 2FA enabled successfully');
+    } catch (err: any) {
+      setMessage(err?.message || 'Invalid email code');
     } finally {
       setMfaLoading(false);
     }
@@ -478,17 +565,33 @@ export default function UserSettingsPage() {
             <div>
               <h2 className="text-lg font-semibold text-slate-950">Two-factor authentication</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Add an authenticator app code requirement for stronger account security.
+                Add an authenticator app or email code requirement for stronger account security.
               </p>
             </div>
-            <button onClick={startMfaEnroll} disabled={mfaLoading || !!mfaEnroll} className="vs-button-secondary">
-              {mfaLoading ? 'Working...' : 'Enable 2FA'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={startMfaEnroll} disabled={mfaLoading || !!mfaEnroll} className="vs-button-secondary">
+                {mfaLoading ? 'Working...' : 'Enable app 2FA'}
+              </button>
+              <button onClick={startEmailMfaEnroll} disabled={mfaLoading || !!emailMfaPending} className="vs-button-secondary">
+                {mfaLoading ? 'Working...' : 'Enable email 2FA'}
+              </button>
+            </div>
           </div>
 
           {mfaEnroll && (
             <div className="mt-5 rounded-2xl border border-violet-200 bg-violet-50 p-4">
-              <div className="grid gap-4 lg:grid-cols-[1fr,1fr] lg:items-start">
+              <div className="grid gap-4 lg:grid-cols-[260px,1fr,1fr] lg:items-start">
+                <div className="rounded-xl border border-violet-200 bg-white p-4 text-center">
+                  <div className="text-xs font-bold uppercase tracking-[0.16em] text-violet-700">Scan QR code</div>
+                  {mfaQrDataUrl ? (
+                    <img src={mfaQrDataUrl} alt="Authenticator app QR code" className="mx-auto mt-3 h-[220px] w-[220px] rounded-xl border border-slate-200 bg-white p-2" />
+                  ) : (
+                    <div className="mt-3 flex h-[220px] w-full items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
+                      Generating QR...
+                    </div>
+                  )}
+                  <p className="mt-3 text-xs leading-5 text-slate-600">Open your authenticator app and scan this QR code.</p>
+                </div>
                 <div className="rounded-xl border border-violet-200 bg-white p-4">
                   <div className="text-xs font-bold uppercase tracking-[0.16em] text-violet-700">Setup key</div>
                   {mfaEnroll.secret && (
@@ -522,6 +625,38 @@ export default function UserSettingsPage() {
                       Verify and enable
                     </button>
                   </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-600">
+                    If the code is rejected, remove any old VictorySync entry from your authenticator app, scan this latest QR code again, and make sure your phone time is set automatically.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {emailMfaPending && (
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700">Email code</div>
+                  <p className="mt-2 text-sm text-slate-700">
+                    Enter the 6-digit code sent to <span className="font-semibold">{emailMfaPending.email || 'your email'}</span>.
+                    {emailMfaPending.expiresAt ? ` It expires at ${new Date(emailMfaPending.expiresAt).toLocaleTimeString()}.` : ''}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    className="vs-input tracking-[0.22em]"
+                    inputMode="numeric"
+                    value={emailMfaCode}
+                    onChange={(event) => setEmailMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                  />
+                  <button onClick={verifyEmailMfaEnroll} disabled={mfaLoading || emailMfaCode.length < 6} className="vs-button-primary">
+                    Verify email code
+                  </button>
+                  <button onClick={startEmailMfaEnroll} disabled={mfaLoading} className="vs-button-secondary">
+                    Resend
+                  </button>
                 </div>
               </div>
             </div>
@@ -536,9 +671,9 @@ export default function UserSettingsPage() {
               mfaFactors.map((factor) => (
                 <div key={factor.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3">
                   <div>
-                    <div className="text-sm font-semibold text-slate-950">Authenticator app</div>
+                    <div className="text-sm font-semibold text-slate-950">{factor.label || (factor.type === 'email' ? 'Email code' : 'Authenticator app')}</div>
                     <div className="text-xs text-slate-500">
-                      Status: {factor.verified ? 'enabled' : 'pending'}{factor.enabled_at ? ` · Enabled ${new Date(factor.enabled_at).toLocaleDateString()}` : ''}
+                      Status: {factor.verified ? 'enabled' : 'pending'}{factor.email ? ` · ${factor.email}` : ''}{factor.enabled_at ? ` · Enabled ${new Date(factor.enabled_at).toLocaleDateString()}` : ''}
                     </div>
                   </div>
                   <button onClick={() => removeMfaFactor(factor.id)} disabled={mfaLoading} className="vs-button-secondary !px-3 !py-1.5 !text-xs">

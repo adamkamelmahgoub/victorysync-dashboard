@@ -461,13 +461,43 @@ function verifyTotp(secret: string, code: string) {
   const clean = String(code || '').replace(/\D/g, '');
   if (!/^\d{6}$/.test(clean)) return false;
   const counter = Math.floor(Date.now() / 30000);
-  return [-1, 0, 1].some((window) => hotp(secret, counter + window) === clean);
+  return [-2, -1, 0, 1, 2].some((window) => hotp(secret, counter + window) === clean);
 }
 
 function totpUri(email: string, secret: string) {
   const label = encodeURIComponent(`VictorySync:${email || 'user'}`);
   const issuer = encodeURIComponent('VictorySync');
   return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
+}
+
+function hashMfaEmailCode(userId: string, code: string) {
+  return crypto
+    .createHmac('sha256', mfaEncryptionKey())
+    .update(`${userId}:${String(code || '').replace(/\D/g, '')}`)
+    .digest('hex');
+}
+
+function generateMfaEmailCode() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+
+async function sendMfaEmailCode(params: { email: string; code: string }) {
+  return sendEmail({
+    to: [params.email],
+    subject: 'Your VictorySync two-factor code',
+    html: `
+      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;background:#f6f7f9;padding:28px;color:#111827;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:26px;box-shadow:0 18px 48px rgba(15,23,42,.08);">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6d28d9;">VictorySync security</div>
+          <h1 style="margin:10px 0 0;font-size:22px;">Your two-factor code</h1>
+          <p style="color:#4b5563;line-height:1.6;">Use this code to finish enabling email two-factor authentication.</p>
+          <div style="margin:22px 0;padding:18px;border-radius:14px;background:#f5f3ff;border:1px solid #ddd6fe;font-size:30px;font-weight:900;letter-spacing:.18em;text-align:center;color:#4c1d95;">${params.code}</div>
+          <p style="color:#6b7280;font-size:13px;line-height:1.6;">This code expires in 10 minutes. If you did not request this, secure your VictorySync account.</p>
+        </div>
+      </div>
+    `,
+    text: `Your VictorySync two-factor code is ${params.code}. It expires in 10 minutes.`,
+  });
 }
 
 const IMMUTABLE_SUPER_ADMIN_EMAIL = 'adam@victorysync.com';
@@ -4753,19 +4783,44 @@ app.get('/api/user/mfa/factors', async (req, res) => {
   try {
     const actorId = req.actorId || req.header('x-user-id') || null;
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
-    const { data, error } = await supabaseAdmin
+    const { data: totpData, error: totpError } = await supabaseAdmin
       .from('user_mfa_totp')
       .select('id, verified, enabled_at, created_at, updated_at')
       .eq('user_id', String(actorId))
       .order('created_at', { ascending: false });
-    if (error) {
-      const message = String(error.message || '').toLowerCase();
+    if (totpError) {
+      const message = String(totpError.message || '').toLowerCase();
       if (message.includes('relation') || message.includes('does not exist')) {
         return res.json({ factors: [], migration_required: true });
       }
-      throw error;
+      throw totpError;
     }
-    res.json({ factors: data || [] });
+
+    let emailData: any[] = [];
+    let emailMigrationRequired = false;
+    const { data: emailRows, error: emailError } = await supabaseAdmin
+      .from('user_mfa_email')
+      .select('id, email, verified, enabled_at, created_at, updated_at')
+      .eq('user_id', String(actorId))
+      .order('created_at', { ascending: false });
+    if (emailError) {
+      const message = String(emailError.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        emailMigrationRequired = true;
+      } else {
+        throw emailError;
+      }
+    } else {
+      emailData = emailRows || [];
+    }
+
+    res.json({
+      factors: [
+        ...(totpData || []).map((factor: any) => ({ ...factor, type: 'totp', label: 'Authenticator app' })),
+        ...emailData.map((factor: any) => ({ ...factor, type: 'email', label: 'Email code' })),
+      ],
+      email_migration_required: emailMigrationRequired,
+    });
   } catch (err: any) {
     console.error('mfa_factors_failed:', fmtErr(err));
     res.status(500).json({ error: 'mfa_factors_failed' });
@@ -4810,6 +4865,7 @@ app.post('/api/user/mfa/enroll', async (req, res) => {
         id: data?.id,
         secret,
         otpauth_uri: totpUri(email, secret),
+        server_time: new Date().toISOString(),
       },
     });
   } catch (err: any) {
@@ -4836,7 +4892,13 @@ app.post('/api/user/mfa/:factorId/verify', async (req, res) => {
     if (!row) return res.status(404).json({ error: 'mfa_factor_not_found' });
 
     const secret = decryptMfaSecret(row);
-    if (!verifyTotp(secret, code)) return res.status(400).json({ error: 'invalid_mfa_code' });
+    if (!verifyTotp(secret, code)) {
+      return res.status(400).json({
+        error: 'invalid_mfa_code',
+        detail: 'Invalid authenticator code. Make sure you scanned the latest QR code and your phone time is set automatically.',
+        server_time: new Date().toISOString(),
+      });
+    }
 
     const { data, error: updateError } = await supabaseAdmin
       .from('user_mfa_totp')
@@ -4853,6 +4915,92 @@ app.post('/api/user/mfa/:factorId/verify', async (req, res) => {
   }
 });
 
+app.post('/api/user/mfa/email/enroll', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(actorId))) {
+      return res.status(400).json({ error: 'invalid_user_session', detail: 'Sign out and sign back in before enabling email 2FA.' });
+    }
+
+    const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(String(actorId));
+    const email = normalizeEmail(authUser?.user?.email || '');
+    if (!email) return res.status(400).json({ error: 'email_required', detail: 'Your account needs an email address before email 2FA can be enabled.' });
+
+    const code = generateMfaEmailCode();
+    const codeHash = hashMfaEmailCode(String(actorId), code);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('user_mfa_email')
+      .upsert({
+        user_id: String(actorId),
+        email,
+        code_hash: codeHash,
+        code_expires_at: expiresAt,
+        verified: false,
+        enabled_at: null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' })
+      .select('id, email, code_expires_at')
+      .maybeSingle();
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.status(503).json({ error: 'mfa_email_migration_required', detail: 'Apply Supabase migration 036_user_mfa_email.sql before enabling email 2FA.' });
+      }
+      throw error;
+    }
+
+    await sendMfaEmailCode({ email, code });
+    res.json({ factor: { id: data?.id, type: 'email', email, code_expires_at: data?.code_expires_at || expiresAt } });
+  } catch (err: any) {
+    console.error('mfa_email_enroll_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mfa_email_enroll_failed', detail: 'Email 2FA setup could not be started. Check email delivery and the MFA email migration.' });
+  }
+});
+
+app.post('/api/user/email-mfa/verify', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+    const code = String(req.body?.code || '').replace(/\D/g, '');
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: 'invalid_mfa_code', detail: 'Enter the 6-digit email code.' });
+
+    const { data: row, error } = await supabaseAdmin
+      .from('user_mfa_email')
+      .select('*')
+      .eq('user_id', String(actorId))
+      .maybeSingle();
+    if (error) throw error;
+    if (!row) return res.status(404).json({ error: 'mfa_factor_not_found', detail: 'Start email 2FA setup again to receive a fresh code.' });
+    if (!row.code_hash || !row.code_expires_at || new Date(row.code_expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: 'mfa_code_expired', detail: 'That email code expired. Send a new code and try again.' });
+    }
+    if (hashMfaEmailCode(String(actorId), code) !== row.code_hash) {
+      return res.status(400).json({ error: 'invalid_mfa_code', detail: 'Invalid email code. Check the latest VictorySync email and try again.' });
+    }
+
+    const { data, error: updateError } = await supabaseAdmin
+      .from('user_mfa_email')
+      .update({
+        verified: true,
+        enabled_at: new Date().toISOString(),
+        code_hash: null,
+        code_expires_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id)
+      .eq('user_id', String(actorId))
+      .select('id, email, verified, enabled_at, created_at, updated_at')
+      .maybeSingle();
+    if (updateError) throw updateError;
+    res.json({ factor: { ...data, type: 'email', label: 'Email code' } });
+  } catch (err: any) {
+    console.error('mfa_email_verify_failed:', fmtErr(err));
+    res.status(500).json({ error: 'mfa_email_verify_failed', detail: 'Email 2FA code could not be verified.' });
+  }
+});
+
 app.delete('/api/user/mfa/:factorId', async (req, res) => {
   try {
     const actorId = req.actorId || req.header('x-user-id') || null;
@@ -4864,7 +5012,19 @@ app.delete('/api/user/mfa/:factorId', async (req, res) => {
       .delete()
       .eq('id', factorId)
       .eq('user_id', String(actorId));
-    if (error) throw error;
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (!message.includes('relation') && !message.includes('does not exist')) throw error;
+    }
+    const { error: emailError } = await supabaseAdmin
+      .from('user_mfa_email')
+      .delete()
+      .eq('id', factorId)
+      .eq('user_id', String(actorId));
+    if (emailError) {
+      const message = String(emailError.message || '').toLowerCase();
+      if (!message.includes('relation') && !message.includes('does not exist')) throw emailError;
+    }
     res.json({ success: true });
   } catch (err: any) {
     console.error('mfa_delete_failed:', fmtErr(err));
