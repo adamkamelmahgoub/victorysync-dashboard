@@ -192,6 +192,38 @@ function findAnyOwnedPhones(index: OwnershipIndex, ...numbers: any[]): OwnedPhon
   return Array.from(out.values());
 }
 
+function fallbackOwnedPhoneForOrg(orgId: string, ...numbers: any[]): OwnedPhoneMatch | null {
+  for (const number of numbers) {
+    const text = String(number || '').trim();
+    const digits = normalizePhoneDigitsForOwnership(text);
+    if (digits.length >= 7) {
+      return {
+        id: null,
+        org_id: orgId,
+        number: text || null,
+        digits,
+      };
+    }
+  }
+  return null;
+}
+
+export function resolveOwnedPhoneForSync(index: OwnershipIndex, orgId: string, ...numbers: any[]): {
+  ownedPhone: OwnedPhoneMatch | null;
+  candidateOrgs: OwnedPhoneMatch[];
+  fallback: boolean;
+} {
+  const ownedPhone = findOwnedPhoneForOrg(index, orgId, ...numbers);
+  if (ownedPhone) return { ownedPhone, candidateOrgs: [], fallback: false };
+
+  const candidateOrgs = findAnyOwnedPhones(index, ...numbers);
+  const belongsToOtherOrg = candidateOrgs.some((match) => match.org_id && match.org_id !== orgId);
+  if (belongsToOtherOrg) return { ownedPhone: null, candidateOrgs, fallback: false };
+
+  const fallback = fallbackOwnedPhoneForOrg(orgId, ...numbers);
+  return { ownedPhone: fallback, candidateOrgs, fallback: Boolean(fallback) };
+}
+
 function numberMatchesOwnedPhone(number: any, owned: OwnedPhoneMatch | null): boolean {
   if (!owned) return false;
   return normalizePhoneDigitsForOwnership(number) === owned.digits;
@@ -1818,17 +1850,17 @@ export async function syncMightyCallReports(
       const fromNumber = pickPhoneText(r?.from, r?.from_number, r?.client?.address, r?.client?.number, r?.caller?.number, r?.source?.number);
       const toNumber = pickPhoneText(r?.to, r?.to_number, r?.called?.[0]?.phone, r?.called?.[0]?.number, r?.destination?.number, r?.businessNumber?.number);
       const externalId = String(r?.external_id || r?.external_call_id || r?.callId || r?.id || r?.requestGuid || `${fromNumber || ''}:${toNumber || ''}:${created}`).trim();
-      const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, toNumber, fromNumber);
+      const ownership = resolveOwnedPhoneForSync(ownershipIndex, orgId, businessNumber, toNumber, fromNumber);
+      const ownedPhone = ownership.ownedPhone;
       if (!ownedPhone) {
-        const candidateOrgs = findAnyOwnedPhones(ownershipIndex, businessNumber, toNumber, fromNumber);
         skippedUnowned += 1;
         await quarantineIntegrationRow(supabaseAdminClient, {
           integrationType: 'mightycall_calls',
           orgId,
           externalId,
           detectedNumbers: [businessNumber, fromNumber, toNumber].filter(Boolean),
-          candidateOrgs,
-          reason: candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
+          candidateOrgs: ownership.candidateOrgs,
+          reason: ownership.candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
           rawPayload: r,
         });
         quarantined += 1;
@@ -1906,6 +1938,7 @@ export async function syncMightyCallReports(
           ...(r || {}),
           owned_phone_digits: ownedPhone.digits,
           owned_phone_org_id: ownedPhone.org_id,
+          ownership_fallback: ownership.fallback,
           inferred_direction: direction,
         },
         raw_payload: r,
@@ -1921,17 +1954,17 @@ export async function syncMightyCallReports(
       const fromNumber = pickPhoneText(m?.client?.address, m?.client?.number, m?.from, m?.from_number, m?.sender?.number, m?.sender);
       const toNumber = pickPhoneText(m?.businessNumber?.number, m?.to, m?.to_number, m?.recipient?.number, m?.recipient, m?.destination?.number);
       const externalId = String(m?.id || m?.requestGuid || `${created}:${m?.textModel?.text || m?.text || ''}`).trim();
-      const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, toNumber, fromNumber);
+      const ownership = resolveOwnedPhoneForSync(ownershipIndex, orgId, businessNumber, toNumber, fromNumber);
+      const ownedPhone = ownership.ownedPhone;
       if (!ownedPhone) {
-        const candidateOrgs = findAnyOwnedPhones(ownershipIndex, businessNumber, toNumber, fromNumber);
         skippedUnowned += 1;
         await quarantineIntegrationRow(supabaseAdminClient, {
           integrationType: 'mightycall_sms_messages',
           orgId,
           externalId,
           detectedNumbers: [businessNumber, fromNumber, toNumber].filter(Boolean),
-          candidateOrgs,
-          reason: candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
+          candidateOrgs: ownership.candidateOrgs,
+          reason: ownership.candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
           rawPayload: m,
         });
         quarantined += 1;
@@ -2146,17 +2179,17 @@ export async function syncMightyCallRecordings(
 
         const externalId = String(r.callId || r.id || r.recordingUrl || '').trim() || null;
         const detectedNumbers = [businessNumber, fromNumber, toNumber].filter(Boolean);
-        const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, toNumber, fromNumber);
+        const ownership = resolveOwnedPhoneForSync(ownershipIndex, orgId, businessNumber, toNumber, fromNumber);
+        const ownedPhone = ownership.ownedPhone;
         if (!ownedPhone) {
-          const candidateOrgs = findAnyOwnedPhones(ownershipIndex, businessNumber, toNumber, fromNumber);
           skippedUnowned += 1;
           await quarantineIntegrationRow(supabaseAdminClient, {
             integrationType: 'mightycall_recordings',
             orgId,
             externalId,
             detectedNumbers,
-            candidateOrgs,
-            reason: candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
+            candidateOrgs: ownership.candidateOrgs,
+            reason: ownership.candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
             rawPayload: metadata || r,
           });
           quarantined += 1;
@@ -2178,7 +2211,8 @@ export async function syncMightyCallRecordings(
           metadata: {
             ...(metadata || r || {}),
             owned_phone_digits: ownedPhone.digits,
-            owned_phone_org_id: ownedPhone.org_id
+            owned_phone_org_id: ownedPhone.org_id,
+            ownership_fallback: ownership.fallback
           }
         });
       }
@@ -2325,18 +2359,18 @@ export async function syncMightyCallSMS(
           ? pickPhoneText(rawToNumber, m.client?.address, businessNumber)
           : pickPhoneText(businessNumber, rawToNumber);
         const externalId = String(m?.id || m?.requestGuid || m?.external_id || `${m?.created || ''}:${m?.textModel?.text || m?.messageInfo?.text || m?.text || ''}`);
-        const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, fromNumber, toNumber);
+        const ownership = resolveOwnedPhoneForSync(ownershipIndex, orgId, businessNumber, fromNumber, toNumber);
+        const ownedPhone = ownership.ownedPhone;
         const detectedNumbers = [businessNumber, fromNumber, toNumber].filter(Boolean);
         if (!ownedPhone) {
-          const candidateOrgs = findAnyOwnedPhones(ownershipIndex, businessNumber, fromNumber, toNumber);
           skippedUnowned += 1;
           await quarantineIntegrationRow(supabaseAdminClient, {
             integrationType: 'mightycall_sms_messages',
             orgId,
             externalId,
             detectedNumbers,
-            candidateOrgs,
-            reason: candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
+            candidateOrgs: ownership.candidateOrgs,
+            reason: ownership.candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
             rawPayload: m,
           });
           quarantined += 1;
@@ -2369,6 +2403,7 @@ export async function syncMightyCallSMS(
             ...(m || {}),
             owned_phone_digits: ownedPhone.digits,
             owned_phone_org_id: ownedPhone.org_id,
+            ownership_fallback: ownership.fallback,
             inferred_direction: direction,
           }
         });
@@ -2464,17 +2499,17 @@ export async function syncMightyCallCallHistory(
         c?.businessNumber?.number
       );
       const externalId = String(c?.external_id || c?.external_call_id || c?.callId || c?.id || c?.requestGuid || `${from || ''}:${to || ''}:${c?.dateTimeUtc || c?.created || ''}`).trim();
-      const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, to, from);
+      const ownership = resolveOwnedPhoneForSync(ownershipIndex, orgId, businessNumber, to, from);
+      const ownedPhone = ownership.ownedPhone;
       if (!ownedPhone) {
-        const candidateOrgs = findAnyOwnedPhones(ownershipIndex, businessNumber, to, from);
         skippedUnowned += 1;
         await quarantineIntegrationRow(supabaseAdminClient, {
           integrationType: 'mightycall_calls',
           orgId,
           externalId,
           detectedNumbers: [businessNumber, from, to].filter(Boolean),
-          candidateOrgs,
-          reason: candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
+          candidateOrgs: ownership.candidateOrgs,
+          reason: ownership.candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
           rawPayload: c,
         });
         quarantined += 1;
@@ -2511,6 +2546,7 @@ export async function syncMightyCallCallHistory(
           ...(c || {}),
           owned_phone_digits: ownedPhone.digits,
           owned_phone_org_id: ownedPhone.org_id,
+          ownership_fallback: ownership.fallback,
           inferred_direction: direction,
         },
         raw_payload: c,
@@ -2527,7 +2563,10 @@ export async function syncMightyCallCallHistory(
         .lte('started_at', `${end.slice(0, 10)}T23:59:59Z`)
         .limit(50000);
       const unownedIds = (existingRows || [])
-        .filter((row: any) => !findOwnedPhoneForOrg(ownershipIndex, orgId, row?.business_number, row?.to_number, row?.from_number))
+        .filter((row: any) => {
+          const ownership = resolveOwnedPhoneForSync(ownershipIndex, orgId, row?.business_number, row?.to_number, row?.from_number);
+          return !ownership.ownedPhone && ownership.candidateOrgs.length > 0;
+        })
         .map((row: any) => row?.id)
         .filter(Boolean);
       if (unownedIds.length > 0) {
