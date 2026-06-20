@@ -131,6 +131,18 @@ function fmtErr(e: any): string {
   return msg;
 }
 
+function isSupabaseAuthProfileTriggerError(error: any) {
+  const text = String(error?.message || error?.error_description || error || '').toLowerCase();
+  return text.includes('database error saving new user') || text.includes('handle_new_auth_user');
+}
+
+function authProfileTriggerErrorResponse() {
+  return {
+    error: 'auth_profile_trigger_migration_required',
+    detail: 'Supabase could not create the auth user because the database profile trigger failed. Apply supabase/migrations/037_auth_user_profile_trigger_repair.sql, then retry the invite.',
+  };
+}
+
 const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
 const IS_DEBUG = LOG_LEVEL === 'debug' || LOG_LEVEL === 'verbose' || LOG_LEVEL === 'trace';
 const SENSITIVE_LOG_KEY = /(token|secret|password|authorization|api[_-]?key|service[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token)/i;
@@ -10855,6 +10867,9 @@ app.post('/api/orgs/:orgId/members', async (req, res) => {
           data: { org_id: orgId, role }
         });
         if (authInvErr) {
+          if (isSupabaseAuthProfileTriggerError(authInvErr)) {
+            return res.status(503).json(authProfileTriggerErrorResponse());
+          }
           console.warn('[org_add_member] Supabase auth invite failed:', fmtErr(authInvErr));
           // Email invite failed, but still create a DB record so admin can retry later
         }
@@ -11116,6 +11131,9 @@ app.post('/api/admin/platform-invites', async (req, res) => {
         },
       } as any);
       if (error) {
+        if (isSupabaseAuthProfileTriggerError(error)) {
+          return res.status(503).json(authProfileTriggerErrorResponse());
+        }
         inviteError = error.message || 'supabase_invite_failed';
         const msg = String(error.message || '').toLowerCase();
         if (!msg.includes('already')) throw error;
@@ -11450,6 +11468,9 @@ app.post('/api/auth/signup-with-invite', async (req, res) => {
       }
     });
     if (createErr) {
+      if (isSupabaseAuthProfileTriggerError(createErr)) {
+        return res.status(503).json(authProfileTriggerErrorResponse());
+      }
       const msg = String(createErr.message || '');
       if (msg.toLowerCase().includes('already')) return res.status(409).json({ error: 'account_already_exists' });
       throw createErr;
@@ -12368,7 +12389,12 @@ app.post("/api/admin/users", async (req, res) => {
           role: normalizedRole,
         },
       });
-      if (error) throw error;
+      if (error) {
+        if (isSupabaseAuthProfileTriggerError(error)) {
+          return res.status(503).json(authProfileTriggerErrorResponse());
+        }
+        throw error;
+      }
       createdUser = data.user;
       const membership = { org_id: orgId, user_id: data.user.id, role: normalizedRole };
       try { await supabaseAdmin.from('org_users').upsert(membership, { onConflict: 'org_id,user_id' }); } catch {}
