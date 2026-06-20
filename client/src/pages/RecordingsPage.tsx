@@ -40,6 +40,26 @@ function secondsOf(r: Recording) {
   return Number(r.duration_seconds ?? r.duration ?? 0) || 0;
 }
 
+function normalizeLegacyRecording(row: Recording, orgId?: string | null): Recording {
+  const metadata = (row as any).metadata || {};
+  return {
+    ...row,
+    id: row.id,
+    org_id: row.org_id || orgId || '',
+    recording_date: row.recording_date || row.created_at || null,
+    from_number: row.from_number || metadata.from_number || metadata.from || metadata.businessNumber || null,
+    to_number: row.to_number || metadata.to_number || metadata.to || metadata.called?.[0]?.phone || null,
+    duration_seconds: row.duration_seconds ?? row.duration ?? 0,
+    direction: row.direction || metadata.direction || null,
+    status: row.status || 'available',
+    recording_url: row.recording_url || null,
+  };
+}
+
+function endOfDayIso(date: string) {
+  return date.includes('T') ? date : `${date}T23:59:59.999Z`;
+}
+
 function recordingTimestamp(recording: Recording) {
   return recording.recording_date || recording.created_at;
 }
@@ -120,6 +140,32 @@ export function RecordingsPage() {
     }
   };
 
+  const legacyOrgIds = () => {
+    if (orgId) return [orgId];
+    return isPlatformAdmin ? orgs.map((item) => item.id).filter(Boolean) : [];
+  };
+
+  const fetchLegacyRecordings = async () => {
+    const targets = legacyOrgIds();
+    if (!user?.id || targets.length === 0) return [] as Recording[];
+    const loaded = await Promise.all(targets.map(async (targetOrgId) => {
+      const q = new URLSearchParams();
+      q.set('org_id', targetOrgId);
+      q.set('limit', '10000');
+      q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
+      if (endDate) q.set('end_date', endOfDayIso(endDate));
+      if (search.trim()) q.set('phone_number', search.trim());
+      if (directionFilter !== 'all') q.set('direction', directionFilter);
+      const response = await fetch(buildApiUrl(`/api/recordings?${q.toString()}`), {
+        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to fetch recordings');
+      return (data.recordings || []).map((row: Recording) => normalizeLegacyRecording(row, targetOrgId));
+    }));
+    return loaded.flat();
+  };
+
   const fetchRecordings = async (reset = true, options?: { syncFirst?: boolean }) => {
     if (!user) return;
     if (!reset && nextOffset == null) return;
@@ -142,21 +188,37 @@ export function RecordingsPage() {
 		      if (endDate) q.set('end_date', endDate);
 		      if (search.trim()) q.set('search', search.trim());
 		      if (directionFilter !== 'all') q.set('direction', directionFilter);
-      const response = await fetch(buildApiUrl(`/api/reports/recordings?${q.toString()}`), {
-        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        setError(body?.detail || body?.error || 'Failed to fetch recordings');
-        return;
+      let rows: Recording[] = [];
+      let nextPageOffset: number | null = null;
+      let reason: string | null = null;
+      let reportsError: Error | null = null;
+      try {
+        const response = await fetch(buildApiUrl(`/api/reports/recordings?${q.toString()}`), {
+          headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to fetch recordings');
+        rows = data.recordings || [];
+        nextPageOffset = data.next_offset ?? null;
+        reason = data.empty_reason || null;
+      } catch (err: any) {
+        reportsError = err;
       }
 
-      const data = await response.json();
-      const rows = data.recordings || [];
+      if (reset && (reportsError || rows.length === 0)) {
+        const legacyRows = await fetchLegacyRecordings();
+        if (legacyRows.length > 0) {
+          rows = legacyRows;
+          nextPageOffset = null;
+          reason = null;
+          reportsError = null;
+        }
+      }
+
+      if (reportsError) throw reportsError;
       setRecordings((prev) => (reset ? rows : [...prev, ...rows]));
-      setNextOffset(data.next_offset ?? null);
-      if (reset) setEmptyReason(data.empty_reason || null);
+      setNextOffset(nextPageOffset);
+      if (reset) setEmptyReason(reason);
     } catch (err: any) {
       setError(err?.message || 'Error fetching recordings');
     } finally {
@@ -167,7 +229,7 @@ export function RecordingsPage() {
 
 		  useEffect(() => {
 		    if (user) fetchRecordings(true);
-		  }, [orgId, user?.id, endDate, directionFilter]);
+		  }, [orgId, user?.id, orgs.length, endDate, directionFilter]);
 
 	  useEffect(() => {
 	    return () => {

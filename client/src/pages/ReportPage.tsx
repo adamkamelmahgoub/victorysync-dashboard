@@ -93,6 +93,27 @@ function orgNameFor(row: Row, orgs: Array<{ id: string; name?: string | null }>)
   return orgs.find((org) => org.id === row.org_id)?.name || row.organization_name || row.org_name || row.org_id || '-';
 }
 
+function normalizeLegacyCall(row: Row, orgId?: string | null): Row {
+  const metadata = row.metadata || {};
+  return {
+    ...row,
+    id: row.id || row.recording_id || `${orgId || row.org_id || 'call'}:${row.started_at || row.recording_date || Math.random()}`,
+    org_id: row.org_id || orgId || null,
+    started_at: row.started_at || row.recording_date || row.created_at,
+    from_number: row.from_number || row.fromNumber || metadata.from_number || metadata.from || metadata.businessNumber || null,
+    to_number: row.to_number || row.toNumber || metadata.to_number || metadata.to || metadata.called?.[0]?.phone || null,
+    business_number: row.business_number || row.phone_number || row.to_number || metadata.businessNumber || null,
+    duration_seconds: row.duration_seconds ?? row.duration ?? 0,
+    status: row.status || row.result || 'answered',
+    recording_id: row.recording_id || row.mightycall_recording_id || (row.recording_url ? row.id : null),
+    has_recording: Boolean(row.has_recording || row.recording_url || row.recording_id),
+  };
+}
+
+function endOfDayIso(date: string) {
+  return date.includes('T') ? date : `${date}T23:59:59.999Z`;
+}
+
 export default function ReportPage() {
   const { user, globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const { org } = useOrg();
@@ -129,6 +150,82 @@ export default function ReportPage() {
     return q.toString();
   };
 
+  const legacyOrgIds = () => {
+    if (activeOrgId) return [activeOrgId];
+    return isPlatformAdmin ? orgs.map((item) => item.id).filter(Boolean) : [];
+  };
+
+  const loadLegacyCallStats = async () => {
+    if (!user?.id) return [] as Array<{ orgId: string; stats: any; calls: Row[] }>;
+    const targets = legacyOrgIds();
+    if (targets.length === 0) return [];
+    return Promise.all(targets.map(async (orgId) => {
+      const q = new URLSearchParams();
+      q.set('org_id', orgId);
+      q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
+      if (endDate) q.set('end_date', endOfDayIso(endDate));
+      const response = await fetch(buildApiUrl(`/api/call-stats?${q.toString()}`), {
+        headers: { 'x-user-id': user.id },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load call stats');
+      return {
+        orgId,
+        stats: data.stats || {},
+        calls: (data.calls || []).map((row: Row) => normalizeLegacyCall(row, orgId)),
+      };
+    }));
+  };
+
+  const loadLegacyRecordings = async () => {
+    if (!user?.id) return [] as Row[];
+    const targets = legacyOrgIds();
+    if (targets.length === 0) return [];
+    const loaded = await Promise.all(targets.map(async (orgId) => {
+      const q = new URLSearchParams();
+      q.set('org_id', orgId);
+      q.set('limit', '10000');
+      q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
+      if (endDate) q.set('end_date', endOfDayIso(endDate));
+      if (selectedNumber) q.set('phone_number', selectedNumber);
+      if (direction !== 'all') q.set('direction', direction);
+      const response = await fetch(buildApiUrl(`/api/recordings?${q.toString()}`), {
+        headers: { 'x-user-id': user.id },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load recordings');
+      return (data.recordings || []).map((row: Row) => ({ ...row, org_id: row.org_id || orgId, status: row.status || 'available' }));
+    }));
+    return loaded.flat();
+  };
+
+  const buildLegacyOverview = async () => {
+    const [statsByOrg, recordings] = await Promise.all([
+      loadLegacyCallStats(),
+      loadLegacyRecordings().catch(() => [] as Row[]),
+    ]);
+    const calls = statsByOrg.flatMap((item) => item.calls);
+    const totalCalls = statsByOrg.reduce((sum, item) => sum + Number(item.stats.totalCalls || item.calls.length || 0), 0);
+    const answeredCalls = statsByOrg.reduce((sum, item) => sum + Number(item.stats.answeredCalls || 0), 0);
+    const missedCalls = statsByOrg.reduce((sum, item) => sum + Number(item.stats.missedCalls || 0), 0);
+    const durationSeconds = statsByOrg.reduce((sum, item) => sum + Number(item.stats.totalDuration || 0), 0);
+    return {
+      total_calls: totalCalls || calls.length,
+      answered_calls: answeredCalls || calls.filter((row) => String(row.status || '').toLowerCase().includes('answer')).length,
+      missed_calls: missedCalls,
+      total_transfers: calls.filter((row) => JSON.stringify(row).toLowerCase().includes('transfer')).length,
+      avg_duration_seconds: calls.length > 0 ? Math.round(durationSeconds / Math.max(1, calls.length)) : 0,
+      total_recordings: recordings.length || calls.filter((row) => hasRecording(row)).length,
+      total_sms: Number(overview.total_sms || 0),
+      inbound_sms: Number(overview.inbound_sms || 0),
+      outbound_sms: Number(overview.outbound_sms || 0),
+      top_agents: overview.top_agents || [],
+      top_numbers: overview.top_numbers || [],
+      transfers_by_number: overview.transfers_by_number || [],
+      latest_sync: overview.latest_sync || null,
+    };
+  };
+
   useEffect(() => {
     try {
       setTopAgentEdits(JSON.parse(localStorage.getItem('victorysync.reportTopAgentEdits') || '{}'));
@@ -153,20 +250,51 @@ export default function ReportPage() {
     setError(null);
     try {
       if (activeTab === 'overview') {
-        const response = await fetch(buildApiUrl(`/api/reports/overview?${buildQuery()}`), { headers: { 'x-user-id': user.id } });
-        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Failed to load overview');
-        const data = await response.json();
-        setOverview(data.overview || {});
+        let nextOverview: Overview = {};
+        let reportsError: Error | null = null;
+        try {
+          const response = await fetch(buildApiUrl(`/api/reports/overview?${buildQuery()}`), { headers: { 'x-user-id': user.id } });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load overview');
+          nextOverview = data.overview || {};
+        } catch (err: any) {
+          reportsError = err;
+        }
+        if (reportsError || Number(nextOverview.total_calls || 0) === 0) {
+          const legacyOverview = await buildLegacyOverview();
+          if (Number(legacyOverview.total_calls || 0) > 0 || Number(legacyOverview.total_recordings || 0) > 0) {
+            nextOverview = { ...nextOverview, ...legacyOverview };
+            reportsError = null;
+          }
+        }
+        if (reportsError) throw reportsError;
+        setOverview(nextOverview);
         setRows([]);
       } else if (activeTab === 'numbers') {
         await loadNumbers();
         setRows([]);
       } else {
         const endpoint = activeTab === 'agents' ? 'agents' : activeTab;
-        const response = await fetch(buildApiUrl(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' }, { preload: true })}`), { headers: { 'x-user-id': user.id } });
-        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `Failed to load ${activeTab}`);
-        const data = await response.json();
-        setRows(data[activeTab] || data.messages || data.agents || []);
+        let nextRows: Row[] = [];
+        let reportsError: Error | null = null;
+        try {
+          const response = await fetch(buildApiUrl(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' }, { preload: true })}`), { headers: { 'x-user-id': user.id } });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data?.detail || data?.error || `Failed to load ${activeTab}`);
+          nextRows = data[activeTab] || data.messages || data.agents || [];
+        } catch (err: any) {
+          reportsError = err;
+        }
+        if ((reportsError || nextRows.length === 0) && activeTab === 'calls') {
+          nextRows = (await loadLegacyCallStats()).flatMap((item) => item.calls);
+          if (nextRows.length > 0) reportsError = null;
+        }
+        if ((reportsError || nextRows.length === 0) && activeTab === 'recordings') {
+          nextRows = await loadLegacyRecordings();
+          if (nextRows.length > 0) reportsError = null;
+        }
+        if (reportsError) throw reportsError;
+        setRows(nextRows);
       }
     } catch (err: any) {
       setError(err?.message || 'Failed to load reports');
@@ -175,8 +303,8 @@ export default function ReportPage() {
     }
   };
 
-  useEffect(() => { void loadNumbers(); }, [user?.id, activeOrgId]);
-  useEffect(() => { void loadReport(); }, [user?.id, activeOrgId, activeTab, startDate, endDate, direction, status]);
+  useEffect(() => { void loadNumbers(); }, [user?.id, activeOrgId, orgs.length]);
+  useEffect(() => { void loadReport(); }, [user?.id, activeOrgId, orgs.length, activeTab, startDate, endDate, direction, status]);
 
   const runSync = async () => {
     if (!user?.id) return;
