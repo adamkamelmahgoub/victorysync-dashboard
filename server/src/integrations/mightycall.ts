@@ -248,6 +248,50 @@ async function quarantineIntegrationRow(
   }
 }
 
+async function upsertCallRowsWithSchemaFallback(supabaseAdminClient: any, rows: any[]): Promise<number> {
+  const validRows = rows.filter((row) => row?.org_id && (row?.external_call_id || row?.external_id));
+  if (validRows.length === 0) return 0;
+
+  const attempts = [
+    { onConflict: 'org_id,external_call_id', rows: validRows.map((row) => ({ ...row, external_call_id: row.external_call_id || row.external_id })) },
+    { onConflict: 'org_id,external_id', rows: validRows.map((row) => ({ ...row, external_id: row.external_id || row.external_call_id })) },
+  ];
+
+  for (const attempt of attempts) {
+    const { error } = await supabaseAdminClient.from('calls').upsert(attempt.rows, { onConflict: attempt.onConflict });
+    if (!error) return attempt.rows.length;
+    if (!/constraint|unique|conflict|schema cache|external_id|external_call_id|42P10|PGRST/i.test(error.message || error.code || '')) {
+      console.warn('[MightyCall] calls upsert failed:', error);
+      return 0;
+    }
+  }
+
+  let inserted = 0;
+  for (const row of validRows) {
+    try {
+      const externalCallId = String(row.external_call_id || row.external_id || '').trim();
+      if (externalCallId) {
+        await supabaseAdminClient
+          .from('calls')
+          .delete()
+          .eq('org_id', row.org_id)
+          .eq('external_call_id', externalCallId);
+        await supabaseAdminClient
+          .from('calls')
+          .delete()
+          .eq('org_id', row.org_id)
+          .eq('external_id', externalCallId);
+      }
+      const { error } = await supabaseAdminClient.from('calls').insert(row);
+      if (!error) inserted += 1;
+      else console.warn('[MightyCall] call row insert fallback failed:', error);
+    } catch (err) {
+      console.warn('[MightyCall] call row insert fallback exception:', err);
+    }
+  }
+  return inserted;
+}
+
 async function requestWithRetry(url: string, opts: any, retries = 2, backoff = 250, timeoutMs = MIGHTYCALL_HTTP_TIMEOUT_MS) {
   let attempt = 0;
   while (true) {
@@ -1868,11 +1912,7 @@ export async function syncMightyCallReports(
 	    ];
 	    let callsSynced = 0;
 	    if (callRows.length > 0) {
-	      const { error: callRowsError } = await supabaseAdminClient
-	        .from('calls')
-	        .upsert(callRows, { onConflict: 'org_id,external_id' });
-	      if (callRowsError) console.warn('[MightyCall] journal call rows upsert failed:', callRowsError);
-	      else callsSynced = callRows.length;
+	      callsSynced = await upsertCallRowsWithSchemaFallback(supabaseAdminClient, callRows);
 	    }
 	    try {
 	      await supabaseAdminClient
@@ -2385,9 +2425,7 @@ export async function syncMightyCallCallHistory(
     } catch {}
 
     if (rows.length > 0) {
-      const { error } = await supabaseAdminClient.from('calls').upsert(rows, { onConflict: 'org_id,external_id' });
-      if (error) console.warn('[MightyCall] call history insert error', error);
-      else callsSynced = rows.length;
+      callsSynced = await upsertCallRowsWithSchemaFallback(supabaseAdminClient, rows);
     }
   }
 

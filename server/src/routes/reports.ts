@@ -311,6 +311,19 @@ function isRealRecordingUrl(value: any): boolean {
   return true;
 }
 
+function canonicalRecordingUrl(value: any): string {
+  const url = String(value || '').trim();
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return url.split('?')[0].split('#')[0].replace(/\/$/, '');
+  }
+}
+
 function recordingIdOf(row: any): string | null {
   const metadata = rowMetadata(row);
   const raw = rowRawPayload(row);
@@ -1047,7 +1060,7 @@ function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
       row.external_id,
       row.external_call_id,
       row.call_id,
-      row.recording_url,
+      canonicalRecordingUrl(row.recording_url),
       row.id,
     ].map((value) => String(value || '').trim()).filter(Boolean);
     if (keys.length === 0) return false;
