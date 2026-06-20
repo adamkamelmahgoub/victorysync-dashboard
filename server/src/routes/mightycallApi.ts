@@ -12,6 +12,7 @@ import {
 } from '../mightycall/sync';
 import { getMightyCallStatusByExtension } from '../services/mightycallLiveStatus';
 import {
+  syncMightyCallPhoneNumbers,
   syncMightyCallCallHistory,
   syncMightyCallRecordings,
   syncMightyCallReports,
@@ -153,6 +154,7 @@ async function runLegacyJournalSync(req: express.Request, options: { includeRepo
     warnings: [] as string[],
   };
   for (const orgId of scope.orgIds) {
+    await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
     const phoneIds = await getOrgPhoneIds(orgId);
     try {
       if (options.includeReports !== false) {

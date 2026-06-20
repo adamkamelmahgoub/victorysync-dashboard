@@ -1199,6 +1199,7 @@ async function runRollingReportsBackgroundSync() {
     const end = new Date().toISOString().slice(0, 10);
     for (const orgId of orgIds) {
       try {
+        await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
         const phoneIds = await getPhoneIdsForOrg(orgId);
         await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end);
         await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end });
@@ -1215,6 +1216,7 @@ async function runRollingSmsBackgroundSync() {
     const orgIds = await getBackgroundSyncOrgIds();
     for (const orgId of orgIds) {
       try {
+        await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
         await syncMightyCallSMS(supabaseAdmin, orgId);
       } catch (err) {
         console.warn('[mightycall background] sms sync failed:', orgId, safeWarning(err));
@@ -1236,6 +1238,7 @@ async function runRollingRecordingsBackgroundSync() {
     const end = new Date().toISOString().slice(0, 10);
     for (const orgId of orgIds) {
       try {
+        await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
         const phoneIds = await getPhoneIdsForOrg(orgId);
         await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end);
       } catch (err) {
@@ -1256,6 +1259,7 @@ async function runRollingVoicemailBackgroundSync() {
     const orgIds = await getBackgroundSyncOrgIds();
     for (const orgId of orgIds) {
       try {
+        await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
         await syncMightyCallVoicemails(supabaseAdmin, orgId);
       } catch (err) {
         console.warn('[mightycall background] voicemail sync failed:', orgId, safeWarning(err));

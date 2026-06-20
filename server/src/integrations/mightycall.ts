@@ -292,6 +292,110 @@ async function upsertCallRowsWithSchemaFallback(supabaseAdminClient: any, rows: 
   return inserted;
 }
 
+async function fetchPhoneRowsByExternalIds(supabaseAdminClient: any, externalIds: string[]) {
+  const ids = Array.from(new Set(externalIds.map((id) => String(id || '').trim()).filter(Boolean)));
+  if (ids.length === 0) return [];
+  const selects = [
+    'id, external_id, org_id, number, phone_number, label',
+    'id, external_id, org_id, number, label',
+    'id, external_id, org_id, phone_number, label',
+  ];
+  for (const select of selects) {
+    const { data, error } = await supabaseAdminClient
+      .from('phone_numbers')
+      .select(select)
+      .in('external_id', ids);
+    if (!error) return data || [];
+    if (!/number|phone_number|schema cache|does not exist/i.test(error.message || '')) break;
+  }
+  return [];
+}
+
+async function upsertPhoneRowsWithSchemaFallback(supabaseAdminClient: any, rows: any[], orgId?: string): Promise<any[]> {
+  const validRows = rows.filter((row) => row?.external_id && (row?.number || row?.phone_number));
+  if (validRows.length === 0) return [];
+  const now = new Date().toISOString();
+  const modernRows = validRows.map((row) => ({
+    org_id: orgId || row.org_id || null,
+    external_id: row.external_id,
+    number: row.number || row.phone_number,
+    phone_number: row.phone_number || row.number,
+    label: row.label || null,
+    number_digits: row.number_digits || String(row.number || row.phone_number || '').replace(/\D/g, ''),
+    is_active: row.is_active !== false,
+    status: row.is_active === false ? 'inactive' : 'active',
+    metadata: row.metadata || null,
+    last_synced_at: now,
+    updated_at: now,
+  }));
+  const legacyRows = modernRows.map((row) => ({
+    org_id: row.org_id,
+    external_id: row.external_id,
+    phone_number: row.phone_number,
+    label: row.label,
+    status: row.status,
+    last_synced_at: row.last_synced_at,
+    updated_at: row.updated_at,
+  }));
+  const attempts = [
+    { rows: modernRows, onConflict: 'org_id,external_id' },
+    { rows: modernRows, onConflict: 'external_id' },
+    { rows: legacyRows, onConflict: 'org_id,external_id' },
+    { rows: legacyRows, onConflict: 'external_id' },
+  ];
+  for (const attempt of attempts) {
+    const { data, error } = await supabaseAdminClient
+      .from('phone_numbers')
+      .upsert(attempt.rows, { onConflict: attempt.onConflict })
+      .select('id, external_id, org_id, label');
+    if (!error) return data || [];
+    if (!/constraint|unique|conflict|schema cache|number|phone_number|number_digits|is_active|metadata|external_id|42P10|PGRST/i.test(error.message || error.code || '')) {
+      console.warn('[MightyCall] phone number upsert failed:', error);
+      return [];
+    }
+  }
+  return fetchPhoneRowsByExternalIds(supabaseAdminClient, modernRows.map((row) => row.external_id));
+}
+
+async function ensureOrgPhoneAssignments(supabaseAdminClient: any, orgId: string | undefined, phones: any[]) {
+  if (!orgId || !Array.isArray(phones) || phones.length === 0) return 0;
+  let count = 0;
+  for (const phone of phones) {
+    const phoneNumberId = String(phone?.id || '').trim();
+    const number = String(phone?.number || phone?.phone_number || '').trim();
+    if (!phoneNumberId && !number) continue;
+    const row = {
+      org_id: orgId,
+      phone_number_id: phoneNumberId || null,
+      phone_number: number || null,
+      label: phone?.label || null,
+    };
+    const attempts = [
+      { ...row },
+      { org_id: orgId, phone_number_id: phoneNumberId || null },
+      { org_id: orgId, phone_number: number || null, label: phone?.label || null },
+    ];
+    let assigned = false;
+    for (const attempt of attempts) {
+      try {
+        const { error } = await supabaseAdminClient
+          .from('org_phone_numbers')
+          .upsert(attempt, { onConflict: phoneNumberId ? 'org_id,phone_number_id' : 'org_id,phone_number' });
+        if (!error) {
+          assigned = true;
+          break;
+        }
+        if (!/schema cache|does not exist|phone_number_id|phone_number|label|constraint|unique|42P10|PGRST/i.test(error.message || error.code || '')) {
+          console.warn('[MightyCall] org phone assignment failed:', error);
+          break;
+        }
+      } catch {}
+    }
+    if (assigned) count += 1;
+  }
+  return count;
+}
+
 async function requestWithRetry(url: string, opts: any, retries = 2, backoff = 250, timeoutMs = MIGHTYCALL_HTTP_TIMEOUT_MS) {
   let attempt = 0;
   while (true) {
@@ -1587,7 +1691,7 @@ export async function syncMightyCallPhoneNumbers(
 
     const rows = sourcePhones
       .map((p: any) => {
-        const number = String(p.number || p.phone || p.businessNumber?.number || '').trim();
+        const number = String(p.number || p.phoneNumber || p.e164 || p.msisdn || p.phone || p.businessNumber?.number || '').trim();
         if (!number) return null;
         const row: any = {
           external_id: String(p.id || p.external_id || p.externalId || number),
@@ -1603,13 +1707,20 @@ export async function syncMightyCallPhoneNumbers(
       .filter(Boolean);
 
     if (rows.length === 0) return { synced: 0, upserted: 0 };
-    const { error, data } = await supabaseAdminClient
-      .from('phone_numbers')
-      .upsert(rows, { onConflict: 'external_id' })
-      .select('id');
-    if (error) throw error;
-    const count = Array.isArray(data) ? data.length : rows.length;
-    return { synced: count, upserted: count };
+    const upsertedRows = await upsertPhoneRowsWithSchemaFallback(supabaseAdminClient, rows, orgId);
+    const byExternalId = new Map(rows.map((row: any) => [String(row.external_id), row]));
+    const assignmentRows = upsertedRows.map((row: any) => {
+      const source = byExternalId.get(String(row.external_id)) || {};
+      return {
+        ...row,
+        number: row.number || row.phone_number || (source as any).number || (source as any).phone_number,
+        phone_number: row.phone_number || row.number || (source as any).phone_number || (source as any).number,
+        label: row.label || (source as any).label || null,
+      };
+    });
+    const assigned = await ensureOrgPhoneAssignments(supabaseAdminClient, orgId, assignmentRows);
+    const count = upsertedRows.length || rows.length;
+    return { synced: count, upserted: count + assigned };
   } catch (e) {
     console.warn('[MightyCall] sync phone numbers failed:', (e as any)?.message || e);
     return { synced: 0, upserted: 0 };
