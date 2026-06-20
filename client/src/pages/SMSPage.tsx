@@ -5,7 +5,7 @@ import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, SegmentedControl, StatusBadge } from '../components/DashboardPrimitives';
 import { getOrgPhoneNumbers, type PhoneNumber } from '../lib/phonesApi';
-import { sendSmsMessage, triggerMightyCallSMSSync } from '../lib/apiClient';
+import { fetchJson, sendSmsMessage, triggerMightyCallSMSSync } from '../lib/apiClient';
 import { formatPhoneNumber, normalizePhoneDigits, normalizeSmsDirection } from '../lib/reportingMetrics';
 
 interface SMSMessage {
@@ -105,19 +105,7 @@ export function SMSPage() {
 		      if (search.trim()) q.set('search', search.trim());
 		      if (directionFilter !== 'all') q.set('direction', directionFilter);
 
-      const response = await fetch(buildApiUrl(`/api/reports/sms?${q.toString()}`), {
-        headers: {
-          'x-user-id': user.id,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        setError('Failed to fetch SMS messages');
-        return;
-      }
-
-      const data = await response.json();
+      const data = await fetchJson(`/api/reports/sms?${q.toString()}`);
       const rows: SMSMessage[] = data.messages || [];
       setMessages((previous) => (reset ? rows : [...previous, ...rows]));
       setNextOffset(data.next_offset ?? null);

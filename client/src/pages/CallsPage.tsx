@@ -4,7 +4,7 @@ import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
-import { buildApiUrl } from '../config';
+import { apiFetch, fetchJson } from '../lib/apiClient';
 import {
   averageHandleTimeSeconds,
   countMissedCalls,
@@ -151,11 +151,7 @@ export default function CallsPage() {
       setLoadingMore(true);
     }
     try {
-      const response = await fetch(buildApiUrl(`/api/reports/calls?${buildQuery(offset)}`), {
-        headers: { 'x-user-id': user.id },
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load calls');
+      const data = await fetchJson(`/api/reports/calls?${buildQuery(offset)}`);
       const nextRows = data.calls || [];
       setRows((previous) => (reset ? nextRows : [...previous, ...nextRows]));
       setTotal(Number(data.total || nextRows.length || 0));
@@ -175,13 +171,12 @@ export default function CallsPage() {
     try {
       const q = new URLSearchParams();
       if (activeOrgId) q.set('org_id', activeOrgId);
-      const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
+      await fetchJson(`/api/mightycall/sync?${q.toString()}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orgId: activeOrgId || null, startDate: isoDateDaysAgo(FIVE_YEAR_DAYS), endDate }),
+        timeoutMs: 45_000,
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'Failed to sync calls');
       await loadCalls(true);
     } catch (err: any) {
       setError(err?.message || 'Failed to sync calls');
@@ -220,9 +215,7 @@ export default function CallsPage() {
       setError('Recording is not available for this call.');
       return;
     }
-    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`), {
-      headers: { 'x-user-id': user.id },
-    });
+    const response = await apiFetch(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`);
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       setError(payload.detail || payload.error || 'Recording is not available for this call.');

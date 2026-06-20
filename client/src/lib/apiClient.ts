@@ -111,6 +111,22 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
   return json;
 }
 
+export async function apiFetch(path: string, init?: FetchJsonInit) {
+  const url = path.startsWith("http") ? path : buildApiUrl(path);
+  const requestInit = await withBrowserAuthHeaders(url, init);
+  const { timeoutMs = 15000, ...rest } = requestInit || {};
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { cache: (rest as any).cache || "no-store", ...rest, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === "AbortError") throw new Error(`Request timeout after ${timeoutMs}ms: ${url}`);
+    throw err;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export type Metrics = {
   org_id?: string;
   total_calls: number;
