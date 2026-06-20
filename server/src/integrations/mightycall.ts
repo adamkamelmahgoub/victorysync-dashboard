@@ -656,6 +656,14 @@ function pickRecordingUrl(raw: any): string | null {
   return value ? String(value) : null;
 }
 
+function isRealRecordingUrl(value: any): boolean {
+  const url = String(value || '').trim();
+  if (!/^https?:\/\//i.test(url)) return false;
+  if (/^https?:\/\/(www\.)?example\.com\//i.test(url)) return false;
+  if (/\/demo\//i.test(url) || /recording-demo|demo-recording/i.test(url)) return false;
+  return true;
+}
+
 export async function fetchMightyCallRecordings(
   accessToken: string,
   phoneNumberIds: string[] = [],
@@ -687,6 +695,7 @@ export async function fetchMightyCallRecordings(
       date: row?.recordingDate || row?.recordedAt || row?.date || row?.created || row?.createdAt || row?.dateTimeUtc || row?.Timestamp || null,
       metadata
     };
+    if (normalized.recordingUrl && !isRealRecordingUrl(normalized.recordingUrl)) return;
     if (!normalized.recordingUrl && !normalized.callId && !normalized.id) return;
     const key = String(normalized.recordingUrl || normalized.callId || normalized.id || '');
     if (!key || seen.has(key)) return;
@@ -1642,15 +1651,36 @@ export async function syncMightyCallReports(
       return null;
     };
 
+    const ownershipIndex = await loadOwnershipIndex(supabaseAdminClient);
     const callBuckets = new Map<string, any>();
+    const callRows: any[] = [];
+    let skippedUnowned = 0;
+    let quarantined = 0;
     for (const r of Array.isArray(callJournal) ? callJournal : []) {
       const created = String(r?.created || r?.dateTimeUtc || new Date().toISOString());
       const dateKey = created.slice(0, 10);
-      const fromNumber = String(r?.from || r?.from_number || r?.client?.address || '').trim();
-      const toNumber = String(r?.to || r?.to_number || r?.businessNumber?.number || '').trim();
-      const numForMap = toNumber || fromNumber;
-      const digits = numForMap.replace(/\D/g, '');
-      const phoneId = resolvePhoneId(toNumber, fromNumber);
+      const businessNumber = pickPhoneText(r?.business_number, r?.businessNumber?.number, r?.businessNumber, r?.phone_number, r?.phoneNumber);
+      const fromNumber = pickPhoneText(r?.from, r?.from_number, r?.client?.address, r?.client?.number, r?.caller?.number, r?.source?.number);
+      const toNumber = pickPhoneText(r?.to, r?.to_number, r?.called?.[0]?.phone, r?.called?.[0]?.number, r?.destination?.number, r?.businessNumber?.number);
+      const externalId = String(r?.external_id || r?.external_call_id || r?.callId || r?.id || r?.requestGuid || `${fromNumber || ''}:${toNumber || ''}:${created}`).trim();
+      const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, toNumber, fromNumber);
+      if (!ownedPhone) {
+        const candidateOrgs = findAnyOwnedPhones(ownershipIndex, businessNumber, toNumber, fromNumber);
+        skippedUnowned += 1;
+        await quarantineIntegrationRow(supabaseAdminClient, {
+          integrationType: 'mightycall_calls',
+          orgId,
+          externalId,
+          detectedNumbers: [businessNumber, fromNumber, toNumber].filter(Boolean),
+          candidateOrgs,
+          reason: candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
+          rawPayload: r,
+        });
+        quarantined += 1;
+        continue;
+      }
+      const phoneId = ownedPhone.id || resolvePhoneId(businessNumber, toNumber, fromNumber);
+      const digits = ownedPhone.digits;
       const key = bucketKey(dateKey, phoneId, digits);
       if (!callBuckets.has(key)) {
         callBuckets.set(key, {
@@ -1678,17 +1708,53 @@ export async function syncMightyCallReports(
       row.data.raw_entries_count += 1;
       if (st.includes('answer') || st.includes('complete')) row.data.answered_count += 1;
       else if (st.includes('miss')) row.data.missed_count += 1;
-      const dur = Number(r?.duration || r?.durationSeconds || 0);
+      const dur = Number(r?.duration || r?.durationSeconds || r?.callDuration || 0);
       if (Number.isFinite(dur) && dur > 0) row.data.total_duration += dur;
       pushSampleNumber(row, fromNumber);
       pushSampleNumber(row, toNumber);
+      let direction = directionFromText(r?.direction || r?.callDirection || r?.origin || r?.requestOrigin);
+      if (direction === 'unknown') {
+        if (numberMatchesOwnedPhone(fromNumber, ownedPhone) && !numberMatchesOwnedPhone(toNumber, ownedPhone)) direction = 'outbound';
+        else if (numberMatchesOwnedPhone(toNumber, ownedPhone) && !numberMatchesOwnedPhone(fromNumber, ownedPhone)) direction = 'inbound';
+        else if (numberMatchesOwnedPhone(businessNumber, ownedPhone)) direction = numberMatchesOwnedPhone(fromNumber, ownedPhone) ? 'outbound' : 'inbound';
+      }
+      const recordingUrl = pickRecordingUrl(r);
       pushSampleActivity(row, {
-        id: r?.id || r?.requestGuid || null,
+        id: externalId,
         created,
         status: st || null,
         from_number: fromNumber || null,
         to_number: toNumber || null,
-        duration_seconds: Number.isFinite(dur) ? dur : null
+        business_number: ownedPhone.number || businessNumber || null,
+        direction,
+        duration_seconds: Number.isFinite(dur) ? dur : null,
+        recording_url: isRealRecordingUrl(recordingUrl) ? recordingUrl : null
+      });
+      callRows.push({
+        org_id: orgId,
+        external_id: externalId,
+        external_call_id: externalId,
+        phone_number_id: phoneId,
+        business_number: ownedPhone.number || businessNumber || toNumber || fromNumber,
+        direction,
+        from_number: fromNumber,
+        to_number: toNumber,
+        from_number_digits: fromNumber ? fromNumber.replace(/\D/g, '') : null,
+        to_number_digits: toNumber ? toNumber.replace(/\D/g, '') : null,
+        status: st || null,
+        duration_seconds: Number.isFinite(dur) ? dur : 0,
+        started_at: created,
+        ended_at: r?.endedAt || r?.ended_at || r?.end_time || null,
+        has_recording: isRealRecordingUrl(recordingUrl),
+        recording_url: isRealRecordingUrl(recordingUrl) ? recordingUrl : null,
+        metadata: {
+          ...(r || {}),
+          owned_phone_digits: ownedPhone.digits,
+          owned_phone_org_id: ownedPhone.org_id,
+          inferred_direction: direction,
+        },
+        raw_payload: r,
+        created_at: new Date().toISOString(),
       });
     }
 
@@ -1696,11 +1762,28 @@ export async function syncMightyCallReports(
     for (const m of Array.isArray(messageJournal) ? messageJournal : []) {
       const created = String(m?.created || m?.sent_at || new Date().toISOString());
       const dateKey = created.slice(0, 10);
-      const fromNumber = String(m?.client?.address || m?.from || m?.from_number || '').trim();
-      const toNumber = String(m?.businessNumber?.number || m?.to || m?.to_number || '').trim();
-      const numForMap = toNumber || fromNumber;
-      const digits = numForMap.replace(/\D/g, '');
-      const phoneId = resolvePhoneId(toNumber, fromNumber);
+      const businessNumber = pickPhoneText(m?.businessNumber?.number, m?.businessNumber, m?.messageInfo?.businessNumber, m?.business_number, m?.phone_number, m?.phoneNumber);
+      const fromNumber = pickPhoneText(m?.client?.address, m?.client?.number, m?.from, m?.from_number, m?.sender?.number, m?.sender);
+      const toNumber = pickPhoneText(m?.businessNumber?.number, m?.to, m?.to_number, m?.recipient?.number, m?.recipient, m?.destination?.number);
+      const externalId = String(m?.id || m?.requestGuid || `${created}:${m?.textModel?.text || m?.text || ''}`).trim();
+      const ownedPhone = findOwnedPhoneForOrg(ownershipIndex, orgId, businessNumber, toNumber, fromNumber);
+      if (!ownedPhone) {
+        const candidateOrgs = findAnyOwnedPhones(ownershipIndex, businessNumber, toNumber, fromNumber);
+        skippedUnowned += 1;
+        await quarantineIntegrationRow(supabaseAdminClient, {
+          integrationType: 'mightycall_sms_messages',
+          orgId,
+          externalId,
+          detectedNumbers: [businessNumber, fromNumber, toNumber].filter(Boolean),
+          candidateOrgs,
+          reason: candidateOrgs.length > 0 ? 'number_belongs_to_different_org' : 'owned_number_not_found',
+          rawPayload: m,
+        });
+        quarantined += 1;
+        continue;
+      }
+      const phoneId = ownedPhone.id || resolvePhoneId(businessNumber, toNumber, fromNumber);
+      const digits = ownedPhone.digits;
       const key = bucketKey(dateKey, phoneId, digits);
       if (!messageBuckets.has(key)) {
         messageBuckets.set(key, {
@@ -1778,14 +1861,22 @@ export async function syncMightyCallReports(
       };
     });
 
-    const reportRows = [
-      ...Array.from(callBuckets.values()),
-      ...Array.from(messageBuckets.values()),
-      ...analyticsRows
-    ];
-    try {
-      await supabaseAdminClient
-        .from('mightycall_reports')
+	    const reportRows = [
+	      ...Array.from(callBuckets.values()),
+	      ...Array.from(messageBuckets.values()),
+	      ...analyticsRows
+	    ];
+	    let callsSynced = 0;
+	    if (callRows.length > 0) {
+	      const { error: callRowsError } = await supabaseAdminClient
+	        .from('calls')
+	        .upsert(callRows, { onConflict: 'org_id,external_id' });
+	      if (callRowsError) console.warn('[MightyCall] journal call rows upsert failed:', callRowsError);
+	      else callsSynced = callRows.length;
+	    }
+	    try {
+	      await supabaseAdminClient
+	        .from('mightycall_reports')
         .delete()
         .eq('org_id', orgId)
         .in('report_type', ['calls', 'messages', 'analytics'])
@@ -1802,12 +1893,13 @@ export async function syncMightyCallReports(
     const recResult = await syncMightyCallRecordings(supabaseAdminClient, orgId, phoneNumberIds, start, end, overrideCreds);
     const recordingsSynced = recResult.recordingsSynced || 0;
 
-    return {
-      reportsSynced,
-      recordingsSynced,
-      ...(typeof recResult.skippedUnowned === 'number' ? { skippedUnowned: recResult.skippedUnowned } : {}),
-      ...(typeof recResult.quarantined === 'number' ? { quarantined: recResult.quarantined } : {}),
-    } as any;
+	    return {
+	      reportsSynced,
+	      callsSynced,
+	      recordingsSynced,
+	      skippedUnowned: skippedUnowned + (typeof recResult.skippedUnowned === 'number' ? recResult.skippedUnowned : 0),
+	      quarantined: quarantined + (typeof recResult.quarantined === 'number' ? recResult.quarantined : 0),
+	    } as any;
   } catch (e: any) {
     console.warn('[MightyCall] syncMightyCallReports error:', e?.message);
     return { reportsSynced: 0, recordingsSynced: 0 };

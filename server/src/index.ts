@@ -15591,6 +15591,14 @@ app.get("/s/series", async (req, res) => {
       }
     });
 
+      function isRealRecordingAssetUrl(value: any): boolean {
+        const url = String(value || '').trim();
+        if (!/^https?:\/\//i.test(url)) return false;
+        if (/^https?:\/\/(www\.)?example\.com\//i.test(url)) return false;
+        if (/\/demo\//i.test(url) || /recording-demo|demo-recording/i.test(url)) return false;
+        return true;
+      }
+
       async function fetchRecordingAsset(recordingUrl: string, orgId?: string | null) {
         const baseHeaders = {
           Accept: 'audio/*,application/octet-stream,*/*',
@@ -15684,9 +15692,9 @@ app.get("/s/series", async (req, res) => {
             console.error('[recordings/download] mightycall_recordings lookup failed:', error);
             return res.status(500).json({ error: 'db_lookup_failed' });
           }
-          if (!recording || !recording.recording_url) {
-            return res.status(404).json({ error: 'recording_not_found' });
-          }
+	          if (!recording || !isRealRecordingAssetUrl(recording.recording_url)) {
+	            return res.status(404).json({ error: 'recording_not_found' });
+	          }
 
           const isAdmin = await isPlatformAdmin(actorId);
           if (!isAdmin) {

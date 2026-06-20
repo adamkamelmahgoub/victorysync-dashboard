@@ -154,6 +154,7 @@ async function runLegacyJournalSync(req: express.Request, options: { includeRepo
       if (options.includeReports !== false) {
         const reports = await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end);
         result.reportsSynced += reports.reportsSynced || 0;
+        result.callsSynced += (reports as any).callsSynced || 0;
         result.recordingsSynced += reports.recordingsSynced || 0;
         result.skippedUnowned += (reports as any).skippedUnowned || 0;
         result.quarantined += (reports as any).quarantined || 0;

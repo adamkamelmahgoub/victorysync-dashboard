@@ -303,6 +303,14 @@ function recordingUrlOf(row: any): string | null {
   return url && /^https?:\/\//i.test(url) ? url : null;
 }
 
+function isRealRecordingUrl(value: any): boolean {
+  const url = String(value || '').trim();
+  if (!/^https?:\/\//i.test(url)) return false;
+  if (/^https?:\/\/(www\.)?example\.com\//i.test(url)) return false;
+  if (/\/demo\//i.test(url) || /recording-demo|demo-recording/i.test(url)) return false;
+  return true;
+}
+
 function recordingIdOf(row: any): string | null {
   const metadata = rowMetadata(row);
   const raw = rowRawPayload(row);
@@ -1032,7 +1040,7 @@ function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
       duration_seconds: recordingDurationSeconds({ ...row, metadata, raw_payload: raw }),
     };
   }).filter((row) => {
-    if (!row.recording_url) return false;
+    if (!isRealRecordingUrl(row.recording_url)) return false;
     const keys = [
       row.external_recording_id,
       row.recording_id,
