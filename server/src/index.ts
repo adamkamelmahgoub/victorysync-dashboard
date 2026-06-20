@@ -26,7 +26,7 @@
  */
 
 // server/src/index.ts
-import { FRONTEND_ORIGIN, getEnvironmentHealth, MIGHTYCALL_API_KEY, MIGHTYCALL_USER_KEY } from './config/env';
+import { FRONTEND_ORIGIN, getEnvironmentHealth } from './config/env';
 import { installConsoleRedaction } from './security/redactConsole';
 import express from "express";
 import cors from "cors";
@@ -284,7 +284,6 @@ async function getProductionReadinessSnapshot() {
 async function getOrgIntegrationHealth(orgId: string) {
   let integrationConfigured = false;
   let integrationReadable = false;
-  let credentialSource: 'org' | 'environment' | 'missing' = 'missing';
   let tokenHealthy = false;
   let profileHealthy = false;
   let liveCallsHealthy = false;
@@ -302,27 +301,16 @@ async function getOrgIntegrationHealth(orgId: string) {
     const overrideCreds = integ?.credentials ? {
       clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
       clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
-      baseUrl: integ.credentials.baseUrl || integ.credentials.apiBaseUrl || undefined,
     } : undefined;
-    credentialSource = overrideCreds?.clientId && overrideCreds?.clientSecret
-      ? 'org'
-      : (MIGHTYCALL_API_KEY && MIGHTYCALL_USER_KEY ? 'environment' : 'missing');
     const token = await getMightyCallAccessToken(overrideCreds);
     tokenHealthy = !!token;
     if (token) {
       const apiKeyOverride = overrideCreds?.clientId || undefined;
-      const timed = <T,>(promise: Promise<T>, fallback: T) => new Promise<T>((resolve) => {
-        const timeout = setTimeout(() => resolve(fallback), 7_500);
-        promise
-          .then(resolve)
-          .catch(() => resolve(fallback))
-          .finally(() => clearTimeout(timeout));
-      });
       const [profile, calls, journal, ownStatus] = await Promise.all([
-        timed(fetchMightyCallProfileByExtension('100', token, apiKeyOverride), null),
-        timed(fetchMightyCallCalls(token, { pageSize: '5', skip: '0', fast: true }, apiKeyOverride), []),
-        timed(fetchMightyCallJournalRequests(token, { pageSize: '5', page: '1', type: 'Call' }, apiKeyOverride), []),
-        timed(fetchMightyCallOwnStatus(token, apiKeyOverride), null),
+        fetchMightyCallProfileByExtension('100', token, apiKeyOverride).catch(() => null),
+        fetchMightyCallCalls(token, { pageSize: '5', skip: '0' }, apiKeyOverride).catch(() => []),
+        fetchMightyCallJournalRequests(token, { pageSize: '5', page: '1', type: 'Call' }, apiKeyOverride).catch(() => []),
+        fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null),
       ]);
       profileHealthy = !!profile;
       liveCallsHealthy = Array.isArray(calls);
@@ -341,8 +329,7 @@ async function getOrgIntegrationHealth(orgId: string) {
   return {
     org_id: orgId,
     integration_configured: integrationConfigured,
-    integration_readable: integrationReadable || credentialSource === 'environment',
-    credential_source: credentialSource,
+    integration_readable: integrationReadable,
     token_healthy: tokenHealthy,
     profile_healthy: profileHealthy,
     live_calls_healthy: liveCallsHealthy,
@@ -15604,14 +15591,6 @@ app.get("/s/series", async (req, res) => {
       }
     });
 
-      function isRealRecordingAssetUrl(value: any): boolean {
-        const url = String(value || '').trim();
-        if (!/^https?:\/\//i.test(url)) return false;
-        if (/^https?:\/\/(www\.)?example\.com\//i.test(url)) return false;
-        if (/\/demo\//i.test(url) || /recording-demo|demo-recording/i.test(url)) return false;
-        return true;
-      }
-
       async function fetchRecordingAsset(recordingUrl: string, orgId?: string | null) {
         const baseHeaders = {
           Accept: 'audio/*,application/octet-stream,*/*',
@@ -15705,9 +15684,9 @@ app.get("/s/series", async (req, res) => {
             console.error('[recordings/download] mightycall_recordings lookup failed:', error);
             return res.status(500).json({ error: 'db_lookup_failed' });
           }
-	          if (!recording || !isRealRecordingAssetUrl(recording.recording_url)) {
-	            return res.status(404).json({ error: 'recording_not_found' });
-	          }
+          if (!recording || !recording.recording_url) {
+            return res.status(404).json({ error: 'recording_not_found' });
+          }
 
           const isAdmin = await isPlatformAdmin(actorId);
           if (!isAdmin) {
@@ -16572,11 +16551,7 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
         const { getOrgIntegration } = await import('./lib/integrationsStore');
         const integ = await getOrgIntegration(orgId, 'mightycall');
         if (integ && integ.credentials) {
-          overrideCreds = {
-            clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
-            clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
-            baseUrl: integ.credentials.baseUrl || integ.credentials.apiBaseUrl || undefined,
-          };
+          overrideCreds = { clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined, clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined };
         }
       } catch (ie) {
         console.warn('[MightyCall Sync] failed to load org integration:', ie);
@@ -16584,15 +16559,14 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
 
       // Refresh phone inventory first so downstream report/call/recording/SMS syncs
       // are matched against the latest MightyCall-owned numbers for this org.
-      const phoneSyncResult = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
+      const phoneSyncResult = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
 
       // Get phone numbers for this org after refresh
       const assignedPhones = await getAssignedPhoneNumbersForOrg(orgId);
       const phoneNumberIds = assignedPhones.phones.map((p: any) => p.id || p.number).filter(Boolean);
 
-      const syncWarnings: string[] = [];
       if (phoneNumberIds.length === 0) {
-        syncWarnings.push('No local phone-number assignments were found after MightyCall inventory sync; continuing with journal/call-history sync and unmapped-number fallback.');
+        return res.status(400).json({ error: 'No phone numbers assigned to this organization after MightyCall sync' });
       }
 
       // Perform the sync using per-org creds when available
@@ -16647,7 +16621,6 @@ app.post('/api/mightycall/sync/reports', apiKeyAuthMiddleware, async (req, res) 
         sms_synced: smsSynced,
         sms_skipped_unowned: smsSkippedUnowned,
         sms_quarantined: smsQuarantined,
-        warnings: syncWarnings,
         job_id: job?.id || null
       });
 
@@ -16768,10 +16741,37 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
       return res.status(401).json({ error: 'API key or user authentication required' });
     }
 
-    let job: SyncJobRef = null;
+    const phoneSyncResult = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
+
+    // Get phone numbers for this org
+    const assignedPhones = await getAssignedPhoneNumbersForOrg(orgId);
+    const phoneNumberIds = assignedPhones.phones.map((p: any) => p.id || p.number).filter(Boolean);
+
+    if (phoneNumberIds.length === 0) {
+      return res.status(400).json({ error: 'No phone numbers assigned to this organization after MightyCall sync' });
+    }
+
+    // Default date range to a full historical backfill if not provided
     const today = new Date().toISOString().split('T')[0];
     const actualStartDate = startDate || DEFAULT_MIGHTYCALL_HISTORY_START;
     const actualEndDate = endDate || today;
+
+    console.log(`[MightyCall Sync] Starting recordings sync for org ${orgId}, dates ${actualStartDate} to ${actualEndDate}...`);
+
+    // Create integration sync job record (optional - table may not exist)
+	    let job: SyncJobRef = null;
+	    try {
+	      job = await insertSyncJob({
+	        org_id: orgId,
+	        integration_type: 'mightycall_recordings',
+	        status: 'running',
+	        started_at: new Date().toISOString(),
+	        records_processed: 0,
+	        metadata: { start_date: actualStartDate, end_date: actualEndDate }
+	      });
+	    } catch (e) {
+	      console.warn('[MightyCall Sync] Exception creating job record:', e);
+	    }
 
     try {
       // Load per-org integration credentials when available
@@ -16780,41 +16780,10 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
         const { getOrgIntegration } = await import('./lib/integrationsStore');
         const integ = await getOrgIntegration(orgId, 'mightycall');
         if (integ && integ.credentials) {
-          overrideCreds = {
-            clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
-            clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
-            baseUrl: integ.credentials.baseUrl || integ.credentials.apiBaseUrl || undefined,
-          };
+          overrideCreds = { clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined, clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined };
         }
       } catch (ie) {
         console.warn('[MightyCall Sync] failed to load org integration for recordings:', ie);
-      }
-
-      const phoneSyncResult = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
-
-      // Get phone numbers for this org
-      const assignedPhones = await getAssignedPhoneNumbersForOrg(orgId);
-      const phoneNumberIds = assignedPhones.phones.map((p: any) => p.id || p.number).filter(Boolean);
-
-      const syncWarnings: string[] = [];
-      if (phoneNumberIds.length === 0) {
-        syncWarnings.push('No local phone-number assignments were found after MightyCall inventory sync; continuing with recording sync and unmapped-number fallback.');
-      }
-
-      console.log(`[MightyCall Sync] Starting recordings sync for org ${orgId}, dates ${actualStartDate} to ${actualEndDate}...`);
-
-      // Create integration sync job record (optional - table may not exist)
-      try {
-        job = await insertSyncJob({
-          org_id: orgId,
-          integration_type: 'mightycall_recordings',
-          status: 'running',
-          started_at: new Date().toISOString(),
-          records_processed: 0,
-          metadata: { start_date: actualStartDate, end_date: actualEndDate }
-        });
-      } catch (e) {
-        console.warn('[MightyCall Sync] Exception creating job record:', e);
       }
 
       // Import the recordings sync function and run with override creds
@@ -16845,7 +16814,6 @@ app.post('/api/mightycall/sync/recordings', apiKeyAuthMiddleware, async (req, re
         recordings_synced: result.recordingsSynced,
         skipped_unowned: Number((result as any)?.skippedUnowned || 0),
         quarantined: Number((result as any)?.quarantined || 0),
-        warnings: syncWarnings,
         job_id: job?.id || null
       });
 
@@ -16947,11 +16915,7 @@ app.get('/api/mightycall/test-connection', apiKeyAuthMiddleware, async (req, res
       const { getOrgIntegration } = await import('./lib/integrationsStore');
       const integ = await getOrgIntegration(orgId, 'mightycall');
       if (integ && integ.credentials) {
-        overrideCreds = {
-          clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
-          clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
-          baseUrl: integ.credentials.baseUrl || integ.credentials.apiBaseUrl || undefined,
-        };
+        overrideCreds = { clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined, clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined };
       }
     } catch (ie) {
       console.warn('[MightyCall Test] failed to load org integration:', ie);

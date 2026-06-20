@@ -129,12 +129,6 @@ function isoDateDaysAgo(days: number) {
 
 async function getBackgroundSyncOrgIds() {
   const ids = new Set<string>();
-  const addOrgRows = (rows: any[] | null | undefined, key = 'org_id') => {
-    for (const row of rows || []) {
-      const orgId = String(row?.[key] || '').trim();
-      if (orgId) ids.add(orgId);
-    }
-  };
   try {
     const { data } = await supabaseAdmin
       .from('organizations')
@@ -145,30 +139,16 @@ async function getBackgroundSyncOrgIds() {
       if (row?.id && row?.is_active !== false && !['disabled', 'archived', 'inactive'].includes(status)) ids.add(String(row.id));
     }
   } catch {}
-  try {
-    const { data } = await supabaseAdmin
-      .from('phone_numbers')
-      .select('org_id')
-      .not('org_id', 'is', null)
-      .limit(BACKGROUND_SYNC_MAX_ORGS * 5);
-    addOrgRows(data as any[]);
-  } catch {}
-  try {
-    const { data } = await supabaseAdmin
-      .from('org_phone_numbers')
-      .select('org_id')
-      .not('org_id', 'is', null)
-      .limit(BACKGROUND_SYNC_MAX_ORGS * 5);
-    addOrgRows(data as any[]);
-  } catch {}
-  try {
-    const { data } = await supabaseAdmin
-      .from('org_integrations')
-      .select('org_id')
-      .eq('provider', 'mightycall')
-      .limit(BACKGROUND_SYNC_MAX_ORGS);
-    addOrgRows(data as any[]);
-  } catch {}
+  if (ids.size === 0) {
+    try {
+      const { data } = await supabaseAdmin
+        .from('phone_numbers')
+        .select('org_id')
+        .not('org_id', 'is', null)
+        .limit(BACKGROUND_SYNC_MAX_ORGS * 5);
+      for (const row of (data || []) as any[]) if (row?.org_id) ids.add(String(row.org_id));
+    } catch {}
+  }
   return Array.from(ids).slice(0, BACKGROUND_SYNC_MAX_ORGS);
 }
 
@@ -193,22 +173,6 @@ async function getPhoneIdsForOrg(orgId: string) {
     return (data || []).map((row: any) => String(row.id || '')).filter(Boolean);
   } catch {
     return [];
-  }
-}
-
-async function getMightyCallCredentialOverride(orgId: string) {
-  try {
-    const { getOrgIntegration } = await import('../lib/integrationsStore');
-    const integ = await getOrgIntegration(orgId, 'mightycall');
-    const credentials = integ?.credentials || null;
-    if (!credentials) return undefined;
-    return {
-      clientId: credentials.clientId || credentials.apiKey || undefined,
-      clientSecret: credentials.clientSecret || credentials.userKey || undefined,
-      baseUrl: credentials.baseUrl || credentials.apiBaseUrl || undefined,
-    };
-  } catch {
-    return undefined;
   }
 }
 
@@ -1215,11 +1179,9 @@ async function runRollingReportsBackgroundSync() {
     const end = new Date().toISOString().slice(0, 10);
     for (const orgId of orgIds) {
       try {
-        const overrideCreds = await getMightyCallCredentialOverride(orgId);
-        await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
         const phoneIds = await getPhoneIdsForOrg(orgId);
-        await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end, overrideCreds);
-        await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end }, overrideCreds);
+        await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end);
+        await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end });
       } catch (err) {
         console.warn('[mightycall background] reports/calls sync failed:', orgId, safeWarning(err));
       }
@@ -1233,9 +1195,7 @@ async function runRollingSmsBackgroundSync() {
     const orgIds = await getBackgroundSyncOrgIds();
     for (const orgId of orgIds) {
       try {
-        const overrideCreds = await getMightyCallCredentialOverride(orgId);
-        await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
-        await syncMightyCallSMS(supabaseAdmin, orgId, overrideCreds);
+        await syncMightyCallSMS(supabaseAdmin, orgId);
       } catch (err) {
         console.warn('[mightycall background] sms sync failed:', orgId, safeWarning(err));
       }
@@ -1256,10 +1216,8 @@ async function runRollingRecordingsBackgroundSync() {
     const end = new Date().toISOString().slice(0, 10);
     for (const orgId of orgIds) {
       try {
-        const overrideCreds = await getMightyCallCredentialOverride(orgId);
-        await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
         const phoneIds = await getPhoneIdsForOrg(orgId);
-        await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end, overrideCreds);
+        await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end);
       } catch (err) {
         console.warn('[mightycall background] recordings sync failed:', orgId, safeWarning(err));
       }
@@ -1278,9 +1236,7 @@ async function runRollingVoicemailBackgroundSync() {
     const orgIds = await getBackgroundSyncOrgIds();
     for (const orgId of orgIds) {
       try {
-        const overrideCreds = await getMightyCallCredentialOverride(orgId);
-        await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
-        await syncMightyCallVoicemails(supabaseAdmin, orgId, overrideCreds);
+        await syncMightyCallVoicemails(supabaseAdmin, orgId);
       } catch (err) {
         console.warn('[mightycall background] voicemail sync failed:', orgId, safeWarning(err));
       }

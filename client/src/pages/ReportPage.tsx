@@ -3,7 +3,7 @@ import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, SegmentedControl, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
-import { apiFetch, fetchJson } from '../lib/apiClient';
+import { buildApiUrl } from '../config';
 import { answerRate, formatPhoneNumber, hasRecording } from '../lib/reportingMetrics';
 
 type ReportTab = 'overview' | 'calls' | 'recordings' | 'sms' | 'transfers' | 'numbers' | 'agents';
@@ -110,6 +110,7 @@ export default function ReportPage() {
   const [numbers, setNumbers] = useState<PhoneOption[]>([]);
   const [overview, setOverview] = useState<Overview>({});
   const [rows, setRows] = useState<Row[]>([]);
+  const [topAgentEdits, setTopAgentEdits] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,9 +129,21 @@ export default function ReportPage() {
     return q.toString();
   };
 
+  useEffect(() => {
+    try {
+      setTopAgentEdits(JSON.parse(localStorage.getItem('victorysync.reportTopAgentEdits') || '{}'));
+    } catch {
+      setTopAgentEdits({});
+    }
+  }, []);
+
   const loadNumbers = async () => {
     if (!user?.id) return;
-    const data = await fetchJson(`/api/reports/numbers?${buildQuery()}`);
+    const response = await fetch(buildApiUrl(`/api/reports/numbers?${buildQuery()}`), {
+      headers: { 'x-user-id': user.id },
+    });
+    if (!response.ok) return;
+    const data = await response.json();
     setNumbers(data.numbers || []);
   };
 
@@ -140,7 +153,9 @@ export default function ReportPage() {
     setError(null);
     try {
       if (activeTab === 'overview') {
-        const data = await fetchJson(`/api/reports/overview?${buildQuery()}`);
+        const response = await fetch(buildApiUrl(`/api/reports/overview?${buildQuery()}`), { headers: { 'x-user-id': user.id } });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Failed to load overview');
+        const data = await response.json();
         setOverview(data.overview || {});
         setRows([]);
       } else if (activeTab === 'numbers') {
@@ -148,7 +163,9 @@ export default function ReportPage() {
         setRows([]);
       } else {
         const endpoint = activeTab === 'agents' ? 'agents' : activeTab;
-        const data = await fetchJson(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' }, { preload: true })}`);
+        const response = await fetch(buildApiUrl(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' }, { preload: true })}`), { headers: { 'x-user-id': user.id } });
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `Failed to load ${activeTab}`);
+        const data = await response.json();
         setRows(data[activeTab] || data.messages || data.agents || []);
       }
     } catch (err: any) {
@@ -170,11 +187,11 @@ export default function ReportPage() {
       if (activeOrgId) q.set('org_id', activeOrgId);
       q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
       if (endDate) q.set('end_date', endDate);
-      await fetchJson(`/api/mightycall/sync?${q.toString()}`, {
+      const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        timeoutMs: 45_000,
+        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
       });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Sync failed');
       await loadReport();
       await loadNumbers();
     } catch (err: any) {
@@ -209,10 +226,43 @@ export default function ReportPage() {
     setSearch('');
   };
 
+  const editedTopAgents = useMemo(() => {
+    return (overview.top_agents || []).map((row: any) => {
+      const edit = topAgentEdits[row.key] || {};
+      return {
+        ...row,
+        ...edit,
+        label: edit.label || row.label || row.agent_name || row.key,
+        count: edit.count !== undefined && edit.count !== '' ? Number(edit.count) : row.count,
+      };
+    }).filter((row: any) => !row.hidden).sort((a: any, b: any) => Number(a.rank || 999) - Number(b.rank || 999) || Number(b.count || 0) - Number(a.count || 0));
+  }, [overview.top_agents, topAgentEdits]);
+
+  const editTopAgent = (row: any) => {
+    const label = window.prompt('Top agent display name', row.label || row.agent_name || row.key);
+    if (label === null) return;
+    const count = window.prompt('Displayed result count', String(row.count ?? 0));
+    if (count === null) return;
+    const rank = window.prompt('Pinned rank (1 is first, blank for automatic)', String(row.rank || ''));
+    if (rank === null) return;
+    const next = {
+      ...topAgentEdits,
+      [row.key]: {
+        label: label.trim() || row.label || row.agent_name || row.key,
+        count: Number.isFinite(Number(count)) ? Number(count) : row.count,
+        rank: rank.trim() ? Number(rank) : undefined,
+      },
+    };
+    setTopAgentEdits(next);
+    localStorage.setItem('victorysync.reportTopAgentEdits', JSON.stringify(next));
+  };
+
   const openRecording = async (row: Row) => {
     const recordingId = row.recording_id || row.mightycall_recording_id || (row.recording_url ? row.id : null);
     if (!user?.id || !recordingId) return;
-    const response = await apiFetch(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`);
+    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`), {
+      headers: { 'x-user-id': user.id },
+    });
     if (!response.ok) throw new Error('Recording link failed');
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -290,7 +340,7 @@ export default function ReportPage() {
                 : kpis.map((kpi) => <MetricStatCard key={kpi.label} label={kpi.label} value={kpi.value} hint={kpi.hint} accent={kpi.accent} />)}
             </div>
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-              <TopList title="Top Agents" rows={overview.top_agents || []} />
+              <TopList title="Top Agents" rows={editedTopAgents} onEdit={editTopAgent} />
               <TopList title="Top Numbers" rows={overview.top_numbers || []} />
               <TopList title="Transfers By Number" rows={overview.transfers_by_number || []} />
             </div>
@@ -309,7 +359,7 @@ export default function ReportPage() {
   );
 }
 
-function TopList({ title, rows }: { title: string; rows: Array<{ key: string; count: number }> }) {
+function TopList({ title, rows, onEdit }: { title: string; rows: Array<{ key: string; count: number }>; onEdit?: (row: any) => void }) {
   return (
     <SectionCard title={title}>
       {rows.length === 0 ? <EmptyStatePanel title="No data" description="No matching rows in this filter window." /> : (
@@ -329,7 +379,10 @@ function TopList({ title, rows }: { title: string; rows: Array<{ key: string; co
                   </div>
                 )}
               </div>
-              <span className="shrink-0 text-sm font-semibold text-slate-950">{row.count}{row.unit ? ` ${row.unit}` : ''}</span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-sm font-semibold text-slate-950">{row.count}{row.unit ? ` ${row.unit}` : ''}</span>
+                {onEdit && <button type="button" onClick={() => onEdit(row)} className="vs-button-secondary px-2 py-1 text-xs">Edit</button>}
+              </div>
             </div>
           ))}
         </div>

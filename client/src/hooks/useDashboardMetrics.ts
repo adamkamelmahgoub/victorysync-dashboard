@@ -103,7 +103,7 @@ export function useDashboardMetrics(orgId: string | null | undefined) {
         ? `/api/orgs/${encodeURIComponent(orgId)}/phone-numbers?_fresh=${Date.now()}`
         : isAdmin
           ? `/api/admin/phone-numbers?_fresh=${Date.now()}`
-          : `/api/reports/numbers?_fresh=${Date.now()}`;
+          : `/api/reports/numbers?start_date=${today}&end_date=${today}&_fresh=${Date.now()}`;
       void fetchJson(buildApiUrl(numbersPath), { headers, cache: 'no-store' })
         .then((numbersData) => {
           const rows = numbersData.phone_numbers || numbersData.numbers || [];

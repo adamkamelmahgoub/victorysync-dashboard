@@ -12,7 +12,6 @@ import {
 } from '../mightycall/sync';
 import { getMightyCallStatusByExtension } from '../services/mightycallLiveStatus';
 import {
-  syncMightyCallPhoneNumbers,
   syncMightyCallCallHistory,
   syncMightyCallRecordings,
   syncMightyCallReports,
@@ -68,11 +67,7 @@ async function getLiveStatusOrgIds() {
   const live = await Promise.resolve(supabaseAdmin.from('agent_live_status').select('org_id').not('org_id', 'is', null).limit(1000)).then((r) => r.data || []).catch(() => []);
   const users = await Promise.resolve(supabaseAdmin.from('org_users').select('org_id').not('mightycall_extension', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
   const members = await Promise.resolve(supabaseAdmin.from('org_members').select('org_id').not('mightycall_extension', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
-  const phoneNumbers = await Promise.resolve(supabaseAdmin.from('phone_numbers').select('org_id').not('org_id', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
-  const orgPhones = await Promise.resolve(supabaseAdmin.from('org_phone_numbers').select('org_id').not('org_id', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
-  const integrations = await Promise.resolve(supabaseAdmin.from('org_integrations').select('org_id').eq('provider', 'mightycall').limit(1000)).then((r) => r.data || []).catch(() => []);
-  const organizations = await Promise.resolve(supabaseAdmin.from('organizations').select('id').limit(1000)).then((r) => (r.data || []).map((row: any) => ({ org_id: row.id }))).catch(() => []);
-  rows.push(...live, ...users, ...members, ...phoneNumbers, ...orgPhones, ...integrations, ...organizations);
+  rows.push(...live, ...users, ...members);
   return Array.from(new Set(rows.map((row: any) => String(row.org_id)).filter(Boolean)));
 }
 
@@ -129,97 +124,13 @@ async function getOrgPhoneIds(orgId: string) {
   }
 }
 
-async function getMightyCallCredentialOverride(orgId: string) {
-  try {
-    const { getOrgIntegration } = await import('../lib/integrationsStore');
-    const integ = await getOrgIntegration(orgId, 'mightycall');
-    const credentials = integ?.credentials || null;
-    if (!credentials) return undefined;
-    return {
-      clientId: credentials.clientId || credentials.apiKey || undefined,
-      clientSecret: credentials.clientSecret || credentials.userKey || undefined,
-      baseUrl: credentials.baseUrl || credentials.apiBaseUrl || undefined,
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-type SyncJobRef = { id: string; table: 'integration_sync_jobs' | 'mightycall_sync_runs' } | null;
-
-async function createOrgSyncJob(orgId: string, integrationType: string, metadata: Record<string, any> = {}): Promise<SyncJobRef> {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('integration_sync_jobs')
-      .insert({
-        org_id: orgId,
-        integration_type: integrationType,
-        status: 'running',
-        started_at: new Date().toISOString(),
-        records_processed: 0,
-        metadata,
-      })
-      .select('id')
-      .maybeSingle();
-    if (!error && data?.id) return { id: String(data.id), table: 'integration_sync_jobs' };
-  } catch {}
-
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('mightycall_sync_runs')
-      .insert({
-        org_id: orgId,
-        sync_type: integrationType,
-        status: 'running',
-        started_at: new Date().toISOString(),
-        detail: metadata,
-      })
-      .select('id')
-      .maybeSingle();
-    if (!error && data?.id) return { id: String(data.id), table: 'mightycall_sync_runs' };
-  } catch {}
-
-  return null;
-}
-
-async function finishOrgSyncJob(job: SyncJobRef, updates: { status: 'completed' | 'failed'; recordsProcessed?: number; errorMessage?: string | null; metadata?: Record<string, any> }) {
-  if (!job) return;
-  if (job.table === 'integration_sync_jobs') {
-    await supabaseAdmin
-      .from('integration_sync_jobs')
-      .update({
-        status: updates.status,
-        completed_at: new Date().toISOString(),
-        records_processed: updates.recordsProcessed || 0,
-        error_message: updates.errorMessage || null,
-        metadata: updates.metadata || {},
-      })
-      .eq('id', job.id);
-    return;
-  }
-  await supabaseAdmin
-    .from('mightycall_sync_runs')
-    .update({
-      status: updates.status,
-      finished_at: new Date().toISOString(),
-      detail: {
-        ...(updates.metadata || {}),
-        records_processed: updates.recordsProcessed || 0,
-        error_message: updates.errorMessage || null,
-      },
-    })
-    .eq('id', job.id);
-}
-
 function syncDateRange(req: express.Request) {
-  const fiveYearsAgo = new Date();
-  fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
   const end = String(req.query.end_date || req.body?.endDate || req.body?.end_date || new Date().toISOString().slice(0, 10));
   const start = String(
     req.query.start_date ||
     req.body?.startDate ||
     req.body?.start_date ||
-    fiveYearsAgo.toISOString().slice(0, 10)
+    new Date(Date.now() - (180 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10)
   );
   return { start: start.slice(0, 10), end: end.slice(0, 10) };
 }
@@ -238,54 +149,34 @@ async function runLegacyJournalSync(req: express.Request, options: { includeRepo
     warnings: [] as string[],
   };
   for (const orgId of scope.orgIds) {
-    const overrideCreds = await getMightyCallCredentialOverride(orgId);
-    const job = await createOrgSyncJob(orgId, 'mightycall_manual_sync', { start_date: start, end_date: end });
+    const phoneIds = await getOrgPhoneIds(orgId);
     try {
-      const phoneSync = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
-      const phoneIds = await getOrgPhoneIds(orgId);
-      let orgRecordsProcessed = Number(phoneSync?.upserted || phoneSync?.synced || 0);
       if (options.includeReports !== false) {
-        const reports = await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end, overrideCreds);
+        const reports = await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end);
         result.reportsSynced += reports.reportsSynced || 0;
-        result.callsSynced += (reports as any).callsSynced || 0;
         result.recordingsSynced += reports.recordingsSynced || 0;
         result.skippedUnowned += (reports as any).skippedUnowned || 0;
         result.quarantined += (reports as any).quarantined || 0;
-        orgRecordsProcessed += Number(reports.reportsSynced || 0) + Number(reports.recordingsSynced || 0);
       }
       if (options.includeCalls !== false) {
-        const calls = await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end }, overrideCreds);
+        const calls = await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end });
         result.callsSynced += calls.callsSynced || 0;
-        orgRecordsProcessed += Number(calls.callsSynced || 0);
       }
       if (options.includeRecordings) {
-        const recordings = await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end, overrideCreds);
+        const recordings = await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end);
         result.recordingsSynced += recordings.recordingsSynced || 0;
         result.skippedUnowned += recordings.skippedUnowned || 0;
         result.quarantined += recordings.quarantined || 0;
-        orgRecordsProcessed += Number(recordings.recordingsSynced || 0);
       }
       if (options.includeSms !== false) {
-        const sms = await syncMightyCallSMS(supabaseAdmin, orgId, overrideCreds);
+        const sms = await syncMightyCallSMS(supabaseAdmin, orgId);
         result.smsSynced += sms.smsSynced || 0;
         result.skippedUnowned += sms.skippedUnowned || 0;
         result.quarantined += sms.quarantined || 0;
-        orgRecordsProcessed += Number(sms.smsSynced || 0);
       }
       result.orgsSynced += 1;
-      await finishOrgSyncJob(job, {
-        status: 'completed',
-        recordsProcessed: orgRecordsProcessed,
-        metadata: { start_date: start, end_date: end, ...result },
-      });
     } catch (err: any) {
-      const message = `${orgId}: ${err?.message || String(err)}`;
-      result.warnings.push(message);
-      await finishOrgSyncJob(job, {
-        status: 'failed',
-        errorMessage: err?.message || String(err),
-        metadata: { start_date: start, end_date: end, warnings: [message] },
-      });
+      result.warnings.push(`${orgId}: ${err?.message || String(err)}`);
     }
   }
   return result;

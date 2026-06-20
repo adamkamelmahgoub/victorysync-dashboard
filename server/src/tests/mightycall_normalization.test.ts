@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { directionFromText, normalizePhoneDigitsForOwnership, resolveOwnedPhoneForSync } from '../integrations/mightycall';
+import { directionFromText, normalizePhoneDigitsForOwnership } from '../integrations/mightycall';
 import {
   detectDirectionFromNumbers,
   detectTransferFromCallDetail,
@@ -35,24 +35,6 @@ test('sms direction parser never defaults ambiguous text to inbound', () => {
 test('phone ownership digit normalization strips formatting', () => {
   assert.equal(normalizePhoneDigitsForOwnership('+1 (732) 847-9836'), '17328479836');
   assert.equal(normalizePhoneDigitsForOwnership('732-847-9836'), '7328479836');
-});
-
-test('sync ownership falls back for unmapped numbers but blocks other-org numbers', () => {
-  const index = {
-    byDigits: new Map([
-      ['15551234567', [{ id: 'phone-other', org_id: 'org-other', number: '+1 555 123 4567', digits: '15551234567' }]],
-    ]),
-  };
-
-  const unmapped = resolveOwnedPhoneForSync(index, 'org-current', '+1 732 847 9836');
-  assert.equal(unmapped.fallback, true);
-  assert.equal(unmapped.ownedPhone?.org_id, 'org-current');
-  assert.equal(unmapped.ownedPhone?.id, null);
-
-  const otherOrg = resolveOwnedPhoneForSync(index, 'org-current', '+1 555 123 4567');
-  assert.equal(otherOrg.ownedPhone, null);
-  assert.equal(otherOrg.fallback, false);
-  assert.equal(otherOrg.candidateOrgs[0]?.org_id, 'org-other');
 });
 
 test('api-only live call rows promote active calls and ignore completed calls', () => {

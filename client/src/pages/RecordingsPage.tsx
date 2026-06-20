@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
-import { apiFetch, fetchJson } from '../lib/apiClient';
+import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
@@ -106,12 +106,12 @@ export function RecordingsPage() {
     try {
       const q = new URLSearchParams();
       if (orgId) q.set('org_id', orgId);
-      await fetchJson(`/api/mightycall/sync/recordings?${q.toString()}`, {
+      const response = await fetch(buildApiUrl(`/api/mightycall/sync/recordings?${q.toString()}`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
         body: JSON.stringify({ orgId: orgId || null }),
-        timeoutMs: 45_000,
       });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Failed to sync recordings');
       await fetchRecordings(true);
     } catch (e: any) {
       setError(e?.message || 'Failed to sync recent recordings');
@@ -142,7 +142,17 @@ export function RecordingsPage() {
 		      if (endDate) q.set('end_date', endDate);
 		      if (search.trim()) q.set('search', search.trim());
 		      if (directionFilter !== 'all') q.set('direction', directionFilter);
-      const data = await fetchJson(`/api/reports/recordings?${q.toString()}`);
+      const response = await fetch(buildApiUrl(`/api/reports/recordings?${q.toString()}`), {
+        headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setError(body?.detail || body?.error || 'Failed to fetch recordings');
+        return;
+      }
+
+      const data = await response.json();
       const rows = data.recordings || [];
       setRecordings((prev) => (reset ? rows : [...prev, ...rows]));
       setNextOffset(data.next_offset ?? null);
@@ -171,7 +181,9 @@ export function RecordingsPage() {
       return;
     }
     try {
-	      const response = await apiFetch(`/api/recordings/${encodeURIComponent(recording.id)}/download?inline=1`);
+	      const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(recording.id)}/download?inline=1`), {
+        headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
+      });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         setError(payload.detail || payload.error || 'Failed to download recording');
@@ -193,7 +205,9 @@ export function RecordingsPage() {
 
   const handlePlay = async (recording: Recording) => {
     try {
-      const response = await apiFetch(`/api/recordings/${encodeURIComponent(recording.id)}/download`);
+      const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(recording.id)}/download`), {
+        headers: { 'x-user-id': user?.id || '', 'Content-Type': 'application/json' },
+      });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         setError(payload.detail || payload.error || 'Failed to open recording');

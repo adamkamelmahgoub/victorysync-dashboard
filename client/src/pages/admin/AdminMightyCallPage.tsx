@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
-import { deleteOrgIntegration, fetchJson, getOrgIntegrationHealth, getOrgIntegrations, listMightyCallSyncJobs, saveOrgIntegration } from '../../lib/apiClient';
+import { deleteOrgIntegration, getOrgIntegrationHealth, getOrgIntegrations, listMightyCallSyncJobs, saveOrgIntegration } from '../../lib/apiClient';
 
 interface Integration {
   id: string;
@@ -28,7 +28,6 @@ export default function AdminMightyCallPage() {
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [integrationHealth, setIntegrationHealth] = useState<any | null>(null);
   const [syncJobs, setSyncJobs] = useState<any[]>([]);
-  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (globalRole === 'platform_admin' && orgs && orgs.length > 0 && !activeOrgId) {
@@ -124,25 +123,6 @@ export default function AdminMightyCallPage() {
     }
   };
 
-  const handleSyncNow = async () => {
-    if (!activeOrgId || !user?.id) return;
-    try {
-      setSyncing(true);
-      setError(null);
-      await fetchJson(`/api/mightycall/sync?org_id=${encodeURIComponent(activeOrgId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
-        body: JSON.stringify({ orgId: activeOrgId }),
-        timeoutMs: 60_000,
-      });
-      await Promise.all([loadIntegrationHealth(), loadSyncJobs()]);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to sync MightyCall data');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   if (!globalRole || !['platform_admin', 'org_admin'].includes(globalRole)) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
@@ -155,31 +135,16 @@ export default function AdminMightyCallPage() {
 
   const healthTone = integrationHealth?.error
     ? 'warning'
-    : integrationHealth?.integration_readable && integrationHealth?.token_healthy
+    : integrationHealth?.integration_configured && integrationHealth?.token_healthy
       ? 'success'
       : 'neutral';
-  const credentialSource = integrationHealth?.credential_source || 'missing';
-  const credentialLabel = credentialSource === 'org'
-    ? 'Org Configured'
-    : credentialSource === 'environment'
-      ? 'Server Configured'
-      : integrationHealth?.integration_configured
-        ? 'Unreadable'
-        : 'Missing';
 
   return (
     <PageLayout
       eyebrow="Integrations"
       title="MightyCall"
       description="Manage credentials, inspect connection health, and review sync posture before issues become production incidents."
-      actions={(
-        <>
-          <button onClick={handleSyncNow} disabled={syncing || !activeOrgId} className="vs-button-primary">
-            {syncing ? 'Syncing...' : 'Sync Now'}
-          </button>
-          <button onClick={() => navigate('/admin/orgs')} className="vs-button-secondary">Back To Orgs</button>
-        </>
-      )}
+      actions={<button onClick={() => navigate('/admin/orgs')} className="vs-button-secondary">Back To Orgs</button>}
     >
       <div className="space-y-6">
         <AdminTopNav />
@@ -201,7 +166,7 @@ export default function AdminMightyCallPage() {
         )}
 
         <div className="grid gap-4 xl:grid-cols-4">
-          <MetricStatCard label="Credentials" value={credentialLabel} accent={integrationHealth?.integration_readable ? 'emerald' : 'amber'} hint={credentialSource === 'environment' ? 'Using backend MightyCall environment keys' : 'Stored integration state'} />
+          <MetricStatCard label="Credentials" value={integrationHealth?.integration_configured ? 'Configured' : 'Missing'} accent={integrationHealth?.integration_configured ? 'emerald' : 'amber'} hint="Stored integration state" />
           <MetricStatCard label="Token" value={integrationHealth?.token_healthy ? 'Healthy' : 'Failing'} accent={integrationHealth?.token_healthy ? 'emerald' : 'amber'} hint="Authentication to MightyCall" />
           <MetricStatCard label="Own Status" value={integrationHealth?.own_status_label || (integrationHealth?.own_status_healthy ? 'Readable' : 'Unavailable')} accent={integrationHealth?.own_status_healthy ? 'emerald' : 'amber'} hint="Current-user status returned by MightyCall" />
           <MetricStatCard label="Journal" value={integrationHealth?.journal_healthy ? 'Readable' : 'Unavailable'} accent={integrationHealth?.journal_healthy ? 'emerald' : 'amber'} hint="Live activity source" />
@@ -217,7 +182,6 @@ export default function AdminMightyCallPage() {
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Checks</div>
 	                <div className="mt-3 space-y-2">
 	                  <div>Config readable: {String(!!integrationHealth.integration_readable)}</div>
-	                  <div>Credential source: {integrationHealth.credential_source || 'missing'}</div>
 	                  <div>Profile lookup: {String(!!integrationHealth.profile_healthy)}</div>
 	                  <div>Live calls endpoint: {String(!!integrationHealth.live_calls_healthy)}</div>
 	                  <div>Journal endpoint: {String(!!integrationHealth.journal_healthy)}</div>
