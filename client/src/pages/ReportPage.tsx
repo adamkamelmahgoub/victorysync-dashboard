@@ -12,6 +12,7 @@ type PhoneOption = { id: string; org_id: string; number: string; label?: string 
 type Overview = Record<string, any>;
 type Row = Record<string, any>;
 const FIVE_YEAR_DAYS = 5 * 366;
+const DEFAULT_VIEW_DAYS = 7;
 
 const tabLabels: Array<{ id: ReportTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
@@ -31,6 +32,20 @@ function fmtDate(value?: string | null) {
   if (!value) return '-';
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? '-' : parsed.toLocaleString();
+}
+
+function rowTimestamp(row: Row) {
+  return row.started_at || row.recording_date || row.sent_at || row.message_date || row.transferred_at || row.created_at || row.date;
+}
+
+function rowInDateRange(row: Row, startDate: string, endDate: string) {
+  const value = rowTimestamp(row);
+  if (!value) return true;
+  const timestamp = Date.parse(String(value));
+  if (!Number.isFinite(timestamp)) return true;
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T23:59:59.999Z`);
+  return timestamp >= start && timestamp <= end;
 }
 
 function fmtSeconds(value: unknown) {
@@ -85,7 +100,7 @@ export default function ReportPage() {
   const activeOrgId = isPlatformAdmin ? selectedOrgId : (selectedOrgId || org?.id || orgs[0]?.id || null);
 
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(FIVE_YEAR_DAYS));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(DEFAULT_VIEW_DAYS));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [selectedNumber, setSelectedNumber] = useState('');
   const [agent, setAgent] = useState('');
@@ -100,10 +115,10 @@ export default function ReportPage() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const buildQuery = (extra?: Record<string, string>) => {
+  const buildQuery = (extra?: Record<string, string>, options?: { preload?: boolean }) => {
     const q = new URLSearchParams();
     if (activeOrgId) q.set('org_id', activeOrgId);
-    if (startDate) q.set('start_date', startDate);
+    if (startDate) q.set('start_date', options?.preload ? isoDateDaysAgo(FIVE_YEAR_DAYS) : startDate);
     if (endDate) q.set('end_date', endDate);
     if (selectedNumber) q.set('number', selectedNumber);
     if (agent.trim()) q.set('agent', agent.trim());
@@ -148,7 +163,7 @@ export default function ReportPage() {
         setRows([]);
       } else {
         const endpoint = activeTab === 'agents' ? 'agents' : activeTab;
-        const response = await fetch(buildApiUrl(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' })}`), { headers: { 'x-user-id': user.id } });
+        const response = await fetch(buildApiUrl(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' }, { preload: true })}`), { headers: { 'x-user-id': user.id } });
         if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || `Failed to load ${activeTab}`);
         const data = await response.json();
         setRows(data[activeTab] || data.messages || data.agents || []);
@@ -170,7 +185,7 @@ export default function ReportPage() {
     try {
       const q = new URLSearchParams();
       if (activeOrgId) q.set('org_id', activeOrgId);
-      if (startDate) q.set('start_date', startDate);
+      q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
       if (endDate) q.set('end_date', endDate);
       const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
         method: 'POST',
@@ -202,7 +217,7 @@ export default function ReportPage() {
   }, [overview]);
 
   const resetFilters = () => {
-    setStartDate(isoDateDaysAgo(FIVE_YEAR_DAYS));
+    setStartDate(isoDateDaysAgo(DEFAULT_VIEW_DAYS));
     setEndDate(new Date().toISOString().slice(0, 10));
     setSelectedNumber('');
     setAgent('');
@@ -255,10 +270,15 @@ export default function ReportPage() {
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
+  const visibleRows = useMemo(
+    () => rows.filter((row) => rowInDateRange(row, startDate, endDate)),
+    [endDate, rows, startDate]
+  );
+
   const actions = (
     <div className="flex flex-wrap gap-2">
       {activeTab !== 'overview' && activeTab !== 'numbers' && (
-        <button onClick={() => downloadCsv(`victorysync-${activeTab}.csv`, rows)} className="vs-button-secondary">Export CSV</button>
+        <button onClick={() => downloadCsv(`victorysync-${activeTab}.csv`, visibleRows)} className="vs-button-secondary">Export CSV</button>
       )}
       <button onClick={runSync} disabled={syncing} className="vs-button-primary">{syncing ? 'Syncing...' : 'Sync Now'}</button>
       <button onClick={() => loadReport()} disabled={loading} className="vs-button-secondary">{loading ? 'Refreshing...' : 'Refresh'}</button>
@@ -331,7 +351,7 @@ export default function ReportPage() {
           </SectionCard>
         ) : (
           <SectionCard title={`${tabLabels.find((tab) => tab.id === activeTab)?.label} report`} description="Rows are normalized from real source records only." contentClassName="p-0">
-            <ReportTable rows={rows} loading={loading} tab={activeTab} onOpenRecording={openRecording} orgs={orgs} isPlatformAdmin={isPlatformAdmin} />
+            <ReportTable rows={visibleRows} loading={loading} tab={activeTab} onOpenRecording={openRecording} orgs={orgs} isPlatformAdmin={isPlatformAdmin} />
           </SectionCard>
         )}
       </div>

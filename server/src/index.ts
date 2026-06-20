@@ -385,6 +385,7 @@ function inviteCodeSecret(): string {
     process.env.SERVICE_KEY ||
     process.env.SUPABASE_SERVICE_KEY ||
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE ||
     (process.env.NODE_ENV === 'production' ? '' : 'victorysync-invite-dev');
   if (!secret) throw new Error('invite_code_secret_not_configured');
   return String(secret);

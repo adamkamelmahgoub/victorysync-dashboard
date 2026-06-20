@@ -59,6 +59,7 @@ function isoDateDaysAgo(days: number) {
 }
 
 const FIVE_YEAR_DAYS = 5 * 366;
+const DEFAULT_VIEW_DAYS = 7;
 
 function safeNumber(value: unknown) {
   const number = Number(value);
@@ -67,6 +68,14 @@ function safeNumber(value: unknown) {
 
 function callTime(row: Record<string, any>) {
   return row.started_at || row.created_at || row.timestamp || row.date_time || row.date;
+}
+
+function rowInDateRange(row: Record<string, any>, startDate: string, endDate: string) {
+  const timestamp = Date.parse(String(callTime(row) || ''));
+  if (!Number.isFinite(timestamp)) return false;
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T23:59:59.999Z`);
+  return timestamp >= start && timestamp <= end;
 }
 
 function callStatus(row: Record<string, any>) {
@@ -123,7 +132,7 @@ const DashboardNewV3: FC = () => {
   const [liveError, setLiveError] = useState<string | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveRefreshedAt, setLiveRefreshedAt] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(FIVE_YEAR_DAYS));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(DEFAULT_VIEW_DAYS));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [reportOverview, setReportOverview] = useState<Record<string, any>>({});
   const [reportCalls, setReportCalls] = useState<Array<Record<string, any>>>([]);
@@ -162,13 +171,17 @@ const DashboardNewV3: FC = () => {
     setReportError(null);
     try {
       const query = new URLSearchParams();
+      const callsQuery = new URLSearchParams();
       if (activeOrgId) query.set('org_id', activeOrgId);
+      if (activeOrgId) callsQuery.set('org_id', activeOrgId);
       if (startDate) query.set('start_date', startDate);
+      callsQuery.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
       if (endDate) query.set('end_date', endDate);
+      if (endDate) callsQuery.set('end_date', endDate);
       const headers = { 'x-user-id': user.id };
       const [overviewResponse, callsResponse] = await Promise.all([
         fetch(buildApiUrl(`/api/reports/overview?${query.toString()}`), { headers }),
-        fetch(buildApiUrl(`/api/reports/calls?${query.toString()}&limit=5000`), { headers }),
+        fetch(buildApiUrl(`/api/reports/calls?${callsQuery.toString()}&limit=5000`), { headers }),
       ]);
       const overviewJson = await overviewResponse.json().catch(() => ({}));
       const callsJson = await callsResponse.json().catch(() => ({}));
@@ -199,44 +212,48 @@ const DashboardNewV3: FC = () => {
   const available = Math.max(liveAgents.length - onCall, 0);
 
   const topAgents = useMemo(() => liveAgents.slice(0, 6), [liveAgents]);
+  const visibleReportCalls = useMemo(
+    () => reportCalls.filter((row) => rowInDateRange(row, startDate, endDate)),
+    [endDate, reportCalls, startDate]
+  );
 
   const callsByHour = useMemo(() => {
     const buckets = new Map<string, number>();
-    reportCalls.forEach((row) => {
+    visibleReportCalls.forEach((row) => {
       const date = new Date(callTime(row));
       if (Number.isNaN(date.getTime())) return;
       const label = `${String(date.getHours()).padStart(2, '0')}:00`;
       buckets.set(label, (buckets.get(label) || 0) + 1);
     });
     return Array.from(buckets.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => ({ name, value }));
-  }, [reportCalls]);
+  }, [visibleReportCalls]);
 
   const callsByStatus = useMemo(() => {
     const buckets = new Map<string, number>();
-    reportCalls.forEach((row) => {
+    visibleReportCalls.forEach((row) => {
       const key = callStatus(row);
       buckets.set(key, (buckets.get(key) || 0) + 1);
     });
     return Array.from(buckets.entries()).map(([name, value]) => ({ name, value }));
-  }, [reportCalls]);
+  }, [visibleReportCalls]);
 
   const callsByNumber = useMemo(() => {
     const buckets = new Map<string, number>();
-    reportCalls.forEach((row) => {
+    visibleReportCalls.forEach((row) => {
       const key = callNumber(row);
       buckets.set(key, (buckets.get(key) || 0) + 1);
     });
     return Array.from(buckets.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, value]) => ({ name, value }));
-  }, [reportCalls]);
+  }, [visibleReportCalls]);
 
   const directionBreakdown = useMemo(() => {
     const buckets = new Map<string, number>();
-    reportCalls.forEach((row) => {
+    visibleReportCalls.forEach((row) => {
       const key = callDirection(row);
       buckets.set(key, (buckets.get(key) || 0) + 1);
     });
     return Array.from(buckets.entries()).map(([name, value]) => ({ name, value }));
-  }, [reportCalls]);
+  }, [visibleReportCalls]);
 
   const agentActivity = useMemo(() => {
     return (reportOverview.top_agents || [])

@@ -24,6 +24,7 @@ type Recording = {
 };
 
 const FIVE_YEAR_DAYS = 5 * 366;
+const DEFAULT_VIEW_DAYS = 7;
 
 function isoDateDaysAgo(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -37,6 +38,18 @@ function fmtDate(v?: string | null) {
 
 function secondsOf(r: Recording) {
   return Number(r.duration_seconds ?? r.duration ?? 0) || 0;
+}
+
+function recordingTimestamp(recording: Recording) {
+  return recording.recording_date || recording.created_at;
+}
+
+function rowInDateRange(recording: Recording, startDate: string, endDate: string) {
+  const timestamp = Date.parse(String(recordingTimestamp(recording) || ''));
+  if (!Number.isFinite(timestamp)) return false;
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T23:59:59.999Z`);
+  return timestamp >= start && timestamp <= end;
 }
 
 function fmtDuration(s: number) {
@@ -66,7 +79,7 @@ export function RecordingsPage() {
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [syncing, setSyncing] = useState(false);
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(FIVE_YEAR_DAYS));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(DEFAULT_VIEW_DAYS));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [directionFilter, setDirectionFilter] = useState('all');
   const [playbackUrls, setPlaybackUrls] = useState<Record<string, string>>({});
@@ -74,9 +87,10 @@ export function RecordingsPage() {
 
   const filteredRows = useMemo(() => {
     const q = search.trim();
-    if (!q) return recordings;
-    return recordings.filter((r) => String(r.from_number || '').includes(q) || String(r.to_number || '').includes(q));
-  }, [recordings, search]);
+    const byDate = recordings.filter((recording) => rowInDateRange(recording, startDate, endDate));
+    if (!q) return byDate;
+    return byDate.filter((r) => String(r.from_number || '').includes(q) || String(r.to_number || '').includes(q));
+  }, [endDate, recordings, search, startDate]);
 
   const summary = useMemo(() => {
     const total = filteredRows.length;
@@ -124,7 +138,7 @@ export function RecordingsPage() {
 	      q.set('limit', '500');
 	      q.set('offset', String(activeOffset));
 	      if (orgId) q.set('org_id', orgId);
-		      if (startDate) q.set('start_date', startDate);
+		      q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
 		      if (endDate) q.set('end_date', endDate);
 		      if (search.trim()) q.set('search', search.trim());
 		      if (directionFilter !== 'all') q.set('direction', directionFilter);
@@ -153,7 +167,7 @@ export function RecordingsPage() {
 
 		  useEffect(() => {
 		    if (user) fetchRecordings(true);
-		  }, [orgId, user?.id, startDate, endDate, directionFilter]);
+		  }, [orgId, user?.id, endDate, directionFilter]);
 
 	  useEffect(() => {
 	    return () => {

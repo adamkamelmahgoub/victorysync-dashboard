@@ -19,6 +19,7 @@ type CallRow = Record<string, any>;
 
 const PAGE_SIZE = 100;
 const FIVE_YEAR_DAYS = 5 * 366;
+const DEFAULT_VIEW_DAYS = 7;
 
 function fmtDate(value?: string | null) {
   if (!value) return '-';
@@ -59,6 +60,18 @@ function directionOf(row: CallRow) {
 
 function statusOf(row: CallRow) {
   return String(row.status || row.result || row.call_status || row.metadata?.status || 'unknown');
+}
+
+function callTimestamp(row: CallRow) {
+  return row.started_at || row.created_at || row.timestamp || row.date_time || row.date;
+}
+
+function rowInDateRange(row: CallRow, startDate: string, endDate: string) {
+  const timestamp = Date.parse(String(callTimestamp(row) || ''));
+  if (!Number.isFinite(timestamp)) return false;
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T23:59:59.999Z`);
+  return timestamp >= start && timestamp <= end;
 }
 
 function downloadCsv(filename: string, rows: CallRow[]) {
@@ -104,7 +117,7 @@ export default function CallsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState(isoDateDaysAgo(FIVE_YEAR_DAYS));
+  const [startDate, setStartDate] = useState(isoDateDaysAgo(DEFAULT_VIEW_DAYS));
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [direction, setDirection] = useState('all');
@@ -118,7 +131,7 @@ export default function CallsPage() {
     q.set('limit', String(PAGE_SIZE));
     q.set('offset', String(offset));
     if (activeOrgId) q.set('org_id', activeOrgId);
-    if (startDate) q.set('start_date', startDate);
+    q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
     if (endDate) q.set('end_date', endDate);
     if (search.trim()) q.set('search', search.trim());
     if (agent.trim()) q.set('agent', agent.trim());
@@ -165,7 +178,7 @@ export default function CallsPage() {
       const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
-        body: JSON.stringify({ orgId: activeOrgId || null, startDate, endDate }),
+        body: JSON.stringify({ orgId: activeOrgId || null, startDate: isoDateDaysAgo(FIVE_YEAR_DAYS), endDate }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'Failed to sync calls');
@@ -179,22 +192,27 @@ export default function CallsPage() {
 
   useEffect(() => {
     void loadCalls(true);
-  }, [user?.id, activeOrgId, startDate, endDate, direction, status, searchParams]);
+  }, [user?.id, activeOrgId, endDate, direction, status, searchParams]);
 
   useEffect(() => {
     const nextSearch = searchParams.get('search') || '';
     setSearch(nextSearch);
   }, [searchParams]);
 
+  const visibleRows = useMemo(
+    () => rows.filter((row) => rowInDateRange(row, startDate, endDate)),
+    [endDate, rows, startDate]
+  );
+
   const summary = useMemo(() => {
-    const answered = rows.filter((row) => ['answered', 'completed'].includes(normalizeCallStatus(statusOf(row)))).length;
-    const missed = countMissedCalls(rows);
-    const inbound = rows.filter((row) => directionOf(row) === 'inbound').length;
-    const outbound = rows.filter((row) => directionOf(row) === 'outbound').length;
-    const recordings = rows.filter((row) => row.recording_url || row.has_recording).length;
-    const avgDuration = averageHandleTimeSeconds(rows);
+    const answered = visibleRows.filter((row) => ['answered', 'completed'].includes(normalizeCallStatus(statusOf(row)))).length;
+    const missed = countMissedCalls(visibleRows);
+    const inbound = visibleRows.filter((row) => directionOf(row) === 'inbound').length;
+    const outbound = visibleRows.filter((row) => directionOf(row) === 'outbound').length;
+    const recordings = visibleRows.filter((row) => row.recording_url || row.has_recording).length;
+    const avgDuration = averageHandleTimeSeconds(visibleRows);
     return { answered, missed, inbound, outbound, recordings, avgDuration };
-  }, [rows]);
+  }, [visibleRows]);
 
   const openRecording = async (row: CallRow) => {
     const recordingId = row.recording_id || row.recordingId || row.mightycall_recording_id || (row.recording_url ? row.id : null);
@@ -223,7 +241,7 @@ export default function CallsPage() {
       description={`Searchable call log for ${orgName}, including outcomes, recordings, transfers, and source IDs.`}
       actions={(
         <div className="flex flex-wrap gap-2">
-          <button className="vs-button-secondary" onClick={() => downloadCsv('victorysync-calls.csv', rows)} disabled={rows.length === 0}>Export CSV</button>
+          <button className="vs-button-secondary" onClick={() => downloadCsv('victorysync-calls.csv', visibleRows)} disabled={visibleRows.length === 0}>Export CSV</button>
           <button className="vs-button-secondary" onClick={() => syncCalls()} disabled={loading || syncing}>{syncing ? 'Syncing...' : 'Sync Calls'}</button>
           <button className="vs-button-primary" onClick={() => loadCalls(true)} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
         </div>
@@ -231,7 +249,7 @@ export default function CallsPage() {
     >
       <div className="space-y-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <MetricStatCard label="Loaded calls" value={rows.length} hint={`${total} total in scope`} accent="cyan" />
+          <MetricStatCard label="Loaded calls" value={visibleRows.length} hint={`${rows.length} preloaded from 5 years`} accent="cyan" />
           <MetricStatCard label="Answered" value={summary.answered} hint="Connected or completed" accent="emerald" />
           <MetricStatCard label="Missed / failed" value={summary.missed} hint="Needs follow-up review" accent="amber" />
           <MetricStatCard label="Inbound" value={summary.inbound} hint="Customer-originated" />
@@ -269,7 +287,7 @@ export default function CallsPage() {
               setAgent('');
               setDirection('all');
               setStatus('all');
-              setStartDate(isoDateDaysAgo(FIVE_YEAR_DAYS));
+              setStartDate(isoDateDaysAgo(DEFAULT_VIEW_DAYS));
               setEndDate(new Date().toISOString().slice(0, 10));
             }}>Reset</button>
             <button className="vs-button-primary h-10" onClick={() => loadCalls(true)}>Apply</button>
@@ -283,7 +301,7 @@ export default function CallsPage() {
             <div className="space-y-3 p-5">
               {Array.from({ length: 7 }).map((_, index) => <LoadingSkeleton key={index} className="h-12" />)}
             </div>
-          ) : rows.length === 0 ? (
+          ) : visibleRows.length === 0 ? (
             <div className="p-5">
               <EmptyStatePanel title="No calls found" description="No real call records matched this filter window. Try a wider date range, another organization, or sync the MightyCall reports." />
             </div>
@@ -310,7 +328,7 @@ export default function CallsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {rows.map((row, index) => {
+                  {visibleRows.map((row, index) => {
                     const direction = directionOf(row);
                     const status = statusOf(row);
                     const hasRecording = row.recording_url || row.has_recording;
