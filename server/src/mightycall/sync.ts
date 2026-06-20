@@ -129,6 +129,12 @@ function isoDateDaysAgo(days: number) {
 
 async function getBackgroundSyncOrgIds() {
   const ids = new Set<string>();
+  const addOrgRows = (rows: any[] | null | undefined, key = 'org_id') => {
+    for (const row of rows || []) {
+      const orgId = String(row?.[key] || '').trim();
+      if (orgId) ids.add(orgId);
+    }
+  };
   try {
     const { data } = await supabaseAdmin
       .from('organizations')
@@ -139,16 +145,30 @@ async function getBackgroundSyncOrgIds() {
       if (row?.id && row?.is_active !== false && !['disabled', 'archived', 'inactive'].includes(status)) ids.add(String(row.id));
     }
   } catch {}
-  if (ids.size === 0) {
-    try {
-      const { data } = await supabaseAdmin
-        .from('phone_numbers')
-        .select('org_id')
-        .not('org_id', 'is', null)
-        .limit(BACKGROUND_SYNC_MAX_ORGS * 5);
-      for (const row of (data || []) as any[]) if (row?.org_id) ids.add(String(row.org_id));
-    } catch {}
-  }
+  try {
+    const { data } = await supabaseAdmin
+      .from('phone_numbers')
+      .select('org_id')
+      .not('org_id', 'is', null)
+      .limit(BACKGROUND_SYNC_MAX_ORGS * 5);
+    addOrgRows(data as any[]);
+  } catch {}
+  try {
+    const { data } = await supabaseAdmin
+      .from('org_phone_numbers')
+      .select('org_id')
+      .not('org_id', 'is', null)
+      .limit(BACKGROUND_SYNC_MAX_ORGS * 5);
+    addOrgRows(data as any[]);
+  } catch {}
+  try {
+    const { data } = await supabaseAdmin
+      .from('org_integrations')
+      .select('org_id')
+      .eq('provider', 'mightycall')
+      .limit(BACKGROUND_SYNC_MAX_ORGS);
+    addOrgRows(data as any[]);
+  } catch {}
   return Array.from(ids).slice(0, BACKGROUND_SYNC_MAX_ORGS);
 }
 

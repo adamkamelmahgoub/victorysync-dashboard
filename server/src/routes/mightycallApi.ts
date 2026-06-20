@@ -67,7 +67,11 @@ async function getLiveStatusOrgIds() {
   const live = await Promise.resolve(supabaseAdmin.from('agent_live_status').select('org_id').not('org_id', 'is', null).limit(1000)).then((r) => r.data || []).catch(() => []);
   const users = await Promise.resolve(supabaseAdmin.from('org_users').select('org_id').not('mightycall_extension', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
   const members = await Promise.resolve(supabaseAdmin.from('org_members').select('org_id').not('mightycall_extension', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
-  rows.push(...live, ...users, ...members);
+  const phoneNumbers = await Promise.resolve(supabaseAdmin.from('phone_numbers').select('org_id').not('org_id', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
+  const orgPhones = await Promise.resolve(supabaseAdmin.from('org_phone_numbers').select('org_id').not('org_id', 'is', null).limit(5000)).then((r) => r.data || []).catch(() => []);
+  const integrations = await Promise.resolve(supabaseAdmin.from('org_integrations').select('org_id').eq('provider', 'mightycall').limit(1000)).then((r) => r.data || []).catch(() => []);
+  const organizations = await Promise.resolve(supabaseAdmin.from('organizations').select('id').limit(1000)).then((r) => (r.data || []).map((row: any) => ({ org_id: row.id }))).catch(() => []);
+  rows.push(...live, ...users, ...members, ...phoneNumbers, ...orgPhones, ...integrations, ...organizations);
   return Array.from(new Set(rows.map((row: any) => String(row.org_id)).filter(Boolean)));
 }
 

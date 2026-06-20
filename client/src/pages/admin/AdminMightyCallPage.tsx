@@ -135,9 +135,17 @@ export default function AdminMightyCallPage() {
 
   const healthTone = integrationHealth?.error
     ? 'warning'
-    : integrationHealth?.integration_configured && integrationHealth?.token_healthy
+    : integrationHealth?.integration_readable && integrationHealth?.token_healthy
       ? 'success'
       : 'neutral';
+  const credentialSource = integrationHealth?.credential_source || 'missing';
+  const credentialLabel = credentialSource === 'org'
+    ? 'Org Configured'
+    : credentialSource === 'environment'
+      ? 'Server Configured'
+      : integrationHealth?.integration_configured
+        ? 'Unreadable'
+        : 'Missing';
 
   return (
     <PageLayout
@@ -166,7 +174,7 @@ export default function AdminMightyCallPage() {
         )}
 
         <div className="grid gap-4 xl:grid-cols-4">
-          <MetricStatCard label="Credentials" value={integrationHealth?.integration_configured ? 'Configured' : 'Missing'} accent={integrationHealth?.integration_configured ? 'emerald' : 'amber'} hint="Stored integration state" />
+          <MetricStatCard label="Credentials" value={credentialLabel} accent={integrationHealth?.integration_readable ? 'emerald' : 'amber'} hint={credentialSource === 'environment' ? 'Using backend MightyCall environment keys' : 'Stored integration state'} />
           <MetricStatCard label="Token" value={integrationHealth?.token_healthy ? 'Healthy' : 'Failing'} accent={integrationHealth?.token_healthy ? 'emerald' : 'amber'} hint="Authentication to MightyCall" />
           <MetricStatCard label="Own Status" value={integrationHealth?.own_status_label || (integrationHealth?.own_status_healthy ? 'Readable' : 'Unavailable')} accent={integrationHealth?.own_status_healthy ? 'emerald' : 'amber'} hint="Current-user status returned by MightyCall" />
           <MetricStatCard label="Journal" value={integrationHealth?.journal_healthy ? 'Readable' : 'Unavailable'} accent={integrationHealth?.journal_healthy ? 'emerald' : 'amber'} hint="Live activity source" />
@@ -182,6 +190,7 @@ export default function AdminMightyCallPage() {
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Checks</div>
 	                <div className="mt-3 space-y-2">
 	                  <div>Config readable: {String(!!integrationHealth.integration_readable)}</div>
+	                  <div>Credential source: {integrationHealth.credential_source || 'missing'}</div>
 	                  <div>Profile lookup: {String(!!integrationHealth.profile_healthy)}</div>
 	                  <div>Live calls endpoint: {String(!!integrationHealth.live_calls_healthy)}</div>
 	                  <div>Journal endpoint: {String(!!integrationHealth.journal_healthy)}</div>

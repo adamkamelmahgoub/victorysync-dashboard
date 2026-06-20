@@ -26,7 +26,7 @@
  */
 
 // server/src/index.ts
-import { FRONTEND_ORIGIN, getEnvironmentHealth } from './config/env';
+import { FRONTEND_ORIGIN, getEnvironmentHealth, MIGHTYCALL_API_KEY, MIGHTYCALL_USER_KEY } from './config/env';
 import { installConsoleRedaction } from './security/redactConsole';
 import express from "express";
 import cors from "cors";
@@ -284,6 +284,7 @@ async function getProductionReadinessSnapshot() {
 async function getOrgIntegrationHealth(orgId: string) {
   let integrationConfigured = false;
   let integrationReadable = false;
+  let credentialSource: 'org' | 'environment' | 'missing' = 'missing';
   let tokenHealthy = false;
   let profileHealthy = false;
   let liveCallsHealthy = false;
@@ -302,15 +303,25 @@ async function getOrgIntegrationHealth(orgId: string) {
       clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
       clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
     } : undefined;
+    credentialSource = overrideCreds?.clientId && overrideCreds?.clientSecret
+      ? 'org'
+      : (MIGHTYCALL_API_KEY && MIGHTYCALL_USER_KEY ? 'environment' : 'missing');
     const token = await getMightyCallAccessToken(overrideCreds);
     tokenHealthy = !!token;
     if (token) {
       const apiKeyOverride = overrideCreds?.clientId || undefined;
+      const timed = <T,>(promise: Promise<T>, fallback: T) => new Promise<T>((resolve) => {
+        const timeout = setTimeout(() => resolve(fallback), 7_500);
+        promise
+          .then(resolve)
+          .catch(() => resolve(fallback))
+          .finally(() => clearTimeout(timeout));
+      });
       const [profile, calls, journal, ownStatus] = await Promise.all([
-        fetchMightyCallProfileByExtension('100', token, apiKeyOverride).catch(() => null),
-        fetchMightyCallCalls(token, { pageSize: '5', skip: '0' }, apiKeyOverride).catch(() => []),
-        fetchMightyCallJournalRequests(token, { pageSize: '5', page: '1', type: 'Call' }, apiKeyOverride).catch(() => []),
-        fetchMightyCallOwnStatus(token, apiKeyOverride).catch(() => null),
+        timed(fetchMightyCallProfileByExtension('100', token, apiKeyOverride), null),
+        timed(fetchMightyCallCalls(token, { pageSize: '5', skip: '0', fast: true }, apiKeyOverride), []),
+        timed(fetchMightyCallJournalRequests(token, { pageSize: '5', page: '1', type: 'Call' }, apiKeyOverride), []),
+        timed(fetchMightyCallOwnStatus(token, apiKeyOverride), null),
       ]);
       profileHealthy = !!profile;
       liveCallsHealthy = Array.isArray(calls);
@@ -329,7 +340,8 @@ async function getOrgIntegrationHealth(orgId: string) {
   return {
     org_id: orgId,
     integration_configured: integrationConfigured,
-    integration_readable: integrationReadable,
+    integration_readable: integrationReadable || credentialSource === 'environment',
+    credential_source: credentialSource,
     token_healthy: tokenHealthy,
     profile_healthy: profileHealthy,
     live_calls_healthy: liveCallsHealthy,
