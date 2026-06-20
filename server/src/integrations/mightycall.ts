@@ -461,8 +461,8 @@ function resolveSyncDateRange(startDate?: string, endDate?: string) {
   };
 }
 
-export async function getMightyCallAccessToken(override?: { clientId?: string; clientSecret?: string }): Promise<string> {
-  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+export async function getMightyCallAccessToken(override?: { clientId?: string; clientSecret?: string; baseUrl?: string }): Promise<string> {
+  const base = (override?.baseUrl || MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const clientId = override?.clientId || MIGHTYCALL_API_KEY || '';
   const clientSecret = override?.clientSecret || MIGHTYCALL_USER_KEY || '';
   const cacheKey = getTokenCacheKey(clientId, clientSecret);
@@ -577,12 +577,12 @@ function getTokenCacheKey(clientId: string, clientSecret: string): string {
   return `${clientId}::${clientSecret}`;
 }
 
-export async function fetchMightyCallPhoneNumbers(accessToken: string) {
-  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+export async function fetchMightyCallPhoneNumbers(accessToken: string, apiKeyOverride?: string, baseUrlOverride?: string) {
+  const base = (baseUrlOverride || MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const endpoints = ['/phonenumbers', '/phone_numbers', '/v4/phonenumbers', '/v4/phone_numbers'];
   for (const ep of endpoints) {
     for (const url of buildUrlVariants(base, ep)) {
-      const r = await tryFetchJson(url, accessToken);
+      const r = await tryFetchJson(url, accessToken, apiKeyOverride);
       if (r.ok && r.body) {
         const list = (r.body as any)?.data?.phoneNumbers ?? (r.body as any)?.phoneNumbers ?? (r.body as any)?.data ?? [];
         if (Array.isArray(list)) return list;
@@ -1711,13 +1711,14 @@ export async function fetchMightyCallVoicemails(accessToken?: string, apiKeyOver
 export async function syncMightyCallPhoneNumbers(
   supabaseAdminClient: any,
   orgId?: string,
-  phones: any[] = []
+  phones: any[] = [],
+  overrideCreds?: { clientId?: string; clientSecret?: string; baseUrl?: string }
 ): Promise<{ synced?: number; upserted?: number }> {
   try {
     let sourcePhones = phones;
     if (!Array.isArray(sourcePhones) || sourcePhones.length === 0) {
-      const token = await getMightyCallAccessToken();
-      sourcePhones = await fetchMightyCallPhoneNumbers(token);
+      const token = await getMightyCallAccessToken(overrideCreds);
+      sourcePhones = await fetchMightyCallPhoneNumbers(token, overrideCreds?.clientId, overrideCreds?.baseUrl);
     }
     if (!Array.isArray(sourcePhones) || sourcePhones.length === 0) return { synced: 0, upserted: 0 };
 

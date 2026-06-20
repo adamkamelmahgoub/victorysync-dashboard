@@ -604,13 +604,14 @@ export async function getMightyCallStatusByExtension(input: {
   const extension = normalizeExtension(input.extension);
   if (!extension) throw new Error('extension is required');
 
-  let overrideCreds: { clientId?: string; clientSecret?: string } | undefined;
+  let overrideCreds: { clientId?: string; clientSecret?: string; baseUrl?: string } | undefined;
   if (input.orgId) {
     const integ = await getOrgIntegration(input.orgId, 'mightycall').catch(() => null);
     if (integ?.credentials) {
       overrideCreds = {
         clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
         clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+        baseUrl: integ.credentials.baseUrl || integ.credentials.apiBaseUrl || undefined,
       };
     }
   }

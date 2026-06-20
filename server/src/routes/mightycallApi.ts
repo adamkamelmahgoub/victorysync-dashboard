@@ -129,13 +129,31 @@ async function getOrgPhoneIds(orgId: string) {
   }
 }
 
+async function getMightyCallCredentialOverride(orgId: string) {
+  try {
+    const { getOrgIntegration } = await import('../lib/integrationsStore');
+    const integ = await getOrgIntegration(orgId, 'mightycall');
+    const credentials = integ?.credentials || null;
+    if (!credentials) return undefined;
+    return {
+      clientId: credentials.clientId || credentials.apiKey || undefined,
+      clientSecret: credentials.clientSecret || credentials.userKey || undefined,
+      baseUrl: credentials.baseUrl || credentials.apiBaseUrl || undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function syncDateRange(req: express.Request) {
+  const fiveYearsAgo = new Date();
+  fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
   const end = String(req.query.end_date || req.body?.endDate || req.body?.end_date || new Date().toISOString().slice(0, 10));
   const start = String(
     req.query.start_date ||
     req.body?.startDate ||
     req.body?.start_date ||
-    new Date(Date.now() - (180 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10)
+    fiveYearsAgo.toISOString().slice(0, 10)
   );
   return { start: start.slice(0, 10), end: end.slice(0, 10) };
 }
@@ -154,11 +172,12 @@ async function runLegacyJournalSync(req: express.Request, options: { includeRepo
     warnings: [] as string[],
   };
   for (const orgId of scope.orgIds) {
-    await syncMightyCallPhoneNumbers(supabaseAdmin, orgId);
+    const overrideCreds = await getMightyCallCredentialOverride(orgId);
+    await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
     const phoneIds = await getOrgPhoneIds(orgId);
     try {
       if (options.includeReports !== false) {
-        const reports = await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end);
+        const reports = await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end, overrideCreds);
         result.reportsSynced += reports.reportsSynced || 0;
         result.callsSynced += (reports as any).callsSynced || 0;
         result.recordingsSynced += reports.recordingsSynced || 0;
@@ -166,17 +185,17 @@ async function runLegacyJournalSync(req: express.Request, options: { includeRepo
         result.quarantined += (reports as any).quarantined || 0;
       }
       if (options.includeCalls !== false) {
-        const calls = await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end });
+        const calls = await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end }, overrideCreds);
         result.callsSynced += calls.callsSynced || 0;
       }
       if (options.includeRecordings) {
-        const recordings = await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end);
+        const recordings = await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end, overrideCreds);
         result.recordingsSynced += recordings.recordingsSynced || 0;
         result.skippedUnowned += recordings.skippedUnowned || 0;
         result.quarantined += recordings.quarantined || 0;
       }
       if (options.includeSms !== false) {
-        const sms = await syncMightyCallSMS(supabaseAdmin, orgId);
+        const sms = await syncMightyCallSMS(supabaseAdmin, orgId, overrideCreds);
         result.smsSynced += sms.smsSynced || 0;
         result.skippedUnowned += sms.skippedUnowned || 0;
         result.quarantined += sms.quarantined || 0;
