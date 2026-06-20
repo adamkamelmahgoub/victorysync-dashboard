@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
-import { deleteOrgIntegration, getOrgIntegrationHealth, getOrgIntegrations, listMightyCallSyncJobs, saveOrgIntegration } from '../../lib/apiClient';
+import { deleteOrgIntegration, fetchJson, getOrgIntegrationHealth, getOrgIntegrations, listMightyCallSyncJobs, saveOrgIntegration } from '../../lib/apiClient';
 
 interface Integration {
   id: string;
@@ -28,6 +28,7 @@ export default function AdminMightyCallPage() {
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [integrationHealth, setIntegrationHealth] = useState<any | null>(null);
   const [syncJobs, setSyncJobs] = useState<any[]>([]);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (globalRole === 'platform_admin' && orgs && orgs.length > 0 && !activeOrgId) {
@@ -123,6 +124,25 @@ export default function AdminMightyCallPage() {
     }
   };
 
+  const handleSyncNow = async () => {
+    if (!activeOrgId || !user?.id) return;
+    try {
+      setSyncing(true);
+      setError(null);
+      await fetchJson(`/api/mightycall/sync?org_id=${encodeURIComponent(activeOrgId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body: JSON.stringify({ orgId: activeOrgId }),
+        timeoutMs: 60_000,
+      });
+      await Promise.all([loadIntegrationHealth(), loadSyncJobs()]);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to sync MightyCall data');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   if (!globalRole || !['platform_admin', 'org_admin'].includes(globalRole)) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
@@ -152,7 +172,14 @@ export default function AdminMightyCallPage() {
       eyebrow="Integrations"
       title="MightyCall"
       description="Manage credentials, inspect connection health, and review sync posture before issues become production incidents."
-      actions={<button onClick={() => navigate('/admin/orgs')} className="vs-button-secondary">Back To Orgs</button>}
+      actions={(
+        <>
+          <button onClick={handleSyncNow} disabled={syncing || !activeOrgId} className="vs-button-primary">
+            {syncing ? 'Syncing...' : 'Sync Now'}
+          </button>
+          <button onClick={() => navigate('/admin/orgs')} className="vs-button-secondary">Back To Orgs</button>
+        </>
+      )}
     >
       <div className="space-y-6">
         <AdminTopNav />

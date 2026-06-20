@@ -145,6 +145,72 @@ async function getMightyCallCredentialOverride(orgId: string) {
   }
 }
 
+type SyncJobRef = { id: string; table: 'integration_sync_jobs' | 'mightycall_sync_runs' } | null;
+
+async function createOrgSyncJob(orgId: string, integrationType: string, metadata: Record<string, any> = {}): Promise<SyncJobRef> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('integration_sync_jobs')
+      .insert({
+        org_id: orgId,
+        integration_type: integrationType,
+        status: 'running',
+        started_at: new Date().toISOString(),
+        records_processed: 0,
+        metadata,
+      })
+      .select('id')
+      .maybeSingle();
+    if (!error && data?.id) return { id: String(data.id), table: 'integration_sync_jobs' };
+  } catch {}
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('mightycall_sync_runs')
+      .insert({
+        org_id: orgId,
+        sync_type: integrationType,
+        status: 'running',
+        started_at: new Date().toISOString(),
+        detail: metadata,
+      })
+      .select('id')
+      .maybeSingle();
+    if (!error && data?.id) return { id: String(data.id), table: 'mightycall_sync_runs' };
+  } catch {}
+
+  return null;
+}
+
+async function finishOrgSyncJob(job: SyncJobRef, updates: { status: 'completed' | 'failed'; recordsProcessed?: number; errorMessage?: string | null; metadata?: Record<string, any> }) {
+  if (!job) return;
+  if (job.table === 'integration_sync_jobs') {
+    await supabaseAdmin
+      .from('integration_sync_jobs')
+      .update({
+        status: updates.status,
+        completed_at: new Date().toISOString(),
+        records_processed: updates.recordsProcessed || 0,
+        error_message: updates.errorMessage || null,
+        metadata: updates.metadata || {},
+      })
+      .eq('id', job.id);
+    return;
+  }
+  await supabaseAdmin
+    .from('mightycall_sync_runs')
+    .update({
+      status: updates.status,
+      finished_at: new Date().toISOString(),
+      detail: {
+        ...(updates.metadata || {}),
+        records_processed: updates.recordsProcessed || 0,
+        error_message: updates.errorMessage || null,
+      },
+    })
+    .eq('id', job.id);
+}
+
 function syncDateRange(req: express.Request) {
   const fiveYearsAgo = new Date();
   fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
@@ -173,9 +239,11 @@ async function runLegacyJournalSync(req: express.Request, options: { includeRepo
   };
   for (const orgId of scope.orgIds) {
     const overrideCreds = await getMightyCallCredentialOverride(orgId);
-    await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
-    const phoneIds = await getOrgPhoneIds(orgId);
+    const job = await createOrgSyncJob(orgId, 'mightycall_manual_sync', { start_date: start, end_date: end });
     try {
+      const phoneSync = await syncMightyCallPhoneNumbers(supabaseAdmin, orgId, [], overrideCreds);
+      const phoneIds = await getOrgPhoneIds(orgId);
+      let orgRecordsProcessed = Number(phoneSync?.upserted || phoneSync?.synced || 0);
       if (options.includeReports !== false) {
         const reports = await syncMightyCallReports(supabaseAdmin, orgId, phoneIds, start, end, overrideCreds);
         result.reportsSynced += reports.reportsSynced || 0;
@@ -183,26 +251,41 @@ async function runLegacyJournalSync(req: express.Request, options: { includeRepo
         result.recordingsSynced += reports.recordingsSynced || 0;
         result.skippedUnowned += (reports as any).skippedUnowned || 0;
         result.quarantined += (reports as any).quarantined || 0;
+        orgRecordsProcessed += Number(reports.reportsSynced || 0) + Number(reports.recordingsSynced || 0);
       }
       if (options.includeCalls !== false) {
         const calls = await syncMightyCallCallHistory(supabaseAdmin, orgId, { dateStart: start, dateEnd: end }, overrideCreds);
         result.callsSynced += calls.callsSynced || 0;
+        orgRecordsProcessed += Number(calls.callsSynced || 0);
       }
       if (options.includeRecordings) {
         const recordings = await syncMightyCallRecordings(supabaseAdmin, orgId, phoneIds, start, end, overrideCreds);
         result.recordingsSynced += recordings.recordingsSynced || 0;
         result.skippedUnowned += recordings.skippedUnowned || 0;
         result.quarantined += recordings.quarantined || 0;
+        orgRecordsProcessed += Number(recordings.recordingsSynced || 0);
       }
       if (options.includeSms !== false) {
         const sms = await syncMightyCallSMS(supabaseAdmin, orgId, overrideCreds);
         result.smsSynced += sms.smsSynced || 0;
         result.skippedUnowned += sms.skippedUnowned || 0;
         result.quarantined += sms.quarantined || 0;
+        orgRecordsProcessed += Number(sms.smsSynced || 0);
       }
       result.orgsSynced += 1;
+      await finishOrgSyncJob(job, {
+        status: 'completed',
+        recordsProcessed: orgRecordsProcessed,
+        metadata: { start_date: start, end_date: end, ...result },
+      });
     } catch (err: any) {
-      result.warnings.push(`${orgId}: ${err?.message || String(err)}`);
+      const message = `${orgId}: ${err?.message || String(err)}`;
+      result.warnings.push(message);
+      await finishOrgSyncJob(job, {
+        status: 'failed',
+        errorMessage: err?.message || String(err),
+        metadata: { start_date: start, end_date: end, warnings: [message] },
+      });
     }
   }
   return result;
