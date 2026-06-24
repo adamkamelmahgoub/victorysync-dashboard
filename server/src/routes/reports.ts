@@ -66,11 +66,11 @@ function objectValue(value: unknown): any {
 }
 
 function rowMetadata(row: any): any {
-  return objectValue(row?.metadata);
+  return objectValue(row?.metadata || row?.payload || row?.data);
 }
 
 function rowRawPayload(row: any): any {
-  return objectValue(row?.raw_payload);
+  return objectValue(row?.raw_payload || row?.payload || row?.data || row?.metadata);
 }
 
 function asDateParam(value: unknown, endOfDay = false): string | null {
@@ -125,16 +125,36 @@ function secondsBetween(start: unknown, end: unknown): number {
 }
 
 function rowTimestamp(row: any): string | null {
-  return firstString(row.started_at, row.recording_date, row.sent_at, row.message_date, row.transferred_at, row.created_at);
+  const metadata = rowMetadata(row);
+  const raw = rowRawPayload(row);
+  return firstString(
+    row.started_at,
+    row.date_time_utc,
+    row.dateTimeUtc,
+    row.recording_date,
+    row.sent_at,
+    row.message_date,
+    row.transferred_at,
+    row.created_at,
+    metadata?.started_at,
+    metadata?.dateTimeUtc,
+    metadata?.created,
+    raw?.started_at,
+    raw?.dateTimeUtc,
+    raw?.created
+  );
 }
 
 function rowNumbers(row: any): string[] {
-  const metadata = row?.metadata || row?.raw_payload || {};
+  const metadata = rowMetadata(row);
+  const raw = rowRawPayload(row);
   const values = [
     row?.phone_number,
     row?.business_number,
     row?.from_number,
     row?.to_number,
+    row?.from,
+    row?.to,
     row?.original_caller,
     row?.original_receiving_number,
     row?.transfer_target,
@@ -148,6 +168,18 @@ function rowNumbers(row: any): string[] {
     metadata?.client?.number,
     metadata?.called?.[0]?.phone,
     metadata?.called?.[0]?.number,
+    raw?.phone_number,
+    raw?.business_number,
+    raw?.businessNumber?.number,
+    raw?.businessNumber,
+    raw?.from_number,
+    raw?.to_number,
+    raw?.from,
+    raw?.to,
+    raw?.client?.address,
+    raw?.client?.number,
+    raw?.called?.[0]?.phone,
+    raw?.called?.[0]?.number,
   ];
   return values.map((value) => String(value || '').trim()).filter(Boolean);
 }
@@ -159,10 +191,14 @@ function rowMatchesDigits(row: any, digits: Set<string>): boolean {
 }
 
 function statusOf(row: any): string {
-  return String(row?.status || row?.result || row?.call_status || row?.metadata?.status || '').toLowerCase();
+  const metadata = rowMetadata(row);
+  const raw = rowRawPayload(row);
+  return String(row?.status || row?.result || row?.call_status || metadata?.status || metadata?.result || raw?.status || raw?.result || '').toLowerCase();
 }
 
 function directionOf(row: any): string {
+  const metadata = rowMetadata(row);
+  const rawPayload = rowRawPayload(row);
   const raw = String(
     row?.direction ||
     row?.current_call_direction ||
@@ -170,24 +206,24 @@ function directionOf(row: any): string {
     row?.callDirection ||
     row?.origin ||
     row?.requestOrigin ||
-    row?.metadata?.direction ||
-    row?.metadata?.callDirection ||
-    row?.metadata?.call_direction ||
-    row?.metadata?.origin ||
-    row?.metadata?.requestOrigin ||
-    row?.metadata?.callInfo?.direction ||
-    row?.metadata?.callInfo?.origin ||
-    row?.metadata?.communication?.direction ||
-    row?.metadata?.communication?.origin ||
-    row?.raw_payload?.direction ||
-    row?.raw_payload?.callDirection ||
-    row?.raw_payload?.call_direction ||
-    row?.raw_payload?.origin ||
-    row?.raw_payload?.requestOrigin ||
-    row?.raw_payload?.callInfo?.direction ||
-    row?.raw_payload?.callInfo?.origin ||
-    row?.raw_payload?.communication?.direction ||
-    row?.raw_payload?.communication?.origin ||
+    metadata?.direction ||
+    metadata?.callDirection ||
+    metadata?.call_direction ||
+    metadata?.origin ||
+    metadata?.requestOrigin ||
+    metadata?.callInfo?.direction ||
+    metadata?.callInfo?.origin ||
+    metadata?.communication?.direction ||
+    metadata?.communication?.origin ||
+    rawPayload?.direction ||
+    rawPayload?.callDirection ||
+    rawPayload?.call_direction ||
+    rawPayload?.origin ||
+    rawPayload?.requestOrigin ||
+    rawPayload?.callInfo?.direction ||
+    rawPayload?.callInfo?.origin ||
+    rawPayload?.communication?.direction ||
+    rawPayload?.communication?.origin ||
     ''
   ).toLowerCase();
   if (raw.includes('out')) return 'outbound';
@@ -198,17 +234,19 @@ function directionOf(row: any): string {
 }
 
 function rowAgentExtension(row: any): string {
+  const metadata = rowMetadata(row);
+  const raw = rowRawPayload(row);
   return String(
     row?.agent_extension ||
     row?.mightycall_extension ||
     row?.extension ||
-    row?.metadata?.agent_extension ||
-    row?.metadata?.mightycall_extension ||
-    row?.metadata?.agent?.extension ||
-    row?.metadata?.users?.[0]?.extension ||
-    row?.raw_payload?.agent_extension ||
-    row?.raw_payload?.agent?.extension ||
-    row?.raw_payload?.users?.[0]?.extension ||
+    metadata?.agent_extension ||
+    metadata?.mightycall_extension ||
+    metadata?.agent?.extension ||
+    metadata?.users?.[0]?.extension ||
+    raw?.agent_extension ||
+    raw?.agent?.extension ||
+    raw?.users?.[0]?.extension ||
     ''
   ).replace(/\D/g, '');
 }
@@ -718,10 +756,46 @@ async function fetchTableRows(table: string, dateColumn: string, req: express.Re
   query = query.order(dateColumn, { ascending: false }).limit(max);
   const { data, error } = await query;
   if (error) {
-    if (error.code === 'PGRST205' || /not exist|schema cache/i.test(error.message || '')) return [];
+    if (
+      ['PGRST204', 'PGRST205', '42703'].includes(String(error.code || '')) ||
+      /not exist|schema cache|column .* does not exist|could not find .* column/i.test(error.message || '')
+    ) return [];
     throw error;
   }
   return applyCommonFilters(data || [], req, scope, options);
+}
+
+async function fetchFirstAvailableRows(
+  table: string,
+  dateColumns: string[],
+  req: express.Request,
+  scope: ReportScope,
+  max = 10000,
+  options: { skipDirection?: boolean; skipStatus?: boolean; skipAgent?: boolean; skipSearch?: boolean } = {}
+) {
+  for (const dateColumn of dateColumns) {
+    const rows = await fetchTableRows(table, dateColumn, req, scope, max, options);
+    if (rows.length > 0) return rows;
+  }
+  return [];
+}
+
+async function fetchRealCallRows(
+  req: express.Request,
+  scope: ReportScope,
+  max = 10000,
+  options: { skipDirection?: boolean; skipStatus?: boolean; skipAgent?: boolean; skipSearch?: boolean } = {}
+) {
+  const dateColumns = ['started_at', 'date_time_utc', 'dateTimeUtc', 'call_date', 'timestamp', 'created_at'];
+  const mightyCallLogRows = await fetchFirstAvailableRows('mightycall_call_logs', dateColumns, req, scope, max, options);
+  if (mightyCallLogRows.length > 0) {
+    return mightyCallLogRows.map((row) => ({
+      ...row,
+      metadata: row.metadata || row.raw_payload || row.payload || row.data || row,
+      raw_payload: row.raw_payload || row.payload || row.data || row.metadata || row,
+    }));
+  }
+  return fetchFirstAvailableRows('calls', ['started_at', 'created_at'], req, scope, max, options);
 }
 
 function paginate(req: express.Request, rows: any[]) {
@@ -851,132 +925,6 @@ function groupAgentStats(calls: any[], transfers: any[], identities: Awaited<Ret
   return typeof limit === 'number' ? rows.slice(0, limit) : rows;
 }
 
-async function fetchLegacyMightyCallReports(reportType: string, req: express.Request, scope: ReportScope) {
-  if (!scope.isPlatformAdmin && scope.orgIds.length === 0) return [];
-  const { start, end } = resolveReportDateRange(req);
-  let query = supabaseAdmin.from('mightycall_reports').select('*').eq('report_type', reportType);
-  if (scope.orgIds.length > 0) query = query.in('org_id', scope.orgIds);
-  if (start) query = query.gte('report_date', start.slice(0, 10));
-  if (end) query = query.lte('report_date', end.slice(0, 10));
-  const { data, error } = await query.order('report_date', { ascending: false }).limit(5000);
-  if (error) {
-    if (error.code === 'PGRST205' || /not exist|schema cache/i.test(error.message || '')) return [];
-    throw error;
-  }
-  const numberDigits = scope.requestedPhoneDigits.size > 0 ? scope.requestedPhoneDigits : scope.allowedPhoneDigits;
-  if (!scope.isPlatformAdmin && !scope.orgWide && numberDigits.size === 0) return [];
-  return (data || []).filter((row: any) => {
-    const sampleNumbers = Array.isArray(row?.data?.sample_numbers) ? row.data.sample_numbers : [];
-    if (!scope.isPlatformAdmin && numberDigits.size > 0) {
-      const digits = sampleNumbers.map((value: any) => normalizePhoneDigits(value)).filter(Boolean);
-      if (!digits.some((value: any) => numberDigits.has(value))) return false;
-    }
-    if (scope.isPlatformAdmin && scope.requestedPhoneDigits.size > 0) {
-      const digits = sampleNumbers.map((value: any) => normalizePhoneDigits(value)).filter(Boolean);
-      if (!digits.some((value: any) => scope.requestedPhoneDigits.has(value))) return false;
-    }
-    return true;
-  });
-}
-
-function legacyCallRows(reports: any[]) {
-  const out: any[] = [];
-  for (const report of reports) {
-    const data = report?.data || {};
-    const samples = Array.isArray(data.sample_activity) ? data.sample_activity : [];
-    if (samples.length > 0) {
-      for (const sample of samples) {
-        out.push({
-          id: `${report.id || report.report_date}:${sample.id || out.length}`,
-          org_id: report.org_id,
-          started_at: sample.created || report.report_date,
-          from_number: sample.from_number || null,
-          to_number: sample.to_number || null,
-          duration_seconds: safeNumber(sample.duration_seconds),
-          status: sample.status || 'unknown',
-          direction: sample.direction || sample.origin || 'unknown',
-          business_number: sample.business_number || null,
-          external_call_id: sample.id || null,
-          recording_url: sample.recording_url || sample.recordingUrl || sample.recording?.link || sample.recording?.uri || null,
-          has_recording: Boolean(sample.recording_url || sample.recordingUrl || sample.recording?.link || sample.recording?.uri),
-          metadata: { source: 'mightycall_reports_sample', report_id: report.id, ...sample },
-        });
-      }
-    } else if (data.source === 'mightycall_reports_sample') {
-      out.push({
-        id: report.id,
-        org_id: report.org_id,
-        started_at: report.report_date,
-        from_number: Array.isArray(data.sample_numbers) ? data.sample_numbers[0] : null,
-        to_number: Array.isArray(data.sample_numbers) ? data.sample_numbers[1] : null,
-        duration_seconds: safeNumber(data.total_duration),
-        status: 'summary',
-        direction: 'unknown',
-        calls_count: safeNumber(data.calls_count),
-        answered_count: safeNumber(data.answered_count),
-        missed_count: safeNumber(data.missed_count),
-        metadata: { source: 'mightycall_reports', report_id: report.id },
-      });
-    }
-  }
-  return out;
-}
-
-function legacyOverviewFromReports(reports: any[]) {
-  return reports.reduce((acc, report) => {
-    const data = report?.data || {};
-    acc.total += safeNumber(data.calls_count);
-    acc.answered += safeNumber(data.answered_count);
-    acc.missed += safeNumber(data.missed_count);
-    acc.duration += safeNumber(data.total_duration);
-    return acc;
-  }, { total: 0, answered: 0, missed: 0, duration: 0 });
-}
-
-function legacyMessageRows(reports: any[], ownedDigits: Set<string>) {
-  const out: any[] = [];
-  for (const report of reports) {
-    const data = report?.data || {};
-    const samples = Array.isArray(data.sample_activity) ? data.sample_activity : [];
-    if (samples.length > 0) {
-      for (const sample of samples) {
-        const row = {
-          id: `${report.id || report.report_date}:${sample.id || out.length}`,
-          org_id: report.org_id,
-          sent_at: sample.created || report.report_date,
-          message_date: sample.created || report.report_date,
-          from_number: sample.from_number || null,
-          to_number: sample.to_number || null,
-          business_number: sample.business_number || null,
-          message_text: sample.message_text || sample.text || null,
-          status: sample.status || 'unknown',
-          direction: sample.direction || 'unknown',
-          metadata: { source: 'mightycall_reports', report_id: report.id, ...sample },
-        };
-        out.push({ ...row, direction: inferDirectionFromOwnedNumbers(row, ownedDigits) });
-      }
-    } else {
-      const row = {
-        id: report.id,
-        org_id: report.org_id,
-        sent_at: report.report_date,
-        message_date: report.report_date,
-        from_number: Array.isArray(data.sample_numbers) ? data.sample_numbers[0] : null,
-        to_number: Array.isArray(data.sample_numbers) ? data.sample_numbers[1] : null,
-        message_text: null,
-        status: 'summary',
-        direction: 'unknown',
-        messages_count: safeNumber(data.messages_count),
-        inbound_count: safeNumber(data.inbound_count),
-        outbound_count: safeNumber(data.outbound_count),
-        metadata: { source: 'mightycall_reports', report_id: report.id },
-      };
-      out.push({ ...row, direction: inferDirectionFromOwnedNumbers(row, ownedDigits) });
-    }
-  }
-  return out;
-}
-
 function normalizeSmsDirections(rows: any[], ownedDigits: Set<string>) {
   return rows.map((row) => ({
     ...row,
@@ -1054,19 +1002,100 @@ function normalizeCallRows(rows: any[], ownedDigits: Set<string>) {
   return rows.map((row) => {
     const metadata = rowMetadata(row);
     const raw = rowRawPayload(row);
+    const fromNumber = firstString(
+      row.from_number,
+      row.from,
+      row.caller_number,
+      row.caller,
+      metadata?.from_number,
+      metadata?.from,
+      metadata?.caller_number,
+      metadata?.caller?.number,
+      metadata?.client?.address,
+      metadata?.client?.number,
+      raw?.from_number,
+      raw?.from,
+      raw?.caller_number,
+      raw?.caller?.number,
+      raw?.client?.address,
+      raw?.client?.number
+    );
+    const toNumber = firstString(
+      row.to_number,
+      row.to,
+      row.called_number,
+      row.destination_number,
+      metadata?.to_number,
+      metadata?.to,
+      metadata?.called_number,
+      metadata?.destination_number,
+      metadata?.called?.[0]?.phone,
+      metadata?.called?.[0]?.number,
+      raw?.to_number,
+      raw?.to,
+      raw?.called_number,
+      raw?.destination_number,
+      raw?.called?.[0]?.phone,
+      raw?.called?.[0]?.number
+    );
+    const businessNumber = firstString(
+      row.business_number,
+      row.phone_number,
+      metadata?.business_number,
+      metadata?.businessNumber?.number,
+      metadata?.businessNumber,
+      raw?.business_number,
+      raw?.businessNumber?.number,
+      raw?.businessNumber
+    );
+    const startedAt = firstString(
+      row.started_at,
+      row.date_time_utc,
+      row.dateTimeUtc,
+      row.start_time,
+      row.created,
+      row.timestamp,
+      row.created_at,
+      metadata?.started_at,
+      metadata?.dateTimeUtc,
+      metadata?.start_time,
+      metadata?.created,
+      raw?.started_at,
+      raw?.dateTimeUtc,
+      raw?.start_time,
+      raw?.created
+    );
+    const endedAt = firstString(row.ended_at, row.endedAt, row.end_time, metadata?.ended_at, metadata?.endedAt, raw?.ended_at, raw?.endedAt);
+    const agentExtension = firstString(row.agent_extension, row.extension, row.mightycall_extension, metadata?.agent_extension, metadata?.extension, metadata?.agent?.extension, raw?.agent_extension, raw?.extension, raw?.agent?.extension);
     const direction = normalizeDirection({
       ...row,
+      from_number: fromNumber,
+      to_number: toNumber,
+      business_number: businessNumber,
       metadata,
       raw_payload: raw,
     }, ownedDigits);
-    const durationSeconds = callDurationSeconds({ ...row, metadata, raw_payload: raw });
-    const recordingUrl = recordingUrlOf({ ...row, metadata, raw_payload: raw });
-    const recordingId = recordingIdOf({ ...row, metadata, raw_payload: raw });
-    return {
+    const normalizedRow = {
       ...row,
+      from_number: fromNumber,
+      to_number: toNumber,
+      business_number: businessNumber,
+      started_at: startedAt,
+      ended_at: endedAt,
+      agent_extension: agentExtension,
+      metadata,
+      raw_payload: raw,
+    };
+    const durationSeconds = callDurationSeconds(normalizedRow);
+    const recordingUrl = recordingUrlOf(normalizedRow);
+    const recordingId = recordingIdOf(normalizedRow);
+    return {
+      ...normalizedRow,
       direction,
-      status: normalizeReportCallStatus(row),
+      status: normalizeReportCallStatus(normalizedRow),
       duration_seconds: durationSeconds,
+      external_id: row.external_id || row.call_id || row.callId || raw?.id || raw?.callId || null,
+      external_call_id: row.external_call_id || row.call_id || row.callId || raw?.id || raw?.callId || null,
       recording_id: row.recording_id || row.mightycall_recording_id || recordingId || null,
       recording_url: row.recording_url || recordingUrl || null,
       has_recording: Boolean(row.has_recording || row.recording_url || recordingUrl || recordingId),
@@ -1276,29 +1305,6 @@ function ownedDigitsForScope(phones: Array<{ digits: string }>, scope: ReportSco
   ]);
 }
 
-async function callRecordingRows(req: express.Request, scope: ReportScope) {
-  const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
-  const ownedDigits = ownedDigitsForScope(phones, scope);
-  const rows = normalizeCallRows(await fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true, skipStatus: true, skipAgent: true }), ownedDigits);
-  return rows.filter((row) => row.recording_url).map((row) => ({
-    id: row.id,
-    org_id: row.org_id,
-    external_id: row.external_id,
-    external_call_id: row.external_call_id || row.external_id,
-    recording_date: row.started_at,
-    recorded_at: row.started_at,
-    from_number: row.from_number,
-    to_number: row.to_number,
-    business_number: row.business_number || row.to_number,
-    direction: row.direction || 'unknown',
-    duration_seconds: row.duration_seconds || callDurationSeconds(row),
-    recording_url: row.recording_url || null,
-    recording_id: row.recording_id || row.id,
-    extension: row.extension || row.agent_extension || null,
-    metadata: { source: 'calls.recording_url', call_id: row.id },
-  }));
-}
-
 async function handle(req: express.Request, res: express.Response, fn: (scope: ReportScope) => Promise<void>) {
   try {
     const scope = await resolveScope(req);
@@ -1317,7 +1323,7 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
   }
   const rows = scope.isPlatformAdmin || scope.orgWide ? phones : phones.filter((phone) => scope.allowedPhoneIds.has(phone.id));
   const [calls, baseRecordings, baseSms, transfers] = await Promise.all([
-    fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }),
+    fetchRealCallRows(req, scope, 10000, { skipDirection: true }),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
     fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
@@ -1325,7 +1331,7 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
   const ownedDigits = ownedDigitsForScope(phones, scope);
   const normalizedCalls = normalizeCallRows(calls, ownedDigits);
   const transferRows = transfers.length > 0 ? transfers : applyCommonFilters(transferRowsFromCalls(calls), req, scope);
-  const recordings = baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope);
+  const recordings = normalizeRecordingRows(baseRecordings, ownedDigits);
   const sms = normalizeSmsDirections(baseSms, new Set(phones.map((phone) => phone.digits).filter(Boolean)));
   const numbers = rows.map((phone) => {
     const matches = (row: any) => rowMatchesDigits(row, new Set([phone.digits]));
@@ -1346,16 +1352,17 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
 router.get('/calls', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = ownedDigitsForScope(phones, scope);
-  let rows = await enrichCallsWithRecordingLinks(
-    normalizeCallRows(await fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }), ownedDigits),
+  const rows = await enrichCallsWithRecordingLinks(
+    normalizeCallRows(await fetchRealCallRows(req, scope, 10000, { skipDirection: true }), ownedDigits),
     req,
     scope,
     ownedDigits
   );
-  if (rows.length === 0) rows = legacyCallRows(await fetchLegacyMightyCallReports('calls', req, scope));
   const requestedDirection = String(req.query.direction || '').toLowerCase();
-  if (requestedDirection && requestedDirection !== 'all') rows = rows.filter((row) => directionOf(row) === requestedDirection);
-  const page = paginate(req, rows);
+  const filteredRows = requestedDirection && requestedDirection !== 'all'
+    ? rows.filter((row) => directionOf(row) === requestedDirection)
+    : rows;
+  const page = paginate(req, filteredRows);
   res.json({ calls: page.rows, total: page.total, next_offset: page.next_offset });
 }));
 
@@ -1363,8 +1370,7 @@ router.get('/recordings', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = ownedDigitsForScope(phones, scope);
   const recordingTableRows = await fetchTableRows('mightycall_recordings', 'recording_date', req, scope, 10000, { skipDirection: true, skipStatus: true, skipAgent: true });
-  const callRows = await callRecordingRows(req, scope);
-  let rows = normalizeRecordingRows([...recordingTableRows, ...callRows], ownedDigits);
+  let rows = normalizeRecordingRows(recordingTableRows, ownedDigits);
   const requestedDirection = String(req.query.direction || '').toLowerCase();
   if (requestedDirection && requestedDirection !== 'all') rows = rows.filter((row) => row.direction === requestedDirection);
   const page = paginate(req, rows);
@@ -1376,7 +1382,6 @@ router.get('/sms', (req, res) => handle(req, res, async (scope) => {
   const ownedDigits = ownedDigitsForScope(phones, scope);
   const requestedDirection = String(req.query.direction || '').toLowerCase();
   let rows = normalizeSmsDirections(await fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }), ownedDigits);
-  if (rows.length === 0) rows = legacyMessageRows(await fetchLegacyMightyCallReports('messages', req, scope), ownedDigits);
   if (requestedDirection && requestedDirection !== 'all') {
     rows = rows.filter((row) => directionOf(row) === requestedDirection);
   }
@@ -1387,7 +1392,7 @@ router.get('/sms', (req, res) => handle(req, res, async (scope) => {
 router.get('/transfers', (req, res) => handle(req, res, async (scope) => {
   let rows = await fetchTableRows('call_transfers', 'transferred_at', req, scope);
   if (rows.length === 0) {
-    const calls = await fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true });
+    const calls = await fetchRealCallRows(req, scope, 10000, { skipDirection: true });
     rows = applyCommonFilters(transferRowsFromCalls(calls), req, scope);
   }
   const page = paginate(req, rows);
@@ -1398,7 +1403,7 @@ router.get('/agents', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = ownedDigitsForScope(phones, scope);
   const [calls, recordings, sms, transfers] = await Promise.all([
-    fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }),
+    fetchRealCallRows(req, scope, 10000, { skipDirection: true }),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
     fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
@@ -1412,30 +1417,27 @@ router.get('/overview', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = ownedDigitsForScope(phones, scope);
   const [baseCalls, baseRecordings, baseSms, transfers] = await Promise.all([
-    fetchTableRows('calls', 'started_at', req, scope, 10000, { skipDirection: true }),
+    fetchRealCallRows(req, scope, 10000, { skipDirection: true }),
     fetchTableRows('mightycall_recordings', 'recording_date', req, scope),
     fetchTableRows('mightycall_sms_messages', 'sent_at', req, scope, 10000, { skipDirection: true }),
     fetchTableRows('call_transfers', 'transferred_at', req, scope),
   ]);
   const calls = normalizeCallRows(baseCalls, ownedDigits);
   const transferRows = transfers.length > 0 ? transfers : applyCommonFilters(transferRowsFromCalls(baseCalls), req, scope);
-  const recordings = normalizeRecordingRows(baseRecordings.length ? baseRecordings : await callRecordingRows(req, scope), ownedDigits);
-  const legacyMessageReports = baseSms.length === 0 ? await fetchLegacyMightyCallReports('messages', req, scope) : [];
-  const sms = baseSms.length > 0 ? normalizeSmsDirections(baseSms, ownedDigits) : legacyMessageRows(legacyMessageReports, ownedDigits);
+  const recordings = normalizeRecordingRows(baseRecordings, ownedDigits);
+  const sms = normalizeSmsDirections(baseSms, ownedDigits);
   const answered = calls.filter((row) => statusOf(row).includes('answer') || statusOf(row).includes('complete')).length;
   const missed = calls.filter((row) => statusOf(row).includes('miss')).length;
   const abandoned = calls.filter((row) => statusOf(row).includes('abandon')).length;
   const inboundSms = sms.reduce((sum, row) => sum + (row.inbound_count ? safeNumber(row.inbound_count) : (directionOf(row) === 'inbound' ? 1 : 0)), 0);
   const outboundSms = sms.reduce((sum, row) => sum + (row.outbound_count ? safeNumber(row.outbound_count) : (directionOf(row) === 'outbound' ? 1 : 0)), 0);
-  const legacyReports = calls.length === 0 ? await fetchLegacyMightyCallReports('calls', req, scope) : [];
-  const legacy = legacyOverviewFromReports(legacyReports);
   const agentStats = groupAgentStats([...calls, ...recordings, ...sms], transferRows, await loadAgentIdentityMap(scope), 10);
   const overview = {
-    total_calls: calls.length || legacy.total,
-    answered_calls: answered || legacy.answered,
-    missed_calls: missed || legacy.missed,
+    total_calls: calls.length,
+    answered_calls: answered,
+    missed_calls: missed,
     abandoned_calls: abandoned,
-    avg_duration_seconds: calls.length > 0 ? avg(calls.map((row) => safeNumber(row.duration_seconds))) : (legacy.total > 0 ? Math.round(legacy.duration / legacy.total) : 0),
+    avg_duration_seconds: calls.length > 0 ? avg(calls.map((row) => safeNumber(row.duration_seconds))) : 0,
     avg_wait_seconds: avg(calls.map((row) => safeNumber(row.wait_seconds || row.queue_wait_seconds || row.metadata?.wait_seconds))),
     total_recordings: recordings.length,
     total_sms: sms.reduce((sum, row) => sum + (row.messages_count ? safeNumber(row.messages_count) : 1), 0),

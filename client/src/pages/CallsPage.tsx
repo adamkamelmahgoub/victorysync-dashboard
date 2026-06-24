@@ -104,27 +104,6 @@ function downloadCsv(filename: string, rows: CallRow[]) {
   URL.revokeObjectURL(url);
 }
 
-function normalizeLegacyCall(row: CallRow, orgId?: string | null): CallRow {
-  const metadata = row.metadata || {};
-  return {
-    ...row,
-    id: row.id || row.recording_id || `${orgId || row.org_id || 'call'}:${row.started_at || row.recording_date || Math.random()}`,
-    org_id: row.org_id || orgId || null,
-    started_at: row.started_at || row.recording_date || row.created_at,
-    from_number: row.from_number || row.fromNumber || metadata.from_number || metadata.from || metadata.businessNumber || null,
-    to_number: row.to_number || row.toNumber || metadata.to_number || metadata.to || metadata.called?.[0]?.phone || null,
-    business_number: row.business_number || row.phone_number || row.to_number || metadata.businessNumber || null,
-    duration_seconds: row.duration_seconds ?? row.duration ?? 0,
-    status: row.status || row.result || 'answered',
-    recording_id: row.recording_id || row.mightycall_recording_id || (row.recording_url ? row.id : null),
-    has_recording: Boolean(row.has_recording || row.recording_url || row.recording_id),
-  };
-}
-
-function endOfDayIso(date: string) {
-  return date.includes('T') ? date : `${date}T23:59:59.999Z`;
-}
-
 export default function CallsPage() {
   const { user, globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const { org } = useOrg();
@@ -161,33 +140,6 @@ export default function CallsPage() {
     return q.toString();
   };
 
-  const legacyOrgIds = () => {
-    if (activeOrgId) return [activeOrgId];
-    return isPlatformAdmin ? orgs.map((item) => item.id).filter(Boolean) : [];
-  };
-
-  const loadLegacyCalls = async () => {
-    const targets = legacyOrgIds();
-    if (!user?.id || targets.length === 0) return { rows: [] as CallRow[], total: 0 };
-    const loaded = await Promise.all(targets.map(async (orgId) => {
-      const q = new URLSearchParams();
-      q.set('org_id', orgId);
-      q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
-      if (endDate) q.set('end_date', endOfDayIso(endDate));
-      const data = await fetchJson(`/api/call-stats?${q.toString()}`, {
-        headers: { 'x-user-id': user.id },
-      });
-      return {
-        rows: (data.calls || []).map((row: CallRow) => normalizeLegacyCall(row, orgId)),
-        total: Number(data.stats?.totalCalls || data.calls?.length || 0),
-      };
-    }));
-    return loaded.reduce(
-      (acc, item) => ({ rows: [...acc.rows, ...item.rows], total: acc.total + item.total }),
-      { rows: [] as CallRow[], total: 0 }
-    );
-  };
-
   const loadCalls = async (reset = true) => {
     if (!user?.id) return;
     if (!reset && nextOffset == null) return;
@@ -199,32 +151,12 @@ export default function CallsPage() {
       setLoadingMore(true);
     }
     try {
-      let nextRows: CallRow[] = [];
-      let nextTotal = 0;
-      let nextPageOffset: number | null = null;
-      let reportsError: Error | null = null;
-      try {
-        const data = await fetchJson(`/api/reports/calls?${buildQuery(offset)}`, {
-          headers: { 'x-user-id': user.id },
-        });
-        nextRows = data.calls || [];
-        nextTotal = Number(data.total || nextRows.length || 0);
-        nextPageOffset = data.next_offset ?? null;
-      } catch (err: any) {
-        reportsError = err;
-      }
-
-      if (reset && (reportsError || nextRows.length === 0)) {
-        const legacy = await loadLegacyCalls();
-        if (legacy.rows.length > 0) {
-          nextRows = legacy.rows;
-          nextTotal = legacy.total || legacy.rows.length;
-          nextPageOffset = null;
-          reportsError = null;
-        }
-      }
-
-      if (reportsError) throw reportsError;
+      const data = await fetchJson(`/api/reports/calls?${buildQuery(offset)}`, {
+        headers: { 'x-user-id': user.id },
+      });
+      const nextRows: CallRow[] = data.calls || [];
+      const nextTotal = Number(data.total || nextRows.length || 0);
+      const nextPageOffset = data.next_offset ?? null;
       setRows((previous) => (reset ? nextRows : [...previous, ...nextRows]));
       setTotal(nextTotal);
       setNextOffset(nextPageOffset);

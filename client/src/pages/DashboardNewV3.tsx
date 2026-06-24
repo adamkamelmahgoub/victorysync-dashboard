@@ -57,10 +57,6 @@ function isoDateDaysAgo(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-function endOfDayIso(date: string) {
-  return date.includes('T') ? date : `${date}T23:59:59.999Z`;
-}
-
 const FIVE_YEAR_DAYS = 5 * 366;
 const DEFAULT_VIEW_DAYS = 7;
 
@@ -182,56 +178,12 @@ const DashboardNewV3: FC = () => {
       if (endDate) query.set('end_date', endDate);
       if (endDate) callsQuery.set('end_date', endDate);
       const headers = { 'x-user-id': user.id };
-      let overviewJson: any = {};
-      let callsJson: any = {};
-      let reportsError: Error | null = null;
-      try {
-        [overviewJson, callsJson] = await Promise.all([
-          fetchJson(`/api/reports/overview?${query.toString()}`, { headers }),
-          fetchJson(`/api/reports/calls?${callsQuery.toString()}&limit=5000`, { headers }),
-        ]);
-      } catch (err: any) {
-        reportsError = err;
-      }
-
-      let overview = overviewJson.overview || {};
-      let calls = callsJson.calls || [];
-      if (reportsError || calls.length === 0 || Number(overview.total_calls || 0) === 0) {
-        const targetOrgIds = activeOrgId ? [activeOrgId] : (isAdmin ? orgs.map((item) => item.id).filter(Boolean) : []);
-        const legacy = await Promise.all(targetOrgIds.map(async (orgId) => {
-          const q = new URLSearchParams();
-          q.set('org_id', orgId);
-          q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
-          if (endDate) q.set('end_date', endOfDayIso(endDate));
-          const data = await fetchJson(`/api/call-stats?${q.toString()}`, { headers });
-          return {
-            stats: data.stats || {},
-            calls: (data.calls || []).map((row: any) => ({
-              ...row,
-              org_id: row.org_id || orgId,
-              started_at: row.started_at || row.recording_date || row.created_at,
-              duration_seconds: row.duration_seconds ?? row.duration ?? 0,
-              status: row.status || 'answered',
-            })),
-          };
-        }));
-        const legacyCalls = legacy.flatMap((item) => item.calls);
-        if (legacyCalls.length > 0) {
-          calls = legacyCalls;
-          overview = {
-            ...overview,
-            total_calls: legacy.reduce((sum, item) => sum + Number(item.stats.totalCalls || item.calls.length || 0), 0),
-            answered_calls: legacy.reduce((sum, item) => sum + Number(item.stats.answeredCalls || 0), 0),
-            missed_calls: legacy.reduce((sum, item) => sum + Number(item.stats.missedCalls || 0), 0),
-            avg_duration_seconds: legacyCalls.length
-              ? Math.round(legacy.reduce((sum, item) => sum + Number(item.stats.totalDuration || 0), 0) / legacyCalls.length)
-              : 0,
-            total_recordings: legacyCalls.filter((row: any) => row.recording_url || row.recording_id || row.has_recording).length,
-          };
-          reportsError = null;
-        }
-      }
-      if (reportsError) throw reportsError;
+      const [overviewJson, callsJson] = await Promise.all([
+        fetchJson(`/api/reports/overview?${query.toString()}`, { headers }),
+        fetchJson(`/api/reports/calls?${callsQuery.toString()}&limit=5000`, { headers }),
+      ]);
+      const overview = overviewJson.overview || {};
+      const calls = callsJson.calls || [];
       setReportOverview(overview);
       setReportCalls(calls);
     } catch (error: any) {
@@ -239,7 +191,7 @@ const DashboardNewV3: FC = () => {
     } finally {
       setReportLoading(false);
     }
-  }, [activeOrgId, endDate, isAdmin, orgs, startDate, user?.id]);
+  }, [activeOrgId, endDate, startDate, user?.id]);
 
   useEffect(() => {
     void loadReportSnapshot();
