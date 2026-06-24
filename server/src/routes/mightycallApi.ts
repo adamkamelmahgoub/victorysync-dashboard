@@ -505,7 +505,7 @@ router.post('/mightycall/sync', async (req, res) => {
     const scopedRecentCalls = (await Promise.all(
       scope.orgIds.map((orgId) => withTimeout(syncRecentCalls(FIVE_YEAR_CALL_WINDOW_HOURS, orgId), 90_000, 0))
     )).reduce((sum, count) => sum + Number(count || 0), 0);
-    const scopedCallDetails = await withTimeout(syncCallDetails(1000), 120_000, {
+    const scopedCallDetails = await withTimeout(syncCallDetails(100), 45_000, {
       details: 0,
       recordings: 0,
       transfers: 0,
@@ -544,7 +544,7 @@ router.post('/mightycall/sync/recordings', async (req, res) => {
     const scope = await getSyncOrgIds(req);
     const [journal, details] = await Promise.all([
       runLegacyJournalSync(req, { includeReports: false, includeCalls: false, includeRecordings: true, includeSms: false }),
-      Promise.all(scope.orgIds.map((orgId) => syncRecentCalls(FIVE_YEAR_CALL_WINDOW_HOURS, orgId))).then(() => syncCallDetails(1000)),
+      Promise.all(scope.orgIds.map((orgId) => syncRecentCalls(FIVE_YEAR_CALL_WINDOW_HOURS, orgId))).then(() => syncCallDetails(100)),
     ]);
     res.json({
       ok: true,

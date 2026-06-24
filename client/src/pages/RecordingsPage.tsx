@@ -186,7 +186,8 @@ export function RecordingsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `recording-${recording.id}.mp3`;
+      const extension = blob.type.includes('wav') ? 'wav' : blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') || blob.type.includes('m4a') ? 'm4a' : 'mp3';
+      a.download = `recording-${recording.id}.${extension}`;
       document.body.appendChild(a);
       a.click();
       a.remove();

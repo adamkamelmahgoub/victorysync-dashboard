@@ -976,23 +976,27 @@ function normalizeRecordingRows(rows: any[], ownedDigits: Set<string>) {
       raw?.caller_number,
       row.from_number,
       metadata?.from_number,
-      raw?.from_number
+      raw?.from_number,
+      raw?.caller?.phone,
+      raw?.caller?.number
     );
     const origin = String(firstString(metadata?.origin, raw?.origin, row.direction, metadata?.callDirection, raw?.callDirection) || '').toLowerCase();
     const fromNumber = origin.includes('out')
       ? (businessNumber || row.from_number || metadata?.from_number || null)
-      : firstString(row.from_number, metadata?.from_number, raw?.from_number, metadata?.client?.address, raw?.client?.address);
+      : firstString(row.from_number, metadata?.from_number, raw?.from_number, raw?.caller?.phone, raw?.caller?.number, metadata?.client?.address, raw?.client?.address);
     const toNumber = origin.includes('out')
-      ? (clientNumber || row.to_number || metadata?.to_number || null)
-      : firstString(row.to_number, metadata?.to_number, raw?.to_number, metadata?.businessNumber?.number, raw?.businessNumber?.number);
+      ? (clientNumber || row.to_number || metadata?.to_number || raw?.called?.[0]?.phone || raw?.called?.[0]?.number || null)
+      : firstString(row.to_number, metadata?.to_number, raw?.to_number, metadata?.businessNumber?.number, raw?.businessNumber?.number, businessNumber);
     const recordingUrl = recordingUrlOf(row);
     const direction = normalizeDirection({ ...row, from_number: fromNumber, to_number: toNumber, business_number: businessNumber, metadata, raw_payload: raw }, ownedDigits);
+    const displayFromNumber = direction === 'outbound' ? (fromNumber || businessNumber) : fromNumber;
+    const displayToNumber = direction === 'inbound' ? (toNumber || businessNumber) : toNumber;
     return {
       ...row,
       recording_id: recordingIdOf(row),
       recording_url: recordingUrl,
-      from_number: fromNumber,
-      to_number: toNumber,
+      from_number: displayFromNumber,
+      to_number: displayToNumber || businessNumber,
       business_number: businessNumber,
       direction,
       duration_seconds: recordingDurationSeconds({ ...row, metadata, raw_payload: raw }),
@@ -1098,10 +1102,12 @@ function normalizeCallRows(rows: any[], ownedDigits: Set<string>) {
       metadata,
       raw_payload: raw,
     }, ownedDigits);
+    const displayFromNumber = direction === 'outbound' ? (fromNumber || businessNumber) : fromNumber;
+    const displayToNumber = direction === 'inbound' ? (toNumber || businessNumber) : toNumber;
     const normalizedRow = {
       ...row,
-      from_number: fromNumber,
-      to_number: toNumber || businessNumber,
+      from_number: displayFromNumber,
+      to_number: displayToNumber || businessNumber,
       business_number: businessNumber,
       started_at: startedAt,
       ended_at: endedAt,

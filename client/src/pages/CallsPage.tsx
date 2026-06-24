@@ -212,6 +212,32 @@ export default function CallsPage() {
     return { answered, missed, inbound, outbound, recordings, avgDuration };
   }, [visibleRows]);
 
+  const coldCalling = useMemo(() => {
+    const outboundRows = visibleRows.filter((row) => directionOf(row) === 'outbound');
+    const connected = outboundRows.filter((row) => ['answered', 'completed'].includes(normalizeCallStatus(statusOf(row))));
+    const noAnswer = outboundRows.filter((row) => ['missed', 'failed', 'abandoned'].includes(normalizeCallStatus(statusOf(row))));
+    const recordings = outboundRows.filter((row) => row.recording_url || row.has_recording);
+    const connectRate = outboundRows.length > 0 ? Math.round((connected.length / outboundRows.length) * 1000) / 10 : 0;
+    const avgDuration = averageHandleTimeSeconds(connected);
+    const byAgent = new Map<string, { agent: string; attempts: number; connected: number; noAnswer: number; recordings: number; avgDuration: number; durationTotal: number }>();
+    for (const row of outboundRows) {
+      const agent = String(row.agent_name || row.agent_extension || row.extension || 'Unassigned');
+      const current = byAgent.get(agent) || { agent, attempts: 0, connected: 0, noAnswer: 0, recordings: 0, avgDuration: 0, durationTotal: 0 };
+      current.attempts += 1;
+      const normalizedStatus = normalizeCallStatus(statusOf(row));
+      if (['answered', 'completed'].includes(normalizedStatus)) current.connected += 1;
+      if (['missed', 'failed', 'abandoned'].includes(normalizedStatus)) current.noAnswer += 1;
+      if (row.recording_url || row.has_recording) current.recordings += 1;
+      current.durationTotal += Number(row.duration_seconds || row.duration || 0) || 0;
+      byAgent.set(agent, current);
+    }
+    const agents = Array.from(byAgent.values())
+      .map((row) => ({ ...row, avgDuration: row.connected > 0 ? Math.round(row.durationTotal / row.connected) : 0 }))
+      .sort((a, b) => b.attempts - a.attempts || b.connected - a.connected)
+      .slice(0, 8);
+    return { attempts: outboundRows.length, connected: connected.length, noAnswer: noAnswer.length, recordings: recordings.length, connectRate, avgDuration, agents };
+  }, [visibleRows]);
+
   const openRecording = async (row: CallRow) => {
     const recordingId = row.recording_id || row.recordingId || row.mightycall_recording_id || (row.recording_url ? row.id : null);
     if (!user?.id || !recordingId) {
@@ -363,6 +389,54 @@ export default function CallsPage() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Cold calling tracker"
+          description="Outbound activity from MightyCall, grouped for sales and follow-up coaching."
+          contentClassName="p-0"
+        >
+          <div className="grid grid-cols-1 gap-4 border-b border-slate-200 p-5 md:grid-cols-3 xl:grid-cols-6">
+            <MetricStatCard label="Outbound attempts" value={coldCalling.attempts} hint="Calls placed" />
+            <MetricStatCard label="Connected" value={coldCalling.connected} hint="Answered or completed" accent="emerald" />
+            <MetricStatCard label="No answer / failed" value={coldCalling.noAnswer} hint="Follow-up needed" accent="amber" />
+            <MetricStatCard label="Connect rate" value={`${coldCalling.connectRate}%`} hint="Connected / attempts" accent="cyan" />
+            <MetricStatCard label="Avg talk time" value={formatSeconds(coldCalling.avgDuration)} hint="Connected calls" />
+            <MetricStatCard label="Recordings" value={coldCalling.recordings} hint="Outbound recordings" />
+          </div>
+          {coldCalling.agents.length === 0 ? (
+            <div className="p-5">
+              <EmptyStatePanel title="No outbound calls in this view" description="Widen the date range or sync MightyCall to populate cold calling activity." />
+            </div>
+          ) : (
+            <div className="vs-table-shell overflow-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                  <tr>
+                    {['Agent / extension', 'Attempts', 'Connected', 'No answer', 'Connect rate', 'Avg duration', 'Recordings'].map((label) => (
+                      <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]">{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {coldCalling.agents.map((agent) => {
+                    const rate = agent.attempts > 0 ? Math.round((agent.connected / agent.attempts) * 1000) / 10 : 0;
+                    return (
+                      <tr key={agent.agent} className="transition hover:bg-violet-50/40">
+                        <td className="px-4 py-3 font-medium text-slate-800">{agent.agent}</td>
+                        <td className="px-4 py-3 text-slate-700">{agent.attempts}</td>
+                        <td className="px-4 py-3 text-slate-700">{agent.connected}</td>
+                        <td className="px-4 py-3 text-slate-700">{agent.noAnswer}</td>
+                        <td className="px-4 py-3"><StatusBadge tone={rate >= 35 ? 'success' : rate >= 15 ? 'info' : 'warning'}>{rate}%</StatusBadge></td>
+                        <td className="px-4 py-3 text-slate-700">{formatSeconds(agent.avgDuration)}</td>
+                        <td className="px-4 py-3 text-slate-700">{agent.recordings}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </SectionCard>

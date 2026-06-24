@@ -15630,9 +15630,17 @@ app.get("/s/series", async (req, res) => {
         } as any);
       }
 
+      function recordingExtension(contentType: string | null) {
+        const type = String(contentType || '').toLowerCase();
+        if (type.includes('wav') || type.includes('wave')) return 'wav';
+        if (type.includes('ogg')) return 'ogg';
+        if (type.includes('mp4') || type.includes('m4a')) return 'm4a';
+        return 'mp3';
+      }
+
       function streamRecordingResponse(req: express.Request, res: express.Response, id: string, fetched: any) {
         const contentType = fetched.headers.get('content-type') || 'audio/mpeg';
-        const filename = `${id}.mp3`;
+        const filename = `${id}.${recordingExtension(contentType)}`;
         const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
         res.setHeader('Content-Type', contentType);
         res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);

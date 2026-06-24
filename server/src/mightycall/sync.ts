@@ -443,12 +443,14 @@ function unwrapApiObject(body: any) {
 
 function normalizeCallRow(raw: any, owner: Awaited<ReturnType<typeof resolveOrgByBusinessNumber>>, businessNumbers: string[]) {
   const externalCallId = firstString(raw?.external_call_id, raw?.externalCallId, raw?.callId, raw?.id, raw?.requestGuid, raw?.guid);
-  const fromNumber = normalizePhone(firstString(raw?.from_number, raw?.from, raw?.caller?.phone, raw?.caller?.number, raw?.client?.address, raw?.source?.number));
-  const toNumber = normalizePhone(firstString(raw?.to_number, raw?.to, raw?.called?.[0]?.phone, raw?.called?.[0]?.number, raw?.businessNumber?.number, raw?.businessNumber, raw?.destination?.number));
-  const businessNumber = normalizePhone(firstString(raw?.business_number, raw?.businessNumber?.number, raw?.businessNumber, owner?.number, toNumber, fromNumber));
+  const rawFromNumber = normalizePhone(firstString(raw?.from_number, raw?.from, raw?.caller?.phone, raw?.caller?.number, raw?.client?.address, raw?.source?.number));
+  const rawToNumber = normalizePhone(firstString(raw?.to_number, raw?.to, raw?.called?.[0]?.phone, raw?.called?.[0]?.number, raw?.businessNumber?.number, raw?.businessNumber, raw?.destination?.number));
+  const businessNumber = normalizePhone(firstString(raw?.business_number, raw?.businessNumber?.number, raw?.businessNumber, owner?.number, rawToNumber, rawFromNumber));
   const explicitDirection = directionFromText(firstString(raw?.direction, raw?.callDirection, raw?.Direction, raw?.origin, raw?.requestOrigin));
   const directionNumbers = Array.from(new Set([...businessNumbers, owner?.number].filter((value): value is string => !!value)));
-  const direction = explicitDirection !== 'unknown' ? explicitDirection : detectDirectionFromNumbers(fromNumber, toNumber, directionNumbers);
+  const direction = explicitDirection !== 'unknown' ? explicitDirection : detectDirectionFromNumbers(rawFromNumber, rawToNumber, directionNumbers);
+  const fromNumber = direction === 'outbound' ? (rawFromNumber || businessNumber) : rawFromNumber;
+  const toNumber = direction === 'inbound' ? (rawToNumber || businessNumber) : rawToNumber;
   const extension = normalizePhoneDigits(firstString(
     raw?.extension,
     raw?.agent_extension,
@@ -1149,20 +1151,26 @@ async function upsertRecording(callRow: any, raw: any, recordingUrl: string) {
     recordingUrl
   );
   const recordedAt = firstIso(raw?.recordedAt, raw?.recordingDate, raw?.dateTimeUtc, raw?.started_at, callRow.started_at) || new Date().toISOString();
+  const direction = directionFromText(callRow.direction || raw?.direction || raw?.callDirection);
+  const businessNumber = normalizePhone(firstString(callRow.business_number, raw?.businessNumber?.number, raw?.businessNumber, callRow.to_number, callRow.from_number));
+  const rawFromNumber = normalizePhone(firstString(raw?.from_number, raw?.from, raw?.caller?.phone, raw?.caller?.number, callRow.from_number));
+  const rawToNumber = normalizePhone(firstString(raw?.to_number, raw?.to, raw?.called?.[0]?.phone, raw?.called?.[0]?.number, callRow.to_number));
+  const fromNumber = direction === 'outbound' ? (rawFromNumber || businessNumber) : rawFromNumber;
+  const toNumber = direction === 'inbound' ? (rawToNumber || businessNumber) : rawToNumber;
   const row = {
     org_id: callRow.org_id,
     external_id: externalRecordingId,
     external_recording_id: externalRecordingId,
     external_call_id: externalCallId,
     call_id: externalCallId,
-    business_number: callRow.business_number || callRow.to_number || callRow.from_number,
+    business_number: businessNumber,
     recording_url: recordingUrl,
     duration_seconds: mightyCallDurationSeconds({ ...raw, duration_seconds: callRow.duration_seconds || raw?.duration_seconds }),
     recording_date: recordedAt,
     recorded_at: recordedAt,
-    from_number: normalizePhone(firstString(raw?.from_number, raw?.from, raw?.caller?.phone, raw?.caller?.number, callRow.from_number)),
-    to_number: normalizePhone(firstString(raw?.to_number, raw?.to, raw?.called?.[0]?.phone, raw?.called?.[0]?.number, raw?.businessNumber?.number, raw?.businessNumber, callRow.to_number)),
-    direction: callRow.direction || 'unknown',
+    from_number: fromNumber,
+    to_number: toNumber,
+    direction: direction !== 'unknown' ? direction : (callRow.direction || 'unknown'),
     extension: callRow.agent_extension || null,
     raw_payload: raw,
     metadata: raw,
