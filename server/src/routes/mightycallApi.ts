@@ -19,6 +19,7 @@ import {
 } from '../integrations/mightycall';
 
 const router = express.Router();
+const FIVE_YEAR_CALL_WINDOW_HOURS = 24 * 365 * 5;
 let lastInlineLiveRefreshAt = 0;
 let lastInlineLiveRefreshResult: any = null;
 
@@ -502,13 +503,21 @@ router.post('/mightycall/sync', async (req, res) => {
       runLegacyJournalSync(req, { includeReports: true, includeCalls: true, includeRecordings: true, includeSms: true }),
     ]);
     const scopedRecentCalls = (await Promise.all(
-      scope.orgIds.map((orgId) => withTimeout(syncRecentCalls(168, orgId), 12_000, 0))
+      scope.orgIds.map((orgId) => withTimeout(syncRecentCalls(FIVE_YEAR_CALL_WINDOW_HOURS, orgId), 90_000, 0))
     )).reduce((sum, count) => sum + Number(count || 0), 0);
+    const scopedCallDetails = await withTimeout(syncCallDetails(1000), 120_000, {
+      details: 0,
+      recordings: 0,
+      transfers: 0,
+      transferDetailsSupported: false,
+    });
     res.json({
       ...apiResult,
       journal: journalResult,
       syncedCalls: (apiResult.syncedCalls || 0) + journalResult.callsSynced + scopedRecentCalls,
-      syncedRecordings: (apiResult.syncedRecordings || 0) + journalResult.recordingsSynced,
+      syncedCallDetails: (apiResult.syncedCallDetails || 0) + scopedCallDetails.details,
+      syncedRecordings: (apiResult.syncedRecordings || 0) + journalResult.recordingsSynced + scopedCallDetails.recordings,
+      syncedTransfers: (apiResult.syncedTransfers || 0) + scopedCallDetails.transfers,
       syncedSms: (apiResult.syncedSms || 0) + journalResult.smsSynced,
       warnings: [...(apiResult.warnings || []), ...journalResult.warnings],
     });
@@ -535,7 +544,7 @@ router.post('/mightycall/sync/recordings', async (req, res) => {
     const scope = await getSyncOrgIds(req);
     const [journal, details] = await Promise.all([
       runLegacyJournalSync(req, { includeReports: false, includeCalls: false, includeRecordings: true, includeSms: false }),
-      Promise.all(scope.orgIds.map((orgId) => syncRecentCalls(168, orgId))).then(() => syncCallDetails(100)),
+      Promise.all(scope.orgIds.map((orgId) => syncRecentCalls(FIVE_YEAR_CALL_WINDOW_HOURS, orgId))).then(() => syncCallDetails(1000)),
     ]);
     res.json({
       ok: true,

@@ -746,11 +746,32 @@ export async function syncRecentCalls(windowHours = 48, fallbackOrgId?: string |
   const rawCalls = await fetchCallPages(start, end, windowHours > 24 * 14 ? 50 : 10);
   const businessPhones = await loadBusinessNumbers();
   const businessNumbers = businessPhones.map((phone) => phone.number).filter((value): value is string => !!value);
+  const businessPhoneByDigits = new Map<string, (typeof businessPhones)[number]>();
+  for (const phone of businessPhones) {
+    if (phone.digits) businessPhoneByDigits.set(phone.digits, phone);
+  }
   const membersByExt = await loadOrgMembersByExtension();
+  const historicalBackfill = windowHours > 24 * 14;
   let count = 0;
   const activeKeys = new Set<string>();
-  for (const raw of rawCalls.slice(0, 500)) {
-    let owner = await resolveOrgByBusinessNumber(raw?.businessNumber?.number, raw?.businessNumber, raw?.to, raw?.to_number, raw?.from, raw?.from_number);
+  const historicalLogRows: Record<string, any>[] = [];
+  for (const raw of rawCalls) {
+    const candidateDigits = [
+      raw?.businessNumber?.number,
+      raw?.businessNumber,
+      raw?.to,
+      raw?.to_number,
+      raw?.from,
+      raw?.from_number,
+    ].map((value) => normalizePhoneDigits(value)).filter(Boolean);
+    let owner: (typeof businessPhones)[number] | null = null;
+    for (const digits of candidateDigits) {
+      const match = businessPhoneByDigits.get(digits || '');
+      if (match) {
+        owner = match;
+        break;
+      }
+    }
     if (!owner && fallbackOrgId) {
       const businessNumber = normalizePhone(firstString(raw?.businessNumber?.number, raw?.businessNumber, raw?.to, raw?.to_number, raw?.from, raw?.from_number));
       owner = {
@@ -762,6 +783,11 @@ export async function syncRecentCalls(windowHours = 48, fallbackOrgId?: string |
     }
     const call = normalizeCallRow(raw, owner, businessNumbers);
     if (!call.orgId || !call.externalCallId) continue;
+    if (historicalBackfill) {
+      historicalLogRows.push(callLogRow(call));
+      count += 1;
+      continue;
+    }
     const saved = await upsertCall(call);
     if (!saved) continue;
     const activeStatus = liveStatusFromCall({ ...raw, ...call });
@@ -786,6 +812,9 @@ export async function syncRecentCalls(windowHours = 48, fallbackOrgId?: string |
       }, raw, call.recordingUrl);
     }
     count += 1;
+  }
+  if (historicalBackfill) {
+    return saveCallLogRowsBatch(historicalLogRows);
   }
   await expireCallPollStatuses(activeKeys);
   return count;
@@ -950,25 +979,9 @@ async function expireCallPollStatuses(activeKeys: Set<string>) {
 }
 
 async function upsertCall(call: ReturnType<typeof normalizeCallRow>) {
-  const logRow = {
-    org_id: call.orgId,
-    external_id: call.externalCallId,
-    from_number: call.fromNumber,
-    to_number: call.toNumber,
-    from_number_digits: normalizePhoneDigits(call.fromNumber),
-    to_number_digits: normalizePhoneDigits(call.toNumber),
-    started_at: call.startedAt,
-    answered_at: call.connectedAt,
-    ended_at: call.endedAt,
-    duration_seconds: call.durationSeconds,
-    status: call.status,
-    direction: call.direction,
-    agent_extension: call.extension,
-    metadata: call.raw,
-    raw_payload: call.raw,
-    updated_at: new Date().toISOString(),
-  };
+  const logRow = callLogRow(call);
   const logSaved = await saveCallLogRow(logRow);
+  if (logSaved) return true;
 
   const legacyRow = {
     ...logRow,
@@ -987,6 +1000,44 @@ async function upsertCall(call: ReturnType<typeof normalizeCallRow>) {
     return false;
   }
   return true;
+}
+
+function callLogRow(call: ReturnType<typeof normalizeCallRow>) {
+  return {
+    org_id: call.orgId,
+    external_id: call.externalCallId,
+    from_number: call.fromNumber,
+    to_number: call.toNumber,
+    from_number_digits: normalizePhoneDigits(call.fromNumber),
+    to_number_digits: normalizePhoneDigits(call.toNumber),
+    started_at: call.startedAt,
+    answered_at: call.connectedAt,
+    ended_at: call.endedAt,
+    duration_seconds: call.durationSeconds,
+    status: call.status,
+    direction: call.direction,
+    agent_extension: call.extension,
+    metadata: call.raw,
+    raw_payload: call.raw,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function saveCallLogRowsBatch(rows: Record<string, any>[]) {
+  let saved = 0;
+  for (let index = 0; index < rows.length; index += 500) {
+    const chunk = rows.slice(index, index + 500);
+    const result = await supabaseAdmin.from('mightycall_call_logs').upsert(chunk, { onConflict: 'org_id,external_id' });
+    if (!result.error) {
+      saved += chunk.length;
+      continue;
+    }
+    console.warn('[mightycall sync] batch call-log upsert failed, falling back:', result.error.message);
+    for (const row of chunk) {
+      if (await saveCallLogRow(row)) saved += 1;
+    }
+  }
+  return saved;
 }
 
 async function saveCallLogRow(row: Record<string, any>) {
