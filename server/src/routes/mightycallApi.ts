@@ -496,15 +496,18 @@ router.post('/live-status/sync', async (req, res) => {
 
 router.post('/mightycall/sync', async (req, res) => {
   try {
-    await getSyncOrgIds(req);
+    const scope = await getSyncOrgIds(req);
     const [apiResult, journalResult] = await Promise.all([
       runMightyCallSync('manual-full-sync'),
       runLegacyJournalSync(req, { includeReports: true, includeCalls: true, includeRecordings: true, includeSms: true }),
     ]);
+    const scopedRecentCalls = (await Promise.all(
+      scope.orgIds.map((orgId) => withTimeout(syncRecentCalls(168, orgId), 12_000, 0))
+    )).reduce((sum, count) => sum + Number(count || 0), 0);
     res.json({
       ...apiResult,
       journal: journalResult,
-      syncedCalls: (apiResult.syncedCalls || 0) + journalResult.callsSynced,
+      syncedCalls: (apiResult.syncedCalls || 0) + journalResult.callsSynced + scopedRecentCalls,
       syncedRecordings: (apiResult.syncedRecordings || 0) + journalResult.recordingsSynced,
       syncedSms: (apiResult.syncedSms || 0) + journalResult.smsSynced,
       warnings: [...(apiResult.warnings || []), ...journalResult.warnings],
@@ -529,10 +532,10 @@ router.get('/mightycall/sync/status', async (req, res) => {
 
 router.post('/mightycall/sync/recordings', async (req, res) => {
   try {
-    await getSyncOrgIds(req);
+    const scope = await getSyncOrgIds(req);
     const [journal, details] = await Promise.all([
       runLegacyJournalSync(req, { includeReports: false, includeCalls: false, includeRecordings: true, includeSms: false }),
-      syncRecentCalls(168).then(() => syncCallDetails(100)),
+      Promise.all(scope.orgIds.map((orgId) => syncRecentCalls(168, orgId))).then(() => syncCallDetails(100)),
     ]);
     res.json({
       ok: true,

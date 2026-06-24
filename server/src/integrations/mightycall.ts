@@ -265,10 +265,38 @@ async function requestWithRetry(url: string, opts: any, retries = 2, backoff = 2
   }
 }
 
+function normalizeMightyCallAuthBase(base: string) {
+  let b = (base || 'https://ccapi.mightycall.com/v4/api').replace(/\/$/, '');
+  b = b.replace(/\/api$/i, '');
+  if (!/\/v4$/i.test(b)) b = `${b}/v4`;
+  return b;
+}
+
+function normalizeMightyCallApiBase(base: string) {
+  return `${normalizeMightyCallAuthBase(base)}/api`;
+}
+
+function cleanMightyCallEndpoint(endpoint: string) {
+  return `/${String(endpoint || '').replace(/^\/+/, '')}`
+    .replace(/^\/v4\/api\//i, '/')
+    .replace(/^\/v4\//i, '/')
+    .replace(/^\/api\//i, '/');
+}
+
+function uniqueUrls(urls: string[]) {
+  return Array.from(new Set(urls));
+}
+
 function buildUrlVariants(base: string, endpoint: string) {
-  const b = (base || '').replace(/\/$/, '');
-  const ep = endpoint || '';
-  return [`${b}${ep}`, `${b}/api${ep}`];
+  const ep = cleanMightyCallEndpoint(endpoint);
+  const apiBase = normalizeMightyCallApiBase(base);
+  const authBase = normalizeMightyCallAuthBase(base);
+  return uniqueUrls([`${apiBase}${ep}`, `${authBase}${ep}`]);
+}
+
+function buildAuthUrlVariants(base: string, endpoint: string) {
+  const ep = cleanMightyCallEndpoint(endpoint);
+  return uniqueUrls([`${normalizeMightyCallAuthBase(base)}${ep}`]);
 }
 
 const DEFAULT_MIGHTYCALL_HISTORY_START = '2020-01-01';
@@ -291,7 +319,7 @@ export async function getMightyCallAccessToken(override?: { clientId?: string; c
     return cached.token;
   }
   const authEndpoints = ['/auth/token', '/oauth/token', '/auth/access_token', '/token'];
-  const candidates = authEndpoints.flatMap((ep) => buildUrlVariants(base, ep));
+  const candidates = authEndpoints.flatMap((ep) => buildAuthUrlVariants(base, ep));
 
   const formBody = new URLSearchParams();
   formBody.append('grant_type', 'client_credentials');
@@ -2131,6 +2159,7 @@ export async function syncMightyCallCallHistory(
   overrideCreds?: any
 ): Promise<{ callsSynced: number }> {
   const token = await getMightyCallAccessToken(overrideCreds);
+  const apiKeyOverride = overrideCreds?.clientId || overrideCreds?.apiKey || undefined;
   const range = resolveSyncDateRange(
     String(filters?.dateStart || filters?.startUtc || ''),
     String(filters?.dateEnd || filters?.endUtc || '')
@@ -2142,7 +2171,7 @@ export async function syncMightyCallCallHistory(
     endUtc: end.includes('T') ? end : `${end}T23:59:59Z`,
     pageSize: '200',
     skip: '0'
-  }).catch(() => []);
+  }, apiKeyOverride).catch(() => []);
 
   // Fallback to journal requests when calls endpoint is empty for this account.
   if (!Array.isArray(calls) || calls.length === 0) {
@@ -2152,7 +2181,7 @@ export async function syncMightyCallCallHistory(
       type: 'Call',
       pageSize: '200',
       page: '1'
-    }).catch(() => []);
+    }, apiKeyOverride).catch(() => []);
     calls = (Array.isArray(journalCalls) ? journalCalls : []).map((r: any) => ({
       id: r?.id || r?.requestGuid || null,
       from: r?.from || r?.from_number || r?.client?.address || null,
@@ -2186,18 +2215,31 @@ export async function syncMightyCallCallHistory(
       ).trim() || null;
       const started = c?.dateTimeUtc || c?.started_at || c?.start_time || c?.created || c?.timestamp || new Date().toISOString();
       const ended = c?.endedAt || c?.ended_at || c?.end_time || null;
-      const duration = Number(c?.duration ?? c?.durationSeconds ?? c?.callDuration ?? 0) || 0;
+      const explicitSeconds = Number(c?.duration_seconds ?? c?.durationSeconds ?? c?.callDurationSeconds ?? 0) || 0;
+      const rawDuration = Number(c?.duration ?? c?.callDuration ?? 0) || 0;
+      const duration = explicitSeconds > 0 ? explicitSeconds : (rawDuration > 0 ? Math.max(1, Math.round(rawDuration / 1000)) : 0);
       const st = String(c?.status || c?.callStatus || c?.state || '').toLowerCase();
+      const externalId = String(c?.id || c?.callId || c?.external_id || c?.requestGuid || `${started}:${from || ''}:${to || ''}`);
+      const businessNumber = pickPhoneText(c?.businessNumber?.number, c?.businessNumber, c?.business_number, to);
+      const recordingUrl = pickPhoneText(c?.callRecord?.uri, c?.callRecord?.fileName, c?.recordingUrl, c?.recording_url);
       return {
         org_id: orgId,
-        direction: c?.direction || (to && from ? 'inbound' : null),
+        external_id: externalId,
+        external_call_id: externalId,
+        business_number: businessNumber,
+        direction: directionFromText(c?.direction) !== 'unknown' ? directionFromText(c?.direction) : (to && from ? 'inbound' : null),
         from_number: from,
         to_number: to,
+        from_number_digits: from ? from.replace(/\D/g, '') : null,
         to_number_digits: to ? to.replace(/\D/g, '') : null,
         status: st || null,
         duration_seconds: duration,
         started_at: started,
         ended_at: ended,
+        has_recording: !!recordingUrl,
+        recording_url: recordingUrl,
+        metadata: c,
+        raw_payload: c,
         created_at: new Date().toISOString()
       };
     });

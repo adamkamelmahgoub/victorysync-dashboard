@@ -24,7 +24,7 @@ export default function AdminMightyCallPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [userKey, setUserKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState('https://ccapi.mightycall.com/v4');
+  const [baseUrl, setBaseUrl] = useState('https://ccapi.mightycall.com/v4/api');
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [integrationHealth, setIntegrationHealth] = useState<any | null>(null);
   const [syncJobs, setSyncJobs] = useState<any[]>([]);
@@ -209,7 +209,7 @@ export default function AdminMightyCallPage() {
             </div>
             <div className="md:col-span-2">
               <label className="mb-1 block text-sm font-medium text-slate-300">Base URL</label>
-              <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://ccapi.mightycall.com/v4" className="vs-input w-full" />
+              <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://ccapi.mightycall.com/v4/api" className="vs-input w-full" />
             </div>
             <div className="md:col-span-2 flex justify-end">
               <button onClick={handleSaveIntegration} disabled={isCreating || !apiKey || !userKey} className="vs-button-primary">

@@ -16,7 +16,7 @@
  * REQUIRED FOR MIGHTYCALL SYNC:
  * - MIGHTYCALL_API_KEY: MightyCall API key for authentication
  * - MIGHTYCALL_USER_KEY: MightyCall user/account key
- * - MIGHTYCALL_API_BASE_URL or MIGHTYCALL_BASE_URL: MightyCall API base URL (default: https://ccapi.mightycall.com/v4)
+ * - MIGHTYCALL_API_BASE_URL or MIGHTYCALL_BASE_URL: MightyCall API base URL (default: https://ccapi.mightycall.com/v4/api)
  * 
  * LOCAL DEVELOPMENT:
  * - Create a .env file in the server root directory with all of the above
@@ -64,7 +64,7 @@ export const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 export const MIGHTYCALL_API_KEY = process.env.MIGHTYCALL_API_KEY;
 export const MIGHTYCALL_USER_KEY = process.env.MIGHTYCALL_USER_KEY;
-export const MIGHTYCALL_BASE_URL = process.env.MIGHTYCALL_API_BASE_URL || process.env.MIGHTYCALL_BASE_URL || 'https://ccapi.mightycall.com/v4';
+export const MIGHTYCALL_BASE_URL = process.env.MIGHTYCALL_API_BASE_URL || process.env.MIGHTYCALL_BASE_URL || 'https://ccapi.mightycall.com/v4/api';
 export const INTEGRATIONS_KEY = process.env.INTEGRATIONS_KEY || process.env.SERVICE_KEY || process.env.SERVER_SERVICE_KEY || null;
 export const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || process.env.APP_URL || process.env.DASHBOARD_URL || null;
 

@@ -87,7 +87,10 @@ function safeNumber(value: unknown): number {
 }
 
 function durationToSeconds(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.round(value));
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const rounded = Math.max(0, Math.round(value));
+    return rounded > 12 * 60 * 60 ? Math.round(rounded / 1000) : rounded;
+  }
   if (value && typeof value === 'object') {
     const item: any = value;
     const seconds = firstValue(
@@ -105,7 +108,10 @@ function durationToSeconds(value: unknown): number {
   }
   const text = String(value || '').trim();
   if (!text) return 0;
-  if (/^\d+(\.\d+)?$/.test(text)) return Math.max(0, Math.round(Number(text)));
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const rounded = Math.max(0, Math.round(Number(text)));
+    return rounded > 12 * 60 * 60 ? Math.round(rounded / 1000) : rounded;
+  }
   const parts = text.split(':').map((part) => Number(part));
   if (parts.length >= 2 && parts.every((part) => Number.isFinite(part))) {
     return Math.max(0, Math.round(parts.reduce((total, part) => total * 60 + part, 0)));
@@ -321,6 +327,9 @@ function recordingUrlOf(row: any): string | null {
     metadata?.downloadUrl,
     metadata?.audio_url,
     metadata?.recording?.url,
+    metadata?.callRecord?.uri,
+    metadata?.callRecord?.url,
+    metadata?.callRecord?.fileName,
     metadata?.recording?.link,
     metadata?.recording?.downloadUrl,
     metadata?.recordings?.[0]?.url,
@@ -333,6 +342,9 @@ function recordingUrlOf(row: any): string | null {
     raw?.downloadUrl,
     raw?.audio_url,
     raw?.recording?.url,
+    raw?.callRecord?.uri,
+    raw?.callRecord?.url,
+    raw?.callRecord?.fileName,
     raw?.recording?.link,
     raw?.recording?.downloadUrl,
     raw?.recordings?.[0]?.url,
@@ -353,11 +365,17 @@ function recordingIdOf(row: any): string | null {
     metadata?.recordingId,
     metadata?.external_recording_id,
     metadata?.recording?.id,
+    metadata?.callRecord?.id,
+    metadata?.callRecord?.fileName,
+    metadata?.callRecord?.uri,
     metadata?.recordings?.[0]?.id,
     raw?.recording_id,
     raw?.recordingId,
     raw?.external_recording_id,
     raw?.recording?.id,
+    raw?.callRecord?.id,
+    raw?.callRecord?.fileName,
+    raw?.callRecord?.uri,
     raw?.recordings?.[0]?.id
   );
 }
@@ -1016,7 +1034,9 @@ function normalizeCallRows(rows: any[], ownedDigits: Set<string>) {
       raw?.from_number,
       raw?.from,
       raw?.caller_number,
+      raw?.caller?.phone,
       raw?.caller?.number,
+      raw?.caller,
       raw?.client?.address,
       raw?.client?.number
     );
@@ -1036,7 +1056,10 @@ function normalizeCallRows(rows: any[], ownedDigits: Set<string>) {
       raw?.called_number,
       raw?.destination_number,
       raw?.called?.[0]?.phone,
-      raw?.called?.[0]?.number
+      raw?.called?.[0]?.number,
+      raw?.called?.phone,
+      raw?.called?.number,
+      Array.isArray(raw?.called) ? raw?.called?.[0] : raw?.called
     );
     const businessNumber = firstString(
       row.business_number,
@@ -1078,7 +1101,7 @@ function normalizeCallRows(rows: any[], ownedDigits: Set<string>) {
     const normalizedRow = {
       ...row,
       from_number: fromNumber,
-      to_number: toNumber,
+      to_number: toNumber || businessNumber,
       business_number: businessNumber,
       started_at: startedAt,
       ended_at: endedAt,

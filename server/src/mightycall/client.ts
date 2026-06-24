@@ -1,15 +1,37 @@
 import fetch from 'node-fetch';
 import { MIGHTYCALL_API_KEY, MIGHTYCALL_BASE_URL, MIGHTYCALL_USER_KEY } from '../config/env';
 
-const BASE_URL = (
+const CONFIGURED_BASE_URL = (
   process.env.MIGHTYCALL_API_BASE_URL ||
   MIGHTYCALL_BASE_URL ||
-  'https://ccapi.mightycall.com/v4'
+  'https://ccapi.mightycall.com/v4/api'
 ).replace(/\/$/, '');
+const API_BASE_URL = normalizeApiBaseUrl(CONFIGURED_BASE_URL);
+const AUTH_BASE_URL = normalizeAuthBaseUrl(CONFIGURED_BASE_URL);
 
 const REQUEST_TIMEOUT_MS = 15_000;
 let cachedToken: { accessToken: string; expiresAt: number } | null = null;
 const unsupportedPaths = new Set<string>();
+
+function normalizeAuthBaseUrl(raw: string) {
+  let base = (raw || 'https://ccapi.mightycall.com/v4/api').replace(/\/$/, '');
+  base = base.replace(/\/api$/i, '');
+  if (!/\/v4$/i.test(base)) base = `${base}/v4`;
+  return base;
+}
+
+function normalizeApiBaseUrl(raw: string) {
+  const authBase = normalizeAuthBaseUrl(raw);
+  return `${authBase}/api`;
+}
+
+function apiPath(path: string) {
+  const clean = `/${String(path || '').replace(/^\/+/, '')}`
+    .replace(/^\/v4\/api\//i, '/')
+    .replace(/^\/v4\//i, '/')
+    .replace(/^\/api\//i, '/');
+  return clean;
+}
 
 function redact(value: string) {
   return value
@@ -39,7 +61,7 @@ export async function getMightyCallToken(): Promise<string> {
   body.set('client_id', apiKey);
   body.set('client_secret', userKey);
 
-  const response = await withTimeout((signal) => fetch(`${BASE_URL}/auth/token`, {
+  const response = await withTimeout((signal) => fetch(`${AUTH_BASE_URL}/auth/token`, {
     method: 'POST',
     headers: {
       'x-api-key': apiKey,
@@ -69,7 +91,8 @@ export async function mightyCallGet<T>(
 ): Promise<T> {
   const token = await getMightyCallToken();
   const apiKey = process.env.MIGHTYCALL_API_KEY || MIGHTYCALL_API_KEY || '';
-  const url = new URL(`${BASE_URL}${path.startsWith('/') ? path : `/${path}`}`);
+  const normalizedPath = apiPath(path);
+  const url = new URL(`${API_BASE_URL}${normalizedPath}`);
   for (const [key, value] of Object.entries(query || {})) {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
   }
@@ -91,7 +114,8 @@ export async function mightyCallGet<T>(
 export async function mightyCallPost<T>(path: string, payload?: unknown): Promise<T> {
   const token = await getMightyCallToken();
   const apiKey = process.env.MIGHTYCALL_API_KEY || MIGHTYCALL_API_KEY || '';
-  const response = await withTimeout((signal) => fetch(`${BASE_URL}${path.startsWith('/') ? path : `/${path}`}`, {
+  const normalizedPath = apiPath(path);
+  const response = await withTimeout((signal) => fetch(`${API_BASE_URL}${normalizedPath}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -129,5 +153,5 @@ export async function mightyCallGetFirst<T>(
 }
 
 export function getMightyCallApiBaseUrl() {
-  return BASE_URL;
+  return API_BASE_URL;
 }
