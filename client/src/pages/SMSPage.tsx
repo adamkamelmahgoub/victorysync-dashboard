@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
-import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, SegmentedControl, StatusBadge } from '../components/DashboardPrimitives';
 import { getOrgPhoneNumbers, type PhoneNumber } from '../lib/phonesApi';
-import { sendSmsMessage, triggerMightyCallSMSSync } from '../lib/apiClient';
+import { fetchJson, sendSmsMessage, triggerMightyCallSMSSync } from '../lib/apiClient';
 import { formatPhoneNumber, normalizePhoneDigits, normalizeSmsDirection } from '../lib/reportingMetrics';
 
 interface SMSMessage {
@@ -105,19 +104,12 @@ export function SMSPage() {
 		      if (search.trim()) q.set('search', search.trim());
 		      if (directionFilter !== 'all') q.set('direction', directionFilter);
 
-      const response = await fetch(buildApiUrl(`/api/reports/sms?${q.toString()}`), {
+      const data = await fetchJson(`/api/reports/sms?${q.toString()}`, {
         headers: {
           'x-user-id': user.id,
           'Content-Type': 'application/json',
         },
       });
-
-      if (!response.ok) {
-        setError('Failed to fetch SMS messages');
-        return;
-      }
-
-      const data = await response.json();
       const rows: SMSMessage[] = data.messages || [];
       setMessages((previous) => (reset ? rows : [...previous, ...rows]));
       setNextOffset(data.next_offset ?? null);
@@ -163,15 +155,10 @@ export function SMSPage() {
       }
       try {
         const rows = isPlatformAdmin
-          ? await fetch(buildApiUrl('/api/admin/phone-numbers'), { headers: { 'x-user-id': user.id } })
-              .then(async (response) => {
-                if (!response.ok) throw new Error('Failed to fetch sender numbers');
-                const data = await response.json();
-                return (data.phone_numbers || data.numbers || []).map((row: any) => ({
-                  ...row,
-                  org_id: row.org_id || row.orgId || null,
-                })) as PhoneNumber[];
-              })
+          ? ((await fetchJson('/api/admin/phone-numbers', { headers: { 'x-user-id': user.id } })).phone_numbers || []).map((row: any) => ({
+              ...row,
+              org_id: row.org_id || row.orgId || null,
+            })) as PhoneNumber[]
           : await getOrgPhoneNumbers(orgId, user.id);
         if (cancelled) return;
         const usable = (rows || []).filter((row) => row.number);

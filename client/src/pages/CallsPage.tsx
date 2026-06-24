@@ -4,7 +4,7 @@ import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
-import { buildApiUrl } from '../config';
+import { apiFetch, fetchJson } from '../lib/apiClient';
 import {
   averageHandleTimeSeconds,
   countMissedCalls,
@@ -174,11 +174,9 @@ export default function CallsPage() {
       q.set('org_id', orgId);
       q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
       if (endDate) q.set('end_date', endOfDayIso(endDate));
-      const response = await fetch(buildApiUrl(`/api/call-stats?${q.toString()}`), {
+      const data = await fetchJson(`/api/call-stats?${q.toString()}`, {
         headers: { 'x-user-id': user.id },
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load legacy call data');
       return {
         rows: (data.calls || []).map((row: CallRow) => normalizeLegacyCall(row, orgId)),
         total: Number(data.stats?.totalCalls || data.calls?.length || 0),
@@ -206,11 +204,9 @@ export default function CallsPage() {
       let nextPageOffset: number | null = null;
       let reportsError: Error | null = null;
       try {
-        const response = await fetch(buildApiUrl(`/api/reports/calls?${buildQuery(offset)}`), {
+        const data = await fetchJson(`/api/reports/calls?${buildQuery(offset)}`, {
           headers: { 'x-user-id': user.id },
         });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load calls');
         nextRows = data.calls || [];
         nextTotal = Number(data.total || nextRows.length || 0);
         nextPageOffset = data.next_offset ?? null;
@@ -247,13 +243,11 @@ export default function CallsPage() {
     try {
       const q = new URLSearchParams();
       if (activeOrgId) q.set('org_id', activeOrgId);
-      const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
+      await fetchJson(`/api/mightycall/sync?${q.toString()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
         body: JSON.stringify({ orgId: activeOrgId || null, startDate: isoDateDaysAgo(FIVE_YEAR_DAYS), endDate }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'Failed to sync calls');
       await loadCalls(true);
     } catch (err: any) {
       setError(err?.message || 'Failed to sync calls');
@@ -292,7 +286,7 @@ export default function CallsPage() {
       setError('Recording is not available for this call.');
       return;
     }
-    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`), {
+    const response = await apiFetch(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`, {
       headers: { 'x-user-id': user.id },
     });
     if (!response.ok) {

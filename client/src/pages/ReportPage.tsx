@@ -3,7 +3,7 @@ import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, SegmentedControl, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
-import { buildApiUrl } from '../config';
+import { apiFetch, fetchJson } from '../lib/apiClient';
 import { answerRate, formatPhoneNumber, hasRecording } from '../lib/reportingMetrics';
 
 type ReportTab = 'overview' | 'calls' | 'recordings' | 'sms' | 'transfers' | 'numbers' | 'agents';
@@ -164,11 +164,9 @@ export default function ReportPage() {
       q.set('org_id', orgId);
       q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
       if (endDate) q.set('end_date', endOfDayIso(endDate));
-      const response = await fetch(buildApiUrl(`/api/call-stats?${q.toString()}`), {
+      const data = await fetchJson(`/api/call-stats?${q.toString()}`, {
         headers: { 'x-user-id': user.id },
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load call stats');
       return {
         orgId,
         stats: data.stats || {},
@@ -189,11 +187,9 @@ export default function ReportPage() {
       if (endDate) q.set('end_date', endOfDayIso(endDate));
       if (selectedNumber) q.set('phone_number', selectedNumber);
       if (direction !== 'all') q.set('direction', direction);
-      const response = await fetch(buildApiUrl(`/api/recordings?${q.toString()}`), {
+      const data = await fetchJson(`/api/recordings?${q.toString()}`, {
         headers: { 'x-user-id': user.id },
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load recordings');
       return (data.recordings || []).map((row: Row) => ({ ...row, org_id: row.org_id || orgId, status: row.status || 'available' }));
     }));
     return loaded.flat();
@@ -236,12 +232,14 @@ export default function ReportPage() {
 
   const loadNumbers = async () => {
     if (!user?.id) return;
-    const response = await fetch(buildApiUrl(`/api/reports/numbers?${buildQuery()}`), {
-      headers: { 'x-user-id': user.id },
-    });
-    if (!response.ok) return;
-    const data = await response.json();
-    setNumbers(data.numbers || []);
+    try {
+      const data = await fetchJson(`/api/reports/numbers?${buildQuery()}`, {
+        headers: { 'x-user-id': user.id },
+      });
+      setNumbers(data.numbers || []);
+    } catch {
+      setNumbers([]);
+    }
   };
 
   const loadReport = async () => {
@@ -253,9 +251,7 @@ export default function ReportPage() {
         let nextOverview: Overview = {};
         let reportsError: Error | null = null;
         try {
-          const response = await fetch(buildApiUrl(`/api/reports/overview?${buildQuery()}`), { headers: { 'x-user-id': user.id } });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data?.detail || data?.error || 'Failed to load overview');
+          const data = await fetchJson(`/api/reports/overview?${buildQuery()}`, { headers: { 'x-user-id': user.id } });
           nextOverview = data.overview || {};
         } catch (err: any) {
           reportsError = err;
@@ -278,9 +274,7 @@ export default function ReportPage() {
         let nextRows: Row[] = [];
         let reportsError: Error | null = null;
         try {
-          const response = await fetch(buildApiUrl(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' }, { preload: true })}`), { headers: { 'x-user-id': user.id } });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data?.detail || data?.error || `Failed to load ${activeTab}`);
+          const data = await fetchJson(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' }, { preload: true })}`, { headers: { 'x-user-id': user.id } });
           nextRows = data[activeTab] || data.messages || data.agents || [];
         } catch (err: any) {
           reportsError = err;
@@ -315,11 +309,10 @@ export default function ReportPage() {
       if (activeOrgId) q.set('org_id', activeOrgId);
       q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
       if (endDate) q.set('end_date', endDate);
-      const response = await fetch(buildApiUrl(`/api/mightycall/sync?${q.toString()}`), {
+      await fetchJson(`/api/mightycall/sync?${q.toString()}`, {
         method: 'POST',
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
       });
-      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Sync failed');
       await loadReport();
       await loadNumbers();
     } catch (err: any) {
@@ -388,7 +381,7 @@ export default function ReportPage() {
   const openRecording = async (row: Row) => {
     const recordingId = row.recording_id || row.mightycall_recording_id || (row.recording_url ? row.id : null);
     if (!user?.id || !recordingId) return;
-    const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`), {
+    const response = await apiFetch(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`, {
       headers: { 'x-user-id': user.id },
     });
     if (!response.ok) throw new Error('Recording link failed');

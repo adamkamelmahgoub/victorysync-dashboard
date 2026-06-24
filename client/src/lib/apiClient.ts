@@ -111,6 +111,13 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
   return json;
 }
 
+export async function apiFetch(path: string, init?: FetchJsonInit) {
+  const url = path.startsWith("http") ? path : buildApiUrl(path);
+  const requestInit = await withBrowserAuthHeaders(url, init);
+  const { timeoutMs: _timeoutMs, ...cleanInit } = requestInit || {};
+  return fetch(url, { cache: (cleanInit as any).cache || 'no-store', ...cleanInit });
+}
+
 export type Metrics = {
   org_id?: string;
   total_calls: number;
