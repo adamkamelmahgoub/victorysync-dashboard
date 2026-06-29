@@ -73,7 +73,14 @@ export function findRecordingUrl(raw: any): string | null {
     'recordings.0.mediaUrl',
     'recordings.0.audioUrl',
   ]);
-  return value ? String(value) : null;
+  const text = value ? String(value).trim() : '';
+  if (!text) return null;
+  try {
+    const parsed = new URL(text);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? text : null;
+  } catch {
+    return null;
+  }
 }
 
 export function directionFromText(value: unknown): NormalizedDirection {

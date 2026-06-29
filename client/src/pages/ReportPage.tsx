@@ -4,7 +4,7 @@ import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, Segmente
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { apiFetch, fetchJson } from '../lib/apiClient';
-import { answerRate, formatPhoneNumber, hasRecording } from '../lib/reportingMetrics';
+import { answerRate, formatPhoneNumber } from '../lib/reportingMetrics';
 import { supabase } from '../lib/supabaseClient';
 
 type ReportTab = 'overview' | 'calls' | 'recordings' | 'sms' | 'transfers' | 'numbers' | 'agents';
@@ -13,7 +13,7 @@ type PhoneOption = { id: string; org_id: string; number: string; label?: string 
 type Overview = Record<string, any>;
 type Row = Record<string, any>;
 const FIVE_YEAR_DAYS = 5 * 366;
-const DEFAULT_VIEW_DAYS = FIVE_YEAR_DAYS;
+const DEFAULT_VIEW_DAYS = 7;
 
 const tabLabels: Array<{ id: ReportTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
@@ -108,6 +108,16 @@ function reportRowTone(row: Row) {
   return 'border-l-4 border-transparent hover:bg-slate-50';
 }
 
+function hasPlayableRecordingUrl(value?: string | null) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export default function ReportPage() {
   const { user, globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const { org } = useOrg();
@@ -182,7 +192,7 @@ export default function ReportPage() {
         setRows([]);
       } else {
         const endpoint = activeTab === 'agents' ? 'agents' : activeTab;
-        const data = await fetchJson(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' }, { preload: true })}`, { headers: { 'x-user-id': user.id } });
+        const data = await fetchJson(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' })}`, { headers: { 'x-user-id': user.id } });
         const nextRows: Row[] = data[activeTab] || data.messages || data.agents || [];
         setRows(nextRows);
       }
@@ -504,7 +514,7 @@ function cellValue(row: Row, column: string, onOpenRecording?: (row: Row) => Pro
   if (column.includes('date') || column.endsWith('_at')) return <span className="text-xs text-slate-500">{fmtDate(String(value || ''))}</span>;
   if (column.includes('duration')) return fmtSeconds(value);
   if (column === 'recording_url') {
-    return hasRecording(row) && (row.recording_id || row.recordingId || row.mightycall_recording_id) ? <button type="button" className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => onOpenRecording?.(row).catch(() => undefined)}>Open</button> : <span className="text-slate-500">Unavailable</span>;
+    return hasPlayableRecordingUrl(row.recording_url) && (row.recording_id || row.recordingId || row.mightycall_recording_id) ? <button type="button" className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => onOpenRecording?.(row).catch(() => undefined)}>Open</button> : <span className="text-slate-500">Unavailable</span>;
   }
   if (column === 'direction' || column === 'status' || column === 'result' || column === 'transfer_type') {
     return <StatusBadge tone={badgeTone(String(value || ''))}>{String(value || 'unknown')}</StatusBadge>;

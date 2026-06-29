@@ -71,6 +71,16 @@ function fmtSeconds(total: number) {
   return `${m}m ${r}s`;
 }
 
+function hasPlayableRecordingUrl(value?: string | null) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 const AdminReportsPage: FC = () => {
   const { user, selectedOrgId } = useAuth();
   const userId = user?.id;
@@ -218,7 +228,7 @@ const AdminReportsPage: FC = () => {
   };
 
   const openRecording = async (row: { id: string; recording_id?: string | null; recording_url?: string | null }) => {
-    const recordingId = row.recording_id || (row.recording_url ? row.id : null);
+    const recordingId = row.recording_id || (hasPlayableRecordingUrl(row.recording_url) ? row.id : null);
     if (!userId || !recordingId) return;
     const response = await fetch(buildApiUrl(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`), {
       headers: { 'x-user-id': userId },
@@ -356,9 +366,12 @@ const AdminReportsPage: FC = () => {
                       <tbody className="divide-y divide-white/6">
                         {detail.related.calls.length === 0 ? (
                           <tr><td className="px-3 py-4 text-slate-400" colSpan={7}>No related calls found for this report.</td></tr>
-                        ) : detail.related.calls.map((c) => (
-                          <tr key={c.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.to_number, detail.report.to_number)}</td><td className="px-3 py-3"><StatusBadge tone={String(c.direction || '').toLowerCase().includes('out') || String(c.direction || '').toLowerCase().includes('in') ? 'info' : 'neutral'}>{c.direction || 'unknown'}</StatusBadge></td><td className="px-3 py-3"><StatusBadge tone={String(c.status || '').toLowerCase().includes('miss') ? 'warning' : 'neutral'}>{c.status || '-'}</StatusBadge></td><td className="px-3 py-3 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td><td className="px-3 py-3">{c.recording_url || c.has_recording ? <button type="button" className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => void openRecording(c)}>Open</button> : <span className="text-slate-500">Unavailable</span>}</td><td className="px-3 py-3 text-slate-500">{fmtDate(c.started_at)}</td></tr>
-                        ))}
+                        ) : detail.related.calls.map((c) => {
+                          const playable = hasPlayableRecordingUrl(c.recording_url) && (c.recording_id || c.id);
+                          return (
+                          <tr key={c.id}><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.from_number, detail.report.from_number)}</td><td className="px-3 py-3 font-mono text-slate-200">{displayNumber(c.to_number, detail.report.to_number)}</td><td className="px-3 py-3"><StatusBadge tone={String(c.direction || '').toLowerCase().includes('out') || String(c.direction || '').toLowerCase().includes('in') ? 'info' : 'neutral'}>{c.direction || 'unknown'}</StatusBadge></td><td className="px-3 py-3"><StatusBadge tone={String(c.status || '').toLowerCase().includes('miss') ? 'warning' : 'neutral'}>{c.status || '-'}</StatusBadge></td><td className="px-3 py-3 text-slate-300">{fmtSeconds(Number(c.duration_seconds || 0))}</td><td className="px-3 py-3">{playable ? <button type="button" className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => void openRecording(c)}>Open</button> : <span className="text-slate-500">Unavailable</span>}</td><td className="px-3 py-3 text-slate-500">{fmtDate(c.started_at)}</td></tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   )}

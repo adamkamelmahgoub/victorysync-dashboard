@@ -24,8 +24,7 @@ type Recording = {
   organization_name?: string | null;
 };
 
-const FIVE_YEAR_DAYS = 5 * 366;
-const DEFAULT_VIEW_DAYS = FIVE_YEAR_DAYS;
+const DEFAULT_VIEW_DAYS = 7;
 
 function isoDateDaysAgo(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -41,12 +40,22 @@ function secondsOf(r: Recording) {
   return Number(r.duration_seconds ?? r.duration ?? 0) || 0;
 }
 
+function hasPlayableRecordingUrl(value?: string | null) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function recordingRowTone(recording: Recording) {
   const status = String(recording.status || '').toLowerCase();
   if (status.includes('fail') || status.includes('error')) {
     return 'border-l-4 border-amber-400 bg-amber-50/45 hover:bg-amber-50';
   }
-  if (!recording.recording_url) {
+  if (!hasPlayableRecordingUrl(recording.recording_url)) {
     return 'border-l-4 border-slate-300 bg-slate-50/70 hover:bg-slate-100/70';
   }
   if (recording.direction === 'outbound') return 'border-l-4 border-sky-400 bg-sky-50/35 hover:bg-sky-50';
@@ -154,7 +163,7 @@ export function RecordingsPage() {
 	      q.set('limit', '500');
 	      q.set('offset', String(activeOffset));
 	      if (orgId) q.set('org_id', orgId);
-		      q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
+		      if (startDate) q.set('start_date', startDate);
 		      if (endDate) q.set('end_date', endDate);
 		      if (search.trim()) q.set('search', search.trim());
 		      if (directionFilter !== 'all') q.set('direction', directionFilter);
@@ -175,7 +184,7 @@ export function RecordingsPage() {
       }
       else setLoadingMore(false);
     }
-  }, [directionFilter, endDate, nextOffset, orgId, search, user]);
+  }, [directionFilter, endDate, nextOffset, orgId, search, startDate, user]);
 
 		  useEffect(() => {
 		    if (user) fetchRecordings(true);
@@ -381,7 +390,7 @@ export function RecordingsPage() {
                       {isPlatformAdmin && <td className="px-4 py-3 text-slate-700">{recording.organization_name || orgs.find((org) => org.id === recording.org_id)?.name || recording.org_id || '-'}</td>}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-	                          {recording.id && recording.recording_url ? (
+	                          {recording.id && hasPlayableRecordingUrl(recording.recording_url) ? (
 	                            <>
 	                              <button onClick={() => handlePlay(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</button>
 	                              {playbackUrls[recording.id] && (
@@ -389,7 +398,7 @@ export function RecordingsPage() {
 	                              )}
 	                            </>
 	                          ) : <span className="text-xs text-slate-500">N/A</span>}
-                          {recording.id && recording.recording_url && <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>}
+                          {recording.id && hasPlayableRecordingUrl(recording.recording_url) && <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>}
                         </div>
                       </td>
                     </tr>

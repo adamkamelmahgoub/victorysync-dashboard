@@ -58,8 +58,7 @@ function isoDateDaysAgo(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-const FIVE_YEAR_DAYS = 5 * 366;
-const DEFAULT_VIEW_DAYS = FIVE_YEAR_DAYS;
+const DEFAULT_VIEW_DAYS = 7;
 
 function safeNumber(value: unknown) {
   const number = Number(value);
@@ -177,7 +176,7 @@ const DashboardNewV3: FC = () => {
       if (activeOrgId) query.set('org_id', activeOrgId);
       if (activeOrgId) callsQuery.set('org_id', activeOrgId);
       if (startDate) query.set('start_date', startDate);
-      callsQuery.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
+      if (startDate) callsQuery.set('start_date', startDate);
       if (endDate) query.set('end_date', endDate);
       if (endDate) callsQuery.set('end_date', endDate);
       const headers = { 'x-user-id': user.id };

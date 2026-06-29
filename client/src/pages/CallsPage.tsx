@@ -20,7 +20,7 @@ type CallRow = Record<string, any>;
 
 const PAGE_SIZE = 100;
 const FIVE_YEAR_DAYS = 5 * 366;
-const DEFAULT_VIEW_DAYS = FIVE_YEAR_DAYS;
+const DEFAULT_VIEW_DAYS = 7;
 
 function fmtDate(value?: string | null) {
   if (!value) return '-';
@@ -48,6 +48,16 @@ function rowToneClass(direction: string, status: string) {
   if (direction === 'outbound') return 'border-l-4 border-sky-400 bg-sky-50/35 hover:bg-sky-50';
   if (direction === 'inbound') return 'border-l-4 border-violet-400 bg-violet-50/35 hover:bg-violet-50';
   return 'border-l-4 border-transparent hover:bg-slate-50';
+}
+
+function hasPlayableRecordingUrl(value?: string | null) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 function directionOf(row: CallRow) {
@@ -145,14 +155,14 @@ export default function CallsPage() {
     q.set('limit', String(PAGE_SIZE));
     q.set('offset', String(offset));
     if (activeOrgId) q.set('org_id', activeOrgId);
-    q.set('start_date', isoDateDaysAgo(FIVE_YEAR_DAYS));
+    if (startDate) q.set('start_date', startDate);
     if (endDate) q.set('end_date', endDate);
     if (search.trim()) q.set('search', search.trim());
     if (agent.trim()) q.set('agent', agent.trim());
     if (direction !== 'all') q.set('direction', direction);
     if (status !== 'all') q.set('status', status);
     return q.toString();
-  }, [activeOrgId, agent, direction, endDate, search, status]);
+  }, [activeOrgId, agent, direction, endDate, search, startDate, status]);
 
   const loadCalls = useCallback(async (reset = true, options?: { silent?: boolean }) => {
     if (!user?.id) return;
@@ -256,7 +266,7 @@ export default function CallsPage() {
     const missed = countMissedCalls(visibleRows);
     const inbound = visibleRows.filter((row) => directionOf(row) === 'inbound').length;
     const outbound = visibleRows.filter((row) => directionOf(row) === 'outbound').length;
-    const recordings = visibleRows.filter((row) => row.recording_url || row.has_recording).length;
+    const recordings = visibleRows.filter((row) => hasPlayableRecordingUrl(row.recording_url)).length;
     const avgDuration = averageHandleTimeSeconds(visibleRows);
     return { answered, missed, inbound, outbound, recordings, avgDuration };
   }, [visibleRows]);
@@ -265,7 +275,7 @@ export default function CallsPage() {
     const outboundRows = visibleRows.filter((row) => directionOf(row) === 'outbound');
     const connected = outboundRows.filter((row) => ['answered', 'completed'].includes(normalizeCallStatus(statusOf(row))));
     const noAnswer = outboundRows.filter((row) => ['missed', 'failed', 'abandoned'].includes(normalizeCallStatus(statusOf(row))));
-    const recordings = outboundRows.filter((row) => row.recording_url || row.has_recording);
+    const recordings = outboundRows.filter((row) => hasPlayableRecordingUrl(row.recording_url));
     const connectRate = outboundRows.length > 0 ? Math.round((connected.length / outboundRows.length) * 1000) / 10 : 0;
     const avgDuration = averageHandleTimeSeconds(connected);
     const byAgent = new Map<string, { agent: string; attempts: number; connected: number; noAnswer: number; recordings: number; avgDuration: number; durationTotal: number }>();
@@ -276,7 +286,7 @@ export default function CallsPage() {
       const normalizedStatus = normalizeCallStatus(statusOf(row));
       if (['answered', 'completed'].includes(normalizedStatus)) current.connected += 1;
       if (['missed', 'failed', 'abandoned'].includes(normalizedStatus)) current.noAnswer += 1;
-      if (row.recording_url || row.has_recording) current.recordings += 1;
+      if (hasPlayableRecordingUrl(row.recording_url)) current.recordings += 1;
       current.durationTotal += Number(row.duration_seconds || row.duration || 0) || 0;
       byAgent.set(agent, current);
     }
@@ -322,7 +332,7 @@ export default function CallsPage() {
     >
       <div className="space-y-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <MetricStatCard label="Loaded calls" value={visibleRows.length} hint={`${rows.length} preloaded from 5 years`} accent="cyan" />
+          <MetricStatCard label="Loaded calls" value={visibleRows.length} hint={`${rows.length} loaded for this window`} accent="cyan" />
           <MetricStatCard label="Answered" value={summary.answered} hint="Connected or completed" accent="emerald" />
           <MetricStatCard label="Missed / failed" value={summary.missed} hint="Needs follow-up review" accent="amber" />
           <MetricStatCard label="Inbound" value={summary.inbound} hint="Customer-originated" />
@@ -404,7 +414,7 @@ export default function CallsPage() {
                   {visibleRows.map((row, index) => {
                     const direction = directionOf(row);
                     const status = statusOf(row);
-                    const hasRecording = row.recording_url || row.has_recording;
+                    const hasRecording = hasPlayableRecordingUrl(row.recording_url);
                     const rowOrgName = orgs.find((item) => item.id === row.org_id)?.name || row.organization_name || row.org_name || row.org_id || '-';
                     return (
                       <tr key={String(row.id || row.external_call_id || row.external_id || index)} className={`transition ${rowToneClass(direction, status)}`}>

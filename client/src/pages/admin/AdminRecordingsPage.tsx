@@ -44,6 +44,16 @@ function fmtDuration(s: number) {
   return `${m}m ${rem}s`;
 }
 
+function hasPlayableRecordingUrl(value?: string | null) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 const AdminRecordingsPage: FC = () => {
   const { user, selectedOrgId, globalRole } = useAuth();
   const userId = user?.id;
@@ -240,22 +250,25 @@ const AdminRecordingsPage: FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/6">
-                  {filteredRows.map((r) => (
-                    <tr key={r.id} className={`transition ${r.recording_url ? 'border-l-4 border-emerald-400/80 bg-emerald-400/5 hover:bg-emerald-400/10' : 'border-l-4 border-amber-400/80 bg-amber-400/5 hover:bg-amber-400/10'}`}>
+                  {filteredRows.map((r) => {
+                    const playable = hasPlayableRecordingUrl(r.recording_url);
+                    return (
+                    <tr key={r.id} className={`transition ${playable ? 'border-l-4 border-emerald-400/80 bg-emerald-400/5 hover:bg-emerald-400/10' : 'border-l-4 border-amber-400/80 bg-amber-400/5 hover:bg-amber-400/10'}`}>
                       <td className="px-4 py-3 text-slate-200">{r.organizations?.name || r.org_id}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-200">{r.from_number || '-'}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-200">{r.to_number || '-'}</td>
                       <td className="px-4 py-3 text-slate-300">{fmtDuration(secondsOf(r))}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(r.recording_date || r.created_at)}</td>
                       <td className="px-4 py-3">
-                        {r.recording_url ? (
+                        {playable ? (
                           <button onClick={() => handlePlay(r)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</button>
                         ) : (
                           <span className="text-xs text-slate-500">N/A</span>
                         )}
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
 

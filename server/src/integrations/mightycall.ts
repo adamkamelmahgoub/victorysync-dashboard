@@ -659,6 +659,19 @@ function pickPhoneText(...values: any[]): string | null {
   return null;
 }
 
+function pickHttpUrl(...values: any[]): string | null {
+  for (const value of values) {
+    if (!value) continue;
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (!text) continue;
+    try {
+      const parsed = new URL(text);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return text;
+    } catch {}
+  }
+  return null;
+}
+
 export async function fetchMightyCallRecordings(
   accessToken: string,
   phoneNumberIds: string[] = [],
@@ -671,17 +684,17 @@ export async function fetchMightyCallRecordings(
   const addRecording = (row: any) => {
     const metadata = row?.metadata || row;
     const callRecord = metadata?.callRecord || metadata?.call_record || metadata?.recording || metadata?.recordingInfo || null;
-    const recordingUrl =
-      row?.recordingUrl ||
-      row?.recording_url ||
-      row?.uri ||
-      row?.link ||
-      row?.downloadUrl ||
-      row?.RecordingLink ||
-      callRecord?.uri ||
-      callRecord?.link ||
-      callRecord?.downloadUrl ||
-      null;
+    const recordingUrl = pickHttpUrl(
+      row?.recordingUrl,
+      row?.recording_url,
+      row?.uri,
+      row?.link,
+      row?.downloadUrl,
+      row?.RecordingLink,
+      callRecord?.uri,
+      callRecord?.link,
+      callRecord?.downloadUrl
+    );
     const normalized = {
       id: row?.id || row?.recordingId || row?.externalId || row?.callId || null,
       callId: row?.callId || row?.call_id || row?.id || row?.externalId || null,
@@ -712,11 +725,12 @@ export async function fetchMightyCallRecordings(
       (c as any)?.call_record ??
       (c as any)?.callRecording ??
       null;
-    if (rec && (rec.uri || rec.link || rec.downloadUrl || rec.recordingUrl)) {
+    const recordingUrl = rec ? pickHttpUrl(rec.uri, rec.link, rec.downloadUrl, rec.recordingUrl) : null;
+    if (recordingUrl) {
       addRecording({
         id: (c as any).id || (c as any).callId,
         callId: (c as any).id || (c as any).callId,
-        recordingUrl: rec.uri || rec.link || rec.downloadUrl || rec.recordingUrl,
+        recordingUrl,
         duration: (c as any).duration ?? null,
         date: (c as any).dateTimeUtc ?? (c as any).created ?? null,
         metadata: c
@@ -733,7 +747,7 @@ export async function fetchMightyCallRecordings(
     page: '1'
   }, apiKeyOverride);
   for (const r of jr) {
-    const link = (r as any)?.recording?.link ?? (r as any)?.recording?.uri ?? (r as any)?.recording?.downloadUrl ?? null;
+    const link = pickHttpUrl((r as any)?.recording?.link, (r as any)?.recording?.uri, (r as any)?.recording?.downloadUrl);
     if (link) {
       addRecording({
         id: (r as any).id,
@@ -2221,7 +2235,7 @@ export async function syncMightyCallCallHistory(
       const st = String(c?.status || c?.callStatus || c?.state || '').toLowerCase();
       const externalId = String(c?.id || c?.callId || c?.external_id || c?.requestGuid || `${started}:${from || ''}:${to || ''}`);
       const businessNumber = pickPhoneText(c?.businessNumber?.number, c?.businessNumber, c?.business_number, to);
-      const recordingUrl = pickPhoneText(c?.callRecord?.uri, c?.callRecord?.fileName, c?.recordingUrl, c?.recording_url);
+      const recordingUrl = pickHttpUrl(c?.callRecord?.uri, c?.callRecord?.link, c?.callRecord?.downloadUrl, c?.recordingUrl, c?.recording_url);
       return {
         org_id: orgId,
         external_id: externalId,
