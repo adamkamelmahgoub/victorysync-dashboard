@@ -816,9 +816,51 @@ async function fetchRealCallRows(
   return fetchFirstAvailableRows('calls', ['started_at', 'created_at'], req, scope, max, options);
 }
 
-function paginate(req: express.Request, rows: any[]) {
-  const limit = Math.max(1, Math.min(Number(req.query.limit || 500), 5000));
+function pageParams(req: express.Request, fallbackLimit = 500) {
+  const limit = Math.max(1, Math.min(Number(req.query.limit || fallbackLimit), 5000));
   const offset = Math.max(0, Number(req.query.offset || 0));
+  return { limit, offset };
+}
+
+async function fetchPagedTableRows(table: string, dateColumn: string, req: express.Request, scope: ReportScope) {
+  if (!scope.isPlatformAdmin && scope.orgIds.length === 0) return { rows: [], next_offset: null, total: 0 };
+  const { start, end } = resolveReportDateRange(req);
+  const { limit, offset } = pageParams(req);
+  let query = supabaseAdmin.from(table).select('*');
+  if (scope.orgIds.length > 0) query = query.in('org_id', scope.orgIds);
+  if (start) query = query.gte(dateColumn, start);
+  if (end) query = query.lte(dateColumn, end);
+  query = query.order(dateColumn, { ascending: false }).range(offset, offset + limit);
+  const { data, error } = await query;
+  if (error) {
+    if (
+      ['PGRST204', 'PGRST205', '42703'].includes(String(error.code || '')) ||
+      /not exist|schema cache|column .* does not exist|could not find .* column/i.test(error.message || '')
+    ) return null;
+    throw error;
+  }
+  const rows = data || [];
+  const pageRows = rows.slice(0, limit);
+  return {
+    rows: pageRows,
+    next_offset: rows.length > limit ? offset + limit : null,
+    total: offset + pageRows.length + (rows.length > limit ? 1 : 0),
+  };
+}
+
+async function fetchPagedFirstAvailableRows(table: string, dateColumns: string[], req: express.Request, scope: ReportScope) {
+  let emptyResult: { rows: any[]; next_offset: number | null; total: number } | null = null;
+  for (const dateColumn of dateColumns) {
+    const result = await fetchPagedTableRows(table, dateColumn, req, scope);
+    if (!result) continue;
+    if (!emptyResult) emptyResult = result;
+    if (result.rows.length > 0 || result.next_offset !== null) return result;
+  }
+  return emptyResult || { rows: [], next_offset: null, total: 0 };
+}
+
+function paginate(req: express.Request, rows: any[]) {
+  const { limit, offset } = pageParams(req);
   return {
     rows: rows.slice(offset, offset + limit),
     next_offset: offset + limit < rows.length ? offset + limit : null,
@@ -1381,13 +1423,34 @@ router.get('/numbers', (req, res) => handle(req, res, async (scope) => {
 router.get('/calls', (req, res) => handle(req, res, async (scope) => {
   const phones = scope.orgIds.length > 0 ? await queryPhoneNumbers(scope.orgIds) : await queryPhoneNumbers();
   const ownedDigits = ownedDigitsForScope(phones, scope);
+  const requestedDirection = String(req.query.direction || '').toLowerCase();
+  const requestedStatus = String(req.query.status || '').toLowerCase();
+  const hasHeavyFilters = Boolean(
+    (requestedDirection && requestedDirection !== 'all') ||
+    (requestedStatus && requestedStatus !== 'all') ||
+    String(req.query.agent || '').trim() ||
+    String(req.query.search || '').trim() ||
+    scope.requestedPhoneDigits.size > 0
+  );
+  if (scope.orgWide && !hasHeavyFilters) {
+    const dateColumns = ['started_at', 'date_time_utc', 'dateTimeUtc', 'call_date', 'timestamp', 'created_at'];
+    const page = await fetchPagedFirstAvailableRows('mightycall_call_logs', dateColumns, req, scope);
+    const resolvedPage = page.rows.length > 0 ? page : await fetchPagedFirstAvailableRows('calls', ['started_at', 'created_at'], req, scope);
+    const baseRows = resolvedPage.rows;
+    const rows = normalizeCallRows(baseRows.map((row) => ({
+      ...row,
+      metadata: row.metadata || row.raw_payload || row.payload || row.data || row,
+      raw_payload: row.raw_payload || row.payload || row.data || row.metadata || row,
+    })), ownedDigits);
+    res.json({ calls: rows, total: resolvedPage.total, next_offset: resolvedPage.next_offset });
+    return;
+  }
   const rows = await enrichCallsWithRecordingLinks(
     normalizeCallRows(await fetchRealCallRows(req, scope, 10000, { skipDirection: true }), ownedDigits),
     req,
     scope,
     ownedDigits
   );
-  const requestedDirection = String(req.query.direction || '').toLowerCase();
   const filteredRows = requestedDirection && requestedDirection !== 'all'
     ? rows.filter((row) => directionOf(row) === requestedDirection)
     : rows;

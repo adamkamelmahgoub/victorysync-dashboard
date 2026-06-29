@@ -4,7 +4,7 @@ import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
-import { apiFetch, fetchJson } from '../lib/apiClient';
+import { apiFetch, fetchJson, triggerMightyCallRecentCallsSync } from '../lib/apiClient';
 import { supabase } from '../lib/supabaseClient';
 import {
   averageHandleTimeSeconds,
@@ -217,9 +217,23 @@ export default function CallsPage() {
     }
   };
 
+  const syncRecentCallsOnly = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      await triggerMightyCallRecentCallsSync(activeOrgId, user.id);
+    } catch (err) {
+      console.warn('[CallsPage] recent MightyCall call sync failed:', err);
+    }
+  }, [activeOrgId, user?.id]);
+
   useEffect(() => {
     void loadCalls(true);
   }, [loadCalls, user?.id, activeOrgId, orgs.length, endDate, direction, status, searchParams]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void syncRecentCallsOnly().then(() => loadCalls(true, { silent: true }));
+  }, [activeOrgId, syncRecentCallsOnly, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -243,13 +257,16 @@ export default function CallsPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_call_logs', ...orgFilter }, refreshSoon)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_recordings', ...orgFilter }, refreshSoon)
       .subscribe();
-    const poll = window.setInterval(() => void loadCalls(true, { silent: true }), 30_000);
+    const poll = window.setInterval(() => {
+      void loadCalls(true, { silent: true });
+      void syncRecentCallsOnly().then(() => loadCalls(true, { silent: true }));
+    }, 30_000);
     return () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       window.clearInterval(poll);
       void channel.unsubscribe();
     };
-  }, [activeOrgId, loadCalls, user?.id]);
+  }, [activeOrgId, loadCalls, syncRecentCallsOnly, user?.id]);
 
   useEffect(() => {
     const nextSearch = searchParams.get('search') || '';

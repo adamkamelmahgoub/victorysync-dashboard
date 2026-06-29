@@ -281,6 +281,15 @@ export async function triggerMightyCallPhoneNumberSync(userId?: string) {
   return await fetchJson(`/api/mightycall/sync/phone-numbers`, { method: 'POST', headers: { 'x-user-id': userId || '' } });
 }
 
+export async function triggerMightyCallRecentCallsSync(orgId?: string | null, userId?: string) {
+  return await fetchJson(`/api/mightycall/sync/recent-calls`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ orgId: orgId || null, windowHours: 6 }),
+    timeoutMs: 15000,
+  });
+}
+
 export async function triggerMightyCallReportsSync(orgId: string, startDate?: string, endDate?: string, userId?: string) {
   return await fetchJson(`/api/mightycall/sync/reports`, {
     method: 'POST',

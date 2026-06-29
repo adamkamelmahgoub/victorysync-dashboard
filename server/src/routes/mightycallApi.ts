@@ -526,6 +526,19 @@ router.post('/mightycall/sync', async (req, res) => {
   }
 });
 
+router.post('/mightycall/sync/recent-calls', async (req, res) => {
+  try {
+    const scope = await getSyncOrgIds(req);
+    const windowHours = Math.max(1, Math.min(Number(req.body?.windowHours || req.query.window_hours || 6), 24 * 7));
+    const syncedCalls = (await Promise.all(
+      scope.orgIds.map((orgId) => withTimeout(syncRecentCalls(windowHours, orgId), 12_000, 0))
+    )).reduce((sum, count) => sum + Number(count || 0), 0);
+    res.json({ ok: true, syncedCalls, refreshed_at: new Date().toISOString() });
+  } catch (err: any) {
+    res.status(err?.status || 500).json({ error: err?.message || 'recent_calls_sync_failed' });
+  }
+});
+
 router.get('/mightycall/sync/status', async (req, res) => {
   try {
     await getActor(req);
