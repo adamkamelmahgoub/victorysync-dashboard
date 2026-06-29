@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
 import { fetchJson, getLiveAgentStatus } from '../lib/apiClient';
+import { supabase } from '../lib/supabaseClient';
 import { PageLayout } from '../components/PageLayout';
 import { answerRate as calculateAnswerRate } from '../lib/reportingMetrics';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard } from '../components/DashboardPrimitives';
@@ -58,7 +59,7 @@ function isoDateDaysAgo(days: number) {
 }
 
 const FIVE_YEAR_DAYS = 5 * 366;
-const DEFAULT_VIEW_DAYS = 7;
+const DEFAULT_VIEW_DAYS = FIVE_YEAR_DAYS;
 
 function safeNumber(value: unknown) {
   const number = Number(value);
@@ -197,6 +198,30 @@ const DashboardNewV3: FC = () => {
     void loadReportSnapshot();
   }, [loadReportSnapshot]);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    let refreshTimer: number | null = null;
+    const refreshSoon = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => void loadReportSnapshot(), 500);
+    };
+    const orgFilter = activeOrgId ? { filter: `org_id=eq.${activeOrgId}` } : {};
+    const channel = supabase
+      .channel(`dashboard-report-refresh:${activeOrgId || 'all'}:${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_call_logs', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_recordings', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_sms_messages', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'call_transfers', ...orgFilter }, refreshSoon)
+      .subscribe();
+    const poll = window.setInterval(refreshSoon, 15_000);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.clearInterval(poll);
+      void channel.unsubscribe();
+    };
+  }, [activeOrgId, loadReportSnapshot, user?.id]);
+
   const answered = safeNumber(reportOverview.answered_calls ?? metrics?.answered_calls_today);
   const total = safeNumber(reportOverview.total_calls ?? metrics?.total_calls_today);
   const missed = safeNumber(reportOverview.missed_calls ?? Math.max(total - answered, 0));
@@ -311,7 +336,7 @@ const DashboardNewV3: FC = () => {
         <section className="vs-surface overflow-hidden">
           <div className="grid gap-px bg-slate-200/80 lg:grid-cols-[1.2fr,0.8fr]">
             <div className="bg-gradient-to-br from-white via-white to-violet-50/60 p-6 sm:p-8">
-              <div className="text-xs font-bold uppercase text-violet-700">Today at a glance</div>
+              <div className="text-xs font-bold uppercase text-violet-700">Selected range at a glance</div>
               <div className="mt-4 flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
                 <div>
                   <div className="text-5xl font-bold text-slate-950">{answerRate}%</div>

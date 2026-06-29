@@ -25,7 +25,7 @@ type Recording = {
 };
 
 const FIVE_YEAR_DAYS = 5 * 366;
-const DEFAULT_VIEW_DAYS = 7;
+const DEFAULT_VIEW_DAYS = FIVE_YEAR_DAYS;
 
 function isoDateDaysAgo(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);

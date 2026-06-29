@@ -20,7 +20,7 @@ type CallRow = Record<string, any>;
 
 const PAGE_SIZE = 100;
 const FIVE_YEAR_DAYS = 5 * 366;
-const DEFAULT_VIEW_DAYS = 7;
+const DEFAULT_VIEW_DAYS = FIVE_YEAR_DAYS;
 
 function fmtDate(value?: string | null) {
   if (!value) return '-';

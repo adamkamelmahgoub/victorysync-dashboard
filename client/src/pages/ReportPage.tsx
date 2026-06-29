@@ -13,7 +13,7 @@ type PhoneOption = { id: string; org_id: string; number: string; label?: string 
 type Overview = Record<string, any>;
 type Row = Record<string, any>;
 const FIVE_YEAR_DAYS = 5 * 366;
-const DEFAULT_VIEW_DAYS = 7;
+const DEFAULT_VIEW_DAYS = FIVE_YEAR_DAYS;
 
 const tabLabels: Array<{ id: ReportTab; label: string }> = [
   { id: 'overview', label: 'Overview' },

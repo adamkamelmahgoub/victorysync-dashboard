@@ -15591,7 +15591,29 @@ app.get("/s/series", async (req, res) => {
       }
     });
 
+      function isValidRecordingUrl(value: unknown) {
+        const text = String(value || '').trim();
+        if (!text) return false;
+        try {
+          const parsed = new URL(text);
+          return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+        } catch {
+          return false;
+        }
+      }
+
+      function isPlayableRecordingResponse(fetched: any) {
+        const type = String(fetched?.headers?.get?.('content-type') || '').toLowerCase();
+        if (!type) return true;
+        if (type.startsWith('audio/') || type.startsWith('video/')) return true;
+        if (type.includes('octet-stream') || type.includes('mpeg') || type.includes('mp3') || type.includes('wav')) return true;
+        return false;
+      }
+
       async function fetchRecordingAsset(recordingUrl: string, orgId?: string | null) {
+        if (!isValidRecordingUrl(recordingUrl)) {
+          return { ok: false, status: 422, invalidRecordingUrl: true };
+        }
         const baseHeaders = {
           Accept: 'audio/*,application/octet-stream,*/*',
           'User-Agent': 'Mozilla/5.0 VictorySync Recording Proxy',
@@ -15741,7 +15763,11 @@ app.get("/s/series", async (req, res) => {
               const fetched = await fetchRecordingAsset(recordingUrl, orgId);
               if (!fetched.ok) {
                 console.error('[recordings/download] remote fetch failed:', fetched.status);
-                return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
+                const status = fetched.invalidRecordingUrl ? 422 : 502;
+                return res.status(status).json({ error: fetched.invalidRecordingUrl ? 'invalid_recording_url' : 'remote_fetch_failed', status: fetched.status });
+              }
+              if (!isPlayableRecordingResponse(fetched)) {
+                return res.status(422).json({ error: 'recording_asset_not_audio' });
               }
               await streamRecordingResponse(req, res, id, fetched);
               return;
@@ -15770,7 +15796,11 @@ app.get("/s/series", async (req, res) => {
           const fetched = await fetchRecordingAsset(recordingUrl, recording.org_id);
           if (!fetched.ok) {
             console.error('[recordings/download] remote fetch failed:', fetched.status);
-            return res.status(502).json({ error: 'remote_fetch_failed', status: fetched.status });
+            const status = fetched.invalidRecordingUrl ? 422 : 502;
+            return res.status(status).json({ error: fetched.invalidRecordingUrl ? 'invalid_recording_url' : 'remote_fetch_failed', status: fetched.status });
+          }
+          if (!isPlayableRecordingResponse(fetched)) {
+            return res.status(422).json({ error: 'recording_asset_not_audio' });
           }
 
           await streamRecordingResponse(req, res, id, fetched);
