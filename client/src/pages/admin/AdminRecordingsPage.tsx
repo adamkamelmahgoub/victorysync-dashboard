@@ -98,33 +98,36 @@ const AdminRecordingsPage: FC = () => {
     }
   }, [selectedOrgId, orgs, filterOrgId, isPlatformAdmin]);
 
-  const syncRecentRecordings = async () => {
+  const syncRecentRecordings = async (options?: { silent?: boolean }) => {
     if (!userId || !filterOrgId) return;
-    setSyncing(true);
+    if (!options?.silent) setSyncing(true);
     try {
       await triggerMightyCallRecordingsSync(filterOrgId, isoDateDaysAgo(2), new Date().toISOString().slice(0, 10), userId);
     } catch (e: any) {
       console.warn('[AdminRecordingsPage] recent MightyCall sync failed:', e?.message || e);
     } finally {
-      setSyncing(false);
+      if (!options?.silent) setSyncing(false);
     }
   };
 
-  const loadRecordings = async (reset = false, options?: { syncFirst?: boolean }) => {
+  const loadRecordings = async (reset = false, options?: { syncFirst?: boolean; silent?: boolean }) => {
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
     if (!userId) return;
     if (!reset && nextOffset == null) return;
+    const silent = options?.silent === true;
 
     try {
       if (reset) {
-        setLoading(true);
-        setListError(null);
+        if (!silent) {
+          setLoading(true);
+          setListError(null);
+        }
       } else {
         setLoadingMore(true);
       }
 
       if (reset && options?.syncFirst && filterOrgId) {
-        await syncRecentRecordings();
+        await syncRecentRecordings({ silent });
       }
 
       let url = buildApiUrl(`/api/mightycall/recordings?limit=${PAGE_SIZE}&offset=${activeOffset}`);
@@ -144,7 +147,9 @@ const AdminRecordingsPage: FC = () => {
     } catch (e: any) {
       setListError(e?.message || 'Failed to load recordings');
     } finally {
-      if (reset) setLoading(false);
+      if (reset) {
+        if (!silent) setLoading(false);
+      }
       else setLoadingMore(false);
     }
   };
@@ -174,7 +179,7 @@ const AdminRecordingsPage: FC = () => {
 
   useEffect(() => {
     if (!autoRefreshEnabled) return;
-    const interval = setInterval(() => loadRecordings(true, { syncFirst: true }), 10000);
+    const interval = setInterval(() => loadRecordings(true, { syncFirst: true, silent: true }), 10000);
     return () => clearInterval(interval);
   }, [autoRefreshEnabled, filterOrgId, userId]);
 

@@ -154,13 +154,16 @@ export default function CallsPage() {
     return q.toString();
   }, [activeOrgId, agent, direction, endDate, search, status]);
 
-  const loadCalls = useCallback(async (reset = true) => {
+  const loadCalls = useCallback(async (reset = true, options?: { silent?: boolean }) => {
     if (!user?.id) return;
     if (!reset && nextOffset == null) return;
     const offset = reset ? 0 : (nextOffset ?? 0);
+    const silent = options?.silent === true;
     if (reset) {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
     } else {
       setLoadingMore(true);
     }
@@ -177,7 +180,9 @@ export default function CallsPage() {
     } catch (err: any) {
       setError(err?.message || 'Failed to load calls');
     } finally {
-      if (reset) setLoading(false);
+      if (reset) {
+        if (!silent) setLoading(false);
+      }
       else setLoadingMore(false);
     }
   }, [buildQuery, nextOffset, user?.id]);
@@ -209,7 +214,7 @@ export default function CallsPage() {
   useEffect(() => {
     if (!user?.id) return;
     const timer = window.setTimeout(() => {
-      void loadCalls(true);
+      void loadCalls(true, { silent: true });
     }, 450);
     return () => window.clearTimeout(timer);
   }, [agent, search, loadCalls, user?.id]);
@@ -219,7 +224,7 @@ export default function CallsPage() {
     let refreshTimer: number | null = null;
     const refreshSoon = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => void loadCalls(true), 500);
+      refreshTimer = window.setTimeout(() => void loadCalls(true, { silent: true }), 500);
     };
     const orgFilter = activeOrgId ? { filter: `org_id=eq.${activeOrgId}` } : {};
     const channel = supabase
@@ -228,7 +233,7 @@ export default function CallsPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_call_logs', ...orgFilter }, refreshSoon)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_recordings', ...orgFilter }, refreshSoon)
       .subscribe();
-    const poll = window.setInterval(() => void loadCalls(true), 30_000);
+    const poll = window.setInterval(() => void loadCalls(true, { silent: true }), 30_000);
     return () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       window.clearInterval(poll);

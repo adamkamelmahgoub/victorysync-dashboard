@@ -164,10 +164,13 @@ export default function ReportPage() {
     }
   }, [buildQuery, user?.id]);
 
-  const loadReport = useCallback(async () => {
+  const loadReport = useCallback(async (options?: { silent?: boolean }) => {
     if (!user?.id) return;
-    setLoading(true);
-    setError(null);
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       if (activeTab === 'overview') {
         const data = await fetchJson(`/api/reports/overview?${buildQuery()}`, { headers: { 'x-user-id': user.id } });
@@ -186,7 +189,7 @@ export default function ReportPage() {
     } catch (err: any) {
       setError(err?.message || 'Failed to load reports');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [activeTab, buildQuery, loadNumbers, user?.id]);
 
@@ -196,7 +199,7 @@ export default function ReportPage() {
   useEffect(() => {
     if (!user?.id) return;
     const timer = window.setTimeout(() => {
-      void loadReport();
+      void loadReport({ silent: true });
     }, 450);
     return () => window.clearTimeout(timer);
   }, [agent, search, selectedNumber, loadReport, user?.id]);
@@ -207,7 +210,7 @@ export default function ReportPage() {
     const refreshSoon = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
-        void loadReport();
+        void loadReport({ silent: true });
         void loadNumbers();
       }, 500);
     };

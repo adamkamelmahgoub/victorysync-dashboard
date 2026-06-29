@@ -139,6 +139,7 @@ const DashboardNewV3: FC = () => {
   const [reportLoading, setReportLoading] = useState(true);
   const [reportError, setReportError] = useState<string | null>(null);
   const requestInFlight = useRef(false);
+  const hasReportSnapshotLoaded = useRef(false);
 
   const loadLiveAgents = useCallback(async (force = false) => {
     if (!user?.id || requestInFlight.current) return;
@@ -165,10 +166,11 @@ const DashboardNewV3: FC = () => {
     return () => window.clearInterval(id);
   }, [loadLiveAgents]);
 
-  const loadReportSnapshot = useCallback(async () => {
+  const loadReportSnapshot = useCallback(async (options?: { silent?: boolean }) => {
     if (!user?.id) return;
-    setReportLoading(true);
-    setReportError(null);
+    const silent = options?.silent === true || hasReportSnapshotLoaded.current;
+    if (!silent) setReportLoading(true);
+    if (!silent) setReportError(null);
     try {
       const query = new URLSearchParams();
       const callsQuery = new URLSearchParams();
@@ -187,10 +189,11 @@ const DashboardNewV3: FC = () => {
       const calls = callsJson.calls || [];
       setReportOverview(overview);
       setReportCalls(calls);
+      hasReportSnapshotLoaded.current = true;
     } catch (error: any) {
       setReportError(error?.message || 'Failed to load dashboard report data');
     } finally {
-      setReportLoading(false);
+      if (!silent) setReportLoading(false);
     }
   }, [activeOrgId, endDate, startDate, user?.id]);
 
@@ -203,7 +206,7 @@ const DashboardNewV3: FC = () => {
     let refreshTimer: number | null = null;
     const refreshSoon = () => {
       if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => void loadReportSnapshot(), 500);
+      refreshTimer = window.setTimeout(() => void loadReportSnapshot({ silent: true }), 500);
     };
     const orgFilter = activeOrgId ? { filter: `org_id=eq.${activeOrgId}` } : {};
     const channel = supabase
@@ -312,7 +315,7 @@ const DashboardNewV3: FC = () => {
           <button className="vs-button-secondary" onClick={() => void loadLiveAgents(true)} disabled={liveLoading}>
             {liveLoading ? 'Refreshing...' : 'Refresh'}
           </button>
-          <button className="vs-button-secondary" onClick={() => void loadReportSnapshot()} disabled={reportLoading}>
+          <button className="vs-button-secondary" onClick={() => void loadReportSnapshot({ silent: false })} disabled={reportLoading}>
             {reportLoading ? 'Loading...' : 'Reload Data'}
           </button>
           <button className="vs-button-primary" onClick={() => navigate('/live-status')}>

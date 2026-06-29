@@ -133,16 +133,19 @@ export function RecordingsPage() {
     }
   };
 
-  const fetchRecordings = useCallback(async (reset = true) => {
+  const fetchRecordings = useCallback(async (reset = true, options?: { silent?: boolean }) => {
     if (!user) return;
     if (!reset && nextOffset == null) return;
 
     const activeOffset = reset ? 0 : (nextOffset ?? 0);
+    const silent = options?.silent === true;
 
     try {
       if (reset) {
-        setLoading(true);
-        setError(null);
+        if (!silent) {
+          setLoading(true);
+          setError(null);
+        }
       } else {
         setLoadingMore(true);
       }
@@ -167,7 +170,9 @@ export function RecordingsPage() {
     } catch (err: any) {
       setError(err?.message || 'Error fetching recordings');
     } finally {
-      if (reset) setLoading(false);
+      if (reset) {
+        if (!silent) setLoading(false);
+      }
       else setLoadingMore(false);
     }
   }, [directionFilter, endDate, nextOffset, orgId, search, user]);
@@ -179,7 +184,7 @@ export function RecordingsPage() {
 	  useEffect(() => {
 	    if (!user?.id) return;
 	    const timer = window.setTimeout(() => {
-	      void fetchRecordings(true);
+	      void fetchRecordings(true, { silent: true });
 	    }, 450);
 	    return () => window.clearTimeout(timer);
 	  }, [fetchRecordings, search, user?.id]);
@@ -189,7 +194,7 @@ export function RecordingsPage() {
 	    let refreshTimer: number | null = null;
 	    const refreshSoon = () => {
 	      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-	      refreshTimer = window.setTimeout(() => void fetchRecordings(true), 500);
+	      refreshTimer = window.setTimeout(() => void fetchRecordings(true, { silent: true }), 500);
 	    };
 	    const orgFilter = orgId ? { filter: `org_id=eq.${orgId}` } : {};
 	    const channel = supabase
@@ -197,7 +202,7 @@ export function RecordingsPage() {
 	      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_recordings', ...orgFilter }, refreshSoon)
 	      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', ...orgFilter }, refreshSoon)
 	      .subscribe();
-	    const poll = window.setInterval(() => void fetchRecordings(true), 30_000);
+	    const poll = window.setInterval(() => void fetchRecordings(true, { silent: true }), 30_000);
 	    return () => {
 	      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
 	      window.clearInterval(poll);
