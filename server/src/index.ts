@@ -15666,12 +15666,46 @@ app.get("/s/series", async (req, res) => {
           const { id } = req.params;
           if (!id) return res.status(400).json({ error: 'missing_id' });
 
-          // First try mightycall_recordings table (primary source)
+          // First try mightycall_recordings table (primary source). Reports may carry
+          // either the row id or a provider/call identifier, so resolve all common keys.
           let { data: recording, error }: { data: any; error: any } = await supabaseAdmin
             .from('mightycall_recordings')
-            .select('id, org_id, phone_number_id, from_number, to_number, recording_url')
+            .select('*')
             .eq('id', id)
             .maybeSingle();
+
+          if (!recording && !error) {
+            const decodedId = decodeURIComponent(String(id || '')).trim();
+            const lookupValues = Array.from(new Set([id, decodedId].filter(Boolean)));
+            const lookupColumns = ['external_id', 'external_recording_id', 'external_call_id', 'call_id', 'recording_url'];
+            for (const value of lookupValues) {
+              for (const column of lookupColumns) {
+                const { data: matched, error: matchError } = await supabaseAdmin
+                  .from('mightycall_recordings')
+                  .select('*')
+                  .eq(column, value)
+                  .limit(1)
+                  .maybeSingle();
+                if (matchError) {
+                  if (
+                    ['PGRST204', 'PGRST205', '42703'].includes(String(matchError.code || '')) ||
+                    /not exist|schema cache|column .* does not exist|could not find .* column/i.test(matchError.message || '')
+                  ) {
+                    continue;
+                  }
+                  error = matchError;
+                  break;
+                }
+                if (matched) {
+                  recording = matched;
+                  break;
+                }
+              }
+              if (error || recording) {
+                break;
+              }
+            }
+          }
 
           // If not found, try calls table as fallback
           if (!recording && !error) {

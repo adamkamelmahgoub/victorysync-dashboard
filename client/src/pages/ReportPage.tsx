@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, SegmentedControl, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { apiFetch, fetchJson } from '../lib/apiClient';
 import { answerRate, formatPhoneNumber, hasRecording } from '../lib/reportingMetrics';
+import { supabase } from '../lib/supabaseClient';
 
 type ReportTab = 'overview' | 'calls' | 'recordings' | 'sms' | 'transfers' | 'numbers' | 'agents';
 
@@ -93,6 +94,20 @@ function orgNameFor(row: Row, orgs: Array<{ id: string; name?: string | null }>)
   return orgs.find((org) => org.id === row.org_id)?.name || row.organization_name || row.org_name || row.org_id || '-';
 }
 
+function reportRowTone(row: Row) {
+  const text = String(row.status || row.result || '').toLowerCase();
+  const direction = String(row.direction || '').toLowerCase();
+  if (text.includes('miss') || text.includes('fail') || text.includes('abandon')) {
+    return 'border-l-4 border-amber-400 bg-amber-50/45 hover:bg-amber-50';
+  }
+  if (text.includes('answer') || text.includes('complete') || text.includes('sent') || text.includes('received')) {
+    return 'border-l-4 border-emerald-400 bg-emerald-50/35 hover:bg-emerald-50';
+  }
+  if (direction.includes('out')) return 'border-l-4 border-sky-400 bg-sky-50/35 hover:bg-sky-50';
+  if (direction.includes('in')) return 'border-l-4 border-violet-400 bg-violet-50/35 hover:bg-violet-50';
+  return 'border-l-4 border-transparent hover:bg-slate-50';
+}
+
 export default function ReportPage() {
   const { user, globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
   const { org } = useOrg();
@@ -115,7 +130,7 @@ export default function ReportPage() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const buildQuery = (extra?: Record<string, string>, options?: { preload?: boolean }) => {
+  const buildQuery = useCallback((extra?: Record<string, string>, options?: { preload?: boolean }) => {
     const q = new URLSearchParams();
     if (activeOrgId) q.set('org_id', activeOrgId);
     if (startDate) q.set('start_date', options?.preload ? isoDateDaysAgo(FIVE_YEAR_DAYS) : startDate);
@@ -127,7 +142,7 @@ export default function ReportPage() {
     if (search.trim()) q.set('search', search.trim());
     Object.entries(extra || {}).forEach(([key, value]) => q.set(key, value));
     return q.toString();
-  };
+  }, [activeOrgId, agent, direction, endDate, search, selectedNumber, startDate, status]);
 
   useEffect(() => {
     try {
@@ -137,7 +152,7 @@ export default function ReportPage() {
     }
   }, []);
 
-  const loadNumbers = async () => {
+  const loadNumbers = useCallback(async () => {
     if (!user?.id) return;
     try {
       const data = await fetchJson(`/api/reports/numbers?${buildQuery()}`, {
@@ -147,9 +162,9 @@ export default function ReportPage() {
     } catch {
       setNumbers([]);
     }
-  };
+  }, [buildQuery, user?.id]);
 
-  const loadReport = async () => {
+  const loadReport = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     setError(null);
@@ -173,10 +188,45 @@ export default function ReportPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, buildQuery, loadNumbers, user?.id]);
 
-  useEffect(() => { void loadNumbers(); }, [user?.id, activeOrgId, orgs.length]);
-  useEffect(() => { void loadReport(); }, [user?.id, activeOrgId, orgs.length, activeTab, startDate, endDate, direction, status]);
+  useEffect(() => { void loadNumbers(); }, [loadNumbers, user?.id, activeOrgId, orgs.length]);
+  useEffect(() => { void loadReport(); }, [loadReport, user?.id, activeOrgId, orgs.length, activeTab, startDate, endDate, direction, status]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const timer = window.setTimeout(() => {
+      void loadReport();
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [agent, search, selectedNumber, loadReport, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let refreshTimer: number | null = null;
+    const refreshSoon = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        void loadReport();
+        void loadNumbers();
+      }, 500);
+    };
+    const orgFilter = activeOrgId ? { filter: `org_id=eq.${activeOrgId}` } : {};
+    const channel = supabase
+      .channel(`reports-auto-refresh:${activeOrgId || 'all'}:${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_call_logs', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_recordings', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_sms_messages', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'call_transfers', ...orgFilter }, refreshSoon)
+      .subscribe();
+    const poll = window.setInterval(refreshSoon, 30_000);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.clearInterval(poll);
+      void channel.unsubscribe();
+    };
+  }, [activeOrgId, loadNumbers, loadReport, user?.id]);
 
   const runSync = async () => {
     if (!user?.id) return;
@@ -257,7 +307,7 @@ export default function ReportPage() {
   };
 
   const openRecording = async (row: Row) => {
-    const recordingId = row.recording_id || row.mightycall_recording_id || (row.recording_url ? row.id : null);
+    const recordingId = row.recording_id || row.recordingId || row.mightycall_recording_id;
     if (!user?.id || !recordingId) return;
     const response = await apiFetch(`/api/recordings/${encodeURIComponent(String(recordingId))}/download?inline=1`, {
       headers: { 'x-user-id': user.id },
@@ -431,7 +481,7 @@ function ReportTable({
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
           {rows.map((row, index) => (
-            <tr key={String(row.id || row.external_id || row.external_call_id || index)} className="hover:bg-violet-50/40">
+            <tr key={String(row.id || row.external_id || row.external_call_id || index)} className={reportRowTone(row)}>
               {displayColumns.map((column) => (
                 <td key={column} className="max-w-[320px] truncate px-4 py-3 text-slate-700">
                   {cellValue(row, column, onOpenRecording, orgs)}
@@ -451,7 +501,7 @@ function cellValue(row: Row, column: string, onOpenRecording?: (row: Row) => Pro
   if (column.includes('date') || column.endsWith('_at')) return <span className="text-xs text-slate-500">{fmtDate(String(value || ''))}</span>;
   if (column.includes('duration')) return fmtSeconds(value);
   if (column === 'recording_url') {
-    return hasRecording(row) ? <button type="button" className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => onOpenRecording?.(row).catch(() => undefined)}>Open</button> : <span className="text-slate-500">Unavailable</span>;
+    return hasRecording(row) && (row.recording_id || row.recordingId || row.mightycall_recording_id) ? <button type="button" className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => onOpenRecording?.(row).catch(() => undefined)}>Open</button> : <span className="text-slate-500">Unavailable</span>;
   }
   if (column === 'direction' || column === 'status' || column === 'result' || column === 'transfer_type') {
     return <StatusBadge tone={badgeTone(String(value || ''))}>{String(value || 'unknown')}</StatusBadge>;

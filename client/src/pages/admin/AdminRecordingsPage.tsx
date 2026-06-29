@@ -56,7 +56,7 @@ const AdminRecordingsPage: FC = () => {
   const [listError, setListError] = useState<string | null>(null);
   const [filterOrgId, setFilterOrgId] = useState('');
   const [search, setSearch] = useState('');
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [syncing, setSyncing] = useState(false);
 
@@ -236,7 +236,7 @@ const AdminRecordingsPage: FC = () => {
                 </thead>
                 <tbody className="divide-y divide-white/6">
                   {filteredRows.map((r) => (
-                    <tr key={r.id} className="transition hover:bg-white/[0.03]">
+                    <tr key={r.id} className={`transition ${r.recording_url ? 'border-l-4 border-emerald-400/80 bg-emerald-400/5 hover:bg-emerald-400/10' : 'border-l-4 border-amber-400/80 bg-amber-400/5 hover:bg-amber-400/10'}`}>
                       <td className="px-4 py-3 text-slate-200">{r.organizations?.name || r.org_id}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-200">{r.from_number || '-'}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-200">{r.to_number || '-'}</td>

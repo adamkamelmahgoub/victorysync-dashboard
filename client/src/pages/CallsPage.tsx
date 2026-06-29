@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { apiFetch, fetchJson } from '../lib/apiClient';
+import { supabase } from '../lib/supabaseClient';
 import {
   averageHandleTimeSeconds,
   countMissedCalls,
@@ -34,6 +35,19 @@ function statusTone(value?: string | null): 'neutral' | 'success' | 'warning' | 
   if (['missed', 'failed', 'abandoned'].includes(normalized)) return 'warning';
   if (text.includes('inbound') || text.includes('outbound') || text.includes('transfer')) return 'info';
   return 'neutral';
+}
+
+function rowToneClass(direction: string, status: string) {
+  const normalizedStatus = normalizeCallStatus(status);
+  if (['missed', 'failed', 'abandoned'].includes(normalizedStatus)) {
+    return 'border-l-4 border-amber-400 bg-amber-50/45 hover:bg-amber-50';
+  }
+  if (['answered', 'completed'].includes(normalizedStatus)) {
+    return 'border-l-4 border-emerald-400 bg-emerald-50/35 hover:bg-emerald-50';
+  }
+  if (direction === 'outbound') return 'border-l-4 border-sky-400 bg-sky-50/35 hover:bg-sky-50';
+  if (direction === 'inbound') return 'border-l-4 border-violet-400 bg-violet-50/35 hover:bg-violet-50';
+  return 'border-l-4 border-transparent hover:bg-slate-50';
 }
 
 function directionOf(row: CallRow) {
@@ -126,7 +140,7 @@ export default function CallsPage() {
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [total, setTotal] = useState(0);
 
-  const buildQuery = (offset = 0) => {
+  const buildQuery = useCallback((offset = 0) => {
     const q = new URLSearchParams();
     q.set('limit', String(PAGE_SIZE));
     q.set('offset', String(offset));
@@ -138,9 +152,9 @@ export default function CallsPage() {
     if (direction !== 'all') q.set('direction', direction);
     if (status !== 'all') q.set('status', status);
     return q.toString();
-  };
+  }, [activeOrgId, agent, direction, endDate, search, status]);
 
-  const loadCalls = async (reset = true) => {
+  const loadCalls = useCallback(async (reset = true) => {
     if (!user?.id) return;
     if (!reset && nextOffset == null) return;
     const offset = reset ? 0 : (nextOffset ?? 0);
@@ -166,7 +180,7 @@ export default function CallsPage() {
       if (reset) setLoading(false);
       else setLoadingMore(false);
     }
-  };
+  }, [buildQuery, nextOffset, user?.id]);
 
   const syncCalls = async () => {
     if (!user?.id) return;
@@ -190,7 +204,37 @@ export default function CallsPage() {
 
   useEffect(() => {
     void loadCalls(true);
-  }, [user?.id, activeOrgId, orgs.length, endDate, direction, status, searchParams]);
+  }, [loadCalls, user?.id, activeOrgId, orgs.length, endDate, direction, status, searchParams]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const timer = window.setTimeout(() => {
+      void loadCalls(true);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [agent, search, loadCalls, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let refreshTimer: number | null = null;
+    const refreshSoon = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => void loadCalls(true), 500);
+    };
+    const orgFilter = activeOrgId ? { filter: `org_id=eq.${activeOrgId}` } : {};
+    const channel = supabase
+      .channel(`calls-auto-refresh:${activeOrgId || 'all'}:${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_call_logs', ...orgFilter }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_recordings', ...orgFilter }, refreshSoon)
+      .subscribe();
+    const poll = window.setInterval(() => void loadCalls(true), 30_000);
+    return () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      window.clearInterval(poll);
+      void channel.unsubscribe();
+    };
+  }, [activeOrgId, loadCalls, user?.id]);
 
   useEffect(() => {
     const nextSearch = searchParams.get('search') || '';
@@ -239,7 +283,7 @@ export default function CallsPage() {
   }, [visibleRows]);
 
   const openRecording = async (row: CallRow) => {
-    const recordingId = row.recording_id || row.recordingId || row.mightycall_recording_id || (row.recording_url ? row.id : null);
+    const recordingId = row.recording_id || row.recordingId || row.mightycall_recording_id;
     if (!user?.id || !recordingId) {
       setError('Recording is not available for this call.');
       return;
@@ -358,7 +402,7 @@ export default function CallsPage() {
                     const hasRecording = row.recording_url || row.has_recording;
                     const rowOrgName = orgs.find((item) => item.id === row.org_id)?.name || row.organization_name || row.org_name || row.org_id || '-';
                     return (
-                      <tr key={String(row.id || row.external_call_id || row.external_id || index)} className="transition hover:bg-violet-50/40">
+                      <tr key={String(row.id || row.external_call_id || row.external_id || index)} className={`transition ${rowToneClass(direction, status)}`}>
                         <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{fmtDate(row.started_at || row.created_at)}</td>
                         <td className="px-4 py-3"><StatusBadge tone={statusTone(direction)}>{direction}</StatusBadge></td>
                         <td className="px-4 py-3 font-mono text-xs text-slate-700">{formatPhoneNumber(row.from_number)}</td>
@@ -369,7 +413,7 @@ export default function CallsPage() {
                         <td className="px-4 py-3 text-slate-700">{formatSeconds(row.duration_seconds || row.duration)}</td>
                         <td className="px-4 py-3 text-slate-700">{row.transfer_status || row.transfer_type || row.transfer_target || '-'}</td>
                         <td className="px-4 py-3">
-                          {hasRecording ? (
+                          {hasRecording && (row.recording_id || row.recordingId || row.mightycall_recording_id) ? (
                             <button className="vs-button-secondary !px-3 !py-1.5 !text-xs" onClick={() => void openRecording(row)}>Open</button>
                           ) : (
                             <span className="text-xs text-slate-500">Unavailable</span>

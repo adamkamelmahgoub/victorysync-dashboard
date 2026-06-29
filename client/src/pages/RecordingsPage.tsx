@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { apiFetch, fetchJson } from '../lib/apiClient';
+import { supabase } from '../lib/supabaseClient';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 
@@ -38,6 +39,19 @@ function fmtDate(v?: string | null) {
 
 function secondsOf(r: Recording) {
   return Number(r.duration_seconds ?? r.duration ?? 0) || 0;
+}
+
+function recordingRowTone(recording: Recording) {
+  const status = String(recording.status || '').toLowerCase();
+  if (status.includes('fail') || status.includes('error')) {
+    return 'border-l-4 border-amber-400 bg-amber-50/45 hover:bg-amber-50';
+  }
+  if (!recording.recording_url) {
+    return 'border-l-4 border-slate-300 bg-slate-50/70 hover:bg-slate-100/70';
+  }
+  if (recording.direction === 'outbound') return 'border-l-4 border-sky-400 bg-sky-50/35 hover:bg-sky-50';
+  if (recording.direction === 'inbound') return 'border-l-4 border-emerald-400 bg-emerald-50/35 hover:bg-emerald-50';
+  return 'border-l-4 border-violet-300 bg-violet-50/25 hover:bg-violet-50/60';
 }
 
 function recordingTimestamp(recording: Recording) {
@@ -119,7 +133,7 @@ export function RecordingsPage() {
     }
   };
 
-  const fetchRecordings = async (reset = true, options?: { syncFirst?: boolean }) => {
+  const fetchRecordings = useCallback(async (reset = true) => {
     if (!user) return;
     if (!reset && nextOffset == null) return;
 
@@ -156,11 +170,40 @@ export function RecordingsPage() {
       if (reset) setLoading(false);
       else setLoadingMore(false);
     }
-  };
+  }, [directionFilter, endDate, nextOffset, orgId, search, user]);
 
 		  useEffect(() => {
 		    if (user) fetchRecordings(true);
-		  }, [orgId, user?.id, orgs.length, endDate, directionFilter]);
+		  }, [fetchRecordings, orgId, user?.id, orgs.length, endDate, directionFilter]);
+
+	  useEffect(() => {
+	    if (!user?.id) return;
+	    const timer = window.setTimeout(() => {
+	      void fetchRecordings(true);
+	    }, 450);
+	    return () => window.clearTimeout(timer);
+	  }, [fetchRecordings, search, user?.id]);
+
+	  useEffect(() => {
+	    if (!user?.id) return;
+	    let refreshTimer: number | null = null;
+	    const refreshSoon = () => {
+	      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+	      refreshTimer = window.setTimeout(() => void fetchRecordings(true), 500);
+	    };
+	    const orgFilter = orgId ? { filter: `org_id=eq.${orgId}` } : {};
+	    const channel = supabase
+	      .channel(`recordings-auto-refresh:${orgId || 'all'}:${user.id}`)
+	      .on('postgres_changes', { event: '*', schema: 'public', table: 'mightycall_recordings', ...orgFilter }, refreshSoon)
+	      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', ...orgFilter }, refreshSoon)
+	      .subscribe();
+	    const poll = window.setInterval(() => void fetchRecordings(true), 30_000);
+	    return () => {
+	      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+	      window.clearInterval(poll);
+	      void channel.unsubscribe();
+	    };
+	  }, [fetchRecordings, orgId, user?.id]);
 
 	  useEffect(() => {
 	    return () => {
@@ -322,7 +365,7 @@ export function RecordingsPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {filteredRows.map((recording) => (
-                    <tr key={recording.id} className="transition hover:bg-violet-50/40">
+                    <tr key={recording.id} className={`transition ${recordingRowTone(recording)}`}>
                       <td className="px-4 py-3 text-slate-600">{fmtDate(recording.recording_date || recording.created_at)}</td>
                       <td className="px-4 py-3 font-mono text-slate-700">{recording.from_number || '-'}</td>
                       <td className="px-4 py-3 font-mono text-slate-700">{recording.to_number || '-'}</td>
@@ -333,7 +376,7 @@ export function RecordingsPage() {
                       {isPlatformAdmin && <td className="px-4 py-3 text-slate-700">{recording.organization_name || orgs.find((org) => org.id === recording.org_id)?.name || recording.org_id || '-'}</td>}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-	                          {recording.id ? (
+	                          {recording.id && recording.recording_url ? (
 	                            <>
 	                              <button onClick={() => handlePlay(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Play</button>
 	                              {playbackUrls[recording.id] && (
@@ -341,7 +384,7 @@ export function RecordingsPage() {
 	                              )}
 	                            </>
 	                          ) : <span className="text-xs text-slate-500">N/A</span>}
-                          {recording.id && <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>}
+                          {recording.id && recording.recording_url && <button onClick={() => handleDownload(recording)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Download</button>}
                         </div>
                       </td>
                     </tr>
