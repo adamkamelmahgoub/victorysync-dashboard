@@ -15602,24 +15602,40 @@ app.get("/s/series", async (req, res) => {
         }
       }
 
-      function isPlayableRecordingResponse(fetched: any) {
-        const type = String(fetched?.headers?.get?.('content-type') || '').toLowerCase();
+      type RecordingFetchResult = {
+        response: any | null;
+        ok: boolean;
+        status: number;
+        invalidRecordingUrl: boolean;
+      };
+
+      function toRecordingFetchResult(response: any): RecordingFetchResult {
+        return {
+          response,
+          ok: Boolean(response?.ok),
+          status: Number(response?.status || 0),
+          invalidRecordingUrl: false,
+        };
+      }
+
+      function isPlayableRecordingResponse(fetched: RecordingFetchResult) {
+        const type = String(fetched.response?.headers?.get?.('content-type') || '').toLowerCase();
         if (!type) return true;
         if (type.startsWith('audio/') || type.startsWith('video/')) return true;
         if (type.includes('octet-stream') || type.includes('mpeg') || type.includes('mp3') || type.includes('wav')) return true;
         return false;
       }
 
-      async function fetchRecordingAsset(recordingUrl: string, orgId?: string | null) {
+      async function fetchRecordingAsset(recordingUrl: string, orgId?: string | null): Promise<RecordingFetchResult> {
         if (!isValidRecordingUrl(recordingUrl)) {
-          return { ok: false, status: 422, invalidRecordingUrl: true };
+          return { response: null, ok: false, status: 422, invalidRecordingUrl: true };
         }
         const baseHeaders = {
           Accept: 'audio/*,application/octet-stream,*/*',
           'User-Agent': 'Mozilla/5.0 VictorySync Recording Proxy',
         };
         const direct = await fetch(recordingUrl, { headers: baseHeaders } as any);
-        if (direct.ok || ![401, 403].includes(direct.status)) return direct;
+        if (direct.ok || ![401, 403].includes(direct.status)) return toRecordingFetchResult(direct);
 
         let overrideCreds: any = undefined;
         if (orgId) {
@@ -15641,15 +15657,16 @@ app.get("/s/series", async (req, res) => {
           console.warn('[recordings/download] MightyCall token lookup failed:', fmtErr(err));
           return null;
         });
-        if (!token) return direct;
+        if (!token) return toRecordingFetchResult(direct);
 
-        return fetch(recordingUrl, {
+        const authorized = await fetch(recordingUrl, {
           headers: {
             ...baseHeaders,
             Authorization: `Bearer ${token}`,
             'x-api-key': overrideCreds?.clientId || process.env.MIGHTYCALL_API_KEY || '',
           },
         } as any);
+        return toRecordingFetchResult(authorized);
       }
 
       function recordingExtension(contentType: string | null) {
@@ -15769,7 +15786,7 @@ app.get("/s/series", async (req, res) => {
               if (!isPlayableRecordingResponse(fetched)) {
                 return res.status(422).json({ error: 'recording_asset_not_audio' });
               }
-              await streamRecordingResponse(req, res, id, fetched);
+              await streamRecordingResponse(req, res, id, fetched.response);
               return;
             }
             const { phones, numbers, digits } = await getUserAssignedPhoneNumbers(orgId, actorId);
@@ -15803,7 +15820,7 @@ app.get("/s/series", async (req, res) => {
             return res.status(422).json({ error: 'recording_asset_not_audio' });
           }
 
-          await streamRecordingResponse(req, res, id, fetched);
+          await streamRecordingResponse(req, res, id, fetched.response);
         } catch (e: any) {
           console.error('[recordings/download] error:', e?.message ?? e);
           res.status(500).json({ error: 'download_failed', detail: e?.message ?? String(e) });
