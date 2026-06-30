@@ -3,8 +3,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { useOrg } from '../contexts/OrgContext';
 import { apiFetch, fetchJson } from '../lib/apiClient';
 import { supabase } from '../lib/supabaseClient';
+import { buildApiUrl } from '../config';
 import { PageLayout } from '../components/PageLayout';
-import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, ErrorStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { errorFromCatch, toUiError, type UiError } from '../lib/errors';
 
 type Recording = {
   id: string;
@@ -97,7 +99,7 @@ export function RecordingsPage() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<UiError | null>(null);
   const [search, setSearch] = useState('');
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [syncing, setSyncing] = useState(false);
@@ -137,7 +139,7 @@ export function RecordingsPage() {
       });
       await fetchRecordings(true);
     } catch (e: any) {
-      setError(e?.message || 'Failed to sync recent recordings');
+      setError(errorFromCatch(e, 'Failed to sync recent recordings'));
     } finally {
       setSyncing(false);
     }
@@ -178,7 +180,7 @@ export function RecordingsPage() {
       setNextOffset(nextPageOffset);
       if (reset) setEmptyReason(reason);
     } catch (err: any) {
-      setError(err?.message || 'Error fetching recordings');
+      setError(errorFromCatch(err, 'Error fetching recordings'));
     } finally {
       if (reset) {
         if (!silent) setLoading(false);
@@ -228,7 +230,7 @@ export function RecordingsPage() {
 
   const handleDownload = async (recording: Recording) => {
     if (!recording.id) {
-      setError('Recording is not available for download.');
+      setError({ code: 'REC_MISSING_ID', message: 'Recording is not available for download.' });
       return;
     }
     try {
@@ -237,7 +239,9 @@ export function RecordingsPage() {
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        setError(payload.detail || payload.error || 'Failed to download recording');
+        const uiError = toUiError({ ...payload, status: response.status }, 'Failed to download recording');
+        setError(uiError);
+        if (uiError.fallbackPath) window.open(buildApiUrl(uiError.fallbackPath), '_blank', 'noopener,noreferrer');
         return;
       }
       const blob = await response.blob();
@@ -251,7 +255,7 @@ export function RecordingsPage() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (err: any) {
-      setError(err?.message || 'Error downloading recording');
+      setError(errorFromCatch(err, 'Error downloading recording'));
     }
   };
 
@@ -262,7 +266,9 @@ export function RecordingsPage() {
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        setError(payload.detail || payload.error || 'Failed to open recording');
+        const uiError = toUiError({ ...payload, status: response.status }, 'Failed to open recording');
+        setError(uiError);
+        if (uiError.fallbackPath) window.open(buildApiUrl(uiError.fallbackPath), '_blank', 'noopener,noreferrer');
         return;
       }
       const blob = await response.blob();
@@ -274,8 +280,12 @@ export function RecordingsPage() {
 	        return next;
 	      });
     } catch (err: any) {
-      setError(err?.message || 'Error opening recording');
+      setError(errorFromCatch(err, 'Error opening recording'));
     }
+  };
+
+  const openFallbackRecording = () => {
+    if (error?.fallbackPath) window.open(buildApiUrl(error.fallbackPath), '_blank', 'noopener,noreferrer');
   };
 
   const emptyCopy = search.trim()
@@ -347,7 +357,14 @@ export function RecordingsPage() {
           </div>
         </SectionCard>
 
-        {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</div>}
+        {error && (
+          <ErrorStatePanel
+            error={error}
+            title="Recording action failed"
+            onRetry={() => fetchRecordings(true)}
+            onFallback={error.fallbackPath ? openFallbackRecording : undefined}
+          />
+        )}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <MetricStatCard label="Recordings" value={summary.total} />

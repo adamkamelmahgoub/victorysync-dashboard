@@ -1,4 +1,5 @@
 import React, { ReactNode } from 'react';
+import type { UiError } from '../lib/errors';
 
 function cx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ');
@@ -352,19 +353,51 @@ export function EmptyStatePanel({
 }
 
 export function ErrorStatePanel({
+  error,
   title = 'Unable to load this section',
   description = 'The page could not load this data. Please try again.',
   action,
+  onRetry,
+  onFallback,
+  fallbackLabel = 'Open recording',
+  className,
 }: {
+  error?: UiError | string;
   title?: string;
   description?: string;
   action?: ReactNode;
+  onRetry?: () => void;
+  onFallback?: () => void;
+  fallbackLabel?: string;
+  className?: string;
 }) {
+  const normalized = typeof error === 'string'
+    ? { code: 'ERROR', message: error }
+    : error;
+  const message = normalized?.message || description;
+  const hasActions = Boolean(action || onRetry || onFallback);
+
   return (
-    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-8 text-center shadow-sm ring-1 ring-white">
-      <div className="text-base font-semibold text-rose-900">{title}</div>
-      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-rose-700">{description}</p>
-      {action && <div className="mt-4 flex justify-center">{action}</div>}
+    <div className={cx('rounded-2xl border border-rose-200 bg-rose-50 px-6 py-6 text-rose-900 shadow-sm ring-1 ring-white', className)}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 text-left">
+          {normalized?.code && (
+            <div className="inline-flex rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-black uppercase text-rose-700">
+              {normalized.code}
+            </div>
+          )}
+          <div className={cx('text-base font-semibold text-rose-900', normalized?.code && 'mt-3')}>{title}</div>
+          <p className="mt-2 max-w-3xl break-words text-sm leading-6 text-rose-700">{message}</p>
+          {normalized?.requestId && <p className="mt-2 font-mono text-xs text-rose-700">Request {normalized.requestId}</p>}
+        </div>
+        {hasActions && (
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {action}
+            {onFallback && <button type="button" onClick={onFallback} className="vs-button-secondary !border-rose-200 !bg-white !text-rose-800">{fallbackLabel}</button>}
+            {onRetry && <button type="button" onClick={onRetry} className="vs-button-secondary !border-rose-200 !bg-white !text-rose-800">Retry</button>}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

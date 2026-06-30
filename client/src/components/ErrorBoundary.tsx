@@ -32,6 +32,9 @@ export default class ErrorBoundary extends React.Component<Props, State> {
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-sm font-black text-rose-700">
               !
             </div>
+            <div className="mx-auto mt-4 inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-black uppercase text-rose-700">
+              UI_RENDER_ERROR
+            </div>
             <h2 className="mt-5 text-2xl font-bold text-slate-950">This page could not load</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
               VictorySync hit an unexpected page error. The event was logged, and you can safely return to the dashboard or retry the page.
@@ -54,7 +57,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
               </button>
             </div>
             {this.state.error?.message && (
-              <p className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs text-slate-600">
+              <p className="mt-5 max-h-32 overflow-auto break-words rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs leading-5 text-slate-600">
                 {this.state.error.message}
               </p>
             )}

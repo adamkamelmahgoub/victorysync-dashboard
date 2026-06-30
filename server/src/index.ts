@@ -131,6 +131,24 @@ function fmtErr(e: any): string {
   return msg;
 }
 
+function sendApiError(
+  res: express.Response,
+  status: number,
+  code: string,
+  message: string,
+  options?: { retryable?: boolean; fallbackPath?: string | null; extra?: Record<string, any> }
+) {
+  return res.status(status).json({
+    error: code,
+    code,
+    message,
+    request_id: (res.req as any)?.requestId || null,
+    retryable: options?.retryable ?? status >= 500,
+    ...(options?.fallbackPath ? { fallback_path: options.fallbackPath } : {}),
+    ...(options?.extra || {}),
+  });
+}
+
 const MAX_ACCOUNT_IMAGE_DATA_URL_LENGTH = 3_000_000;
 
 function validateAccountImageDataUrl(value: unknown): string | null {
@@ -15639,6 +15657,8 @@ app.get("/s/series", async (req, res) => {
         ok: boolean;
         status: number;
         invalidRecordingUrl: boolean;
+        timedOut?: boolean;
+        networkError?: boolean;
       };
 
       function toRecordingFetchResult(response: any): RecordingFetchResult {
@@ -15658,6 +15678,20 @@ app.get("/s/series", async (req, res) => {
         return false;
       }
 
+      async function fetchRecordingUrlWithTimeout(recordingUrl: string, init: any, timeoutMs = 12000) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          return await fetch(recordingUrl, { ...init, signal: controller.signal } as any);
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      function recordingDownloadFallbackPath(id: string) {
+        return `/api/recordings/${encodeURIComponent(id)}/download?redirect=1`;
+      }
+
       async function fetchRecordingAsset(recordingUrl: string, orgId?: string | null): Promise<RecordingFetchResult> {
         if (!isValidRecordingUrl(recordingUrl)) {
           return { response: null, ok: false, status: 422, invalidRecordingUrl: true };
@@ -15666,7 +15700,12 @@ app.get("/s/series", async (req, res) => {
           Accept: 'audio/*,application/octet-stream,*/*',
           'User-Agent': 'Mozilla/5.0 VictorySync Recording Proxy',
         };
-        const direct = await fetch(recordingUrl, { headers: baseHeaders } as any);
+        let direct: any;
+        try {
+          direct = await fetchRecordingUrlWithTimeout(recordingUrl, { headers: baseHeaders });
+        } catch (err: any) {
+          return { response: null, ok: false, status: err?.name === 'AbortError' ? 504 : 502, invalidRecordingUrl: false, timedOut: err?.name === 'AbortError', networkError: err?.name !== 'AbortError' };
+        }
         if (direct.ok || ![401, 403].includes(direct.status)) return toRecordingFetchResult(direct);
 
         let overrideCreds: any = undefined;
@@ -15691,13 +15730,18 @@ app.get("/s/series", async (req, res) => {
         });
         if (!token) return toRecordingFetchResult(direct);
 
-        const authorized = await fetch(recordingUrl, {
-          headers: {
-            ...baseHeaders,
-            Authorization: `Bearer ${token}`,
-            'x-api-key': overrideCreds?.clientId || process.env.MIGHTYCALL_API_KEY || '',
-          },
-        } as any);
+        let authorized: any;
+        try {
+          authorized = await fetchRecordingUrlWithTimeout(recordingUrl, {
+            headers: {
+              ...baseHeaders,
+              Authorization: `Bearer ${token}`,
+              'x-api-key': overrideCreds?.clientId || process.env.MIGHTYCALL_API_KEY || '',
+            },
+          });
+        } catch (err: any) {
+          return { response: null, ok: false, status: err?.name === 'AbortError' ? 504 : 502, invalidRecordingUrl: false, timedOut: err?.name === 'AbortError', networkError: err?.name !== 'AbortError' };
+        }
         return toRecordingFetchResult(authorized);
       }
 
@@ -15732,10 +15776,10 @@ app.get("/s/series", async (req, res) => {
       app.get('/api/recordings/:id/download', async (req, res) => {
         try {
           const actorId = req.header('x-user-id') || null;
-          if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+          if (!actorId) return sendApiError(res, 401, 'UNAUTHENTICATED', 'Sign in again to open recordings.', { retryable: false });
 
           const { id } = req.params;
-          if (!id) return res.status(400).json({ error: 'missing_id' });
+          if (!id) return sendApiError(res, 400, 'REC_MISSING_ID', 'Recording id is missing.', { retryable: false });
 
           // First try mightycall_recordings table (primary source). Reports may carry
           // either the row id or a provider/call identifier, so resolve all common keys.
@@ -15788,35 +15832,50 @@ app.get("/s/series", async (req, res) => {
 
             if (callError) {
               console.error('[recordings/download] db lookup failed:', callError);
-              return res.status(500).json({ error: 'db_lookup_failed' });
+              return sendApiError(res, 500, 'REC_DB_LOOKUP_FAILED', 'Could not look up this recording. Try again in a moment.');
             }
             recording = call;
           }
 
           if (error) {
             console.error('[recordings/download] mightycall_recordings lookup failed:', error);
-            return res.status(500).json({ error: 'db_lookup_failed' });
+            return sendApiError(res, 500, 'REC_DB_LOOKUP_FAILED', 'Could not look up this recording. Try again in a moment.');
           }
           if (!recording || !recording.recording_url) {
-            return res.status(404).json({ error: 'recording_not_found' });
+            return sendApiError(res, 404, 'REC_NOT_FOUND', 'That recording is not available yet.', { retryable: false });
           }
 
           const isAdmin = await isPlatformAdmin(actorId);
           if (!isAdmin) {
             const orgId = String((recording as any).org_id || '').trim();
             if (!orgId || !(await isOrgMember(actorId, orgId))) {
-              return res.status(403).json({ error: 'forbidden' });
+              return sendApiError(res, 403, 'REC_FORBIDDEN', 'You do not have access to this recording.', { retryable: false });
             }
             if ((await isOrgAdmin(actorId, orgId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'))) {
               const recordingUrl = recording.recording_url;
+              if (req.query.redirect === '1') {
+                if (!isValidRecordingUrl(recordingUrl)) {
+                  return sendApiError(res, 422, 'REC_INVALID_URL', 'This recording link is invalid.', { retryable: false });
+                }
+                return res.redirect(302, recordingUrl);
+              }
               const fetched = await fetchRecordingAsset(recordingUrl, orgId);
               if (!fetched.ok) {
                 console.error('[recordings/download] remote fetch failed:', fetched.status);
-                const status = fetched.invalidRecordingUrl ? 422 : 502;
-                return res.status(status).json({ error: fetched.invalidRecordingUrl ? 'invalid_recording_url' : 'remote_fetch_failed', status: fetched.status });
+                if (fetched.invalidRecordingUrl) {
+                  return sendApiError(res, 422, 'REC_INVALID_URL', 'This recording link is invalid.', { retryable: false });
+                }
+                const status = fetched.timedOut ? 504 : 502;
+                return sendApiError(
+                  res,
+                  status,
+                  fetched.timedOut ? 'REC_REMOTE_TIMEOUT' : 'REC_REMOTE_FETCH_FAILED',
+                  fetched.timedOut ? 'The recording provider took too long to respond. You can retry or open the provider recording directly.' : 'The recording provider did not return playable audio.',
+                  { retryable: true, fallbackPath: recordingDownloadFallbackPath(id), extra: { provider_status: fetched.status || null } }
+                );
               }
               if (!isPlayableRecordingResponse(fetched)) {
-                return res.status(422).json({ error: 'recording_asset_not_audio' });
+                return sendApiError(res, 422, 'REC_NOT_AUDIO', 'The provider returned a recording page instead of an audio file.', { retryable: false, fallbackPath: recordingDownloadFallbackPath(id) });
               }
               await streamRecordingResponse(req, res, id, fetched.response);
               return;
@@ -15837,25 +15896,40 @@ app.get("/s/series", async (req, res) => {
               (fd && assignedDigits.has(fd)) ||
               (td && assignedDigits.has(td))
             );
-            if (!allowed) return res.status(403).json({ error: 'forbidden', detail: 'recording_not_assigned_to_user_numbers' });
+            if (!allowed) return sendApiError(res, 403, 'REC_FORBIDDEN', 'This recording is not assigned to one of your numbers.', { retryable: false });
           }
 
           const recordingUrl = recording.recording_url;
+          if (req.query.redirect === '1') {
+            if (!isValidRecordingUrl(recordingUrl)) {
+              return sendApiError(res, 422, 'REC_INVALID_URL', 'This recording link is invalid.', { retryable: false });
+            }
+            return res.redirect(302, recordingUrl);
+          }
           // Fetch remote asset
           const fetched = await fetchRecordingAsset(recordingUrl, recording.org_id);
           if (!fetched.ok) {
             console.error('[recordings/download] remote fetch failed:', fetched.status);
-            const status = fetched.invalidRecordingUrl ? 422 : 502;
-            return res.status(status).json({ error: fetched.invalidRecordingUrl ? 'invalid_recording_url' : 'remote_fetch_failed', status: fetched.status });
+            if (fetched.invalidRecordingUrl) {
+              return sendApiError(res, 422, 'REC_INVALID_URL', 'This recording link is invalid.', { retryable: false });
+            }
+            const status = fetched.timedOut ? 504 : 502;
+            return sendApiError(
+              res,
+              status,
+              fetched.timedOut ? 'REC_REMOTE_TIMEOUT' : 'REC_REMOTE_FETCH_FAILED',
+              fetched.timedOut ? 'The recording provider took too long to respond. You can retry or open the provider recording directly.' : 'The recording provider did not return playable audio.',
+              { retryable: true, fallbackPath: recordingDownloadFallbackPath(id), extra: { provider_status: fetched.status || null } }
+            );
           }
           if (!isPlayableRecordingResponse(fetched)) {
-            return res.status(422).json({ error: 'recording_asset_not_audio' });
+            return sendApiError(res, 422, 'REC_NOT_AUDIO', 'The provider returned a recording page instead of an audio file.', { retryable: false, fallbackPath: recordingDownloadFallbackPath(id) });
           }
 
           await streamRecordingResponse(req, res, id, fetched.response);
         } catch (e: any) {
           console.error('[recordings/download] error:', e?.message ?? e);
-          res.status(500).json({ error: 'download_failed', detail: e?.message ?? String(e) });
+          sendApiError(res, 500, 'REC_DOWNLOAD_FAILED', 'Recording playback failed. Try again in a moment.');
         }
       });
 
@@ -18275,6 +18349,13 @@ app.use('/api', (err: any, req: express.Request, res: express.Response, _next: e
     ? Math.min(Math.max(Number(err.status || err.statusCode), 400), 599)
     : 500;
   const errorCode = status === 403
+    ? 'FORBIDDEN'
+    : status === 401
+      ? 'UNAUTHENTICATED'
+      : status === 400
+        ? 'INVALID_REQUEST'
+        : 'INTERNAL_SERVER_ERROR';
+  const legacyErrorCode = status === 403
     ? 'forbidden'
     : status === 401
       ? 'unauthenticated'
@@ -18292,7 +18373,17 @@ app.use('/api', (err: any, req: express.Request, res: express.Response, _next: e
 
   res.status(status).json({
     error: errorCode,
+    code: errorCode,
+    legacy_error: legacyErrorCode,
+    message: status === 403
+      ? 'You do not have access to this action.'
+      : status === 401
+        ? 'Sign in again to continue.'
+        : status === 400
+          ? 'The request was invalid.'
+          : 'Something went wrong. Try again in a moment.',
     request_id: req.requestId || null,
+    retryable: status >= 500,
   });
 });
 

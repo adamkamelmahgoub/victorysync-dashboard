@@ -100,6 +100,40 @@ function AppLoadingFallback({ label = 'Loading workspace...' }: { label?: string
   );
 }
 
+function RouteStatusScreen({
+  code,
+  title,
+  message,
+  primaryLabel = 'Go to dashboard',
+  onPrimary,
+}: {
+  code: string;
+  title: string;
+  message: string;
+  primaryLabel?: string;
+  onPrimary?: () => void;
+}) {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 text-slate-900">
+      <section className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-[0_18px_48px_rgba(15,23,42,0.10)]">
+        <div className="mx-auto inline-flex rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-black uppercase text-violet-700">
+          {code}
+        </div>
+        <h1 className="mt-4 text-2xl font-black text-slate-950">{title}</h1>
+        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600">{message}</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <button type="button" className="vs-button-primary" onClick={onPrimary || (() => window.location.assign('/dashboard'))}>
+            {primaryLabel}
+          </button>
+          <button type="button" className="vs-button-secondary" onClick={() => window.history.back()}>
+            Go back
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function NavigationProgress() {
   const location = useLocation();
   const [visible, setVisible] = useState(false);
@@ -182,21 +216,14 @@ function AdminRoute({ children }: { children: JSX.Element }) {
   }
   // In dev preview mode, allow access regardless of the authenticated user's role
   if (!user || !["platform_admin", "admin", "super_admin"].includes(String(previewRole || ""))) {
-    const adminToClient: Record<string, string> = {
-      '/admin/reports': '/reports',
-      '/admin/recordings': '/recordings',
-      '/admin/sms': '/sms',
-      '/admin/support': '/support',
-      '/admin/billing': '/dashboard',
-      '/admin/operations': '/dashboard',
-      '/admin/orgs': '/dashboard',
-      '/admin/users': '/dashboard',
-      '/admin/invites': '/dashboard',
-      '/admin/logs': '/dashboard',
-      '/admin': '/dashboard',
-    };
-    const fallback = adminToClient[location.pathname] || '/dashboard';
-    return <Navigate to={fallback} replace />;
+    return (
+      <RouteStatusScreen
+        code="403 FORBIDDEN"
+        title="Admin access required"
+        message="This area is limited to VictorySync admins. Use the dashboard routes available to your account."
+        primaryLabel="Open dashboard"
+      />
+    );
   }
 
   return children;
@@ -215,7 +242,14 @@ function FeatureRoute({ featureKey, children }: { featureKey: string; children: 
     );
   }
   if (!isAdmin && featureAccess[featureKey] === false) {
-    return <Navigate to="/dashboard" replace />;
+    return (
+      <RouteStatusScreen
+        code="403 FORBIDDEN"
+        title="Feature not enabled"
+        message="This feature is not enabled for your organization yet."
+        primaryLabel="Open dashboard"
+      />
+    );
   }
   return children;
 }
@@ -524,7 +558,17 @@ function AppRouter() {
           </AdminRoute>
         }
       />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="*"
+          element={(
+            <RouteStatusScreen
+              code="404 NOT_FOUND"
+              title="Page not found"
+              message="That VictorySync page does not exist or is no longer available."
+              primaryLabel="Open dashboard"
+            />
+          )}
+        />
           </Routes>
         </PageTransition>
       </Suspense>

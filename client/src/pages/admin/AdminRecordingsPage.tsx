@@ -1,10 +1,11 @@
 import React, { FC, useEffect, useMemo, useState } from 'react';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
-import { EmptyStatePanel, MetricStatCard, SectionCard } from '../../components/DashboardPrimitives';
+import { EmptyStatePanel, ErrorStatePanel, MetricStatCard, SectionCard } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
 import { triggerMightyCallRecordingsSync } from '../../lib/apiClient';
+import { errorFromCatch, toUiError, type UiError } from '../../lib/errors';
 
 type Recording = {
   id: string;
@@ -63,7 +64,7 @@ const AdminRecordingsPage: FC = () => {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
+  const [listError, setListError] = useState<UiError | null>(null);
   const [filterOrgId, setFilterOrgId] = useState('');
   const [search, setSearch] = useState('');
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
@@ -146,7 +147,7 @@ const AdminRecordingsPage: FC = () => {
       const response = await fetch(url, { headers: { 'x-user-id': userId, 'Content-Type': 'application/json' } });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        setListError(err?.detail || err?.error || 'Failed to load recordings');
+        setListError(toUiError({ ...err, status: response.status }, 'Failed to load recordings'));
         return;
       }
 
@@ -155,7 +156,7 @@ const AdminRecordingsPage: FC = () => {
       setRecordings((prev) => (reset ? rows : [...prev, ...rows]));
       setNextOffset(data.next_offset ?? null);
     } catch (e: any) {
-      setListError(e?.message || 'Failed to load recordings');
+      setListError(errorFromCatch(e, 'Failed to load recordings'));
     } finally {
       if (reset) {
         if (!silent) setLoading(false);
@@ -172,7 +173,9 @@ const AdminRecordingsPage: FC = () => {
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        setListError(err?.detail || err?.error || 'Failed to open recording');
+        const uiError = toUiError({ ...err, status: response.status }, 'Failed to open recording');
+        setListError(uiError);
+        if (uiError.fallbackPath) window.open(buildApiUrl(uiError.fallbackPath), '_blank', 'noopener,noreferrer');
         return;
       }
       const blob = await response.blob();
@@ -180,8 +183,12 @@ const AdminRecordingsPage: FC = () => {
       window.open(url, '_blank', 'noopener,noreferrer');
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (e: any) {
-      setListError(e?.message || 'Failed to open recording');
+      setListError(errorFromCatch(e, 'Failed to open recording'));
     }
+  };
+
+  const openFallbackRecording = () => {
+    if (listError?.fallbackPath) window.open(buildApiUrl(listError.fallbackPath), '_blank', 'noopener,noreferrer');
   };
 
   useEffect(() => { fetchOrgs(); }, [userId]);
@@ -231,7 +238,14 @@ const AdminRecordingsPage: FC = () => {
 
         <SectionCard title="Recording inventory" description="A cross-client list of recording rows available for review." contentClassName="p-0">
           {listError ? (
-            <div className="px-5 py-10 text-sm text-rose-300">{listError}</div>
+            <div className="p-5">
+              <ErrorStatePanel
+                error={listError}
+                title="Recording action failed"
+                onRetry={() => loadRecordings(true, { syncFirst: true })}
+                onFallback={listError.fallbackPath ? openFallbackRecording : undefined}
+              />
+            </div>
           ) : loading ? (
             <div className="px-5 py-10 text-sm text-slate-400">Loading recordings...</div>
           ) : filteredRows.length === 0 ? (

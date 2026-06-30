@@ -90,10 +90,11 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
   if (!res.ok) {
     // Try to parse JSON body for structured error details
     let detail: string = res.statusText;
+    let payload: any = null;
     try {
-      const j = await res.json();
-      if (j && typeof j === 'object') {
-        detail = j.detail || JSON.stringify(j);
+      payload = await res.json();
+      if (payload && typeof payload === 'object') {
+        detail = payload.message || payload.detail || payload.error || JSON.stringify(payload);
       }
     } catch (e) {
       const text = await res.text().catch(() => "");
@@ -103,6 +104,13 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
     const err: any = new Error(detail || `${res.status} ${res.statusText}`);
     err.status = res.status;
     err.detail = detail;
+    if (payload && typeof payload === 'object') {
+      err.code = payload.code || payload.error;
+      err.requestId = payload.request_id || payload.requestId;
+      err.retryable = payload.retryable;
+      err.fallbackPath = payload.fallback_path || payload.fallbackPath;
+      err.payload = payload;
+    }
     throw err;
   }
   if (res.status === 204) return null as any;
