@@ -131,6 +131,38 @@ function fmtErr(e: any): string {
   return msg;
 }
 
+const MAX_ACCOUNT_IMAGE_DATA_URL_LENGTH = 3_000_000;
+
+function validateAccountImageDataUrl(value: unknown): string | null {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (text.length > MAX_ACCOUNT_IMAGE_DATA_URL_LENGTH) return null;
+  if (!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(text)) return null;
+  return text;
+}
+
+async function verifySupabasePassword(email: string, password: string) {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const authKey =
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    '';
+  if (!supabaseUrl || !authKey) return false;
+  const authResponse = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: {
+      apikey: authKey,
+      Authorization: `Bearer ${authKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, password }),
+  });
+  return authResponse.ok;
+}
+
 function isSupabaseAuthProfileTriggerError(error: any) {
   const text = String(error?.message || error?.error_description || error || '').toLowerCase();
   return text.includes('database error saving new user') || text.includes('handle_new_auth_user');
@@ -17813,10 +17845,23 @@ app.post('/api/user/change-password', async (req, res) => {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
-    const { new_password } = req.body;
+    const { current_password, new_password } = req.body;
 
     if (!new_password || new_password.length < 8) {
       return res.status(400).json({ error: 'password_too_short' });
+    }
+    if (!current_password) {
+      return res.status(400).json({ error: 'current_password_required' });
+    }
+
+    const { data: currentUserData, error: currentUserError } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (currentUserError || !currentUserData?.user?.email) {
+      return res.status(404).json({ error: 'user_not_found' });
+    }
+
+    const verified = await verifySupabasePassword(currentUserData.user.email, current_password);
+    if (!verified) {
+      return res.status(400).json({ error: 'invalid_current_password' });
     }
 
     const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
@@ -17839,19 +17884,24 @@ app.post('/api/user/upload-profile-pic', async (req, res) => {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
-    const { image_data } = req.body;
-    if (!image_data) return res.status(400).json({ error: 'no_image_provided' });
+    const imageData = validateAccountImageDataUrl(req.body?.image_data);
+    if (!imageData) return res.status(400).json({ error: 'invalid_image_data' });
+
+    const { data: currentUserData, error: currentUserError } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (currentUserError || !currentUserData?.user) throw (currentUserError || new Error('user_not_found'));
+    const currentMeta: any = currentUserData.user.user_metadata || {};
 
     const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
       user_metadata: {
-        profile_pic_url: image_data
+        ...currentMeta,
+        profile_pic_url: imageData
       }
     });
 
     if (error) throw error;
 
     queueAccountUpdateEmail(req, String(userId), 'Profile picture updated');
-    res.json({ success: true, url: image_data });
+    res.json({ success: true, url: imageData });
   } catch (err: any) {
     console.error('profile_pic_upload_failed:', fmtErr(err));
     res.status(500).json({ error: 'profile_pic_upload_failed', detail: fmtErr(err) ?? 'unknown_error' });
@@ -17864,8 +17914,9 @@ app.post('/api/user/upload-org-logo', async (req, res) => {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
-    const { image_data, org_id } = req.body;
-    if (!image_data) return res.status(400).json({ error: 'no_image_provided' });
+    const imageData = validateAccountImageDataUrl(req.body?.image_data);
+    const { org_id } = req.body;
+    if (!imageData) return res.status(400).json({ error: 'invalid_image_data' });
 
     let orgId = String(org_id || '').trim() || null;
     if (!orgId) {
@@ -17884,7 +17935,7 @@ app.post('/api/user/upload-org-logo', async (req, res) => {
     // Update org with logo
     const { data: org, error } = await supabaseAdmin
       .from('organizations')
-      .update({ logo_url: image_data, updated_at: new Date().toISOString() })
+      .update({ logo_url: imageData, updated_at: new Date().toISOString() })
       .eq('id', orgId)
       .select()
       .single();

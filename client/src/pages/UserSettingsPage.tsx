@@ -12,6 +12,13 @@ import {
   playLeadAlarmSequence,
   setSelectedLeadAlarmIds,
 } from '../lib/leadAlarm';
+
+const MAX_ACCOUNT_IMAGE_BYTES = 2 * 1024 * 1024;
+
+function isUploadableImageData(value?: string | null) {
+  return /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(String(value || ''));
+}
+
 export default function UserSettingsPage() {
   const { user, selectedOrgId, refreshProfile } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -368,6 +375,16 @@ export default function UserSettingsPage() {
   const handleProfilePicChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (!file.type.startsWith('image/')) {
+        setMessage('Choose an image file for your profile picture');
+        e.target.value = '';
+        return;
+      }
+      if (file.size > MAX_ACCOUNT_IMAGE_BYTES) {
+        setMessage('Profile picture must be 2 MB or smaller');
+        e.target.value = '';
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (event) => {
         setProfilePicPreview(event.target?.result as string);
@@ -379,6 +396,16 @@ export default function UserSettingsPage() {
   const handleLogoPicChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (!file.type.startsWith('image/')) {
+        setMessage('Choose an image file for the organization logo');
+        e.target.value = '';
+        return;
+      }
+      if (file.size > MAX_ACCOUNT_IMAGE_BYTES) {
+        setMessage('Organization logo must be 2 MB or smaller');
+        e.target.value = '';
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (event) => {
         setLogoPreview(event.target?.result as string);
@@ -417,7 +444,10 @@ export default function UserSettingsPage() {
   };
 
   const uploadProfilePic = async () => {
-    if (!user || !profilePicPreview) return;
+    if (!user || !isUploadableImageData(profilePicPreview)) {
+      setMessage('Choose a new profile picture before uploading');
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch(buildApiUrl('/api/user/upload-profile-pic'), {
@@ -435,7 +465,8 @@ export default function UserSettingsPage() {
         fetchProfile();
         await refreshProfile();
       } else {
-        setMessage('Failed to upload profile picture');
+        const error = await response.json().catch(() => ({}));
+        setMessage(error.error === 'invalid_image_data' ? 'Choose a PNG, JPG, WebP, or GIF image up to 2 MB.' : 'Failed to upload profile picture');
       }
     } catch (err: any) {
       setMessage(err.message || 'Error uploading picture');
@@ -445,7 +476,10 @@ export default function UserSettingsPage() {
   };
 
   const uploadOrgLogo = async () => {
-    if (!user || !logoPreview) return;
+    if (!user || !isUploadableImageData(logoPreview)) {
+      setMessage('Choose a new organization logo before uploading');
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch(buildApiUrl('/api/user/upload-org-logo'), {
@@ -463,7 +497,8 @@ export default function UserSettingsPage() {
         fetchProfile();
         await refreshProfile();
       } else {
-        setMessage('Failed to upload logo');
+        const error = await response.json().catch(() => ({}));
+        setMessage(error.error === 'invalid_image_data' ? 'Choose a PNG, JPG, WebP, or GIF image up to 2 MB.' : 'Failed to upload logo');
       }
     } catch (err: any) {
       setMessage(err.message || 'Error uploading logo');
@@ -504,7 +539,7 @@ export default function UserSettingsPage() {
         setTimeout(() => setMessage(null), 3000);
       } else {
         const error = await response.json();
-        setMessage(error.error || 'Failed to change password');
+        setMessage(error.error === 'invalid_current_password' ? 'Current password is incorrect' : error.error || 'Failed to change password');
       }
     } catch (err: any) {
       setMessage(err.message || 'Error changing password');
@@ -775,7 +810,7 @@ export default function UserSettingsPage() {
               </div>
               <button
                 onClick={uploadProfilePic}
-                disabled={!profilePicPreview || saving}
+                disabled={!isUploadableImageData(profilePicPreview) || saving}
                 className="vs-button-secondary w-full"
               >
                 {saving ? 'Uploading...' : 'Upload Picture'}
@@ -855,7 +890,7 @@ export default function UserSettingsPage() {
               </div>
               <button
                 onClick={uploadOrgLogo}
-                disabled={!logoPreview || saving || !selectedOrgId}
+                disabled={!isUploadableImageData(logoPreview) || saving || !selectedOrgId}
                 className="vs-button-secondary w-full"
               >
                 {saving ? 'Uploading...' : 'Upload Logo'}
@@ -971,6 +1006,7 @@ export default function UserSettingsPage() {
               <label className="mb-2 block text-sm font-semibold text-slate-700">Current Password</label>
               <input
                 type="password"
+                autoComplete="current-password"
                 value={passwordData.currentPassword}
                 onChange={(e) => handlePasswordChange('currentPassword', e.target.value)}
                 className="vs-input w-full"
@@ -981,6 +1017,7 @@ export default function UserSettingsPage() {
               <label className="mb-2 block text-sm font-semibold text-slate-700">New Password</label>
               <input
                 type="password"
+                autoComplete="new-password"
                 value={passwordData.newPassword}
                 onChange={(e) => handlePasswordChange('newPassword', e.target.value)}
                 className="vs-input w-full"
@@ -990,6 +1027,7 @@ export default function UserSettingsPage() {
               <label className="mb-2 block text-sm font-semibold text-slate-700">Confirm Password</label>
               <input
                 type="password"
+                autoComplete="new-password"
                 value={passwordData.confirmPassword}
                 onChange={(e) => handlePasswordChange('confirmPassword', e.target.value)}
                 className="vs-input w-full"
