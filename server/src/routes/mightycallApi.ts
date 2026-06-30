@@ -241,11 +241,17 @@ function mapLiveRow(row: any, orgNames: Map<string, string>, identityByKey: Map<
 
 async function loadAssignedExtensionRows(orgIds: string[]) {
   if (orgIds.length === 0) return [];
-  const [orgUsers, orgMembers] = await Promise.all([
+  const [orgUsers, orgMembers, agentExtensions] = await Promise.all([
     Promise.resolve(supabaseAdmin.from('org_users').select('id, org_id, user_id, role, mightycall_extension').in('org_id', orgIds).not('mightycall_extension', 'is', null)).then((r) => r.data || []).catch(() => []),
     Promise.resolve(supabaseAdmin.from('org_members').select('id, org_id, user_id, role, mightycall_extension').in('org_id', orgIds).not('mightycall_extension', 'is', null)).then((r) => r.data || []).catch(() => []),
+    Promise.resolve(supabaseAdmin.from('agent_extensions').select('id, org_id, user_id, extension, display_name').in('org_id', orgIds)).then((r) => r.data || []).catch(() => []),
   ]);
-  const rows = [...(orgUsers as any[]), ...(orgMembers as any[])].filter((row) => String(row?.mightycall_extension || '').trim());
+  const mappedAgentExtensions = (agentExtensions as any[]).map((row) => ({
+    ...row,
+    role: 'agent',
+    mightycall_extension: row.extension,
+  }));
+  const rows = [...(orgUsers as any[]), ...(orgMembers as any[]), ...mappedAgentExtensions].filter((row) => String(row?.mightycall_extension || '').trim());
   const userIds = Array.from(new Set(rows.map((row) => String(row.user_id || '')).filter(Boolean)));
   const profiles = userIds.length
     ? await Promise.resolve(supabaseAdmin.from('profiles').select('id, email, full_name').in('id', userIds)).then((r) => r.data || []).catch(() => [])
@@ -265,7 +271,7 @@ async function loadAssignedExtensionRows(orgIds: string[]) {
     if (!extension) continue;
     const profile = row.user_id ? profileById.get(String(row.user_id)) : null;
     const email = profile?.email || (row.user_id ? authEmailById.get(String(row.user_id)) : null) || null;
-    const displayName = profile?.full_name || (email ? String(email).split('@')[0] : null);
+    const displayName = profile?.full_name || row.display_name || (email ? String(email).split('@')[0] : null);
     const key = `${row.org_id}:${extension}`;
     if (!byKey.has(key) || row.id) {
       byKey.set(key, {
@@ -275,6 +281,24 @@ async function loadAssignedExtensionRows(orgIds: string[]) {
         email,
         display_name: displayName,
         role: row.role || 'agent',
+      });
+    }
+  }
+
+  if (byKey.size === 0 && orgIds.length === 1) {
+    const cached = await Promise.resolve(
+      supabaseAdmin.from('mightycall_extensions').select('extension, display_name, external_id').order('extension', { ascending: true }).limit(200)
+    ).then((r) => r.data || []).catch(() => []);
+    for (const row of cached as any[]) {
+      const extension = String(row?.extension || '').replace(/\D/g, '');
+      if (!extension) continue;
+      byKey.set(`${orgIds[0]}:${extension}`, {
+        org_id: orgIds[0],
+        user_id: null,
+        extension,
+        email: null,
+        display_name: row?.display_name || `Extension ${extension}`,
+        role: 'agent',
       });
     }
   }

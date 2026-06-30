@@ -139,6 +139,7 @@ const LiveStatusPage: FC = () => {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
   const itemsRef = useRef<LiveAgentStatus[]>([]);
   const inFlight = useRef(false);
@@ -161,6 +162,7 @@ const LiveStatusPage: FC = () => {
       const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
       if (requestSeq !== seq.current) return;
       setItems(mergeLiveRows(itemsRef.current, (json.items || []) as LiveAgentStatus[]));
+      setWarnings(Array.isArray(json.direct_warnings) ? json.direct_warnings : []);
       setRefreshedAt(json.refreshed_at || new Date().toISOString());
     } catch (err: any) {
       if (requestSeq === seq.current) setError(err?.message || 'Failed to load live agent status');
@@ -188,6 +190,7 @@ const LiveStatusPage: FC = () => {
         if (cancelled) return;
         if (Array.isArray(result?.items)) {
           setItems(mergeLiveRows(itemsRef.current, result.items as LiveAgentStatus[]));
+          setWarnings(Array.isArray(result.direct_warnings) ? result.direct_warnings : []);
           setRefreshedAt(result.refreshed_at || new Date().toISOString());
         }
       } catch {
@@ -213,6 +216,7 @@ const LiveStatusPage: FC = () => {
       const result = await refreshLiveAgentStatus(activeOrgId, user.id);
       if (Array.isArray(result?.items)) {
         setItems(mergeLiveRows(itemsRef.current, result.items as LiveAgentStatus[]));
+        setWarnings(Array.isArray(result.direct_warnings) ? result.direct_warnings : []);
         setRefreshedAt(result.refreshed_at || new Date().toISOString());
       } else {
         await load(false);
@@ -286,6 +290,11 @@ const LiveStatusPage: FC = () => {
     >
       <div className="space-y-6">
         {error && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">{error}</div>}
+        {warnings.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+            MightyCall status warnings: {warnings.slice(0, 3).join(' | ')}
+          </div>
+        )}
         {staleItems.length > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
             {staleItems.length} extension{staleItems.length === 1 ? '' : 's'} have stale API evidence. Last known state remains visible until MightyCall returns a fresher status.
