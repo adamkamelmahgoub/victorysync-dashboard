@@ -677,6 +677,39 @@ async function sendMfaEmailCode(params: { email: string; code: string }) {
   });
 }
 
+function hashPasswordChangeCode(userId: string, code: string) {
+  return crypto
+    .createHmac('sha256', mfaEncryptionKey())
+    .update(`password-change:${userId}:${String(code || '').replace(/\D/g, '')}`)
+    .digest('hex');
+}
+
+function hashSecurityQuestionAnswer(userId: string, questionOrder: number, answer: string) {
+  return crypto
+    .createHmac('sha256', mfaEncryptionKey())
+    .update(`security-question:${userId}:${questionOrder}:${String(answer || '').trim().toLowerCase().replace(/\s+/g, ' ')}`)
+    .digest('hex');
+}
+
+async function sendPasswordChangeCodeEmail(params: { email: string; code: string }) {
+  return sendEmail({
+    to: [params.email],
+    subject: 'Your VictorySync password change code',
+    html: `
+      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;background:#f6f7f9;padding:28px;color:#111827;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:26px;box-shadow:0 18px 48px rgba(15,23,42,.08);">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6d28d9;">VictorySync security</div>
+          <h1 style="margin:10px 0 0;font-size:22px;">Confirm your password change</h1>
+          <p style="color:#4b5563;line-height:1.6;">Enter this code in account settings to finish changing your password.</p>
+          <div style="margin:22px 0;padding:18px;border-radius:14px;background:#f5f3ff;border:1px solid #ddd6fe;font-size:30px;font-weight:900;letter-spacing:.18em;text-align:center;color:#4c1d95;">${params.code}</div>
+          <p style="color:#6b7280;font-size:13px;line-height:1.6;">This code expires in 10 minutes. If you did not request this, change your password and contact your VictorySync administrator.</p>
+        </div>
+      </div>
+    `,
+    text: `Your VictorySync password change code is ${params.code}. It expires in 10 minutes.`,
+  });
+}
+
 const IMMUTABLE_SUPER_ADMIN_EMAIL = 'adam@victorysync.com';
 async function isImmutableSuperAdminUser(userId: string | null | undefined): Promise<boolean> {
   if (!userId) return false;
@@ -4693,14 +4726,18 @@ app.use(cors({
 app.post('/api/billing/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), stripeWebhookHandler);
 app.use((req, res, next) => {
   if (req.path === '/api/leads/upload') return next(); // handled with larger limit below
+  if (req.path === '/api/user/upload-profile-pic' || req.path === '/api/user/upload-org-logo') return next();
   express.json({ limit: '512kb' })(req, res, next);
 });
 app.use((req, res, next) => {
   if (req.path === '/api/leads/upload') return next();
+  if (req.path === '/api/user/upload-profile-pic' || req.path === '/api/user/upload-org-logo') return next();
   express.urlencoded({ extended: true, limit: '512kb' })(req, res, next);
 });
 // Larger limit only for lead list upload (up to 5000 rows ≈ 2MB JSON)
 app.use('/api/leads/upload', express.json({ limit: '4mb' }));
+app.use('/api/user/upload-profile-pic', express.json({ limit: '4mb' }));
+app.use('/api/user/upload-org-logo', express.json({ limit: '4mb' }));
 app.use('/api', (_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -7832,6 +7869,20 @@ app.get('/api/user/profile', async (req, res) => {
         .maybeSingle();
       organization = orgRow || null;
     }
+    let securityQuestions: any[] = [];
+    let securityQuestionsConfigured = false;
+    const { data: securityRows, error: securityRowsError } = await supabaseAdmin
+      .from('user_security_questions')
+      .select('id, question_order, question, updated_at')
+      .eq('user_id', userId)
+      .order('question_order', { ascending: true });
+    if (securityRowsError) {
+      const message = String(securityRowsError.message || '').toLowerCase();
+      if (!message.includes('relation') && !message.includes('does not exist')) throw securityRowsError;
+    } else {
+      securityQuestions = securityRows || [];
+      securityQuestionsConfigured = securityQuestions.length >= 2;
+    }
     res.json({
       user: {
         id: authUser.id,
@@ -7843,7 +7894,9 @@ app.get('/api/user/profile', async (req, res) => {
         can_upload_leads: profileRow?.can_upload_leads ?? false,
       },
       profile: { id: userId, global_role: globalRole },
-      organization
+      organization,
+      security_questions: securityQuestions,
+      security_questions_configured: securityQuestionsConfigured
     });
   } catch (err: any) {
     console.error('get_user_profile_failed:', fmtErr(err));
@@ -17913,19 +17966,138 @@ app.post('/api/admin/assign-package', async (req, res) => {
   }
 });
 
-// POST /api/user/change-password - Change user password
+app.post('/api/user/password-code', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { data: currentUserData, error: currentUserError } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (currentUserError || !currentUserData?.user?.email) {
+      return res.status(404).json({ error: 'user_not_found' });
+    }
+
+    const email = normalizeEmail(currentUserData.user.email);
+    const code = generateMfaEmailCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const { error } = await supabaseAdmin
+      .from('user_password_change_codes')
+      .insert({
+        user_id: userId,
+        email,
+        code_hash: hashPasswordChangeCode(userId, code),
+        expires_at: expiresAt,
+      });
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.status(503).json({ error: 'account_security_migration_required', detail: 'Apply Supabase migration 038_account_security_questions_password_codes.sql before password code verification can be used.' });
+      }
+      throw error;
+    }
+
+    await sendPasswordChangeCodeEmail({ email, code });
+    res.json({ success: true, email, expires_at: expiresAt });
+  } catch (err: any) {
+    console.error('password_code_send_failed:', fmtErr(err));
+    res.status(500).json({ error: 'password_code_send_failed', detail: 'Unable to send a password change code right now.' });
+  }
+});
+
+app.get('/api/user/security-questions', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const { data, error } = await supabaseAdmin
+      .from('user_security_questions')
+      .select('id, question_order, question, updated_at')
+      .eq('user_id', userId)
+      .order('question_order', { ascending: true });
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.status(503).json({ error: 'account_security_migration_required', questions: [] });
+      }
+      throw error;
+    }
+
+    res.json({ questions: data || [], configured: (data || []).length >= 2 });
+  } catch (err: any) {
+    console.error('security_questions_fetch_failed:', fmtErr(err));
+    res.status(500).json({ error: 'security_questions_fetch_failed' });
+  }
+});
+
+app.put('/api/user/security-questions', async (req, res) => {
+  try {
+    const userId = req.header('x-user-id') || null;
+    if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const questions = Array.isArray(req.body?.questions) ? req.body.questions.slice(0, 3) : [];
+    const cleaned = questions
+      .map((item: any, index: number) => ({
+        question_order: index + 1,
+        question: String(item?.question || '').trim().slice(0, 180),
+        answer: String(item?.answer || '').trim(),
+      }))
+      .filter((item: any) => item.question && item.answer);
+
+    if (cleaned.length < 2) {
+      return res.status(400).json({ error: 'security_questions_required', detail: 'Set at least two security questions and answers.' });
+    }
+    if (cleaned.some((item: any) => item.answer.length < 3)) {
+      return res.status(400).json({ error: 'security_answer_too_short', detail: 'Security answers must be at least 3 characters.' });
+    }
+
+    const rows = cleaned.map((item: any) => ({
+      user_id: userId,
+      question_order: item.question_order,
+      question: item.question,
+      answer_hash: hashSecurityQuestionAnswer(userId, item.question_order, item.answer),
+      updated_at: new Date().toISOString(),
+    }));
+
+    const { error } = await supabaseAdmin
+      .from('user_security_questions')
+      .upsert(rows, { onConflict: 'user_id,question_order' });
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.status(503).json({ error: 'account_security_migration_required', detail: 'Apply Supabase migration 038_account_security_questions_password_codes.sql before saving security questions.' });
+      }
+      throw error;
+    }
+    await supabaseAdmin
+      .from('user_security_questions')
+      .delete()
+      .eq('user_id', userId)
+      .gt('question_order', cleaned.length);
+
+    queueAccountUpdateEmail(req, String(userId), 'Security questions updated');
+    res.json({ success: true, configured: true });
+  } catch (err: any) {
+    console.error('security_questions_save_failed:', fmtErr(err));
+    res.status(500).json({ error: 'security_questions_save_failed' });
+  }
+});
+
+// POST /api/user/change-password - Change user password after current password and email code verification
 app.post('/api/user/change-password', async (req, res) => {
   try {
     const userId = req.header('x-user-id') || null;
     if (!userId) return res.status(401).json({ error: 'unauthenticated' });
 
     const { current_password, new_password } = req.body;
+    const authCode = String(req.body?.auth_code || req.body?.verification_code || '').replace(/\D/g, '');
 
     if (!new_password || new_password.length < 8) {
       return res.status(400).json({ error: 'password_too_short' });
     }
     if (!current_password) {
       return res.status(400).json({ error: 'current_password_required' });
+    }
+    if (!/^\d{6}$/.test(authCode)) {
+      return res.status(400).json({ error: 'password_code_required', detail: 'Enter the 6-digit password change code.' });
     }
 
     const { data: currentUserData, error: currentUserError } = await supabaseAdmin.auth.admin.getUserById(userId);
@@ -17938,11 +18110,38 @@ app.post('/api/user/change-password', async (req, res) => {
       return res.status(400).json({ error: 'invalid_current_password' });
     }
 
+    const { data: codeRows, error: codeError } = await supabaseAdmin
+      .from('user_password_change_codes')
+      .select('id, code_hash, expires_at, consumed_at')
+      .eq('user_id', userId)
+      .is('consumed_at', null)
+      .order('expires_at', { ascending: false })
+      .limit(1);
+    if (codeError) {
+      const message = String(codeError.message || '').toLowerCase();
+      if (message.includes('relation') || message.includes('does not exist')) {
+        return res.status(503).json({ error: 'account_security_migration_required', detail: 'Apply Supabase migration 038_account_security_questions_password_codes.sql before password code verification can be used.' });
+      }
+      throw codeError;
+    }
+    const codeRow = (codeRows || [])[0] as any;
+    if (!codeRow || new Date(codeRow.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: 'password_code_expired', detail: 'Send a new password change code and try again.' });
+    }
+    if (hashPasswordChangeCode(userId, authCode) !== codeRow.code_hash) {
+      return res.status(400).json({ error: 'invalid_password_code', detail: 'Invalid password change code.' });
+    }
+
     const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
       password: new_password
     });
 
     if (error) throw error;
+    await supabaseAdmin
+      .from('user_password_change_codes')
+      .update({ consumed_at: new Date().toISOString() })
+      .eq('id', codeRow.id)
+      .eq('user_id', userId);
 
     queueAccountUpdateEmail(req, String(userId), 'Password changed');
     res.json({ success: true, message: 'password_changed' });

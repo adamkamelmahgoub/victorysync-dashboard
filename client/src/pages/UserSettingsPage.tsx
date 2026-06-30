@@ -14,6 +14,14 @@ import {
 } from '../lib/leadAlarm';
 
 const MAX_ACCOUNT_IMAGE_BYTES = 2 * 1024 * 1024;
+const SECURITY_QUESTION_OPTIONS = [
+  'What was the name of your first school?',
+  'What city were you born in?',
+  'What was your first job?',
+  'What is the name of your favorite teacher?',
+  'What was your childhood nickname?',
+  'What is the name of your first pet?',
+];
 
 function isUploadableImageData(value?: string | null) {
   return /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(String(value || ''));
@@ -53,7 +61,16 @@ export default function UserSettingsPage() {
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
+    authCode: '',
   });
+  const [passwordCodeSentTo, setPasswordCodeSentTo] = useState<string | null>(null);
+  const [passwordCodeExpiresAt, setPasswordCodeExpiresAt] = useState<string | null>(null);
+  const [securityQuestions, setSecurityQuestions] = useState([
+    { question: SECURITY_QUESTION_OPTIONS[0], answer: '' },
+    { question: SECURITY_QUESTION_OPTIONS[1], answer: '' },
+    { question: SECURITY_QUESTION_OPTIONS[2], answer: '' },
+  ]);
+  const [savedSecurityQuestions, setSavedSecurityQuestions] = useState<any[]>([]);
 
   useEffect(() => {
     if (user) {
@@ -115,6 +132,15 @@ export default function UserSettingsPage() {
         }
         if (data.organization?.logo_url) {
           setLogoPreview(data.organization.logo_url);
+        }
+        const savedQuestions = data.security_questions || [];
+        setSavedSecurityQuestions(savedQuestions);
+        if (savedQuestions.length > 0) {
+          setSecurityQuestions((previous) => previous.map((item, index) => ({
+            ...item,
+            question: savedQuestions[index]?.question || item.question,
+            answer: '',
+          })));
         }
       } else {
         setMessage('Failed to load profile');
@@ -507,6 +533,79 @@ export default function UserSettingsPage() {
     }
   };
 
+  const sendPasswordCode = async () => {
+    if (!user) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(buildApiUrl('/api/user/password-code'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id
+        },
+        body: JSON.stringify({})
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const fallback = payload.error === 'account_security_migration_required'
+          ? 'Account security setup needs the latest database migration before password codes can be sent.'
+          : 'Failed to send password code';
+        throw new Error(payload.detail || fallback);
+      }
+      setPasswordCodeSentTo(payload.email || formData.email || 'your email');
+      setPasswordCodeExpiresAt(payload.expires_at || null);
+      setMessage(`Password change code sent to ${payload.email || formData.email || 'your email'}`);
+      setTimeout(() => setMessage(null), 4000);
+    } catch (err: any) {
+      setMessage(err.message || 'Error sending password code');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSecurityQuestionChange = (index: number, field: 'question' | 'answer', value: string) => {
+    setSecurityQuestions((previous) => previous.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, [field]: value } : item
+    )));
+  };
+
+  const saveSecurityQuestions = async () => {
+    if (!user) return;
+    const completed = securityQuestions.filter((item) => item.question.trim() && item.answer.trim());
+    if (completed.length < 2) {
+      setMessage('Set at least two security questions and answers');
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(buildApiUrl('/api/user/security-questions'), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id
+        },
+        body: JSON.stringify({ questions: completed })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const fallback = payload.error === 'account_security_migration_required'
+          ? 'Account security setup needs the latest database migration before security questions can be saved.'
+          : payload.error || 'Failed to save security questions';
+        throw new Error(payload.detail || fallback);
+      }
+      setMessage('Security questions updated successfully');
+      setSecurityQuestions((previous) => previous.map((item) => ({ ...item, answer: '' })));
+      await fetchProfile();
+      setTimeout(() => setMessage(null), 3000);
+    } catch (err: any) {
+      setMessage(err.message || 'Error saving security questions');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const changePassword = async () => {
     if (!user) return;
     if (passwordData.newPassword !== passwordData.confirmPassword) {
@@ -515,6 +614,10 @@ export default function UserSettingsPage() {
     }
     if (passwordData.newPassword.length < 8) {
       setMessage('Password must be at least 8 characters');
+      return;
+    }
+    if (!/^\d{6}$/.test(passwordData.authCode)) {
+      setMessage('Enter the 6-digit password change code');
       return;
     }
 
@@ -529,17 +632,27 @@ export default function UserSettingsPage() {
         },
         body: JSON.stringify({
           current_password: passwordData.currentPassword,
-          new_password: passwordData.newPassword
+          new_password: passwordData.newPassword,
+          auth_code: passwordData.authCode
         })
       });
 
       if (response.ok) {
         setMessage('Password changed successfully');
-        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '', authCode: '' });
+        setPasswordCodeSentTo(null);
+        setPasswordCodeExpiresAt(null);
         setTimeout(() => setMessage(null), 3000);
       } else {
         const error = await response.json();
-        setMessage(error.error === 'invalid_current_password' ? 'Current password is incorrect' : error.error || 'Failed to change password');
+        const friendly =
+          error.error === 'invalid_current_password' ? 'Current password is incorrect' :
+          error.error === 'password_code_required' ? 'Enter the 6-digit password change code' :
+          error.error === 'invalid_password_code' ? 'Password change code is incorrect' :
+          error.error === 'password_code_expired' ? 'Password change code expired. Send a new code and try again.' :
+          error.error === 'account_security_migration_required' ? 'Account security setup needs the latest database migration before password codes can be verified.' :
+          error.detail || error.error || 'Failed to change password';
+        setMessage(friendly);
       }
     } catch (err: any) {
       setMessage(err.message || 'Error changing password');
@@ -998,9 +1111,72 @@ export default function UserSettingsPage() {
         </div>
         )}
 
+        {/* Security Questions */}
+        <div className="vs-surface p-6">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">Security Questions</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Set at least two questions for extra account verification. Answers are saved securely and are not displayed later.
+              </p>
+            </div>
+            {savedSecurityQuestions.length > 0 && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                {savedSecurityQuestions.length} saved
+              </div>
+            )}
+          </div>
+          {savedSecurityQuestions.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {savedSecurityQuestions.map((item, index) => (
+                <div key={item.id || index} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  {index + 1}. {item.question}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-5 grid gap-4">
+            {securityQuestions.map((item, index) => (
+              <div key={index} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr,1fr]">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Question {index + 1}</label>
+                  <select
+                    value={item.question}
+                    onChange={(event) => handleSecurityQuestionChange(index, 'question', event.target.value)}
+                    className="vs-input w-full"
+                  >
+                    {SECURITY_QUESTION_OPTIONS.map((question) => (
+                      <option key={question} value={question}>{question}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Answer</label>
+                  <input
+                    type="password"
+                    value={item.answer}
+                    onChange={(event) => handleSecurityQuestionChange(index, 'answer', event.target.value)}
+                    className="vs-input w-full"
+                    autoComplete="off"
+                    placeholder={savedSecurityQuestions[index] ? 'Enter a new answer to replace' : 'Answer'}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5">
+            <button onClick={saveSecurityQuestions} disabled={saving} className="vs-button-primary">
+              {saving ? 'Saving...' : 'Save Security Questions'}
+            </button>
+          </div>
+        </div>
+
         {/* Change Password */}
         <div className="vs-surface p-6">
           <h2 className="mb-6 text-lg font-semibold text-slate-950">Change Password</h2>
+          <div className="mb-5 rounded-2xl border border-violet-100 bg-violet-50 px-4 py-3 text-sm text-violet-800">
+            Password changes require your current password and a fresh 6-digit code sent to your account email.
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Current Password</label>
@@ -1033,11 +1209,38 @@ export default function UserSettingsPage() {
                 className="vs-input w-full"
               />
             </div>
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Verification Code</label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={passwordData.authCode}
+                  onChange={(e) => handlePasswordChange('authCode', e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="vs-input w-full tracking-[0.22em]"
+                  placeholder="000000"
+                />
+                <button
+                  type="button"
+                  onClick={sendPasswordCode}
+                  disabled={saving}
+                  className="vs-button-secondary whitespace-nowrap"
+                >
+                  Send Code
+                </button>
+              </div>
+              {passwordCodeSentTo && (
+                <p className="mt-2 text-xs leading-5 text-slate-600">
+                  Code sent to {passwordCodeSentTo}{passwordCodeExpiresAt ? ` and expires at ${new Date(passwordCodeExpiresAt).toLocaleTimeString()}` : ''}.
+                </p>
+              )}
+            </div>
           </div>
           <div className="mt-6">
             <button
               onClick={changePassword}
-              disabled={saving || !passwordData.currentPassword || !passwordData.newPassword}
+              disabled={saving || !passwordData.currentPassword || !passwordData.newPassword || passwordData.authCode.length < 6}
               className="vs-button-outline"
             >
               {saving ? 'Updating...' : 'Change Password'}
