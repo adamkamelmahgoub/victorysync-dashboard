@@ -69,6 +69,19 @@ function containsMalformedInput(value: any, depth = 0): boolean {
   return false;
 }
 
+function containsMalformedInputForRequest(req: Request, value: any) {
+  if (
+    (req.path === '/user/upload-profile-pic' || req.path === '/user/upload-org-logo') &&
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  ) {
+    const { image_data: _imageData, ...rest } = value;
+    return containsMalformedInput(rest);
+  }
+  return containsMalformedInput(value);
+}
+
 function getIp(req: Request) {
   const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return forwarded || req.ip || req.socket.remoteAddress || 'unknown';
@@ -297,7 +310,7 @@ export function validateAndSanitizeApiInput(req: Request, res: Response, next: N
   if (
     !bodyResult.success ||
     !queryResult.success ||
-    containsMalformedInput(body) ||
+    containsMalformedInputForRequest(req, body) ||
     containsMalformedInput(query)
   ) {
     return res.status(400).json({ error: 'invalid_request' });
