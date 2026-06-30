@@ -208,6 +208,7 @@ export default function CallsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
         body: JSON.stringify({ orgId: activeOrgId || null, startDate: isoDateDaysAgo(FIVE_YEAR_DAYS), endDate }),
+        timeoutMs: 120000,
       });
       await loadCalls(true);
     } catch (err: any) {

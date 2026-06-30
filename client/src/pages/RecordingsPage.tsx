@@ -133,6 +133,7 @@ export function RecordingsPage() {
         method: 'POST',
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
         body: JSON.stringify({ orgId: orgId || null }),
+        timeoutMs: 120000,
       });
       await fetchRecordings(true);
     } catch (e: any) {

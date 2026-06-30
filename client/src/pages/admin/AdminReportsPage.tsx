@@ -210,7 +210,7 @@ const AdminReportsPage: FC = () => {
     setDetailTab('calls');
 
     try {
-      const response = await fetch(buildApiUrl(`/api/mightycall/reports/${encodeURIComponent(reportId)}?related_limit=5000`), {
+      const response = await fetch(buildApiUrl(`/api/mightycall/reports/${encodeURIComponent(reportId)}?related_limit=1000`), {
         headers: { 'x-user-id': userId, 'Content-Type': 'application/json' },
       });
       if (!response.ok) {

@@ -48,9 +48,9 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
     const cached = readCache.get(url);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
   }
-  // Use a generous timeout to avoid indefinite fetch hangs in the browser
-  // 15s gives the backend time to process requests, while still catching hangs
-  const timeoutMs = requestInit?.timeoutMs ?? 15000; // 15s default
+  // Keep ordinary reads bounded, but give heavier report views enough room to
+  // finish under load instead of failing at the old 15s cutoff.
+  const timeoutMs = requestInit?.timeoutMs ?? 30000;
 
   async function fetchWithTimeout(u: string, i?: FetchJsonInit, t = timeoutMs) {
     if (typeof (import.meta as any).env !== 'undefined' && (import.meta as any).env.VITE_DEBUG_API === 'true') {
@@ -263,7 +263,7 @@ export async function getLiveAgentStatus(params?: { orgId?: string | null }, use
   return await fetchJson(`/api/live-status${suffix}`, {
     cache: 'no-store',
     headers: { 'x-user-id': userId || '', 'Cache-Control': 'no-cache' },
-    timeoutMs: 12000,
+    timeoutMs: 20000,
   });
 }
 
@@ -272,7 +272,7 @@ export async function refreshLiveAgentStatus(orgId?: string | null, userId?: str
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify({ orgId: orgId || null }),
-    timeoutMs: 20000,
+    timeoutMs: 30000,
   });
 }
 
@@ -286,7 +286,7 @@ export async function triggerMightyCallRecentCallsSync(orgId?: string | null, us
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify({ orgId: orgId || null, windowHours: 6 }),
-    timeoutMs: 15000,
+    timeoutMs: 30000,
   });
 }
 
@@ -294,7 +294,8 @@ export async function triggerMightyCallReportsSync(orgId: string, startDate?: st
   return await fetchJson(`/api/mightycall/sync/reports`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
-    body: JSON.stringify({ orgId, startDate, endDate })
+    body: JSON.stringify({ orgId, startDate, endDate }),
+    timeoutMs: 120000,
   });
 }
 
@@ -302,7 +303,8 @@ export async function triggerMightyCallRecordingsSync(orgId: string, startDate?:
   return await fetchJson(`/api/mightycall/sync/recordings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
-    body: JSON.stringify({ orgId, startDate, endDate })
+    body: JSON.stringify({ orgId, startDate, endDate }),
+    timeoutMs: 120000,
   });
 }
 
@@ -310,7 +312,8 @@ export async function triggerMightyCallSMSSync(orgId: string, userId?: string) {
   return await fetchJson(`/api/mightycall/sync/sms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
-    body: JSON.stringify({ orgId })
+    body: JSON.stringify({ orgId }),
+    timeoutMs: 120000,
   });
 }
 

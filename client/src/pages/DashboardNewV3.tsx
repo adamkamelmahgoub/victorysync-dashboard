@@ -181,8 +181,8 @@ const DashboardNewV3: FC = () => {
       if (endDate) callsQuery.set('end_date', endDate);
       const headers = { 'x-user-id': user.id };
       const [overviewJson, callsJson] = await Promise.all([
-        fetchJson(`/api/reports/overview?${query.toString()}`, { headers }),
-        fetchJson(`/api/reports/calls?${callsQuery.toString()}&limit=5000`, { headers }),
+        fetchJson(`/api/reports/overview?${query.toString()}`, { headers, timeoutMs: 30000 }),
+        fetchJson(`/api/reports/calls?${callsQuery.toString()}&limit=1000`, { headers, timeoutMs: 30000 }),
       ]);
       const overview = overviewJson.overview || {};
       const calls = callsJson.calls || [];

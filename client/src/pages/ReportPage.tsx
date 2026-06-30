@@ -183,7 +183,7 @@ export default function ReportPage() {
     }
     try {
       if (activeTab === 'overview') {
-        const data = await fetchJson(`/api/reports/overview?${buildQuery()}`, { headers: { 'x-user-id': user.id } });
+        const data = await fetchJson(`/api/reports/overview?${buildQuery()}`, { headers: { 'x-user-id': user.id }, timeoutMs: 30000 });
         const nextOverview: Overview = data.overview || {};
         setOverview(nextOverview);
         setRows([]);
@@ -192,7 +192,7 @@ export default function ReportPage() {
         setRows([]);
       } else {
         const endpoint = activeTab === 'agents' ? 'agents' : activeTab;
-        const data = await fetchJson(`/api/reports/${endpoint}?${buildQuery({ limit: '5000' })}`, { headers: { 'x-user-id': user.id } });
+        const data = await fetchJson(`/api/reports/${endpoint}?${buildQuery({ limit: '1000' })}`, { headers: { 'x-user-id': user.id }, timeoutMs: 30000 });
         const nextRows: Row[] = data[activeTab] || data.messages || data.agents || [];
         setRows(nextRows);
       }
@@ -253,6 +253,7 @@ export default function ReportPage() {
       await fetchJson(`/api/mightycall/sync?${q.toString()}`, {
         method: 'POST',
         headers: { 'x-user-id': user.id, 'Content-Type': 'application/json' },
+        timeoutMs: 120000,
       });
       await loadReport();
       await loadNumbers();
