@@ -180,31 +180,6 @@ export async function getQueueSummary(params?: { orgId?: string }) {
   return (json.queues ?? json) as Array<{ name: string | null; totalCalls: number; answered: number; missed: number }>;
 }
 
-export type LeadGenHubSummary = {
-  summary: {
-    total_leads: number;
-    new_leads: number;
-    active_sources: number;
-    uploads: number;
-  };
-  modules: Array<{
-    key: string;
-    label: string;
-    path: string;
-    status: 'live' | 'connected' | 'planned';
-    description: string;
-    metric_label: string;
-    metric_value: string | number;
-  }>;
-};
-
-export async function getLeadGenHubSummary(params?: { orgId?: string | null }): Promise<LeadGenHubSummary> {
-  const q = new URLSearchParams();
-  if (params?.orgId) q.set('org_id', params.orgId);
-  const suffix = q.toString() ? `?${q.toString()}` : '';
-  return await fetchJson(`/api/leadgen/hub${suffix}`);
-}
-
 // Org API keys
 export async function getOrgApiKeys(orgId: string, userId?: string) {
   return await fetchJson(`/api/orgs/${encodeURIComponent(orgId)}/api-keys`, { headers: { 'x-user-id': userId || '' } });

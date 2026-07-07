@@ -165,17 +165,6 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           ],
         },
         {
-          label: 'Lead Gen',
-          items: [
-            { label: 'Hub', path: '/lead-gen', badge: 'Live', featureKey: 'lead_generation' },
-            { label: 'Campaigns', path: '/lead-gen/campaigns', featureKey: 'lead_campaigns' },
-            { label: 'Forms', path: '/lead-gen/forms', featureKey: 'lead_forms' },
-            { label: 'Automations', path: '/lead-gen/automations', featureKey: 'lead_automations' },
-            { label: 'Sequences', path: '/lead-gen/sequences', featureKey: 'lead_sequences' },
-            { label: 'Integrations', path: '/lead-gen/integrations', featureKey: 'lead_integrations' },
-          ],
-        },
-        {
           label: 'Operations',
           items: [
             { label: 'Agents', path: '/admin/agents-management' },
@@ -222,10 +211,6 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Agents', path: '/team', featureKey: 'team' },
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
             { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
-            { label: 'Lead Gen Hub', path: '/lead-gen', badge: 'Live', featureKey: 'lead_generation' },
-            { label: 'Campaigns', path: '/lead-gen/campaigns', featureKey: 'lead_campaigns' },
-            { label: 'Forms', path: '/lead-gen/forms', featureKey: 'lead_forms' },
-            { label: 'Automations', path: '/lead-gen/automations', featureKey: 'lead_automations' },
             { label: 'Billing', path: '/billing', featureKey: 'billing' },
             { label: 'API Keys', path: '/api-keys', featureKey: 'api_keys' },
             { label: 'Org Settings', path: '/settings' },
