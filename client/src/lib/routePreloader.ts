@@ -8,6 +8,7 @@ const routeLoaders: Array<{ match: (path: string) => boolean; load: Loader }> = 
   { match: (path) => path.startsWith('/sms') || path.startsWith('/admin/sms'), load: () => import('../pages/SMSPage') },
   { match: (path) => path.startsWith('/recordings'), load: () => import('../pages/RecordingsPage') },
   { match: (path) => path.startsWith('/leads'), load: () => import('../pages/LeadsPage') },
+  { match: (path) => path.startsWith('/lead-gen'), load: () => import('../pages/LeadGenRedirectPage') },
   { match: (path) => path.startsWith('/numbers'), load: () => import('../pages/NumbersPage') },
   { match: (path) => path.startsWith('/billing'), load: () => import('../pages/BillingPage') },
   { match: (path) => path.startsWith('/api-keys'), load: () => import('../pages/APIKeysPage') },

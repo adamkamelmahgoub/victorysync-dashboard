@@ -32,8 +32,10 @@ export const TEST_ORG_ID = "d6b7bbde-54bb-4782-989d-cf9093f8cadf";
 // If you need to use a different host for local development, set
 // `VITE_API_BASE_URL` when running the client.
 const DEFAULT_PROD_API = 'https://api.victorysync.com';
+const DEFAULT_LEAD_GEN_HUB_URL = 'https://victorysyncplatform.vercel.app';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? DEFAULT_PROD_API;
+export const LEAD_GEN_HUB_URL = import.meta.env.VITE_LEAD_GEN_HUB_URL ?? DEFAULT_LEAD_GEN_HUB_URL;
 
 /**
  * Build a full API URL from a path

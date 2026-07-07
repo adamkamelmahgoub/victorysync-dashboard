@@ -51,6 +51,7 @@ const APIKeysPage = lazy(() => import("./pages/APIKeysPage").then((m) => ({ defa
 const BillingPage = lazy(() => import("./pages/BillingPage"));
 const LiveStatusPage = lazy(() => import("./pages/LiveStatusPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
+const LeadGenRedirectPage = lazy(() => import("./pages/LeadGenRedirectPage"));
 const CallsPage = lazy(() => import("./pages/CallsPage"));
 const EmailPreferencesPage = lazy(() => import("./pages/EmailPreferencesPage"));
 
@@ -291,6 +292,14 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <FeatureRoute featureKey="leads"><LeadsPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lead-gen"
+        element={
+          <ProtectedRoute>
+            <LeadGenRedirectPage />
           </ProtectedRoute>
         }
       />

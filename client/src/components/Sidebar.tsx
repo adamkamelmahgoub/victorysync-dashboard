@@ -162,6 +162,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'SMS', path: '/sms', featureKey: 'sms' },
             { label: 'Recordings', path: '/admin/recordings' },
             { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
+            { label: 'Lead Gen Hub', path: '/lead-gen' },
           ],
         },
         {
@@ -211,6 +212,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'Agents', path: '/team', featureKey: 'team' },
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
             { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
+            { label: 'Lead Gen Hub', path: '/lead-gen' },
             { label: 'Billing', path: '/billing', featureKey: 'billing' },
             { label: 'API Keys', path: '/api-keys', featureKey: 'api_keys' },
             { label: 'Org Settings', path: '/settings' },
