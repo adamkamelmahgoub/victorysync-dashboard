@@ -51,6 +51,12 @@ const APIKeysPage = lazy(() => import("./pages/APIKeysPage").then((m) => ({ defa
 const BillingPage = lazy(() => import("./pages/BillingPage"));
 const LiveStatusPage = lazy(() => import("./pages/LiveStatusPage"));
 const LeadsPage = lazy(() => import("./pages/LeadsPage"));
+const LeadGenHubPage = lazy(() => import("./pages/LeadGenHubPage"));
+const LeadGenCampaignsPage = lazy(() => import("./pages/LeadGenHubPage").then((m) => ({ default: m.LeadGenCampaignsPage })));
+const LeadGenFormsPage = lazy(() => import("./pages/LeadGenHubPage").then((m) => ({ default: m.LeadGenFormsPage })));
+const LeadGenAutomationsPage = lazy(() => import("./pages/LeadGenHubPage").then((m) => ({ default: m.LeadGenAutomationsPage })));
+const LeadGenSequencesPage = lazy(() => import("./pages/LeadGenHubPage").then((m) => ({ default: m.LeadGenSequencesPage })));
+const LeadGenIntegrationsPage = lazy(() => import("./pages/LeadGenHubPage").then((m) => ({ default: m.LeadGenIntegrationsPage })));
 const CallsPage = lazy(() => import("./pages/CallsPage"));
 const EmailPreferencesPage = lazy(() => import("./pages/EmailPreferencesPage"));
 
@@ -291,6 +297,54 @@ function AppRouter() {
         element={
           <ProtectedRoute>
             <FeatureRoute featureKey="leads"><LeadsPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lead-gen"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="lead_generation"><LeadGenHubPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lead-gen/campaigns"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="lead_campaigns"><LeadGenCampaignsPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lead-gen/forms"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="lead_forms"><LeadGenFormsPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lead-gen/automations"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="lead_automations"><LeadGenAutomationsPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lead-gen/sequences"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="lead_sequences"><LeadGenSequencesPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lead-gen/integrations"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="lead_integrations"><LeadGenIntegrationsPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />

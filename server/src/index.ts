@@ -5666,6 +5666,112 @@ app.get('/api/leads/summary', async (req, res) => {
   }
 });
 
+app.get('/api/leadgen/hub', async (req, res) => {
+  try {
+    const actorId = String(req.actorId || '');
+    const orgId = String(req.query.organization_id || req.query.org_id || '').trim() || null;
+    if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
+
+    const actorIsPlatformAdmin = await isPlatformAdmin(actorId);
+    if (orgId && !actorIsPlatformAdmin && !(await isOrgMember(actorId, orgId))) return res.status(403).json({ error: 'forbidden' });
+
+    const applyLeadScope = async (query: any) => {
+      if (orgId) return query.eq('organization_id', orgId);
+      if (actorIsPlatformAdmin) return query;
+      const orgIds = await getUserOrgIds(actorId);
+      if (orgIds.length === 0) return null;
+      return query.in('organization_id', orgIds);
+    };
+
+    const scopedLeads = await applyLeadScope(supabaseAdmin.from('leads').select('id, status', { count: 'exact', head: false }).limit(5000));
+    const scopedSources = await applyLeadScope(supabaseAdmin.from('lead_sources').select('id, active', { count: 'exact', head: false }).limit(1000));
+    const scopedUploads = await applyLeadScope(supabaseAdmin.from('lead_list_uploads').select('id', { count: 'exact', head: false }).limit(1000));
+
+    const [leadsRes, sourcesRes, uploadsRes] = await Promise.all([
+      scopedLeads ? scopedLeads : Promise.resolve({ data: [], count: 0, error: null }),
+      scopedSources ? scopedSources : Promise.resolve({ data: [], count: 0, error: null }),
+      scopedUploads ? scopedUploads : Promise.resolve({ data: [], count: 0, error: null }),
+    ]);
+
+    if ((leadsRes as any).error) throw (leadsRes as any).error;
+    if ((sourcesRes as any).error && !String((sourcesRes as any).error.message || '').includes('Could not find the table')) throw (sourcesRes as any).error;
+    if ((uploadsRes as any).error && !String((uploadsRes as any).error.message || '').includes('Could not find the table')) throw (uploadsRes as any).error;
+
+    const leads = ((leadsRes as any).data || []) as Array<{ status?: string | null }>;
+    const sources = ((sourcesRes as any).data || []) as Array<{ active?: boolean | null }>;
+    const uploads = ((uploadsRes as any).data || []) as any[];
+    const activeSources = sources.filter((source) => source.active !== false).length;
+    const newLeads = leads.filter((lead) => String(lead.status || 'new') === 'new').length;
+
+    res.json({
+      summary: {
+        total_leads: (leadsRes as any).count ?? leads.length,
+        new_leads: newLeads,
+        active_sources: activeSources,
+        uploads: (uploadsRes as any).count ?? uploads.length,
+      },
+      modules: [
+        {
+          key: 'leads',
+          label: 'Lead Inbox',
+          path: '/leads',
+          status: 'live',
+          description: 'Review, filter, assign, and act on Supabase-backed lead records.',
+          metric_label: 'Total leads',
+          metric_value: (leadsRes as any).count ?? leads.length,
+        },
+        {
+          key: 'campaigns',
+          label: 'Campaigns',
+          path: '/lead-gen/campaigns',
+          status: 'connected',
+          description: 'Manage lead sources by campaign, type, routing priority, and organization.',
+          metric_label: 'Active sources',
+          metric_value: activeSources,
+        },
+        {
+          key: 'forms',
+          label: 'Forms',
+          path: '/lead-gen/forms',
+          status: 'connected',
+          description: 'Route form captures and uploaded lists into the same lead database.',
+          metric_label: 'Uploads',
+          metric_value: (uploadsRes as any).count ?? uploads.length,
+        },
+        {
+          key: 'automations',
+          label: 'Automations',
+          path: '/lead-gen/automations',
+          status: 'connected',
+          description: 'Use inbound lead events and notifications to power routing workflows.',
+          metric_label: 'New leads',
+          metric_value: newLeads,
+        },
+        {
+          key: 'sequences',
+          label: 'Sequences',
+          path: '/lead-gen/sequences',
+          status: 'planned',
+          description: 'Prepare follow-up cadences that connect to calls, SMS, and transfers.',
+          metric_label: 'Backend',
+          metric_value: 'Ready',
+        },
+        {
+          key: 'integrations',
+          label: 'Integrations',
+          path: '/lead-gen/integrations',
+          status: 'live',
+          description: 'Monitor lead sources, uploads, inbound webhook intake, and Supabase health.',
+          metric_label: 'Sources',
+          metric_value: sources.length,
+        },
+      ],
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'leadgen_hub_failed', detail: fmtErr(e) });
+  }
+});
+
 app.get('/api/leads', async (req, res) => {
   try {
     const actorId = String(req.actorId || '');
