@@ -555,7 +555,10 @@ router.post('/mightycall/sync/recent-calls', async (req, res) => {
     const scope = await getSyncOrgIds(req);
     const windowHours = Math.max(1, Math.min(Number(req.body?.windowHours || req.query.window_hours || 6), 24 * 7));
     const syncedCalls = (await Promise.all(
-      scope.orgIds.map((orgId) => withTimeout(syncRecentCalls(windowHours, orgId), 12_000, 0))
+      scope.orgIds.map((orgId) => Promise.race([
+        syncRecentCalls(windowHours, orgId),
+        new Promise<number>((_resolve, reject) => setTimeout(() => reject(new Error('MightyCall recent calls sync timed out')), 20_000)),
+      ]))
     )).reduce((sum, count) => sum + Number(count || 0), 0);
     res.json({ ok: true, syncedCalls, refreshed_at: new Date().toISOString() });
   } catch (err: any) {

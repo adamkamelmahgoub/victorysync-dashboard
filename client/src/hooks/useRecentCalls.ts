@@ -65,7 +65,11 @@ export function useRecentCalls(orgId: string | null | undefined): UseRecentCalls
     if (orgId) {
       void triggerMightyCallRecentCallsSync(orgId)
         .then(() => load())
-        .catch(() => undefined);
+        .catch((syncError: any) => {
+          if (!cancelled) {
+            setError(syncError?.detail || syncError?.message || 'MightyCall could not refresh recent calls. Check the integration credentials.');
+          }
+        });
     }
     const intervalId = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load();
