@@ -515,6 +515,22 @@ export async function fetchMightyCallCalls(accessToken: string, filters?: any, a
   return all;
 }
 
+export async function fetchMightyCallCallDetail(accessToken: string, callId: string, apiKeyOverride?: string) {
+  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  const encodedId = encodeURIComponent(String(callId || '').trim());
+  if (!encodedId) return null;
+  const endpoints = [`/calls/${encodedId}`, `/api/calls/${encodedId}`, `/v4/calls/${encodedId}`];
+  for (const endpoint of endpoints) {
+    for (const url of buildUrlVariants(base, endpoint)) {
+      const response = await tryFetchJson(url, accessToken, apiKeyOverride);
+      if (!response.ok || !response.body) continue;
+      const body: any = response.body;
+      return body?.data?.call ?? body?.data ?? body?.call ?? body;
+    }
+  }
+  return null;
+}
+
 export async function fetchMightyCallJournalRequests(accessToken: string, params: Record<string,string>, apiKeyOverride?: string) {
   const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const ep = '/journal/requests';

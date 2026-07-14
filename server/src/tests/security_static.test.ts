@@ -68,6 +68,18 @@ test('active webhook presence remains authoritative over unknown direct REST sta
   assert.match(routeSource, /webhook_diagnostics: webhookReceipt/);
 });
 
+test('MightyCall sync and recordings use org credentials without erasing webhook evidence', () => {
+  const syncSource = readFileSync(join(process.cwd(), 'src', 'mightycall', 'sync.ts'), 'utf8');
+  const integrationSource = readFileSync(join(process.cwd(), 'src', 'integrations', 'mightycall.ts'), 'utf8');
+  const indexSource = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+  assert.match(syncSource, /existingActive && freshWebhook/);
+  assert.doesNotMatch(syncSource, /status: status === 'unknown' \? 'available' : status/);
+  assert.match(syncSource, /fetchMightyCallCallDetail\(auth\.token, externalCallId, auth\.apiKey\)/);
+  assert.match(integrationSource, /export async function fetchMightyCallCallDetail/);
+  assert.match(indexSource, /refreshExpiredRecordingAsset/);
+  assert.match(indexSource, /persistence_error_codes/);
+});
+
 test('production rate limiting requires persistent redis unless explicitly bypassed', () => {
   const apiSecurity = readFileSync(join(process.cwd(), 'src', 'security', 'apiSecurity.ts'), 'utf8');
   assert.match(apiSecurity, /ALLOW_IN_MEMORY_RATE_LIMIT_PRODUCTION/);
