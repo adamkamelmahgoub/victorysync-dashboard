@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
-import { deleteOrgIntegration, getOrgIntegrationHealth, getOrgIntegrations, listMightyCallSyncJobs, saveOrgIntegration } from '../../lib/apiClient';
+import { deleteOrgIntegration, getMightyCallReliability, getOrgIntegrationHealth, getOrgIntegrations, listMightyCallSyncJobs, listMightyCallWebhookInbox, reconcileMightyCall, replayMightyCallWebhook, saveOrgIntegration } from '../../lib/apiClient';
 
 interface Integration {
   id: string;
@@ -28,6 +28,9 @@ export default function AdminMightyCallPage() {
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [integrationHealth, setIntegrationHealth] = useState<any | null>(null);
   const [syncJobs, setSyncJobs] = useState<any[]>([]);
+  const [reliability, setReliability] = useState<any | null>(null);
+  const [webhookEvents, setWebhookEvents] = useState<any[]>([]);
+  const [reconciling, setReconciling] = useState(false);
 
   useEffect(() => {
     if (globalRole === 'platform_admin' && orgs && orgs.length > 0 && !activeOrgId) {
@@ -39,7 +42,7 @@ export default function AdminMightyCallPage() {
 
   useEffect(() => {
     if (!activeOrgId || !user?.id) return;
-    void Promise.all([loadIntegrations(), loadIntegrationHealth(), loadSyncJobs()]);
+    void Promise.all([loadIntegrations(), loadIntegrationHealth(), loadSyncJobs(), loadReliability()]);
   }, [activeOrgId, user?.id]);
 
   const loadIntegrations = async () => {
@@ -78,6 +81,43 @@ export default function AdminMightyCallPage() {
       setSyncJobs(data.jobs || []);
     } catch (err: any) {
       console.error('failed to load sync jobs:', err);
+    }
+  };
+
+  const loadReliability = async () => {
+    if (!activeOrgId || !user?.id || globalRole !== 'platform_admin') return;
+    try {
+      const [health, inbox] = await Promise.all([
+        getMightyCallReliability(activeOrgId, user.id),
+        listMightyCallWebhookInbox(activeOrgId, user.id),
+      ]);
+      setReliability(health.items?.[0] || null);
+      setWebhookEvents(inbox.items || []);
+    } catch (err: any) {
+      setError(err?.message || 'Reliability diagnostics are unavailable. Apply the latest database migration.');
+    }
+  };
+
+  const handleReconcile = async () => {
+    if (!activeOrgId || !user?.id) return;
+    try {
+      setReconciling(true);
+      await reconcileMightyCall(activeOrgId, user.id);
+      await Promise.all([loadIntegrationHealth(), loadSyncJobs(), loadReliability()]);
+    } catch (err: any) {
+      setError(err?.message || 'MightyCall reconciliation failed');
+    } finally {
+      setReconciling(false);
+    }
+  };
+
+  const handleReplay = async (id: string) => {
+    if (!user?.id) return;
+    try {
+      await replayMightyCallWebhook(id, user.id);
+      await loadReliability();
+    } catch (err: any) {
+      setError(err?.message || 'Webhook replay failed');
     }
   };
 
@@ -196,6 +236,24 @@ export default function AdminMightyCallPage() {
             </div>
           )}
         </SectionCard>
+
+        {globalRole === 'platform_admin' && (
+          <SectionCard title="Production reliability" description="Durable webhook delivery, freshness alerts, and reconciliation for this organization." actions={<button onClick={handleReconcile} disabled={reconciling} className="vs-button-primary">{reconciling ? 'Reconciling...' : 'Reconcile now'}</button>}>
+            <div className="grid gap-3 md:grid-cols-4">
+              <MetricStatCard label="Webhook" value={reliability?.webhook_ok ? 'Healthy' : 'Stale'} accent={reliability?.webhook_ok ? 'emerald' : 'amber'} hint={reliability?.last_webhook_at ? new Date(reliability.last_webhook_at).toLocaleString() : 'No event stored'} />
+              <MetricStatCard label="Calls" value={reliability?.calls_sync_ok ? 'Fresh' : 'Stale'} accent={reliability?.calls_sync_ok ? 'emerald' : 'amber'} hint={reliability?.last_call_sync_at ? new Date(reliability.last_call_sync_at).toLocaleString() : 'No call sync'} />
+              <MetricStatCard label="Recordings" value={reliability?.recordings_sync_ok ? 'Observed' : 'Missing'} accent={reliability?.recordings_sync_ok ? 'emerald' : 'amber'} hint={reliability?.last_recording_sync_at ? new Date(reliability.last_recording_sync_at).toLocaleString() : 'No recording sync'} />
+              <MetricStatCard label="Open alerts" value={String(reliability?.alerts?.length || 0)} accent={reliability?.alerts?.length ? 'amber' : 'emerald'} hint={reliability?.last_error_code || 'No current processing error'} />
+            </div>
+            <div className="mt-5 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-slate-500"><tr><th className="px-3 py-2">Event</th><th className="px-3 py-2">Extension</th><th className="px-3 py-2">State</th><th className="px-3 py-2">Received</th><th className="px-3 py-2">Action</th></tr></thead>
+                <tbody>{webhookEvents.map((event) => <tr key={event.id} className="border-t border-white/[0.04] text-slate-200"><td className="px-3 py-3">{event.event_type || '-'}</td><td className="px-3 py-3">{event.extension || '-'}</td><td className="px-3 py-3">{event.status}{event.error_code ? `: ${event.error_code}` : ''}</td><td className="px-3 py-3">{new Date(event.created_at).toLocaleString()}</td><td className="px-3 py-3">{event.status !== 'processed' ? <button className="vs-button-secondary" onClick={() => handleReplay(event.id)}>Replay</button> : '-'}</td></tr>)}</tbody>
+              </table>
+              {webhookEvents.length === 0 && <div className="py-5 text-sm text-slate-400">No durable webhook events have been stored yet.</div>}
+            </div>
+          </SectionCard>
+        )}
 
         <SectionCard title="Credentials" description="Make changes deliberately. Save, then confirm the health checks and sync jobs reflect the update.">
           <div className="grid gap-4 md:grid-cols-2">

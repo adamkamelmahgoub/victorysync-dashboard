@@ -576,6 +576,31 @@ export async function getOrgIntegrationHealth(orgId: string, userId?: string) {
   });
 }
 
+export async function getMightyCallReliability(orgId: string, userId?: string) {
+  return await fetchJson(`/api/admin/mightycall/reliability/health?org_id=${encodeURIComponent(orgId)}`, {
+    headers: { 'x-user-id': userId || '' }, cache: 'no-store', timeoutMs: 30000,
+  }) as { items: any[] };
+}
+
+export async function reconcileMightyCall(orgId: string, userId?: string) {
+  return await fetchJson('/api/admin/mightycall/reliability/reconcile', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+    body: JSON.stringify({ org_id: orgId }), timeoutMs: 120000,
+  });
+}
+
+export async function listMightyCallWebhookInbox(orgId: string, userId?: string) {
+  return await fetchJson(`/api/admin/mightycall/webhook-inbox?org_id=${encodeURIComponent(orgId)}&limit=25`, {
+    headers: { 'x-user-id': userId || '' }, cache: 'no-store',
+  }) as { items: any[] };
+}
+
+export async function replayMightyCallWebhook(id: string, userId?: string) {
+  return await fetchJson(`/api/admin/mightycall/webhook-inbox/${encodeURIComponent(id)}/replay`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, body: '{}',
+  });
+}
+
 export async function getProductionHealth(userId?: string) {
   return await fetchJson(`/api/admin/production-health`, { headers: { 'x-user-id': userId || '' } });
 }
