@@ -61,6 +61,13 @@ test('MightyCall webhook maps documented lifecycle payloads and records safe pro
   assert.doesNotMatch(indexSource, /mightycall_webhook_processed'[\s\S]{0,800}raw_payload/);
 });
 
+test('active webhook presence remains authoritative over unknown direct REST status', () => {
+  const routeSource = readFileSync(join(process.cwd(), 'src', 'routes', 'mightycallApi.ts'), 'utf8');
+  assert.doesNotMatch(routeSource, /normalizedStatus === 'unknown' \? 'available'/);
+  assert.match(routeSource, /currentIsActive \? 2 \* 60 \* 60 \* 1000/);
+  assert.match(routeSource, /webhook_diagnostics: webhookReceipt/);
+});
+
 test('production rate limiting requires persistent redis unless explicitly bypassed', () => {
   const apiSecurity = readFileSync(join(process.cwd(), 'src', 'security', 'apiSecurity.ts'), 'utf8');
   assert.match(apiSecurity, /ALLOW_IN_MEMORY_RATE_LIMIT_PRODUCTION/);

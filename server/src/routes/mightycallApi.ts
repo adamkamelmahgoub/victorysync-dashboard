@@ -325,7 +325,8 @@ function assignmentToLiveRow(row: any) {
 
 function resolverStatusToLiveRow(assignment: any, status: any) {
   const now = new Date().toISOString();
-  const normalized = status?.normalizedStatus === 'unknown' ? 'available' : (status?.normalizedStatus || 'unknown');
+  // Unknown REST profile data is not evidence that an agent is available.
+  const normalized = status?.normalizedStatus || 'unknown';
   const active = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(normalized);
   return {
     org_id: assignment.org_id,
@@ -446,6 +447,16 @@ async function buildLiveStatusPayload(req: express.Request) {
     loadCachedLiveStatusRows(scope.orgIds),
     loadDirectMightyCallStatuses(assignments),
   ]);
+  const webhookReceipt = await Promise.resolve(
+    supabaseAdmin
+      .from('audit_logs')
+      .select('org_id, metadata, created_at')
+      .eq('action', 'mightycall_webhook_processed')
+      .in('org_id', scope.orgIds)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  ).then((result: any) => result?.data || null).catch(() => null);
   const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
   const { data: orgs } = await supabaseAdmin.from('organizations').select('id, name').in('id', scope.orgIds);
   const orgNames = new Map((orgs || []).map((row: any) => [String(row.id), String(row.name || '')]));
@@ -459,7 +470,10 @@ async function buildLiveStatusPayload(req: express.Request) {
     const current = liveByKey.get(key);
     const nextIsActive = liveRowIsActive(row);
     const currentIsActive = liveRowIsActive(current);
-    const currentFresh = current && Date.now() - liveRowTimestampMs(current) < 45_000;
+    const currentMaxAge = String(current?.source || '') === 'mightycall_webhook'
+      ? (currentIsActive ? 2 * 60 * 60 * 1000 : 30_000)
+      : 45_000;
+    const currentFresh = current && Date.now() - liveRowTimestampMs(current) < currentMaxAge;
     if (nextIsActive || !currentIsActive || !currentFresh) liveByKey.set(key, row);
   }
   for (const assignment of assignments) {
@@ -475,7 +489,15 @@ async function buildLiveStatusPayload(req: express.Request) {
     source: 'mightycall_api_direct',
     api_source: 'mightycall_api_direct',
     live_status_version: 'mightycall-api-direct-authenticated',
-    direct_warnings: direct.warnings,
+    direct_warnings: [
+      ...direct.warnings,
+      ...(webhookReceipt?.metadata && Number(webhookReceipt.metadata.processing_errors || 0) > 0
+        ? [`Latest MightyCall webhook had ${Number(webhookReceipt.metadata.processing_errors)} processing error(s).`]
+        : []),
+    ],
+    webhook_diagnostics: webhookReceipt
+      ? { ...(webhookReceipt.metadata || {}), received_at: webhookReceipt.created_at }
+      : null,
   };
 }
 
