@@ -284,7 +284,7 @@ const LiveStatusPage: FC = () => {
     <PageLayout
       eyebrow="Live monitoring"
       title="Live status"
-      description="API-polled MightyCall extension presence without webhook dependency or refresh flicker."
+      description="MightyCall lifecycle events with API polling fallback and automatic refresh."
       actions={actions}
       meta={meta}
     >
