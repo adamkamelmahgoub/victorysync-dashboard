@@ -1527,6 +1527,18 @@ async function resolveMightyCallWebhookOrgId(call: ReturnType<typeof normalizeMi
     }
 
     try {
+      const { data: orgMemberMatch } = await supabaseAdmin
+        .from('org_members')
+        .select('org_id, mightycall_extension')
+        .eq('mightycall_extension', normalizedExtension)
+        .limit(1)
+        .maybeSingle();
+      if (orgMemberMatch?.org_id) return String(orgMemberMatch.org_id);
+    } catch (error) {
+      console.warn('[mightycall webhook] org_members extension lookup failed:', fmtErr(error));
+    }
+
+    try {
       const { data: agentExtensionMatch } = await supabaseAdmin
         .from('agent_extensions')
         .select('org_id, extension')
@@ -6623,6 +6635,34 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
       // Don't await — respond immediately, refresh in background
       Promise.all(refreshPromises).catch(() => {});
     }
+
+    // Persist a safe processing receipt so admins can distinguish a delivered
+    // webhook from one that actually resolved and updated live status. Never
+    // store phone numbers, API keys, secrets, or the raw payload here.
+    const resolvedOrgIds = Array.from(orgsToRefresh);
+    const eventSummaries = events.slice(0, 20).map((event: any) => ({
+      event_type: String(event?.EventType ?? event?.eventType ?? event?.type ?? 'unknown').slice(0, 100),
+      extension: normalizeExtension(event?.Body?.Extension ?? event?.body?.Extension ?? event?.Extension ?? event?.extension) || null,
+      has_call_id: !!(event?.Body?.Id ?? event?.body?.Id ?? event?.Id ?? event?.id ?? event?.CallId ?? event?.callId),
+      has_timestamp: !!(event?.Timestamp ?? event?.timestamp),
+    }));
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_id: null,
+      org_id: resolvedOrgIds.length === 1 ? resolvedOrgIds[0] : null,
+      action: 'mightycall_webhook_processed',
+      entity_type: 'integration',
+      entity_id: 'mightycall',
+      metadata: {
+        events_received: events.length,
+        events_processed: results.filter((result: any) => result?.type !== 'error').length,
+        processing_errors: results.filter((result: any) => result?.type === 'error').length,
+        organizations_resolved: resolvedOrgIds.length,
+        live_rows_attempted: results.filter((result: any) => result?.type === 'call_event' && !!result?.org_id).length,
+        events: eventSummaries,
+      },
+    }).then(({ error }) => {
+      if (error) console.warn('[mightycall webhook] processing receipt write failed:', fmtErr(error));
+    });
 
     return res.status(200).json({ received: true, events_processed: results.length, orgs_refreshed: orgsToRefresh.size, results });
   } catch (err) {

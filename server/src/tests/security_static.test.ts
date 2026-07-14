@@ -52,6 +52,15 @@ test('MightyCall webhook is provider-public but protected by a dedicated secret'
   assert.match(indexSource, /invalid_webhook_authentication/);
 });
 
+test('MightyCall webhook maps documented lifecycle payloads and records safe processing receipts', () => {
+  const indexSource = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+  assert.match(indexSource, /raw\?\.Body\?\.Extension/);
+  assert.match(indexSource, /from\('org_members'\)[\s\S]{0,300}mightycall_extension/);
+  assert.match(indexSource, /action: 'mightycall_webhook_processed'/);
+  assert.match(indexSource, /organizations_resolved: resolvedOrgIds\.length/);
+  assert.doesNotMatch(indexSource, /mightycall_webhook_processed'[\s\S]{0,800}raw_payload/);
+});
+
 test('production rate limiting requires persistent redis unless explicitly bypassed', () => {
   const apiSecurity = readFileSync(join(process.cwd(), 'src', 'security', 'apiSecurity.ts'), 'utf8');
   assert.match(apiSecurity, /ALLOW_IN_MEMORY_RATE_LIMIT_PRODUCTION/);
