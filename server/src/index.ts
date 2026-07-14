@@ -5058,7 +5058,8 @@ app.use('/api', (req, res, next) => {
   if (
     req.path.startsWith('/logs') ||
     req.path === '/csrf-token' ||
-    req.path === '/billing/stripe/webhook'
+    req.path === '/billing/stripe/webhook' ||
+    req.path === '/webhooks/mightycall'
   ) {
     return next();
   }
