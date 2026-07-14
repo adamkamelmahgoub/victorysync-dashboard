@@ -1036,15 +1036,16 @@ function parseMightyCallDurationSeconds(value: any): number | null {
   return null;
 }
 
-function extractMightyCallDurationSeconds(call: any): number | null {
-  return parseMightyCallDurationSeconds(
-    call?.duration_seconds ??
-    call?.durationSeconds ??
-    call?.duration ??
-    call?.callDuration ??
-    call?.talkTime ??
-    call?.talk_time
-  );
+export function extractMightyCallDurationSeconds(call: any): number | null {
+  const explicitSeconds = call?.duration_seconds ?? call?.durationSeconds ?? call?.talkTime ?? call?.talk_time;
+  if (explicitSeconds != null && explicitSeconds !== '') return parseMightyCallDurationSeconds(explicitSeconds);
+
+  const officialDurationMs = call?.duration ?? call?.callDuration;
+  if (officialDurationMs == null || officialDurationMs === '') return null;
+  const numeric = Number(officialDurationMs);
+  // MightyCall's documented /calls response defines `duration` as milliseconds.
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric / 1000;
+  return parseMightyCallDurationSeconds(officialDurationMs);
 }
 
 function extractMightyCallStatusCandidates(call: any): string[] {

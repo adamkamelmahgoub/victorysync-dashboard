@@ -1,7 +1,6 @@
 import React, { FC, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useTheme } from '../contexts/ThemeContext';
 import { preloadRoute } from '../lib/routePreloader';
 
 interface SidebarProps {
@@ -140,7 +139,6 @@ function NavButton({
 export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
   const navigate = useNavigate();
   const { signOut, user, selectedOrgId, orgs, profile, featureAccess, featureAccessLoaded } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({
     Developer: true,
@@ -253,13 +251,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
         </div>
       </div>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          onClick={() => void toggleTheme()}
-          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50 hover:text-slate-950 active:translate-y-0"
-        >
-          {theme === 'dark' ? 'Light UI' : 'Dark UI'}
-        </button>
+      <div className="grid grid-cols-1 gap-2">
         <button
           onClick={() => navigateTo('/account-settings')}
           className={`w-full rounded-xl border border-slate-200 px-3 py-2 text-left text-xs font-semibold shadow-sm transition hover:-translate-y-0.5 active:translate-y-0 ${

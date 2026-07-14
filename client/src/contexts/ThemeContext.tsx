@@ -1,6 +1,4 @@
 import { createContext, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from 'react';
-import { useAuth } from './AuthContext';
-import { buildApiUrl } from '../config';
 
 type ThemeMode = 'dark' | 'light';
 
@@ -12,68 +10,26 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-function readStoredTheme(): ThemeMode {
-  return localStorage.getItem('vs-theme') === 'dark' ? 'dark' : 'light';
-}
-
-function applyTheme(theme: ThemeMode) {
-  document.documentElement.dataset.theme = theme;
-  document.body.dataset.theme = theme;
-  localStorage.setItem('vs-theme', theme);
+function applyLightTheme() {
+  document.documentElement.dataset.theme = 'light';
+  document.body.dataset.theme = 'light';
+  localStorage.removeItem('vs-theme');
 }
 
 export const ThemeProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
-  const [theme, setThemeState] = useState<ThemeMode>(() => {
-    return readStoredTheme();
-  });
+  const [theme, setThemeState] = useState<ThemeMode>('light');
 
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    applyLightTheme();
+  }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadProfileTheme = async () => {
-      if (!user?.id) return;
-      try {
-        const response = await fetch(buildApiUrl('/api/user/profile'), {
-          headers: { 'x-user-id': user.id }
-        });
-        if (!response.ok) return;
-        const data = await response.json().catch(() => ({}));
-        const next = data?.user?.theme === 'dark' ? 'dark' : readStoredTheme();
-        if (!cancelled) setThemeState(next);
-      } catch {
-        // keep local theme
-      }
-    };
-    void loadProfileTheme();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
-
-  const setTheme = async (next: ThemeMode) => {
-    setThemeState(next);
-    applyTheme(next);
-    if (!user?.id) return;
-    try {
-      await fetch(buildApiUrl('/api/user/profile'), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user.id,
-        },
-        body: JSON.stringify({ theme: next })
-      });
-    } catch {
-      // local preference is still applied
-    }
+  const setTheme = async (_next: ThemeMode) => {
+    setThemeState('light');
+    applyLightTheme();
   };
 
   const toggleTheme = async () => {
-    await setTheme(theme === 'dark' ? 'light' : 'dark');
+    await setTheme('light');
   };
 
   const value = useMemo(() => ({ theme, setTheme, toggleTheme }), [theme]);

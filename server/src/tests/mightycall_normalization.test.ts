@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { directionFromText, normalizePhoneDigitsForOwnership } from '../integrations/mightycall';
+import { directionFromText, extractMightyCallDurationSeconds, normalizePhoneDigitsForOwnership } from '../integrations/mightycall';
 import {
   detectDirectionFromNumbers,
   detectTransferFromCallDetail,
@@ -41,6 +41,12 @@ test('api-only live call rows promote active calls and ignore completed calls', 
   assert.equal(liveStatusFromCall({ callStatus: 'Connected', endedAt: null }), 'on_call');
   assert.equal(liveStatusFromCall({ state: 'Ringing' }), 'ringing');
   assert.equal(liveStatusFromCall({ status: 'Completed', endedAt: '2026-05-24T10:00:00Z' }), null);
+});
+
+test('MightyCall documented call duration is converted from milliseconds', () => {
+  assert.equal(extractMightyCallDurationSeconds({ duration: 23066 }), 23.066);
+  assert.equal(extractMightyCallDurationSeconds({ duration: 5000 }), 5);
+  assert.equal(extractMightyCallDurationSeconds({ duration_seconds: 45 }), 45);
 });
 
 test('api-only SMS direction uses assigned business number ownership', () => {

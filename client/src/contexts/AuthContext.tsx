@@ -38,7 +38,7 @@ type AuthContextValue = {
   profile: { full_name?: string; phone_number?: string; profile_pic_url?: string; theme?: string } | null;
   refreshProfile: () => Promise<void>;
   refreshFeatures: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<{ error?: string; mfaRequired?: boolean; factors?: MfaFactor[]; email?: string | null }>;
+  signIn: (email: string, password: string, rememberLogin?: boolean) => Promise<{ error?: string; mfaRequired?: boolean; factors?: MfaFactor[]; email?: string | null }>;
   sendMfaEmailCode: () => Promise<{ error?: string }>;
   verifyMfa: (code: string, method: "totp" | "email") => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
@@ -90,6 +90,34 @@ function clearMfaVerifiedSession(userId?: string | null) {
   if (!userId) return;
   try {
     window.sessionStorage.removeItem(mfaSessionKey(userId));
+  } catch {}
+}
+
+const REMEMBER_LOGIN_KEY = "victorysync:remember-login";
+const TAB_LOGIN_KEY = "victorysync:tab-login";
+
+function persistLoginChoice(rememberLogin: boolean) {
+  try {
+    if (rememberLogin) {
+      window.localStorage.setItem(REMEMBER_LOGIN_KEY, "true");
+      window.sessionStorage.removeItem(TAB_LOGIN_KEY);
+    } else {
+      window.localStorage.removeItem(REMEMBER_LOGIN_KEY);
+      window.sessionStorage.setItem(TAB_LOGIN_KEY, "true");
+    }
+  } catch {}
+}
+
+function hasRestorableLogin() {
+  try {
+    return window.localStorage.getItem(REMEMBER_LOGIN_KEY) === "true" || window.sessionStorage.getItem(TAB_LOGIN_KEY) === "true";
+  } catch { return false; }
+}
+
+function clearLoginChoice() {
+  try {
+    window.localStorage.removeItem(REMEMBER_LOGIN_KEY);
+    window.sessionStorage.removeItem(TAB_LOGIN_KEY);
   } catch {}
 }
 
@@ -210,6 +238,13 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     // Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
+        if (!hasRestorableLogin()) {
+          void supabase.auth.signOut().finally(() => {
+            resetAuthState();
+            setLoading(false);
+          });
+          return;
+        }
         setLoading(true);
         loadVerifiedMfaFactors(session.user.id)
           .then((factors) => {
@@ -270,13 +305,15 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     void loadFeatures(user, selectedOrgId);
   }, [user?.id, selectedOrgId]);
 
-  const signIn = async (email: string, password: string): Promise<{ error?: string; mfaRequired?: boolean; factors?: MfaFactor[]; email?: string | null }> => {
+  const signIn = async (email: string, password: string, rememberLogin = true): Promise<{ error?: string; mfaRequired?: boolean; factors?: MfaFactor[]; email?: string | null }> => {
     setLoading(true);
     setAuthError(null);
     setPendingMfa(null);
     passwordSignInInProgressRef.current = true;
+    persistLoginChoice(rememberLogin);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
     if (error) {
+      clearLoginChoice();
       passwordSignInInProgressRef.current = false;
       const message = /invalid login credentials/i.test(error.message)
         ? "The email or password is incorrect."
@@ -367,12 +404,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     try {
       postLog("/api/logs/auth", { event_type: "logout", email: user?.email || null });
       clearMfaVerifiedSession(user?.id || pendingMfa?.userId || currentUserIdRef.current);
+      clearLoginChoice();
       await supabase.auth.signOut();
       resetAuthState();
       currentUserIdRef.current = null;
     } catch (err) {
       console.error("Sign out error:", err);
       clearMfaVerifiedSession(user?.id || pendingMfa?.userId || currentUserIdRef.current);
+      clearLoginChoice();
       resetAuthState();
       currentUserIdRef.current = null;
     }

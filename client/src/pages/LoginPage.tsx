@@ -26,6 +26,7 @@ export const LoginPage: FC = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberLogin, setRememberLogin] = useState(true);
   const [signinError, setSigninError] = useState<string | null>(null);
   const [signinLoading, setSigninLoading] = useState(false);
   const [mfaMethod, setMfaMethod] = useState<"totp" | "email">("totp");
@@ -76,7 +77,7 @@ export const LoginPage: FC = () => {
     setMfaCode("");
     setMfaEmailSent(false);
     setSigninLoading(true);
-    const result = await signIn(email, password);
+    const result = await signIn(email, password, rememberLogin);
     setSigninLoading(false);
     if (result.error) setSigninError(result.error);
     if (result.mfaRequired) {
@@ -317,6 +318,10 @@ export const LoginPage: FC = () => {
                 <Field label="Password">
                   <PasswordField value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword((value) => !value)} autoComplete="current-password" placeholder="Enter your password" />
                 </Field>
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
+                  <input type="checkbox" checked={rememberLogin} onChange={(event) => setRememberLogin(event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500" />
+                  Keep me signed in on this device
+                </label>
                 {signinError && <ErrorBanner>{signinError}</ErrorBanner>}
                 <button type="submit" disabled={signinLoading || authLoading} className="vs-button-primary w-full">
                   {signinLoading || authLoading ? "Signing in..." : "Sign in"}
