@@ -1552,17 +1552,31 @@ async function resolveMightyCallWebhookOrgId(call: ReturnType<typeof normalizeMi
   }
 
   const digitsToMatch = [normalizePhoneDigits(call.to_number), normalizePhoneDigits(call.from_number)].filter(Boolean);
-  if (digitsToMatch.length === 0) return null;
-
-  const { data, error } = await supabaseAdmin.from('phone_numbers').select('*').limit(5000);
-  if (error) {
-    console.error('[mightycall webhook] phone lookup failed:', fmtErr(error));
-    return null;
+  if (digitsToMatch.length > 0) {
+    const { data, error } = await supabaseAdmin.from('phone_numbers').select('*').limit(5000);
+    if (error) {
+      console.error('[mightycall webhook] phone lookup failed:', fmtErr(error));
+    } else {
+      for (const row of data || []) {
+        const rowDigits = normalizePhoneDigits(row?.number ?? row?.phone_number ?? row?.e164 ?? row?.metadata?.number);
+        if (rowDigits && digitsToMatch.includes(rowDigits) && row?.org_id) return String(row.org_id);
+      }
+    }
   }
 
-  for (const row of data || []) {
-    const rowDigits = normalizePhoneDigits(row?.number ?? row?.phone_number ?? row?.e164 ?? row?.metadata?.number);
-    if (rowDigits && digitsToMatch.includes(rowDigits) && row?.org_id) return String(row.org_id);
+  // Terminal MightyCall events can omit Body.Extension. If this deployment has
+  // exactly one organization with assigned MightyCall extensions, that scope is
+  // unambiguous and safer than dropping the lifecycle event.
+  try {
+    const [users, members, extensions] = await Promise.all([
+      Promise.resolve(supabaseAdmin.from('org_users').select('org_id').not('mightycall_extension', 'is', null).limit(5000)).then((r) => r.data || []),
+      Promise.resolve(supabaseAdmin.from('org_members').select('org_id').not('mightycall_extension', 'is', null).limit(5000)).then((r) => r.data || []),
+      Promise.resolve(supabaseAdmin.from('agent_extensions').select('org_id').limit(5000)).then((r) => r.data || []),
+    ]);
+    const candidateOrgIds = Array.from(new Set([...users, ...members, ...extensions].map((row: any) => String(row?.org_id || '')).filter(Boolean)));
+    if (candidateOrgIds.length === 1) return candidateOrgIds[0];
+  } catch (error) {
+    console.warn('[mightycall webhook] unique organization fallback failed:', fmtErr(error));
   }
   return null;
 }
@@ -1625,13 +1639,13 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
       agent_extension: call.agent_extension || null,
       event_type: call.payload?.EventType ?? call.payload?.eventType ?? null,
     });
-    return { org_id: null, external_id: call.external_id, status: call.status };
+    return { org_id: null, external_id: call.external_id, status: call.status, agent_extension: normalizeExtension(call.agent_extension) || existing?.agent_extension || null };
   }
 
   const query = supabaseAdmin.from('calls').upsert(row, { onConflict: 'org_id,external_id' });
   const { error } = await query;
   if (error) throw error;
-  return { org_id: orgId, external_id: call.external_id, status: call.status };
+  return { org_id: orgId, external_id: call.external_id, status: call.status, agent_extension: row.agent_extension || null };
 }
 
 function extractMightyCallWebhookSms(raw: any) {
@@ -6609,7 +6623,7 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
         const upserted = await upsertMightyCallWebhookCall(call);
         if (upserted.org_id) {
           orgsToRefresh.add(upserted.org_id);
-          const extension = normalizeExtension(call.agent_extension);
+          const extension = normalizeExtension(call.agent_extension || upserted.agent_extension);
           if (extension) {
             const normalizedStatus = normalizeAgentLiveEventStatus(call.status);
             const active = normalizedStatus === 'ringing' || normalizedStatus === 'dialing' || normalizedStatus === 'answered' || normalizedStatus === 'in_progress' || normalizedStatus === 'on_call' || normalizedStatus === 'on_hold' || normalizedStatus === 'transferring';
@@ -6642,7 +6656,11 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
         results.push({ type: 'call_event', ...upserted });
       } catch (evtErr) {
         console.warn('[mightycall webhook] event processing error:', fmtErr(evtErr));
-        results.push({ type: 'error', error: fmtErr(evtErr) });
+        results.push({
+          type: 'error',
+          error: fmtErr(evtErr),
+          error_code: String((evtErr as any)?.code || (evtErr as any)?.name || 'processing_error').slice(0, 100),
+        });
       }
     }
 
@@ -6686,6 +6704,7 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
         events_received: events.length,
         events_processed: results.filter((result: any) => result?.type !== 'error').length,
         processing_errors: results.filter((result: any) => result?.type === 'error').length,
+        error_codes: results.filter((result: any) => result?.type === 'error').map((result: any) => result.error_code || 'processing_error').slice(0, 20),
         organizations_resolved: resolvedOrgIds.length,
         live_rows_attempted: results.filter((result: any) => result?.type === 'call_event' && !!result?.org_id).length,
         events: eventSummaries,
