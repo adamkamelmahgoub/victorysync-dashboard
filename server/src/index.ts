@@ -43,6 +43,7 @@ import {
   fetchMightyCallOwnStatus,
   fetchMightyCallVoicemails,
   fetchMightyCallCalls,
+  fetchMightyCallCallDetail,
   fetchMightyCallLiveCallByExtension,
   fetchMightyCallJournalRequests,
   fetchMightyCallContactCenterCommunications,
@@ -72,6 +73,7 @@ import { getSchemaHealth, getSecurityPolicyHealth } from './lib/schemaHealth';
 import { FEATURE_DEFINITIONS, getOrgFeatureConfig, getUserFeatureAccess, getUserFeatureOverrides, saveOrgFeatureConfig, saveUserFeatureOverrides, type FeatureKey } from './lib/featureAccess';
 import { normalizeMightyCallJournalActivity, normalizeMightyCallStatusActivity } from './lib/mightycallNormalizer';
 import { getMightyCallStatusByExtension } from './services/mightycallLiveStatus';
+import { findRecordingUrl } from './mightycall/normalizers';
 import {
   createApiRateLimitMiddleware,
   createClerkSessionMiddleware,
@@ -1608,6 +1610,21 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
     } catch (error) {
       console.warn('[mightycall webhook] existing call lookup failed:', fmtErr(error));
     }
+    if (!existing) {
+      try {
+        const { data } = await supabaseAdmin
+          .from('mightycall_call_logs')
+          .select('id, org_id, started_at, answered_at, ended_at, duration_seconds, direction, from_number, to_number, agent_extension, metadata, raw_payload')
+          .eq('external_id', call.external_id)
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        existing = data || null;
+        if (!orgId && existing?.org_id) orgId = String(existing.org_id);
+      } catch (error) {
+        console.warn('[mightycall webhook] existing call-log lookup failed:', fmtErr(error));
+      }
+    }
   }
 
   const metadata = existing?.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
@@ -1642,10 +1659,35 @@ async function upsertMightyCallWebhookCall(call: ReturnType<typeof normalizeMigh
     return { org_id: null, external_id: call.external_id, status: call.status, agent_extension: normalizeExtension(call.agent_extension) || existing?.agent_extension || null };
   }
 
-  const query = supabaseAdmin.from('calls').upsert(row, { onConflict: 'org_id,external_id' });
-  const { error } = await query;
-  if (error) throw error;
-  return { org_id: orgId, external_id: call.external_id, status: call.status, agent_extension: row.agent_extension || null };
+  let persistError: any = null;
+  const legacy = await supabaseAdmin.from('calls').upsert(row, { onConflict: 'org_id,external_id' });
+  if (legacy.error) persistError = legacy.error;
+  const callLogRow = {
+    org_id: orgId,
+    external_id: call.external_id,
+    from_number: row.from_number,
+    to_number: row.to_number,
+    started_at: row.started_at,
+    answered_at: row.answered_at,
+    ended_at: row.ended_at,
+    duration_seconds: row.duration_seconds,
+    status: row.status,
+    direction: row.direction,
+    agent_extension: row.agent_extension,
+    metadata: row.metadata,
+    raw_payload: call.payload,
+    updated_at: new Date().toISOString(),
+  };
+  const canonical = await supabaseAdmin.from('mightycall_call_logs').upsert(callLogRow, { onConflict: 'org_id,external_id' });
+  if (!canonical.error) persistError = null;
+  else if (!persistError) persistError = canonical.error;
+  return {
+    org_id: orgId,
+    external_id: call.external_id,
+    status: call.status,
+    agent_extension: row.agent_extension || null,
+    persist_error_code: persistError ? String(persistError.code || 'call_persistence_failed').slice(0, 100) : null,
+  };
 }
 
 function extractMightyCallWebhookSms(raw: any) {
@@ -6705,6 +6747,8 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
         events_processed: results.filter((result: any) => result?.type !== 'error').length,
         processing_errors: results.filter((result: any) => result?.type === 'error').length,
         error_codes: results.filter((result: any) => result?.type === 'error').map((result: any) => result.error_code || 'processing_error').slice(0, 20),
+        persistence_errors: results.filter((result: any) => result?.type === 'call_event' && !!result?.persist_error_code).length,
+        persistence_error_codes: results.filter((result: any) => result?.type === 'call_event' && !!result?.persist_error_code).map((result: any) => result.persist_error_code).slice(0, 20),
         organizations_resolved: resolvedOrgIds.length,
         live_rows_attempted: results.filter((result: any) => result?.type === 'call_event' && !!result?.org_id).length,
         events: eventSummaries,
@@ -16003,6 +16047,37 @@ app.get("/s/series", async (req, res) => {
         return toRecordingFetchResult(authorized);
       }
 
+      async function refreshExpiredRecordingAsset(recording: any): Promise<RecordingFetchResult | null> {
+        const orgId = String(recording?.org_id || '').trim();
+        const callId = String(recording?.external_call_id || recording?.call_id || recording?.external_id || '').trim();
+        if (!orgId || !callId) return null;
+        try {
+          const { getOrgIntegration } = await import('./lib/integrationsStore');
+          const integration = await getOrgIntegration(orgId, 'mightycall');
+          const credentials = integration?.credentials || null;
+          const override = credentials ? {
+            clientId: credentials.clientId || credentials.apiKey || undefined,
+            clientSecret: credentials.clientSecret || credentials.userKey || undefined,
+          } : undefined;
+          const token = await getMightyCallAccessToken(override);
+          const detail = await fetchMightyCallCallDetail(token, callId, override?.clientId);
+          const freshUrl = findRecordingUrl(detail);
+          if (!freshUrl || freshUrl === recording?.recording_url) return null;
+          if (recording?.id) {
+            await supabaseAdmin.from('mightycall_recordings').update({
+              recording_url: freshUrl,
+              raw_payload: detail,
+              metadata: detail,
+              updated_at: new Date().toISOString(),
+            }).eq('id', recording.id);
+          }
+          return fetchRecordingAsset(freshUrl, orgId);
+        } catch (error) {
+          console.warn('[recordings/download] recording URL refresh failed:', fmtErr(error));
+          return null;
+        }
+      }
+
       function recordingExtension(contentType: string | null) {
         const type = String(contentType || '').toLowerCase();
         if (type.includes('wav') || type.includes('wave')) return 'wav';
@@ -16117,7 +16192,8 @@ app.get("/s/series", async (req, res) => {
                 }
                 return res.redirect(302, recordingUrl);
               }
-              const fetched = await fetchRecordingAsset(recordingUrl, orgId);
+              let fetched = await fetchRecordingAsset(recordingUrl, orgId);
+              if (!fetched.ok) fetched = (await refreshExpiredRecordingAsset(recording)) || fetched;
               if (!fetched.ok) {
                 console.error('[recordings/download] remote fetch failed:', fetched.status);
                 if (fetched.invalidRecordingUrl) {
@@ -16165,7 +16241,8 @@ app.get("/s/series", async (req, res) => {
             return res.redirect(302, recordingUrl);
           }
           // Fetch remote asset
-          const fetched = await fetchRecordingAsset(recordingUrl, recording.org_id);
+          let fetched = await fetchRecordingAsset(recordingUrl, recording.org_id);
+          if (!fetched.ok) fetched = (await refreshExpiredRecordingAsset(recording)) || fetched;
           if (!fetched.ok) {
             console.error('[recordings/download] remote fetch failed:', fetched.status);
             if (fetched.invalidRecordingUrl) {

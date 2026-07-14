@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../lib/supabaseClient';
 import { getMightyCallToken, mightyCallGetFirst } from './client';
 import {
   fetchMightyCallCalls,
+  fetchMightyCallCallDetail,
   fetchMightyCallLiveCallByExtension,
   getMightyCallAccessToken,
   syncMightyCallCallHistory,
@@ -689,6 +690,21 @@ async function upsertLiveStatus(member: any, userInfo: any, statusPayload: any, 
   const status = currentCallStatus && (rawNormalizedStatus === 'unknown' || rawNormalizedStatus === 'available')
     ? currentCallStatus
     : rawNormalizedStatus;
+
+  // The REST profile endpoint does not provide reliable per-extension call
+  // presence. Never let an unknown poll erase fresh webhook lifecycle evidence.
+  if (status === 'unknown' && !currentCallStatus) {
+    const { data: existing } = await supabaseAdmin
+      .from('agent_live_status')
+      .select('source, normalized_status, current_call_id, last_event_at, updated_at')
+      .eq('org_id', member.orgId)
+      .eq('mightycall_extension', member.extension)
+      .maybeSingle();
+    const existingActive = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(String((existing as any)?.normalized_status || '').toLowerCase());
+    const eventMs = Date.parse(String((existing as any)?.last_event_at || (existing as any)?.updated_at || ''));
+    const freshWebhook = String((existing as any)?.source || '') === 'mightycall_webhook' && Number.isFinite(eventMs) && Date.now() - eventMs < 2 * 60 * 60 * 1000;
+    if (existingActive && freshWebhook) return;
+  }
   const fromNumber = normalizePhone(firstString(currentCall?.from_number, currentCall?.from, currentCall?.caller?.number, currentCall?.client?.address));
   const toNumber = normalizePhone(firstString(currentCall?.to_number, currentCall?.to, currentCall?.destination?.number, currentCall?.called?.[0]?.phone));
   const businessNumber = normalizePhone(firstString(currentCall?.businessNumber?.number, currentCall?.businessNumber));
@@ -703,7 +719,7 @@ async function upsertLiveStatus(member: any, userInfo: any, statusPayload: any, 
     agent_name: firstString(userInfo?.displayName, userInfo?.fullName, userInfo?.name, member.name),
     raw_status: rawStatus,
     normalized_status: status === 'away' ? 'unknown' : status,
-    status: status === 'unknown' ? 'available' : status,
+    status,
     current_call_id: firstString(currentCall?.id, currentCall?.callId),
     current_call_direction: direction.includes('out') ? 'outbound' : direction.includes('in') ? 'inbound' : null,
     direction: direction.includes('out') ? 'outbound' : direction.includes('in') ? 'inbound' : null,
@@ -1119,13 +1135,34 @@ export async function syncCallDetails(maxCalls = 50): Promise<{ details: number;
   let transfers = 0;
   let transferDetailsSupported = false;
   const membersByExt = await loadOrgMembersByExtension();
+  const orgAuthCache = new Map<string, { token: string; apiKey?: string } | null>();
   for (const row of data || []) {
     const externalCallId = String((row as any).external_call_id || (row as any).external_id || '');
     if (!externalCallId) continue;
-    const paths = CALL_DETAIL_PATHS.map((path) => path.replace('{id}', encodeURIComponent(externalCallId)));
-    const response = await mightyCallGetFirst<any>(paths, {}, { optional: true });
-    if (!response.data) continue;
-    const detailRaw = unwrapApiObject(response.data);
+    const orgId = String((row as any).org_id || '');
+    let auth = orgAuthCache.get(orgId);
+    if (auth === undefined) {
+      try {
+        const integration = await getOrgIntegration(orgId, 'mightycall').catch(() => null);
+        const credentials = integration?.credentials || null;
+        const override = credentials ? {
+          clientId: credentials.clientId || credentials.apiKey || undefined,
+          clientSecret: credentials.clientSecret || credentials.userKey || undefined,
+        } : undefined;
+        auth = { token: await getMightyCallAccessToken(override), apiKey: override?.clientId };
+      } catch {
+        auth = null;
+      }
+      orgAuthCache.set(orgId, auth);
+    }
+    let detailRaw: any = null;
+    if (auth?.token) detailRaw = await fetchMightyCallCallDetail(auth.token, externalCallId, auth.apiKey).catch(() => null);
+    if (!detailRaw) {
+      const paths = CALL_DETAIL_PATHS.map((path) => path.replace('{id}', encodeURIComponent(externalCallId)));
+      const response = await mightyCallGetFirst<any>(paths, {}, { optional: true });
+      if (response.data) detailRaw = unwrapApiObject(response.data);
+    }
+    if (!detailRaw) continue;
     details += 1;
     const recordingUrl = findRecordingUrl(detailRaw);
     const transfer = detectTransferFromCallDetail(detailRaw);
