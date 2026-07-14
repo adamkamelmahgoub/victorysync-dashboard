@@ -1481,6 +1481,36 @@ async function resolveMightyCallWebhookOrgId(call: ReturnType<typeof normalizeMi
   );
   if (explicitOrgId) return explicitOrgId;
 
+  // MightyCall includes the account API key on webhook notifications. Resolve
+  // this before extension/number fallbacks because extension numbers are only
+  // unique inside an account and may not have been assigned in our roster yet.
+  const webhookApiKey = firstWebhookValue(call.payload?.ApiKey, call.payload?.apiKey, call.payload?.api_key);
+  if (webhookApiKey) {
+    try {
+      const { data: integrations } = await supabaseAdmin
+        .from('org_integrations')
+        .select('org_id, encrypted_credentials')
+        .eq('provider', 'mightycall')
+        .limit(5000);
+      const { decryptObj } = await import('./lib/integrationsStore');
+      for (const integration of integrations || []) {
+        const orgId = String(integration?.org_id || '');
+        if (!orgId) continue;
+        let credentials: any = null;
+        try {
+          credentials = decryptObj(String(integration?.encrypted_credentials || ''));
+        } catch {}
+        const configuredApiKey = firstWebhookValue(
+          credentials?.clientId,
+          credentials?.apiKey,
+        );
+        if (configuredApiKey && configuredApiKey === webhookApiKey) return orgId;
+      }
+    } catch (error) {
+      console.warn('[mightycall webhook] API-key organization lookup failed:', fmtErr(error));
+    }
+  }
+
   const normalizedExtension = normalizeExtension(call.agent_extension);
   if (normalizedExtension) {
     try {
@@ -3111,6 +3141,24 @@ function hasAuthoritativeWebhookPresence(item: any) {
   if (!Number.isFinite(eventMs)) return false;
   const maxAgeMs = item?.on_call ? (2 * 60 * 60 * 1000) : 30_000;
   return (Date.now() - eventMs) >= 0 && (Date.now() - eventMs) <= maxAgeMs;
+}
+
+function appendUnrosteredWebhookRows(
+  items: any[],
+  liveRows: any[],
+  identityByKey: Map<string, { user_id: string | null; email: string | null; display_name: string | null }>,
+) {
+  const represented = new Set(items.map((item: any) => `${item?.org_id || ''}:${normalizeExtension(item?.extension) || ''}`));
+  for (const row of liveRows || []) {
+    if (String(row?.source || '') !== 'mightycall_webhook') continue;
+    const extension = normalizeExtension(row?.mightycall_extension || row?.extension);
+    const key = `${row?.org_id || ''}:${extension || ''}`;
+    if (!extension || represented.has(key)) continue;
+    const item = mapAgentLiveStatusToApiRow(row, identityByKey);
+    item.display_name = item.display_name || `Extension ${extension}`;
+    items.push(item);
+    represented.add(key);
+  }
 }
 
 async function probeLiveStatusesForAgents(agents: RealAgentMember[]): Promise<Map<string, any>> {
@@ -6544,7 +6592,7 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
               rawEvent,
               rawPayload: rawEvent,
               source: 'mightycall_webhook',
-              lastEventAt: new Date().toISOString(),
+              lastEventAt: webhookIso(rawEvent?.Timestamp ?? rawEvent?.timestamp) || new Date().toISOString(),
               lastSyncedAt: new Date().toISOString(),
             });
           }
@@ -10115,6 +10163,7 @@ app.get('/api/live-status', async (req, res) => {
         stale: true,
       };
     });
+    appendUnrosteredWebhookRows(items, liveRows || [], identityByKey);
     const shouldDirectProbe = agents.length <= 10 && items.length > 0;
     if (shouldDirectProbe) {
       const probe = await probeLiveStatusesForAgents(agents);
@@ -10223,6 +10272,7 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
         stale: true,
       };
     });
+    appendUnrosteredWebhookRows(items, liveRows || [], identityByKey);
     const shouldDirectProbe = agents.length <= 10 && items.length > 0;
     if (shouldDirectProbe) {
       const probe = await probeLiveStatusesForAgents(agents);
