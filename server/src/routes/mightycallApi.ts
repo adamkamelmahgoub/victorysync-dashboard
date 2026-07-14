@@ -533,7 +533,25 @@ async function buildLiveStatusPayload(req: express.Request) {
   for (const row of webhookRows) {
     const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
     const current = liveByKey.get(key);
-    if (!current || liveRowTimestampMs(row) >= liveRowTimestampMs(current) || liveRowIsActive(row)) liveByKey.set(key, row);
+    if (!current || liveRowTimestampMs(row) >= liveRowTimestampMs(current) || liveRowIsActive(row)) {
+      // The inbox deliberately stores only safe routing fields. Keep richer
+      // call context written by the webhook handler while making the durable
+      // lifecycle state authoritative.
+      liveByKey.set(key, current ? {
+        ...current,
+        ...row,
+        direction: current.current_call_direction || current.direction || row.direction || null,
+        current_call_direction: current.current_call_direction || current.direction || row.direction || null,
+        from_number: current.from_number || null,
+        to_number: current.to_number || null,
+        business_number: current.business_number || null,
+        current_counterpart_number: current.current_counterpart_number || null,
+        answered_at: row.normalized_status === 'on_call' ? (current.answered_at || row.started_at) : current.answered_at || null,
+        started_at: current.status_started_at || current.started_at || row.started_at || null,
+        status_started_at: current.status_started_at || current.started_at || row.started_at || null,
+        current_call_id: liveRowIsActive(row) ? (current.current_call_id || current.external_call_id || row.current_call_id || null) : null,
+      } : row);
+    }
   }
   for (const row of direct.rows) {
     const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
