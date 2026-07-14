@@ -6446,10 +6446,18 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
     return res.status(429).json({ error: 'rate_limit_exceeded', retryAfter: 60 });
   }
   try {
-    // --- HMAC signature verification (optional but strongly recommended in prod) ---
+    // MightyCall cannot establish an app session, so this provider endpoint is
+    // public at the API edge and authenticates with its own dedicated secret.
     const webhookSecret = process.env.MIGHTYCALL_WEBHOOK_SECRET || '';
+    if (!webhookSecret && process.env.NODE_ENV === 'production') {
+      return res.status(503).json({ error: 'webhook_secret_not_configured' });
+    }
     if (webhookSecret) {
       const sigHeader = String(req.headers['x-mightycall-signature'] || req.headers['x-webhook-signature'] || req.headers['x-hub-signature-256'] || '');
+      const suppliedSecret = String(req.headers['x-webhook-secret'] || req.query.secret || '');
+      if (!sigHeader && suppliedSecret !== webhookSecret) {
+        return res.status(401).json({ error: 'invalid_webhook_authentication' });
+      }
       if (sigHeader) {
         const crypto = await import('crypto');
         const rawBody = JSON.stringify(req.body);

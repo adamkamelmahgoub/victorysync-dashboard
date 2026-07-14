@@ -36,7 +36,7 @@ const publicApiRoutes = [
   /^\/access-code\/verify$/,
   /^\/leads\/inbound$/,
   /^\/billing\/stripe\/webhook$/,
-  ...(process.env.ENABLE_LEGACY_WEBHOOKS === 'true' ? [/^\/webhooks\/mightycall$/] : []),
+  /^\/webhooks\/mightycall$/,
 ];
 
 const requestObject = z.record(z.string(), z.any());
