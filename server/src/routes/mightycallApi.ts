@@ -447,7 +447,7 @@ async function buildLiveStatusPayload(req: express.Request) {
     loadCachedLiveStatusRows(scope.orgIds),
     loadDirectMightyCallStatuses(assignments),
   ]);
-  const webhookReceipt = await Promise.resolve(
+  let webhookReceipt = await Promise.resolve(
     supabaseAdmin
       .from('audit_logs')
       .select('org_id, metadata, created_at')
@@ -456,7 +456,18 @@ async function buildLiveStatusPayload(req: express.Request) {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-  ).then((result: any) => result?.data || null).catch(() => null);
+  ).then((result: any) => result?.data ? { ...result.data, receipt_scope: 'organization' } : null).catch(() => null);
+  if (!webhookReceipt && scope.admin) {
+    webhookReceipt = await Promise.resolve(
+      supabaseAdmin
+        .from('audit_logs')
+        .select('org_id, metadata, created_at')
+        .eq('action', 'mightycall_webhook_processed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    ).then((result: any) => result?.data ? { ...result.data, receipt_scope: 'latest_unscoped_or_other_org' } : null).catch(() => null);
+  }
   const identityByKey = new Map(assignments.map((row: any) => [`${row.org_id}:${row.extension}`, row]));
   const { data: orgs } = await supabaseAdmin.from('organizations').select('id, name').in('id', scope.orgIds);
   const orgNames = new Map((orgs || []).map((row: any) => [String(row.id), String(row.name || '')]));
@@ -496,7 +507,12 @@ async function buildLiveStatusPayload(req: express.Request) {
         : []),
     ],
     webhook_diagnostics: webhookReceipt
-      ? { ...(webhookReceipt.metadata || {}), received_at: webhookReceipt.created_at }
+      ? {
+          ...(webhookReceipt.metadata || {}),
+          received_at: webhookReceipt.created_at,
+          receipt_scope: webhookReceipt.receipt_scope,
+          resolved_org_id: webhookReceipt.org_id || null,
+        }
       : null,
   };
 }
