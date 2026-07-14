@@ -44,10 +44,12 @@ test('mcgraw now lead intake is external-key protected and duplicate aware', () 
   assert.match(migration, /alter publication supabase_realtime add table public\.leads/);
 });
 
-test('legacy webhook public bypass is opt-in only', () => {
+test('MightyCall webhook is provider-public but protected by a dedicated secret', () => {
   const apiSecurity = readFileSync(join(process.cwd(), 'src', 'security', 'apiSecurity.ts'), 'utf8');
-  assert.match(apiSecurity, /ENABLE_LEGACY_WEBHOOKS === 'true'/);
-  assert.doesNotMatch(apiSecurity, /\n\s*\/\^\\\/webhooks\\\/mightycall\\\$\/,\n/);
+  const indexSource = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+  assert.ok(apiSecurity.includes('/^\\/webhooks\\/mightycall$/'));
+  assert.match(indexSource, /webhook_secret_not_configured/);
+  assert.match(indexSource, /invalid_webhook_authentication/);
 });
 
 test('production rate limiting requires persistent redis unless explicitly bypassed', () => {
