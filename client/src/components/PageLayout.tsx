@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { DashboardShellHeader } from './DashboardPrimitives';
 import StripePortalButton from './StripePortalButton';
 import { buildApiUrl } from '../config';
+import victorySyncLogo from '../assets/victorysync-logo.png';
 
 interface PageLayoutProps {
   title: string;
@@ -123,9 +124,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
         <div className="sticky top-14 z-50 border-b border-slate-200/80 bg-white/88 px-4 shadow-[0_1px_0_rgba(15,23,42,0.03),0_12px_34px_rgba(15,23,42,0.04)] backdrop-blur-xl transition-[box-shadow,background-color] duration-300 lg:top-0 lg:px-6">
           <div className="mx-auto flex h-16 max-w-[1680px] items-center justify-between gap-4">
             <div className="hidden min-w-0 items-center gap-3 lg:flex">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-violet-200 bg-violet-50 text-sm font-bold text-violet-700 shadow-sm">
-                VS
-              </div>
+              <img src={victorySyncLogo} alt="VictorySync logo" className="h-10 w-10 rounded-2xl object-cover shadow-sm ring-1 ring-slate-300" />
               <div className="min-w-0">
                 <div className="text-[11px] font-bold uppercase text-slate-500">{eyebrow || 'Command center'}</div>
                 <div className="truncate text-sm font-semibold text-slate-900">{title}</div>

@@ -2,6 +2,7 @@ import React, { FC, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { preloadRoute } from '../lib/routePreloader';
+import victorySyncLogo from '../assets/victorysync-logo.png';
 
 interface SidebarProps {
   isAdmin: boolean;
@@ -285,10 +286,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           {selectedOrgLogo ? (
             <img src={selectedOrgLogo} alt="Organization logo" className="h-10 w-10 rounded-2xl object-cover ring-1 ring-slate-200" />
           ) : (
-            <div className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(145deg,#7c3aed_0%,#4f46e5_58%,#312e81_100%)] text-sm font-black text-white shadow-[0_16px_32px_rgba(79,70,229,0.28)] ring-1 ring-violet-300/60">
-              <span className="absolute inset-0 rounded-2xl bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]" />
-              <span className="relative">VS</span>
-            </div>
+            <img src={victorySyncLogo} alt="VictorySync logo" className="h-11 w-11 rounded-2xl object-cover shadow-[0_16px_32px_rgba(15,23,42,0.22)] ring-1 ring-slate-300" />
           )}
           <div>
             <div className="text-[15px] font-extrabold text-slate-950">VictorySync</div>

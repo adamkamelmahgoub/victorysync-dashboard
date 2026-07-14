@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { buildApiUrl } from "../config";
+import victorySyncLogo from "../assets/victorysync-logo.png";
 
 type Mode = "signin" | "invite";
 type InviteStep = "code" | "password" | "done";
@@ -399,9 +400,7 @@ export const LoginPage: FC = () => {
 function BrandBlock({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className={`${compact ? "h-10 w-10" : "h-12 w-12"} flex items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-sm font-black text-white shadow-[0_14px_30px_rgba(124,58,237,0.28)]`}>
-        VS
-      </div>
+      <img src={victorySyncLogo} alt="VictorySync logo" className={`${compact ? "h-10 w-10" : "h-12 w-12"} rounded-2xl object-cover shadow-[0_14px_30px_rgba(15,23,42,0.25)] ring-1 ring-slate-300`} />
       <div>
         <div className="text-base font-semibold text-slate-950">VictorySync</div>
         <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">CX command center</div>
