@@ -430,6 +430,59 @@ async function loadCachedLiveStatusRows(orgIds: string[]) {
   return Array.from(byKey.values());
 }
 
+function webhookLifecycleStatus(eventType: string) {
+  const value = String(eventType || '').toLowerCase();
+  if (value.includes('agentcompleted') || value.includes('agentstopringing')) return 'available';
+  if (value.includes('agentconnected') || value.includes('agentanswered')) return 'on_call';
+  if (value.includes('agentringing')) return 'ringing';
+  if (value.includes('outgoing') && (value.includes('connected') || value.includes('answered'))) return 'on_call';
+  if (value.includes('outgoing') && (value.includes('ringing') || value.includes('started'))) return 'dialing';
+  if (value.includes('completed')) return 'available';
+  return null;
+}
+
+async function loadWebhookLifecycleRows(orgIds: string[]) {
+  if (orgIds.length === 0) return [] as any[];
+  const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const result = await Promise.resolve(supabaseAdmin
+    .from('mightycall_webhook_inbox')
+    .select('org_id, event_type, external_call_id, extension, occurred_at, created_at, processed_at')
+    .in('org_id', orgIds)
+    .eq('status', 'processed')
+    .not('extension', 'is', null)
+    .gte('created_at', cutoff)
+    .order('created_at', { ascending: false })
+    .limit(500)).catch(() => ({ data: [] as any[] } as any));
+  const latestByKey = new Map<string, any>();
+  for (const event of result.data || []) {
+    const extension = String(event.extension || '').replace(/\D/g, '');
+    const normalized = webhookLifecycleStatus(event.event_type);
+    if (!event.org_id || !extension || !normalized) continue;
+    const key = `${event.org_id}:${extension}`;
+    if (latestByKey.has(key)) continue;
+    const active = ['ringing', 'dialing', 'on_call'].includes(normalized);
+    const eventAt = event.occurred_at || event.created_at || event.processed_at;
+    latestByKey.set(key, {
+      org_id: event.org_id,
+      mightycall_extension: extension,
+      extension,
+      normalized_status: normalized,
+      status: normalized,
+      raw_status: event.event_type,
+      current_call_id: active ? event.external_call_id || null : null,
+      status_started_at: active ? eventAt : null,
+      started_at: active ? eventAt : null,
+      ended_at: active ? null : eventAt,
+      last_event_at: eventAt,
+      last_synced_at: event.created_at,
+      updated_at: event.created_at,
+      source: 'mightycall_webhook_inbox',
+      stale: false,
+    });
+  }
+  return Array.from(latestByKey.values());
+}
+
 async function buildLiveStatusPayload(req: express.Request) {
   const scope = await resolveOrgScope(req);
   if (scope.orgIds.length === 0) {
@@ -443,8 +496,9 @@ async function buildLiveStatusPayload(req: express.Request) {
   }
 
   const assignments = await loadAssignedExtensionRows(scope.orgIds);
-  const [cachedRows, direct] = await Promise.all([
+  const [cachedRows, webhookRows, direct] = await Promise.all([
     loadCachedLiveStatusRows(scope.orgIds),
+    loadWebhookLifecycleRows(scope.orgIds),
     loadDirectMightyCallStatuses(assignments),
   ]);
   let webhookReceipt = await Promise.resolve(
@@ -476,12 +530,17 @@ async function buildLiveStatusPayload(req: express.Request) {
     const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
     liveByKey.set(key, row);
   }
+  for (const row of webhookRows) {
+    const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
+    const current = liveByKey.get(key);
+    if (!current || liveRowTimestampMs(row) >= liveRowTimestampMs(current) || liveRowIsActive(row)) liveByKey.set(key, row);
+  }
   for (const row of direct.rows) {
     const key = `${row.org_id}:${String(row.mightycall_extension || row.extension || '').replace(/\D/g, '')}`;
     const current = liveByKey.get(key);
     const nextIsActive = liveRowIsActive(row);
     const currentIsActive = liveRowIsActive(current);
-    const currentMaxAge = String(current?.source || '') === 'mightycall_webhook'
+    const currentMaxAge = String(current?.source || '').startsWith('mightycall_webhook')
       ? (currentIsActive ? 2 * 60 * 60 * 1000 : 30_000)
       : 45_000;
     const currentFresh = current && Date.now() - liveRowTimestampMs(current) < currentMaxAge;
