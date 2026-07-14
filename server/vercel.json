@@ -38,7 +38,7 @@
   "crons": [
     {
       "path": "/api/internal/mightycall/reconcile",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
