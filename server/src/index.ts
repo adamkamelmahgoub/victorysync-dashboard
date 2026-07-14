@@ -3105,6 +3105,14 @@ function mapAgentLiveStatusToApiRow(row: any, identityByKey: Map<string, { user_
   };
 }
 
+function hasAuthoritativeWebhookPresence(item: any) {
+  if (String(item?.source || '') !== 'mightycall_webhook') return false;
+  const eventMs = Date.parse(String(item?.refreshed_at || item?.last_seen_at || ''));
+  if (!Number.isFinite(eventMs)) return false;
+  const maxAgeMs = item?.on_call ? (2 * 60 * 60 * 1000) : 30_000;
+  return (Date.now() - eventMs) >= 0 && (Date.now() - eventMs) <= maxAgeMs;
+}
+
 async function probeLiveStatusesForAgents(agents: RealAgentMember[]): Promise<Map<string, any>> {
   const out = new Map<string, any>();
   if (!Array.isArray(agents) || agents.length === 0) return out;
@@ -6501,7 +6509,38 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
         // --- Call events (answered, completed, ringing, etc.) ---
         const call = normalizeMightyCallWebhookCall(rawEvent);
         const upserted = await upsertMightyCallWebhookCall(call);
-        if (upserted.org_id) orgsToRefresh.add(upserted.org_id);
+        if (upserted.org_id) {
+          orgsToRefresh.add(upserted.org_id);
+          const extension = normalizeExtension(call.agent_extension);
+          if (extension) {
+            const normalizedStatus = normalizeAgentLiveEventStatus(call.status);
+            const active = normalizedStatus === 'ringing' || normalizedStatus === 'dialing' || normalizedStatus === 'answered' || normalizedStatus === 'in_progress' || normalizedStatus === 'on_call' || normalizedStatus === 'on_hold' || normalizedStatus === 'transferring';
+            const direction = call.direction === 'outbound' ? 'outbound' : call.direction === 'inbound' ? 'inbound' : null;
+            await upsertAgentLiveStatusRow({
+              orgId: upserted.org_id,
+              extension,
+              status: call.status,
+              rawStatus: call.status,
+              normalizedStatus,
+              externalCallId: call.external_id,
+              currentCallId: active ? call.external_id : null,
+              direction,
+              currentCallDirection: direction,
+              fromNumber: call.from_number,
+              toNumber: call.to_number,
+              currentCounterpartNumber: direction === 'outbound' ? call.to_number : call.from_number,
+              startedAt: active ? call.started_at : null,
+              statusStartedAt: active ? (call.answered_at || call.started_at) : null,
+              answeredAt: active ? call.answered_at : null,
+              endedAt: active ? null : (call.ended_at || new Date().toISOString()),
+              rawEvent,
+              rawPayload: rawEvent,
+              source: 'mightycall_webhook',
+              lastEventAt: new Date().toISOString(),
+              lastSyncedAt: new Date().toISOString(),
+            });
+          }
+        }
         results.push({ type: 'call_event', ...upserted });
       } catch (evtErr) {
         console.warn('[mightycall webhook] event processing error:', fmtErr(evtErr));
@@ -6509,12 +6548,12 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
       }
     }
 
-    // Fire immediate live-status refresh for all affected orgs (non-blocking)
+    // Push the webhook-backed rows immediately. Do not follow a webhook with a
+    // REST profile refresh: /profile/status only describes the authenticated
+    // user and can overwrite a correct per-extension call event.
     if (orgsToRefresh.size > 0) {
       const refreshPromises = Array.from(orgsToRefresh).map(async (orgId) => {
         try {
-          await withDeadline(refreshAgentLiveStatusForOrg(orgId), 5000, null as any);
-          // Push SSE to connected dashboard clients
           if (liveStatusSseClients.has(orgId) && liveStatusSseClients.get(orgId)!.size > 0) {
             try {
               const items = await buildLiveStatusSnapshot(orgId);
@@ -6522,7 +6561,7 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
             } catch (_) {}
           }
         } catch (refreshErr) {
-          console.warn('[mightycall webhook] refresh failed for org', orgId, fmtErr(refreshErr));
+          console.warn('[mightycall webhook] live snapshot failed for org', orgId, fmtErr(refreshErr));
         }
       });
       // Don't await — respond immediately, refresh in background
@@ -9820,7 +9859,7 @@ app.get('/api/agents/live-status', async (req, res) => {
         const item = items[i];
         const key = `${item.org_id || ''}:${normalizeExtension(item.extension) || ''}`;
         const next = probe.get(key);
-        if (next) items[i] = next;
+        if (next && !hasAuthoritativeWebhookPresence(item)) items[i] = next;
       }
     }
 
@@ -9930,7 +9969,7 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
         const item = items[i];
         const key = `${item.org_id || ''}:${normalizeExtension(item.extension) || ''}`;
         const next = probe.get(key);
-        if (next) items[i] = next;
+        if (next && !hasAuthoritativeWebhookPresence(item)) items[i] = next;
       }
     }
     res.json({
@@ -10075,7 +10114,7 @@ app.get('/api/live-status', async (req, res) => {
         const item = items[i];
         const key = `${item.org_id || ''}:${normalizeExtension(item.extension) || ''}`;
         const next = probe.get(key);
-        if (next) items[i] = next;
+        if (next && !hasAuthoritativeWebhookPresence(item)) items[i] = next;
       }
     }
     const refreshedAt = items
@@ -10183,7 +10222,7 @@ app.get('/api/orgs/:orgId/live-status', async (req, res) => {
         const item = items[i];
         const key = `${item.org_id || ''}:${normalizeExtension(item.extension) || ''}`;
         const next = probe.get(key);
-        if (next) items[i] = next;
+        if (next && !hasAuthoritativeWebhookPresence(item)) items[i] = next;
       }
     }
     const refreshedAt = items
