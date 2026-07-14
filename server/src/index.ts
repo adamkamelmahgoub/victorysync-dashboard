@@ -3173,6 +3173,23 @@ function appendUnrosteredWebhookRows(
   }
 }
 
+async function getLatestMightyCallWebhookReceipt(orgIds: string[]) {
+  if (orgIds.length === 0) return null;
+  try {
+    const { data } = await supabaseAdmin
+      .from('audit_logs')
+      .select('org_id, metadata, created_at')
+      .eq('action', 'mightycall_webhook_processed')
+      .in('org_id', orgIds)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
 async function probeLiveStatusesForAgents(agents: RealAgentMember[]): Promise<Map<string, any>> {
   const out = new Map<string, any>();
   if (!Array.isArray(agents) || agents.length === 0) return out;
@@ -6532,7 +6549,20 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
     const payload = req.body;
     if (!payload) return res.status(400).json({ error: 'empty_payload' });
 
-    const events = extractMightyCallWebhookEvents(payload);
+    const webhookOrgId = String(req.query.org_id || '').trim();
+    if (webhookOrgId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(webhookOrgId)) {
+      return res.status(400).json({ error: 'invalid_webhook_organization' });
+    }
+    if (webhookOrgId) {
+      const { data: scopedOrg } = await supabaseAdmin.from('organizations').select('id').eq('id', webhookOrgId).maybeSingle();
+      if (!scopedOrg?.id) return res.status(404).json({ error: 'webhook_organization_not_found' });
+    }
+
+    const events = extractMightyCallWebhookEvents(payload).map((event: any) => (
+      webhookOrgId && event && typeof event === 'object'
+        ? { ...event, organization_id: webhookOrgId }
+        : event
+    ));
     if (events.length === 0) return res.status(200).json({ received: true, events_processed: 0 });
 
     // Collect orgs that need an immediate live-status refresh
@@ -9879,9 +9909,10 @@ app.get('/api/agents/live-status', async (req, res) => {
       }
     }
 
-    let [liveRows, agents] = await Promise.all([
+    let [liveRows, agents, webhookReceipt] = await Promise.all([
       getAgentLiveStatusRowsForOrgIds(orgIds),
       loadRealAgentsFromOrgMembers(orgIds),
+      getLatestMightyCallWebhookReceipt(orgIds),
     ]);
     const hasFreshRows = (liveRows || []).some((row: any) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
@@ -9908,7 +9939,7 @@ app.get('/api/agents/live-status', async (req, res) => {
       });
     }
 
-		    const items = agents.map((agent) => {
+		    const items = agents.map((agent: RealAgentMember) => {
       const key = `${agent.org_id}:${agent.mightycall_extension}`;
       const liveRow = statusByKey.get(key);
       if (liveRow) return mapAgentLiveStatusToApiRow(liveRow, identityByKey);
@@ -9959,12 +9990,22 @@ app.get('/api/agents/live-status', async (req, res) => {
       }
     }
 
+    const webhookMetadata = webhookReceipt?.metadata && typeof webhookReceipt.metadata === 'object' ? webhookReceipt.metadata : null;
+    const directWarnings: string[] = [];
+    if (webhookMetadata && Number(webhookMetadata.organizations_resolved || 0) === 0) {
+      directWarnings.push('Latest MightyCall webhook was received but did not resolve to this organization. Add org_id to the secured webhook URL.');
+    }
+    if (webhookMetadata && Number(webhookMetadata.processing_errors || 0) > 0) {
+      directWarnings.push(`Latest MightyCall webhook had ${Number(webhookMetadata.processing_errors)} processing error(s).`);
+    }
     res.json({
       items,
       refreshed_at: refreshedAt,
       live_status_version: liveStatusVersion,
       source: 'mightycall_user_status_by_extension',
       setup_warning: agents.length === 0 ? 'No real org_members with mightycall_extension found.' : null,
+      direct_warnings: directWarnings,
+      webhook_diagnostics: webhookReceipt ? { ...webhookMetadata, received_at: webhookReceipt.created_at } : null,
     });
   } catch (err: any) {
     console.error('agents_live_status_failed:', fmtErr(err));
@@ -10144,9 +10185,10 @@ app.get('/api/live-status', async (req, res) => {
       orgIds = orgId ? [orgId] : [userOrgIds[0]];
     }
 
-    let [liveRows, agents] = await Promise.all([
+    let [liveRows, agents, webhookReceipt] = await Promise.all([
       getAgentLiveStatusRowsForOrgIds(orgIds),
       loadRealAgentsFromOrgMembers(orgIds),
+      getLatestMightyCallWebhookReceipt(orgIds),
     ]);
     const hasFreshRows = (liveRows || []).some((row: any) => {
       const updatedMs = Date.parse(String(row?.updated_at || row?.last_event_at || row?.last_synced_at || ''));
@@ -10225,12 +10267,19 @@ app.get('/api/live-status', async (req, res) => {
       on_call: items.filter((item: any) => !!item.on_call).length,
       available: items.filter((item: any) => !item.on_call).length,
     });
+    const webhookMetadata = webhookReceipt?.metadata && typeof webhookReceipt.metadata === 'object' ? webhookReceipt.metadata : null;
+    const directWarnings: string[] = [];
+    if (webhookMetadata && Number(webhookMetadata.processing_errors || 0) > 0) {
+      directWarnings.push(`Latest MightyCall webhook had ${Number(webhookMetadata.processing_errors)} processing error(s).`);
+    }
     res.json({
       items,
       refreshed_at: refreshedAt,
       live_status_version: `${LIVE_AGENT_PRESENCE_SYNC_VERSION}-mightycall-user-status`,
       source: 'mightycall_user_status_by_extension',
       setup_warning: agents.length === 0 ? 'No real org_members with mightycall_extension found.' : null,
+      direct_warnings: directWarnings,
+      webhook_diagnostics: webhookReceipt ? { ...webhookMetadata, received_at: webhookReceipt.created_at } : null,
     });
   } catch (err: any) {
     console.error('live_status_failed:', fmtErr(err));
