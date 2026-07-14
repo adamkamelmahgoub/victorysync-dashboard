@@ -1,7 +1,9 @@
 import { supabaseAdmin } from '../lib/supabaseClient';
 import { getMightyCallToken, mightyCallGetFirst } from './client';
 import {
+  fetchMightyCallCalls,
   fetchMightyCallLiveCallByExtension,
+  getMightyCallAccessToken,
   syncMightyCallCallHistory,
   syncMightyCallPhoneNumbers,
   syncMightyCallRecordings,
@@ -9,6 +11,7 @@ import {
   syncMightyCallSMS,
   syncMightyCallVoicemails,
 } from '../integrations/mightycall';
+import { getOrgIntegration } from '../lib/integrationsStore';
 import { getMightyCallStatusByExtension, type MightyCallStatusByExtension } from '../services/mightycallLiveStatus';
 import {
   arrayFromApiResponse,
@@ -745,7 +748,9 @@ async function upsertLiveStatus(member: any, userInfo: any, statusPayload: any, 
 export async function syncRecentCalls(windowHours = 48, fallbackOrgId?: string | null): Promise<number> {
   const start = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
   const end = new Date().toISOString();
-  const rawCalls = await fetchCallPages(start, end, windowHours > 24 * 14 ? 50 : 10);
+  const rawCalls = fallbackOrgId
+    ? await fetchOrgCallPages(fallbackOrgId, start, end, windowHours > 24 * 14 ? 50 : 10)
+    : await fetchCallPages(start, end, windowHours > 24 * 14 ? 50 : 10);
   const businessPhones = await loadBusinessNumbers();
   const businessNumbers = businessPhones.map((phone) => phone.number).filter((value): value is string => !!value);
   const businessPhoneByDigits = new Map<string, (typeof businessPhones)[number]>();
@@ -820,6 +825,31 @@ export async function syncRecentCalls(windowHours = 48, fallbackOrgId?: string |
   }
   await expireCallPollStatuses(activeKeys);
   return count;
+}
+
+async function fetchOrgCallPages(orgId: string, start: string, end: string, maxPages: number) {
+  const integration = await getOrgIntegration(orgId, 'mightycall').catch(() => null);
+  const credentials = integration?.credentials || null;
+  const overrideCreds = credentials ? {
+    clientId: credentials.clientId || credentials.apiKey || undefined,
+    clientSecret: credentials.clientSecret || credentials.userKey || undefined,
+  } : undefined;
+  if (integration && (!overrideCreds?.clientId || !overrideCreds?.clientSecret)) {
+    throw new Error('MightyCall integration credentials could not be read. Save the API key and user key again.');
+  }
+
+  const token = await getMightyCallAccessToken(overrideCreds);
+  const rows = await fetchMightyCallCalls(token, {
+    startUtc: start,
+    endUtc: end,
+    pageSize: '500',
+    maxPages: String(maxPages),
+    skip: '0',
+    fast: true,
+    returnOnFirstSuccess: true,
+  }, overrideCreds?.clientId);
+  if (!Array.isArray(rows)) throw new Error('MightyCall calls response was not a list.');
+  return rows;
 }
 
 async function fetchCallPages(start: string, end: string, maxPages: number) {
