@@ -34,5 +34,11 @@
       ]
     }
   ],
-  "regions": ["bom1"]
+  "regions": ["bom1"],
+  "crons": [
+    {
+      "path": "/api/internal/mightycall/reconcile",
+      "schedule": "*/15 * * * *"
+    }
+  ]
 }

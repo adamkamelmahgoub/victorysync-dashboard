@@ -37,6 +37,7 @@ const publicApiRoutes = [
   /^\/leads\/inbound$/,
   /^\/billing\/stripe\/webhook$/,
   /^\/webhooks\/mightycall$/,
+  /^\/internal\/mightycall\/reconcile$/,
 ];
 
 const requestObject = z.record(z.string(), z.any());

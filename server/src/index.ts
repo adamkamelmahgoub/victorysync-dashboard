@@ -62,6 +62,7 @@ import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgM
 import usersRouter from './routes/users';
 import reportsRouter from './routes/reports';
 import mightyCallApiRouter from './routes/mightycallApi';
+import mightyCallReliabilityRouter from './routes/mightycallReliability';
 import stripeBillingRouter, { stripeWebhookHandler } from './routes/stripeBilling';
 import notificationPreferencesRouter from './routes/notificationPreferences';
 import { startMightyCallPolling } from './mightycall/sync';
@@ -6574,6 +6575,67 @@ app.get('/api/admin/backups/export', async (req, res) => {
   }
 });
 
+function mightyCallWebhookEventId(event: any) {
+  const explicit = firstWebhookValue(event?.Guid, event?.guid, event?.eventId, event?.event_id);
+  if (explicit) return explicit;
+  const stable = JSON.stringify({
+    type: event?.EventType ?? event?.eventType ?? event?.type ?? null,
+    call: event?.Body?.Id ?? event?.body?.Id ?? event?.Id ?? event?.callId ?? null,
+    extension: event?.Body?.Extension ?? event?.body?.Extension ?? event?.Extension ?? null,
+    timestamp: event?.Timestamp ?? event?.timestamp ?? null,
+  });
+  return crypto.createHash('sha256').update(stable).digest('hex');
+}
+
+async function persistMightyCallWebhookInbox(events: any[], orgId: string | null) {
+  const rows: Array<{ id: string | null; providerEventId: string; attempts: number }> = [];
+  try {
+    const { encryptObj } = await import('./lib/integrationsStore');
+    for (const event of events) {
+      const providerEventId = mightyCallWebhookEventId(event);
+      const previous = await supabaseAdmin.from('mightycall_webhook_inbox').select('attempts').eq('provider_event_id', providerEventId).maybeSingle();
+      const attempts = Number(previous.data?.attempts || 0) + 1;
+      const eventType = String(event?.EventType ?? event?.eventType ?? event?.type ?? 'unknown').slice(0, 100);
+      const { data, error } = await supabaseAdmin.from('mightycall_webhook_inbox').upsert({
+        provider_event_id: providerEventId,
+        org_id: orgId || null,
+        event_type: eventType,
+        external_call_id: firstWebhookValue(event?.Body?.Id, event?.body?.Id, event?.Id, event?.callId),
+        extension: normalizeExtension(event?.Body?.Extension ?? event?.body?.Extension ?? event?.Extension ?? event?.extension),
+        occurred_at: webhookIso(event?.Timestamp ?? event?.timestamp),
+        payload_encrypted: encryptObj(event),
+        status: 'processing',
+        attempts,
+        error_code: null,
+        next_attempt_at: null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'provider_event_id' }).select('id').maybeSingle();
+      if (error) throw error;
+      rows.push({ id: data?.id ? String(data.id) : null, providerEventId, attempts });
+    }
+  } catch (error) {
+    console.warn('[mightycall webhook] durable inbox unavailable:', fmtErr(error));
+  }
+  return rows;
+}
+
+async function finishMightyCallWebhookInbox(rows: Array<{ id: string | null; attempts: number }>, results: any[]) {
+  for (let index = 0; index < rows.length; index += 1) {
+    const id = rows[index]?.id;
+    if (!id) continue;
+    const result = results[index];
+    const failed = result?.type === 'error';
+    const attempts = rows[index]?.attempts || 1;
+    await supabaseAdmin.from('mightycall_webhook_inbox').update({
+      status: failed ? (attempts >= 5 ? 'dead_letter' : 'failed') : 'processed',
+      error_code: failed ? String(result?.error_code || 'processing_error').slice(0, 100) : null,
+      next_attempt_at: failed ? new Date(Date.now() + 60_000).toISOString() : null,
+      processed_at: failed ? null : new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', id).then(() => undefined, () => undefined);
+  }
+}
+
 app.post('/api/webhooks/mightycall', async (req, res) => {
   const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim() || 'unknown';
   if (!checkRateLimit(`mc_webhook:${ip}`, 120, 60_000)) {
@@ -6621,6 +6683,7 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
         : event
     ));
     if (events.length === 0) return res.status(200).json({ received: true, events_processed: 0 });
+    const inboxRows = await persistMightyCallWebhookInbox(events, webhookOrgId || null);
 
     // Collect orgs that need an immediate live-status refresh
     const orgsToRefresh = new Set<string>();
@@ -6706,6 +6769,7 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
         });
       }
     }
+    await finishMightyCallWebhookInbox(inboxRows, results);
 
     // Push the webhook-backed rows immediately. Do not follow a webhook with a
     // REST profile refresh: /profile/status only describes the authenticated
@@ -6762,6 +6826,61 @@ app.post('/api/webhooks/mightycall', async (req, res) => {
   } catch (err) {
     console.error('[mightycall webhook] fatal error:', fmtErr(err));
     return res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+app.get('/api/admin/mightycall/webhook-inbox', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(String(actorId)))) return res.status(403).json({ error: 'forbidden' });
+    const status = String(req.query.status || '').trim();
+    const orgId = String(req.query.org_id || '').trim();
+    const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 500);
+    let query = supabaseAdmin
+      .from('mightycall_webhook_inbox')
+      .select('id, provider_event_id, org_id, event_type, external_call_id, extension, occurred_at, status, attempts, error_code, next_attempt_at, processed_at, created_at, updated_at')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (status) query = query.eq('status', status);
+    if (orgId) query = query.eq('org_id', orgId);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ items: data || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'webhook_inbox_failed', detail: fmtErr(error) });
+  }
+});
+
+app.post('/api/admin/mightycall/webhook-inbox/:id/replay', async (req, res) => {
+  try {
+    const actorId = req.actorId || req.header('x-user-id') || null;
+    if (!actorId || !(await isPlatformAdmin(String(actorId)))) return res.status(403).json({ error: 'forbidden' });
+    const { data, error } = await supabaseAdmin
+      .from('mightycall_webhook_inbox')
+      .select('id, org_id, payload_encrypted, attempts')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'webhook_event_not_found' });
+    const { decryptObj } = await import('./lib/integrationsStore');
+    const payload = decryptObj(String(data.payload_encrypted || ''));
+    const secret = process.env.MIGHTYCALL_WEBHOOK_SECRET || '';
+    if (!secret) return res.status(503).json({ error: 'webhook_secret_not_configured' });
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const query = new URLSearchParams();
+    if (data.org_id) query.set('org_id', String(data.org_id));
+    const response = await fetch(`${origin}/api/webhooks/mightycall?${query.toString()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-webhook-secret': secret },
+      body: JSON.stringify(payload),
+    });
+    await supabaseAdmin.from('mightycall_webhook_inbox').update({
+      attempts: Number(data.attempts || 0) + 1,
+      updated_at: new Date().toISOString(),
+    }).eq('id', data.id);
+    res.status(response.ok ? 200 : 502).json({ ok: response.ok, provider_status: response.status });
+  } catch (error) {
+    res.status(500).json({ error: 'webhook_replay_failed', detail: fmtErr(error) });
   }
 });
 
@@ -9118,6 +9237,7 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
 });
 
 app.use('/api', mightyCallApiRouter);
+app.use('/api', mightyCallReliabilityRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api', notificationPreferencesRouter);
 
@@ -16187,6 +16307,13 @@ app.get("/s/series", async (req, res) => {
             }
             if ((await isOrgAdmin(actorId, orgId)) || (await isOrgManagerWith(actorId, orgId, 'can_manage_agents'))) {
               const recordingUrl = recording.recording_url;
+              await supabaseAdmin.from('recording_access_logs').insert({
+                org_id: orgId,
+                recording_id: String(recording.id || id),
+                actor_id: actorId,
+                action: req.query.inline === '1' ? 'download' : 'play',
+                request_id: req.requestId || null,
+              }).then(() => undefined, () => undefined);
               if (req.query.redirect === '1') {
                 if (!isValidRecordingUrl(recordingUrl)) {
                   return sendApiError(res, 422, 'REC_INVALID_URL', 'This recording link is invalid.', { retryable: false });
@@ -16235,6 +16362,13 @@ app.get("/s/series", async (req, res) => {
           }
 
           const recordingUrl = recording.recording_url;
+          await supabaseAdmin.from('recording_access_logs').insert({
+            org_id: recording.org_id,
+            recording_id: String(recording.id || id),
+            actor_id: actorId,
+            action: req.query.inline === '1' ? 'download' : 'play',
+            request_id: req.requestId || null,
+          }).then(() => undefined, () => undefined);
           if (req.query.redirect === '1') {
             if (!isValidRecordingUrl(recordingUrl)) {
               return sendApiError(res, 422, 'REC_INVALID_URL', 'This recording link is invalid.', { retryable: false });

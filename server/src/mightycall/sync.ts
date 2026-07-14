@@ -588,9 +588,23 @@ export async function syncUsersAndStatuses(): Promise<{ users: number; statuses:
   return { users: syncedUsers, statuses: syncedStatuses, liveRingingSupported };
 }
 
+async function shouldPreserveFreshWebhookStatus(member: any, incomingStatus: string, hasStrongCallSignal: boolean) {
+  if (hasStrongCallSignal || !['unknown', 'available', 'dnd', 'offline'].includes(incomingStatus)) return false;
+  const { data: existing } = await supabaseAdmin
+    .from('agent_live_status')
+    .select('source, normalized_status, current_call_id, last_event_at, updated_at')
+    .eq('org_id', member.orgId)
+    .eq('mightycall_extension', member.extension)
+    .maybeSingle();
+  const active = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(String((existing as any)?.normalized_status || '').toLowerCase());
+  const eventMs = Date.parse(String((existing as any)?.last_event_at || (existing as any)?.updated_at || ''));
+  return active && String((existing as any)?.source || '') === 'mightycall_webhook' && Number.isFinite(eventMs) && Date.now() - eventMs < 2 * 60 * 60 * 1000;
+}
+
 async function upsertLiveStatusFromExtensionResolver(member: any, status: MightyCallStatusByExtension, now: string) {
-  const normalized = status.normalizedStatus === 'unknown' ? 'available' : status.normalizedStatus;
+  const normalized = status.normalizedStatus || 'unknown';
   const active = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(normalized);
+  if (await shouldPreserveFreshWebhookStatus(member, normalized, active && !!status.currentCallId)) return;
   const row = {
     org_id: member.orgId,
     org_member_id: member.orgMemberId,
@@ -649,6 +663,7 @@ async function upsertLiveStatusFromExtensionResolver(member: any, status: Mighty
 }
 
 async function ensureLiveStatusRosterRow(member: any, now: string) {
+  if (await shouldPreserveFreshWebhookStatus(member, 'available', false)) return;
   const { data: existing } = await supabaseAdmin
     .from('agent_live_status')
     .select('normalized_status, current_call_id')
@@ -693,18 +708,7 @@ async function upsertLiveStatus(member: any, userInfo: any, statusPayload: any, 
 
   // The REST profile endpoint does not provide reliable per-extension call
   // presence. Never let an unknown poll erase fresh webhook lifecycle evidence.
-  if (status === 'unknown' && !currentCallStatus) {
-    const { data: existing } = await supabaseAdmin
-      .from('agent_live_status')
-      .select('source, normalized_status, current_call_id, last_event_at, updated_at')
-      .eq('org_id', member.orgId)
-      .eq('mightycall_extension', member.extension)
-      .maybeSingle();
-    const existingActive = ['ringing', 'dialing', 'on_call', 'on_hold', 'transferring'].includes(String((existing as any)?.normalized_status || '').toLowerCase());
-    const eventMs = Date.parse(String((existing as any)?.last_event_at || (existing as any)?.updated_at || ''));
-    const freshWebhook = String((existing as any)?.source || '') === 'mightycall_webhook' && Number.isFinite(eventMs) && Date.now() - eventMs < 2 * 60 * 60 * 1000;
-    if (existingActive && freshWebhook) return;
-  }
+  if (await shouldPreserveFreshWebhookStatus(member, status, !!currentCallStatus)) return;
   const fromNumber = normalizePhone(firstString(currentCall?.from_number, currentCall?.from, currentCall?.caller?.number, currentCall?.client?.address));
   const toNumber = normalizePhone(firstString(currentCall?.to_number, currentCall?.to, currentCall?.destination?.number, currentCall?.called?.[0]?.phone));
   const businessNumber = normalizePhone(firstString(currentCall?.businessNumber?.number, currentCall?.businessNumber));
@@ -1114,20 +1118,22 @@ async function saveCallLogRow(row: Record<string, any>) {
   return false;
 }
 
-export async function syncCallDetails(maxCalls = 50): Promise<{ details: number; recordings: number; transfers: number; transferDetailsSupported: boolean }> {
-  let { data, error } = await supabaseAdmin
+export async function syncCallDetails(maxCalls = 50, orgIdFilter?: string): Promise<{ details: number; recordings: number; transfers: number; transferDetailsSupported: boolean }> {
+  let query = supabaseAdmin
     .from('mightycall_call_logs')
     .select('id, org_id, external_id, from_number, to_number, direction, agent_extension, started_at, duration_seconds, raw_payload, metadata')
     .not('external_id', 'is', null)
-    .order('started_at', { ascending: false })
-    .limit(maxCalls);
+    .order('started_at', { ascending: false });
+  if (orgIdFilter) query = query.eq('org_id', orgIdFilter);
+  let { data, error } = await query.limit(maxCalls);
   if (error) {
-    const legacy = await supabaseAdmin
+    let legacyQuery = supabaseAdmin
       .from('calls')
       .select('id, org_id, external_id, external_call_id, from_number, to_number, business_number, direction, agent_extension, started_at, duration_seconds, raw_payload, metadata')
       .not('external_id', 'is', null)
-      .order('started_at', { ascending: false })
-      .limit(maxCalls);
+      .order('started_at', { ascending: false });
+    if (orgIdFilter) legacyQuery = legacyQuery.eq('org_id', orgIdFilter);
+    const legacy = await legacyQuery.limit(maxCalls);
     data = legacy.data;
   }
   let details = 0;
@@ -1157,7 +1163,7 @@ export async function syncCallDetails(maxCalls = 50): Promise<{ details: number;
     }
     let detailRaw: any = null;
     if (auth?.token) detailRaw = await fetchMightyCallCallDetail(auth.token, externalCallId, auth.apiKey).catch(() => null);
-    if (!detailRaw) {
+    if (!detailRaw && !orgIdFilter) {
       const paths = CALL_DETAIL_PATHS.map((path) => path.replace('{id}', encodeURIComponent(externalCallId)));
       const response = await mightyCallGetFirst<any>(paths, {}, { optional: true });
       if (response.data) detailRaw = unwrapApiObject(response.data);

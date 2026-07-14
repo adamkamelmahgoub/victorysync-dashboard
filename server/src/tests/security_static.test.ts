@@ -72,7 +72,8 @@ test('MightyCall sync and recordings use org credentials without erasing webhook
   const syncSource = readFileSync(join(process.cwd(), 'src', 'mightycall', 'sync.ts'), 'utf8');
   const integrationSource = readFileSync(join(process.cwd(), 'src', 'integrations', 'mightycall.ts'), 'utf8');
   const indexSource = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
-  assert.match(syncSource, /existingActive && freshWebhook/);
+  assert.match(syncSource, /shouldPreserveFreshWebhookStatus/);
+  assert.match(syncSource, /source \|\| ''\) === 'mightycall_webhook'/);
   assert.doesNotMatch(syncSource, /status: status === 'unknown' \? 'available' : status/);
   assert.match(syncSource, /fetchMightyCallCallDetail\(auth\.token, externalCallId, auth\.apiKey\)/);
   assert.match(integrationSource, /export async function fetchMightyCallCallDetail/);
