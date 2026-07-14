@@ -285,6 +285,15 @@ function parseDurationSeconds(value: any): number | null {
   return Math.floor(num);
 }
 
+function parseCallDurationSeconds(payload: any): number | null {
+  const explicitSeconds = payload?.duration_seconds ?? payload?.durationSeconds;
+  if (explicitSeconds != null && explicitSeconds !== '') return parseDurationSeconds(explicitSeconds);
+  const durationMs = payload?.duration ?? payload?.callDuration;
+  const numeric = Number(durationMs);
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric / 1000;
+  return null;
+}
+
 function normalizeDigits(value: any): string {
   return String(value || '').replace(/\D/g, '');
 }
@@ -555,11 +564,7 @@ function pickActiveCallEvidence(rows: any[], extension: string): any | null {
         row?.updatedAt ||
         row?.updated_at
       );
-      const durationSeconds = parseDurationSeconds(
-        row?.duration_seconds ??
-        row?.durationSeconds ??
-        row?.duration
-      );
+      const durationSeconds = parseCallDurationSeconds(row);
       if (startedMs != null && durationSeconds != null) {
         const endedByDurationMs = startedMs + (durationSeconds * 1000);
         if (endedByDurationMs < (now - 15_000)) return false;
@@ -825,11 +830,7 @@ export async function getMightyCallStatusByExtension(input: {
     activeCallEvidence?.updatedAt ||
     activeCallEvidence?.updated_at
   );
-  const activeEvidenceDurationSeconds = parseDurationSeconds(
-    activeCallEvidence?.duration_seconds ??
-    activeCallEvidence?.durationSeconds ??
-    activeCallEvidence?.duration
-  );
+  const activeEvidenceDurationSeconds = parseCallDurationSeconds(activeCallEvidence);
   const activeEvidenceExpiredByDuration = Boolean(
     activeEvidenceStartedMs != null &&
     activeEvidenceDurationSeconds != null &&
@@ -871,11 +872,7 @@ export async function getMightyCallStatusByExtension(input: {
     currentCall?.updatedAt ||
     currentCall?.updated_at
   );
-  const directCallDurationSeconds = parseDurationSeconds(
-    currentCall?.duration_seconds ??
-    currentCall?.durationSeconds ??
-    currentCall?.duration
-  );
+  const directCallDurationSeconds = parseCallDurationSeconds(currentCall);
   const directCallId = callRowId(currentCall) || callRowId(activeCallEvidence) || profileCurrentCallId || null;
   const durationProgress = trackDurationProgress(directCallId, directCallDurationSeconds, Date.now());
   const directCallExpiredByDuration = Boolean(

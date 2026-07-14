@@ -9949,7 +9949,7 @@ app.get('/api/orgs/:orgId/agents/live-status', async (req, res) => {
 // SSE: real-time live status stream for a specific org
 app.get('/api/orgs/:orgId/live-status/stream', async (req, res) => {
   try {
-    const actorId = (req.query.userId as string) || req.header('x-user-id') || null;
+    const actorId = req.header('x-user-id') || null;
     const { orgId } = req.params;
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
 

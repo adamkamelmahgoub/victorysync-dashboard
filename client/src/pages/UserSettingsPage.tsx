@@ -4,7 +4,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { PageLayout } from '../components/PageLayout';
 import StripePortalButton from '../components/StripePortalButton';
 import { buildApiUrl } from '../config';
-import { useTheme } from '../contexts/ThemeContext';
 import {
   getSelectedLeadAlarmIds,
   LEAD_ALARM_OPTIONS,
@@ -29,7 +28,6 @@ function isUploadableImageData(value?: string | null) {
 
 export default function UserSettingsPage() {
   const { user, selectedOrgId, refreshProfile } = useAuth();
-  const { theme, setTheme } = useTheme();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -683,30 +681,6 @@ export default function UserSettingsPage() {
             <p className="text-sm">{message}</p>
           </div>
         )}
-
-        <div className="vs-surface p-6">
-          <h2 className="mb-6 text-lg font-semibold text-slate-950">Appearance</h2>
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Theme</div>
-              <div className="mt-1 text-sm text-slate-600">Choose the dashboard appearance for this browser and account.</div>
-            </div>
-            <div className="inline-flex rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200">
-              <button
-                onClick={() => void setTheme('light')}
-                className={`rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition ${theme === 'light' ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-slate-700 hover:bg-white'}`}
-              >
-                Light
-              </button>
-              <button
-                onClick={() => void setTheme('dark')}
-                className={`rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition ${theme === 'dark' ? 'bg-violet-600 text-white hover:bg-violet-700' : 'text-slate-700 hover:bg-white'}`}
-              >
-                Dark
-              </button>
-            </div>
-          </div>
-        </div>
 
         <div className="vs-surface p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">

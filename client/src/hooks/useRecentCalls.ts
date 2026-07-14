@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getRecentCalls } from "../lib/apiClient";
+import { getRecentCalls, triggerMightyCallRecentCallsSync } from "../lib/apiClient";
 
 export type RecentCall = {
   id: string;
@@ -59,8 +59,26 @@ export function useRecentCalls(orgId: string | null | undefined): UseRecentCalls
         if (!cancelled) setLoading(false);
       }
     };
-    load();
-    return () => { cancelled = true; };
+    void load();
+    // Pull the latest supported /calls data for the selected organization, then
+    // keep the visible list current while the dashboard is open.
+    if (orgId) {
+      void triggerMightyCallRecentCallsSync(orgId)
+        .then(() => load())
+        .catch(() => undefined);
+    }
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load();
+    }, 15_000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [orgId]);
   return { calls, loading, error };
 }
