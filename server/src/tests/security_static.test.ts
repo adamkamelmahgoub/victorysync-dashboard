@@ -69,6 +69,9 @@ test('active webhook presence remains authoritative over unknown direct REST sta
   assert.match(routeSource, /loadWebhookLifecycleRows/);
   assert.match(routeSource, /agentconnected.*on_call/si);
   assert.match(routeSource, /startsWith\('mightycall_webhook'\)/);
+  assert.match(routeSource, /currentFresh && liveRowStatus\(row\) === 'unknown'/);
+  const indexSource = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
+  assert.match(indexSource, /incomingWeak && existingActive && freshWebhook/);
 });
 
 test('MightyCall sync and recordings use org credentials without erasing webhook evidence', () => {

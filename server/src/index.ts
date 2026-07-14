@@ -2424,10 +2424,18 @@ async function upsertAgentLiveStatusRow(params: {
   try {
     const { data: existing } = await supabaseAdmin
       .from('agent_live_status')
-      .select('last_event_at')
+      .select('source, normalized_status, last_event_at, updated_at')
       .eq('org_id', params.orgId)
       .eq('extension', normalizedExtension)
       .maybeSingle();
+    const existingStatus = normalizeAgentLiveEventStatus((existing as any)?.normalized_status);
+    const existingActive = ['ringing', 'dialing', 'answered', 'in_progress', 'on_call', 'on_hold', 'transferring'].includes(existingStatus);
+    const incomingWeak = ['unknown', 'available', 'dnd', 'offline'].includes(dbNormalizedStatus);
+    const existingEventMs = Date.parse(String((existing as any)?.last_event_at || (existing as any)?.updated_at || ''));
+    const freshWebhook = String((existing as any)?.source || '').startsWith('mightycall_webhook')
+      && Number.isFinite(existingEventMs)
+      && Date.now() - existingEventMs < 2 * 60 * 60 * 1000;
+    if (!String(params.source || '').startsWith('mightycall_webhook') && incomingWeak && existingActive && freshWebhook) return;
     const existingAt = Date.parse(String((existing as any)?.last_event_at || ''));
     const incomingAt = Date.parse(String(eventAt || ''));
     if (Number.isFinite(existingAt) && Number.isFinite(incomingAt) && existingAt > incomingAt) {

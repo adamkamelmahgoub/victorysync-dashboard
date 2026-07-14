@@ -559,9 +559,10 @@ async function buildLiveStatusPayload(req: express.Request) {
     const nextIsActive = liveRowIsActive(row);
     const currentIsActive = liveRowIsActive(current);
     const currentMaxAge = String(current?.source || '').startsWith('mightycall_webhook')
-      ? (currentIsActive ? 2 * 60 * 60 * 1000 : 30_000)
+      ? (currentIsActive ? 2 * 60 * 60 * 1000 : 2 * 60 * 1000)
       : 45_000;
     const currentFresh = current && Date.now() - liveRowTimestampMs(current) < currentMaxAge;
+    if (String(current?.source || '').startsWith('mightycall_webhook') && currentFresh && liveRowStatus(row) === 'unknown') continue;
     if (nextIsActive || !currentIsActive || !currentFresh) liveByKey.set(key, row);
   }
   for (const assignment of assignments) {
