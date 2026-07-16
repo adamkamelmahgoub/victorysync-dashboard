@@ -4,6 +4,7 @@ import { getLiveAgentStatus, refreshLiveAgentStatus } from '../lib/apiClient';
 import { PageLayout } from '../components/PageLayout';
 import { EmptyStatePanel, LoadingSkeleton, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { formatPhoneNumber, normalizeLivePresenceStatus, type LivePresenceStatus } from '../lib/reportingMetrics';
+import { buildApiUrl } from '../config';
 
 type LiveAgentStatus = {
   user_id: string;
@@ -114,9 +115,9 @@ function stableAgentKey(agent: LiveAgentStatus) {
   return `${agent.org_id || 'global'}:${agent.extension || agent.user_id || agent.email || 'agent'}`;
 }
 
-function mergeLiveRows(previous: LiveAgentStatus[], incoming: LiveAgentStatus[]) {
+function mergeLiveRows(previous: LiveAgentStatus[], incoming: LiveAgentStatus[], preserveMissing = false) {
   const previousByKey = new Map(previous.map((agent) => [stableAgentKey(agent), agent]));
-  return incoming.map((next) => {
+  const merged = incoming.map((next) => {
     const prior = previousByKey.get(stableAgentKey(next));
     if (!prior) return next;
     const nextStatus = statusKey(next);
@@ -127,6 +128,11 @@ function mergeLiveRows(previous: LiveAgentStatus[], incoming: LiveAgentStatus[])
       isFresh(prior);
     return keepPriorActiveMomentarily ? { ...next, ...prior, refreshed_at: next.refreshed_at || prior.refreshed_at } : { ...prior, ...next };
   });
+  if (preserveMissing) {
+    const incomingKeys = new Set(incoming.map(stableAgentKey));
+    merged.push(...previous.filter((agent) => !incomingKeys.has(stableAgentKey(agent))));
+  }
+  return merged;
 }
 
 const LiveStatusPage: FC = () => {
@@ -179,6 +185,68 @@ const LiveStatusPage: FC = () => {
     }, 3_000);
     return () => window.clearInterval(intervalId);
   }, [load]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const targetOrgIds = activeOrgId ? [activeOrgId] : (isAdmin ? orgs.map((org) => org.id) : []);
+    if (targetOrgIds.length === 0) return;
+    const controllers = targetOrgIds.map(() => new AbortController());
+    const retryIds = new Set<number>();
+
+    const connect = async (orgId: string, controller: AbortController) => {
+      try {
+        const response = await fetch(buildApiUrl(`/api/orgs/${encodeURIComponent(orgId)}/live-status/stream`), {
+          headers: { 'x-user-id': user.id, Accept: 'text/event-stream' },
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error('Live stream unavailable');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (!controller.signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split(/\r?\n\r?\n/);
+          buffer = events.pop() || '';
+          for (const event of events) {
+            const data = event.split(/\r?\n/)
+              .filter((line) => line.startsWith('data:'))
+              .map((line) => line.slice(5).trim())
+              .join('\n');
+            if (!data) continue;
+            const payload = JSON.parse(data);
+            if (!Array.isArray(payload?.items)) continue;
+            setItems((current) => mergeLiveRows(current, payload.items as LiveAgentStatus[], targetOrgIds.length > 1));
+            setRefreshedAt(payload.refreshed_at || new Date().toISOString());
+            setError(null);
+          }
+        }
+        if (!controller.signal.aborted) {
+          const retryId = window.setTimeout(() => {
+            retryIds.delete(retryId);
+            void connect(orgId, controller);
+          }, 1_500);
+          retryIds.add(retryId);
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          const retryId = window.setTimeout(() => {
+            retryIds.delete(retryId);
+            void connect(orgId, controller);
+          }, 3_000);
+          retryIds.add(retryId);
+        }
+      }
+    };
+
+    targetOrgIds.forEach((orgId, index) => void connect(orgId, controllers[index]));
+    return () => {
+      controllers.forEach((controller) => controller.abort());
+      retryIds.forEach((retryId) => window.clearTimeout(retryId));
+    };
+  }, [activeOrgId, isAdmin, orgs, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -251,7 +319,7 @@ const LiveStatusPage: FC = () => {
       )}
       <div className="flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-700 shadow-sm">
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
-        MightyCall API polling
+        Live updates
       </div>
       {loading && items.length > 0 && (
         <div className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 shadow-sm">
@@ -284,7 +352,7 @@ const LiveStatusPage: FC = () => {
     <PageLayout
       eyebrow="Live monitoring"
       title="Live status"
-      description="MightyCall lifecycle events with API polling fallback and automatic refresh."
+      description="Current agent availability and call activity, updated automatically."
       actions={actions}
       meta={meta}
     >
@@ -297,7 +365,7 @@ const LiveStatusPage: FC = () => {
         )}
         {staleItems.length > 0 && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-            {staleItems.length} extension{staleItems.length === 1 ? '' : 's'} have stale API evidence. Last known state remains visible until MightyCall returns a fresher status.
+            {staleItems.length} extension{staleItems.length === 1 ? '' : 's'} have not reported recently. Their last known state remains visible until a newer update arrives.
           </div>
         )}
 
@@ -309,7 +377,7 @@ const LiveStatusPage: FC = () => {
           <MetricStatCard label="Unknown" value={counts.unknown} />
         </div>
 
-        <SectionCard title="Extension roster" description="Mapped by MightyCall extension when available, with active ringing/on-call states preserved during background refresh.">
+        <SectionCard title="Extension roster" description="Current availability, ringing, and on-call activity for every assigned extension.">
           {loading && items.length === 0 ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               {Array.from({ length: 4 }).map((_, index) => <LoadingSkeleton key={index} className="h-48" />)}
@@ -351,16 +419,12 @@ const LiveStatusPage: FC = () => {
                       <div className="vs-surface-muted p-4">
                         <div className="text-xs font-bold uppercase text-slate-600">Current call</div>
                         <div className="mt-3 break-words text-sm font-semibold text-slate-950">{active ? formatPhoneNumber(counterpart) : 'Not on a call'}</div>
-                        <div className="mt-2 text-sm text-slate-600">{active ? `${agent.direction || 'unknown'} - ${liveDuration(agent, nowMs)}` : 'No active call evidence'}</div>
-                        <div className="mt-2 text-sm text-slate-600">Call ID: {agent.current_call_id || '-'}</div>
+                        <div className="mt-2 text-sm text-slate-600">{active ? `${agent.direction || 'unknown'} - ${liveDuration(agent, nowMs)}` : 'Ready for calls'}</div>
                       </div>
                       <div className="vs-surface-muted p-4">
-                        <div className="text-xs font-bold uppercase text-slate-600">API evidence</div>
-                        <div className="mt-3 text-sm font-semibold text-slate-950">Started {active ? fmtDateTime(agent.started_at || agent.answered_at) : '-'}</div>
-                        <div className="mt-2 text-sm text-slate-600">Raw: {agent.raw_status || agent.status || '-'}</div>
-                        <div className="mt-1 text-sm text-slate-600">Source: {agent.api_source || agent.source || '-'}</div>
-                        <div className="mt-1 text-sm text-slate-600">Decision: {agent.decision_reason || '-'}</div>
-                        <div className="mt-1 text-sm text-slate-600">Refreshed {fmtDateTime(agent.refreshed_at)}</div>
+                        <div className="text-xs font-bold uppercase text-slate-600">Activity</div>
+                        <div className="mt-3 text-sm font-semibold text-slate-950">{active ? `Started ${fmtDateTime(agent.started_at || agent.answered_at)}` : 'No active call'}</div>
+                        <div className="mt-2 text-sm text-slate-600">Updated {fmtDateTime(agent.refreshed_at || agent.last_seen_at)}</div>
                       </div>
                     </div>
                   </article>

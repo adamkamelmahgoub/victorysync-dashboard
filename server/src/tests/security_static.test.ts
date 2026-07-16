@@ -85,7 +85,7 @@ test('MightyCall sync and recordings use org credentials without erasing webhook
   assert.match(integrationSource, /export async function fetchMightyCallCallDetail/);
   assert.match(indexSource, /refreshExpiredRecordingAsset/);
   assert.match(indexSource, /persistence_error_codes/);
-  assert.match(indexSource, /req\.path === '\/webhooks\/mightycall'/);
+  assert.match(indexSource, /app\.post\('\/api\/webhooks\/mightycall'/);
 });
 
 test('production rate limiting requires persistent redis unless explicitly bypassed', () => {

@@ -418,29 +418,12 @@ export async function notifyUserLogin(params: SecurityEventDetails) {
   });
 }
 
-export async function notifyUserAccountUpdate(params: SecurityEventDetails) {
-  const recipient = await getUserAccountEmail(params.userId);
-  if (!recipient) return { skipped: true, reason: 'user_email_not_found' };
-  return notifyRecipientsForCategory([recipient], 'account_emails', {
-    subject: 'VictorySync account updated',
-    eyebrow: 'Account update',
-    title: 'Your VictorySync account was updated',
-    intro: 'A security or profile setting on your VictorySync account was changed. If this was not you, change your password and contact your VictorySync administrator.',
-    details: {
-      Update: params.updateType || 'Account setting',
-      Time: params.occurredAt || new Date().toISOString(),
-      'IP address': params.ipAddress || 'Unavailable',
-      Location: params.location || 'Unavailable',
-      Device: params.userAgent || 'Unavailable',
-    },
-    actionLabel: 'Open account settings',
-    actionUrl: appUrl('/settings'),
-  });
+export async function notifyUserAccountUpdate(_params: SecurityEventDetails) {
+  return { skipped: true, reason: 'routine_email_disabled' };
 }
 
 function shouldNotifyDashboardUpdates() {
-  const value = String(process.env.EMAIL_NOTIFY_DASHBOARD_UPDATES || '').toLowerCase();
-  return enabled() && value !== 'false';
+  return false;
 }
 
 export async function notifyDashboardUpdate(params: {

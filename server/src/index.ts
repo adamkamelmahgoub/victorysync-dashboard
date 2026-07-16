@@ -97,7 +97,6 @@ import {
   stripSensitiveFields,
 } from './security/adminLogging';
 import {
-  notifyDashboardUpdate,
   notifyInvoiceCreated,
   notifyPaymentReminder,
   notifyUserAccountUpdate,
@@ -5061,37 +5060,6 @@ app.use('/api', async (req, res, next) => {
   }
 });
 app.use('/api', csrfProtection as any);
-app.use('/api', (req, res, next) => {
-  const method = req.method.toUpperCase();
-  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return next();
-  if (
-    req.path.startsWith('/logs') ||
-    req.path === '/csrf-token' ||
-    req.path === '/billing/stripe/webhook' ||
-    req.path === '/webhooks/mightycall'
-  ) {
-    return next();
-  }
-
-  res.on('finish', () => {
-    if (res.statusCode < 200 || res.statusCode >= 400) return;
-    const rawOrgId =
-      (typeof req.body?.org_id === 'string' && req.body.org_id) ||
-      (typeof req.body?.orgId === 'string' && req.body.orgId) ||
-      (typeof req.query.org_id === 'string' && req.query.org_id) ||
-      (typeof req.query.orgId === 'string' && req.query.orgId) ||
-      null;
-    void notifyDashboardUpdate({
-      actorId: req.actorId || req.header('x-user-id') || null,
-      method,
-      path: req.path,
-      orgId: rawOrgId,
-      statusCode: res.statusCode,
-    });
-  });
-
-  next();
-});
 app.use('/api/billing/stripe', stripeBillingRouter);
 
 app.put('/api/admin/orgs/:orgId/billing-lock', async (req, res) => {
