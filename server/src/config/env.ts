@@ -88,7 +88,7 @@ console.log('[env] Loaded MightyCall envs:', {
   MIGHTYCALL_BASE_URL: MIGHTYCALL_BASE_URL,
 });
 
-export function getEnvironmentHealth() {
+export function getEnvironmentHealth(requireProductionControls = process.env.NODE_ENV === 'production') {
   const required = {
     SUPABASE_URL: !!SUPABASE_URL,
     SUPABASE_SERVICE_KEY: !!SUPABASE_SERVICE_KEY,
@@ -110,7 +110,7 @@ export function getEnvironmentHealth() {
 
   return {
     ok: Object.values(required).every(Boolean) &&
-      (process.env.NODE_ENV !== 'production' || Boolean(
+      (!requireProductionControls || Boolean(
         process.env.UPSTASH_REDIS_REST_URL &&
         process.env.UPSTASH_REDIS_REST_TOKEN &&
         process.env.CSRF_SECRET &&

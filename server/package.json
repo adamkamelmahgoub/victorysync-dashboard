@@ -26,7 +26,6 @@
     "express": "^4.18.0",
     "pg": "^8.18.0",
     "stripe": "^22.2.1",
-    "victorysync-dashboard": "file:..",
     "zod": "^4.4.3"
   },
   "devDependencies": {

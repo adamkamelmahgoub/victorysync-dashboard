@@ -9,7 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const webhookSecret = Deno.env.get("MIGHTYCALL_WEBHOOK_SECRET") || "your-secret-key";
+const webhookSecret = Deno.env.get("MIGHTYCALL_WEBHOOK_SECRET") || "";
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -35,6 +35,14 @@ serve(async (req) => {
   }
 
   try {
+    if (!webhookSecret) {
+      console.error("MIGHTYCALL_WEBHOOK_SECRET is not configured");
+      return new Response(JSON.stringify({ error: "Service unavailable" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     // Verify webhook secret
     const authHeader = req.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -120,7 +128,7 @@ serve(async (req) => {
     if (callError) {
       console.error("Error storing call:", callError);
       return new Response(
-        JSON.stringify({ error: "Failed to store call", details: callError }),
+        JSON.stringify({ error: "Failed to store call" }),
         {
           status: 500,
           headers: { "Content-Type": "application/json" },
@@ -158,7 +166,7 @@ serve(async (req) => {
   } catch (error) {
     console.error("Webhook error:", error);
     return new Response(
-      JSON.stringify({ error: "Internal server error", message: error.message }),
+      JSON.stringify({ error: "Internal server error" }),
       {
         status: 500,
         headers: { "Content-Type": "application/json" },

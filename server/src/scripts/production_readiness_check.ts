@@ -11,10 +11,10 @@ function stableLabel(value: unknown, prefix: string) {
 }
 
 async function main() {
-  const env = getEnvironmentHealth();
+  const env = getEnvironmentHealth(true);
   const schema = await getSchemaHealth();
   const membership = await getMembershipDriftDetails(25);
-  const { data } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
+  const { data, error: authError } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
   const users = data?.users || [];
 
   const report = {
@@ -50,10 +50,14 @@ async function main() {
       global_role: (user.user_metadata as any)?.global_role || null,
       role: (user.user_metadata as any)?.role || null,
     })),
+    auth_check: {
+      ok: !authError,
+      error: authError ? 'auth_provider_check_failed' : null,
+    },
   };
 
   console.log(JSON.stringify(report, null, 2));
-  if (!env.ok || !schema.ok || membership.mismatched_records > 0 || membership.org_members_only > 0) {
+  if (!env.ok || !schema.ok || authError || membership.mismatched_records > 0 || membership.org_members_only > 0) {
     process.exitCode = 1;
   }
 }

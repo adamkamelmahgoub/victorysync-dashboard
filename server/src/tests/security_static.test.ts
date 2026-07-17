@@ -52,6 +52,16 @@ test('MightyCall webhook is provider-public but protected by a dedicated secret'
   assert.match(indexSource, /invalid_webhook_authentication/);
 });
 
+test('legacy MightyCall edge webhooks fail closed and do not expose database errors', () => {
+  for (const name of ['calls', 'sms', 'recordings', 'reports']) {
+    const source = readFileSync(join(repoRoot, 'functions', `mightycall-${name}-webhook`, 'index.js'), 'utf8');
+    assert.doesNotMatch(source, /MIGHTYCALL_WEBHOOK_SECRET"\)\s*\|\|\s*"your-secret-key"/);
+    assert.match(source, /if \(!webhookSecret\)/);
+    assert.doesNotMatch(source, /JSON\.stringify\(\{[^}]*details:/s);
+    assert.doesNotMatch(source, /Internal server error",\s*message:/s);
+  }
+});
+
 test('MightyCall webhook maps documented lifecycle payloads and records safe processing receipts', () => {
   const indexSource = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
   assert.match(indexSource, /raw\?\.Body\?\.Extension/);
@@ -112,6 +122,14 @@ test('production readiness output does not print raw user emails or ids', () => 
   assert.doesNotMatch(source, /email: user\.email/);
   assert.doesNotMatch(source, /id: user\.id/);
   assert.doesNotMatch(source, /membership,\n/);
+});
+
+test('production readiness enforces production-only controls regardless of local NODE_ENV', () => {
+  const readiness = readFileSync(join(process.cwd(), 'src', 'scripts', 'production_readiness_check.ts'), 'utf8');
+  const envSource = readFileSync(join(process.cwd(), 'src', 'config', 'env.ts'), 'utf8');
+  assert.match(readiness, /getEnvironmentHealth\(true\)/);
+  assert.match(readiness, /auth_provider_check_failed/);
+  assert.match(envSource, /requireProductionControls/);
 });
 
 test('debug auth page is admin-only in the router', () => {
