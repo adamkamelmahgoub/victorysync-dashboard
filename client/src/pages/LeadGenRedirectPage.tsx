@@ -1,10 +1,26 @@
 import React, { useEffect } from 'react';
 import { PageLayout } from '../components/PageLayout';
 import { LEAD_GEN_HUB_URL } from '../config';
+import { supabase } from '../lib/supabaseClient';
 
 export const LeadGenRedirectPage: React.FC = () => {
   useEffect(() => {
-    window.location.assign(LEAD_GEN_HUB_URL);
+    const openLeadGenHub = async () => {
+      const { data } = await supabase.auth.getSession();
+      const session = data.session;
+      if (!session) {
+        window.location.assign(LEAD_GEN_HUB_URL);
+        return;
+      }
+      const target = new URL(LEAD_GEN_HUB_URL);
+      target.hash = new URLSearchParams({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        token_type: 'bearer',
+      }).toString();
+      window.location.assign(target.toString());
+    };
+    void openLeadGenHub();
   }, []);
 
   return (
