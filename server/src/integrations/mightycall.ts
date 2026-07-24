@@ -838,10 +838,28 @@ export async function sendMightyCallSMS(
   };
 
   const endpoints = ['/contactcenter/messages/send', '/messages/send'];
-  const urls = uniqueUrls(endpoints.flatMap((endpoint) => buildUrlVariants(base, endpoint)));
+  const productionApiBase = 'https://api.mightycall.com/v4/api';
+  const bases = /\/\/ccapi\.mightycall\.com/i.test(base)
+    ? [productionApiBase, base]
+    : [base, productionApiBase];
+  const urls = uniqueUrls(
+    bases.flatMap((candidateBase) =>
+      endpoints.flatMap((endpoint) => buildUrlVariants(candidateBase, endpoint))
+    )
+  );
   let lastError = '';
   for (const url of urls) {
-    const response = await tryPostJson(url, body, token, apiKeyOverride, 30000);
+    let response: Awaited<ReturnType<typeof tryPostJson>>;
+    try {
+      response = await tryPostJson(url, body, token, apiKeyOverride, 15000);
+    } catch (error: any) {
+      lastError = error?.message || String(error);
+      console.warn('[MightyCall SMS] endpoint connection failed, trying fallback:', {
+        host: new URL(url).host,
+        error: lastError,
+      });
+      continue;
+    }
     if (response.ok) return response.body;
     lastError = typeof response.body === 'string'
       ? response.body
@@ -850,7 +868,7 @@ export async function sendMightyCallSMS(
       throw new Error(`MightyCall SMS send failed (${response.status}): ${lastError}`);
     }
   }
-  throw new Error(`MightyCall SMS send endpoint was not found${lastError ? `: ${lastError}` : ''}`);
+  throw new Error(`MightyCall SMS send failed on all available endpoints${lastError ? `: ${lastError}` : ''}`);
 }
 
 export async function fetchMightyCallContacts(accessToken?: string) {
