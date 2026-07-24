@@ -34,7 +34,7 @@
       ]
     }
   ],
-  "regions": ["bom1"],
+  "regions": ["iad1"],
   "crons": [
     {
       "path": "/api/internal/mightycall/reconcile",
