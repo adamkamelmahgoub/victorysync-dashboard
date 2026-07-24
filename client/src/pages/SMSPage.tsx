@@ -177,10 +177,33 @@ export function SMSPage() {
   }, [orgId, user?.id, isPlatformAdmin]);
 
   const handleSendSMS = async () => {
-    const selectedSender = senderNumbers.find((number) => number.number === fromNumber);
+    const trimmedMessage = newMessage.trim();
+    const trimmedRecipient = recipientNumber.trim();
+    const trimmedFrom = fromNumber.trim();
+    const fromDigits = normalizePhoneDigits(trimmedFrom);
+    const selectedSender = senderNumbers.find((number) =>
+      number.number === trimmedFrom || normalizePhoneDigits(number.number) === fromDigits
+    );
     const sendOrgId = orgId || selectedSender?.org_id || (selectedSender as any)?.orgId || null;
-    if (!sendOrgId || !user || !newMessage || !recipientNumber || !fromNumber) {
-      setError('Please fill in all fields');
+
+    if (!user?.id) {
+      setError('Your session has expired. Please sign in again.');
+      return;
+    }
+    if (!trimmedFrom || !selectedSender) {
+      setError('Select an assigned MightyCall number to send from.');
+      return;
+    }
+    if (!trimmedRecipient) {
+      setError('Enter a recipient phone number.');
+      return;
+    }
+    if (!trimmedMessage) {
+      setError('Enter a message.');
+      return;
+    }
+    if (!sendOrgId) {
+      setError('The selected sender number is not linked to an organization.');
       return;
     }
 
@@ -188,7 +211,12 @@ export function SMSPage() {
     setError(null);
 
     try {
-	      await sendSmsMessage({ orgId: sendOrgId, from: fromNumber, to: recipientNumber, message: newMessage }, user.id);
+      await sendSmsMessage({
+        orgId: sendOrgId,
+        from: selectedSender.number,
+        to: trimmedRecipient,
+        message: trimmedMessage,
+      }, user.id);
 
       setNewMessage('');
       setRecipientNumber('');
