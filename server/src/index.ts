@@ -9062,6 +9062,7 @@ app.post('/api/admin/mightycall/send-sms', async (req, res) => {
           overrideCreds = {
             clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
             clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+            baseUrl: integ.credentials.baseUrl || undefined,
           };
         }
       } catch (ie) {
@@ -9176,6 +9177,7 @@ app.post('/api/orgs/:orgId/sms/send', async (req, res) => {
         overrideCreds = {
           clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
           clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+          baseUrl: integ.credentials.baseUrl || undefined,
         };
       }
     } catch (ie) {
@@ -9261,6 +9263,7 @@ app.post('/api/sms/send', async (req, res) => {
         overrideCreds = {
           clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
           clientSecret: integ.credentials.clientSecret || integ.credentials.userKey || undefined,
+          baseUrl: integ.credentials.baseUrl || undefined,
         };
       }
     } catch (ie) {

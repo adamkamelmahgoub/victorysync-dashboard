@@ -309,8 +309,8 @@ function resolveSyncDateRange(startDate?: string, endDate?: string) {
   };
 }
 
-export async function getMightyCallAccessToken(override?: { clientId?: string; clientSecret?: string }): Promise<string> {
-  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+export async function getMightyCallAccessToken(override?: { clientId?: string; clientSecret?: string; baseUrl?: string }): Promise<string> {
+  const base = (override?.baseUrl || MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const clientId = override?.clientId || MIGHTYCALL_API_KEY || '';
   const clientSecret = override?.clientSecret || MIGHTYCALL_USER_KEY || '';
   const cacheKey = getTokenCacheKey(clientId, clientSecret);
@@ -829,7 +829,7 @@ export async function sendMightyCallSMS(
 ) {
   const token = await getMightyCallAccessToken(overrideCreds);
   const apiKeyOverride = overrideCreds?.clientId || undefined;
-  const base = (MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
+  const base = (overrideCreds?.baseUrl || MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const body = {
     from: request.from,
     to: request.to,
@@ -837,8 +837,8 @@ export async function sendMightyCallSMS(
     ...(request.attachments?.length ? { attachments: request.attachments } : {}),
   };
 
-  const endpoints = ['/contactcenter/messages/send', '/messages/send', '/api/messages/send'];
-  const urls = Array.from(new Set(endpoints.map((ep) => `${base}${ep}`)));
+  const endpoints = ['/contactcenter/messages/send', '/messages/send'];
+  const urls = uniqueUrls(endpoints.flatMap((endpoint) => buildUrlVariants(base, endpoint)));
   let lastError = '';
   for (const url of urls) {
     const response = await tryPostJson(url, body, token, apiKeyOverride);
