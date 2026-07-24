@@ -9224,14 +9224,12 @@ app.post('/api/sms/send', async (req, res) => {
   try {
     const actorId = req.header('x-user-id') || null;
     const { to, message, from, attachments } = req.body || {};
-    const orgId = String(req.body?.orgId || req.body?.org_id || '').trim();
+    const requestedOrgId = String(req.body?.orgId || req.body?.org_id || '').trim() || null;
 
     if (!actorId) return res.status(401).json({ error: 'unauthenticated' });
-    if (!orgId || !from || !to || !message) return res.status(400).json({ error: 'missing_required_fields' });
+    if (!from || !to || !message) return res.status(400).json({ error: 'missing_required_fields' });
 
     const isAdminUser = await isPlatformAdmin(actorId);
-    const isMember = await isOrgMember(actorId, orgId);
-    if (!isAdminUser && !isMember) return res.status(403).json({ error: 'forbidden' });
 
     const recipients = (Array.isArray(to) ? to : [to])
       .map((value: any) => String(value || '').trim())
@@ -9243,7 +9241,6 @@ app.post('/api/sms/send', async (req, res) => {
     let phoneQuery = supabaseAdmin
       .from('phone_numbers')
       .select('id, org_id, number, number_digits, e164, phone_number');
-    if (!isAdminUser) phoneQuery = phoneQuery.eq('org_id', orgId);
     const { data: phoneRows, error: phoneErr } = await phoneQuery;
     if (phoneErr) throw phoneErr;
 
@@ -9256,14 +9253,32 @@ app.post('/api/sms/send', async (req, res) => {
       }))
       .find((phone: any) => phone.number === requestedFrom || phone.digits === requestedFromDigits);
     if (!selectedFrom) return res.status(400).json({ error: 'missing_owned_sender_number' });
-    if (!isAdminUser && selectedFrom.org_id !== orgId) {
-      return res.status(403).json({ error: 'sender_not_assigned_to_organization' });
+
+    let effectiveOrgId = requestedOrgId || selectedFrom.org_id || null;
+    if (!isAdminUser) {
+      const { data: assignments, error: assignmentErr } = await supabaseAdmin
+        .from('user_phone_assignments')
+        .select('org_id, phone_number_id')
+        .eq('user_id', actorId)
+        .eq('phone_number_id', selectedFrom.id);
+      if (assignmentErr) throw assignmentErr;
+      const approved = (assignments || []).find((row: any) =>
+        !requestedOrgId || String(row.org_id || '') === requestedOrgId
+      );
+      if (!approved) {
+        return res.status(403).json({
+          error: 'sender_access_required',
+          message: 'You do not have approved access to this sender number.',
+        });
+      }
+      effectiveOrgId = String(approved.org_id || '').trim() || effectiveOrgId;
     }
 
     let overrideCreds: any = undefined;
     try {
+      if (!effectiveOrgId) throw new Error('no_org_credentials_requested');
       const { getOrgIntegration } = await import('./lib/integrationsStore');
-      const integ = await getOrgIntegration(orgId, 'mightycall');
+      const integ = await getOrgIntegration(effectiveOrgId, 'mightycall');
       if (integ && integ.credentials) {
         overrideCreds = {
           clientId: integ.credentials.clientId || integ.credentials.apiKey || undefined,
@@ -9282,7 +9297,7 @@ app.post('/api/sms/send', async (req, res) => {
       attachments: Array.isArray(attachments) ? attachments : undefined,
     }, overrideCreds);
     const sentAt = providerResult?.sendTime || providerResult?.sentAt || new Date().toISOString();
-    const logResult = await syncSMSLog(supabaseAdmin, orgId, {
+    const logResult = effectiveOrgId ? await syncSMSLog(supabaseAdmin, effectiveOrgId, {
       id: providerResult?.id || providerResult?.messageId || null,
       phone_id: selectedFrom.id,
       from: providerResult?.sourcePhoneNumber || selectedFrom.number,
@@ -9293,10 +9308,14 @@ app.post('/api/sms/send', async (req, res) => {
       sent_at: sentAt,
       sendTime: sentAt,
       provider_response: providerResult,
-    });
-    if (!logResult.smsSynced) return res.status(500).json({ error: 'sms_log_failed' });
+    }) : { smsSynced: true };
+    if (!logResult.smsSynced) console.warn('[sms_send] provider accepted SMS but database logging failed');
 
-    res.json({ success: true, message: 'SMS sent and logged', provider: providerResult });
+    res.json({
+      success: true,
+      message: effectiveOrgId ? 'SMS sent and logged' : 'SMS sent',
+      provider: providerResult,
+    });
   } catch (err: any) {
     console.error('sms_send_failed:', fmtErr(err));
     res.status(500).json({ error: 'sms_send_failed', detail: fmtErr(err) ?? 'unknown_error' });

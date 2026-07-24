@@ -389,7 +389,7 @@ async function tryFetchJson(url: string, token?: string, apiKeyOverride?: string
   try { return { ok: true, status: res.status, body: JSON.parse(text || 'null') }; } catch (e) { return { ok: true, status: res.status, body: text }; }
 }
 
-async function tryPostJson(url: string, body: any, token?: string, apiKeyOverride?: string) {
+async function tryPostJson(url: string, body: any, token?: string, apiKeyOverride?: string, timeoutMs = 10000) {
   const res = await requestWithRetry(url, {
     method: 'POST',
     headers: {
@@ -399,7 +399,7 @@ async function tryPostJson(url: string, body: any, token?: string, apiKeyOverrid
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body || {}),
-  }, 1, 300, 10000);
+  }, 1, 300, timeoutMs);
   const text = await res.text().catch(() => '');
   let parsed: any = text;
   try { parsed = JSON.parse(text || 'null'); } catch {}
@@ -841,7 +841,7 @@ export async function sendMightyCallSMS(
   const urls = uniqueUrls(endpoints.flatMap((endpoint) => buildUrlVariants(base, endpoint)));
   let lastError = '';
   for (const url of urls) {
-    const response = await tryPostJson(url, body, token, apiKeyOverride);
+    const response = await tryPostJson(url, body, token, apiKeyOverride, 30000);
     if (response.ok) return response.body;
     lastError = typeof response.body === 'string'
       ? response.body

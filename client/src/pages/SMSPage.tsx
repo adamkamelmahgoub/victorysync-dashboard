@@ -203,17 +203,12 @@ export function SMSPage() {
       setError('Enter a message.');
       return;
     }
-    if (!sendOrgId) {
-      setError('Select the organization that should own this outbound message.');
-      return;
-    }
-
     setSending(true);
     setError(null);
 
     try {
       await sendSmsMessage({
-        orgId: sendOrgId,
+        ...(sendOrgId ? { orgId: sendOrgId } : {}),
         from: selectedSender.number,
         to: trimmedRecipient,
         message: trimmedMessage,

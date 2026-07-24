@@ -325,11 +325,12 @@ export async function triggerMightyCallSMSSync(orgId: string, userId?: string) {
   });
 }
 
-export async function sendSmsMessage(params: { orgId: string; from: string; to: string | string[]; message: string }, userId?: string) {
+export async function sendSmsMessage(params: { orgId?: string; from: string; to: string | string[]; message: string }, userId?: string) {
   return await fetchJson(`/api/sms/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
     body: JSON.stringify(params),
+    timeoutMs: 60_000,
   });
 }
 
