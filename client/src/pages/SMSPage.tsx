@@ -62,6 +62,7 @@ export function SMSPage() {
   const [newMessage, setNewMessage] = useState('');
   const [recipientNumber, setRecipientNumber] = useState('');
   const [fromNumber, setFromNumber] = useState('');
+  const [sendOrgOverride, setSendOrgOverride] = useState('');
   const [senderNumbers, setSenderNumbers] = useState<PhoneNumber[]>([]);
   const [showSendModal, setShowSendModal] = useState(false);
   const [sending, setSending] = useState(false);
@@ -184,7 +185,7 @@ export function SMSPage() {
     const selectedSender = senderNumbers.find((number) =>
       number.number === trimmedFrom || normalizePhoneDigits(number.number) === fromDigits
     );
-    const sendOrgId = orgId || selectedSender?.org_id || (selectedSender as any)?.orgId || null;
+    const sendOrgId = orgId || selectedSender?.org_id || (selectedSender as any)?.orgId || sendOrgOverride || null;
 
     if (!user?.id) {
       setError('Your session has expired. Please sign in again.');
@@ -203,7 +204,7 @@ export function SMSPage() {
       return;
     }
     if (!sendOrgId) {
-      setError('The selected sender number is not linked to an organization.');
+      setError('Select the organization that should own this outbound message.');
       return;
     }
 
@@ -440,6 +441,22 @@ export function SMSPage() {
                   )}
                 </select>
               </div>
+
+              {isPlatformAdmin && !orgId && (
+                <div>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Organization</label>
+                  <select
+                    value={sendOrgOverride}
+                    onChange={(e) => setSendOrgOverride(e.target.value)}
+                    className="vs-input w-full"
+                  >
+                    <option value="">Select organization</option>
+                    {orgs.map((organization) => (
+                      <option key={organization.id} value={organization.id}>{organization.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Recipient Number</label>

@@ -9240,20 +9240,25 @@ app.post('/api/sms/send', async (req, res) => {
 
     const requestedFrom = String(from || '').trim();
     const requestedFromDigits = normalizePhoneDigits(requestedFrom);
-    const { data: phoneRows, error: phoneErr } = await supabaseAdmin
+    let phoneQuery = supabaseAdmin
       .from('phone_numbers')
-      .select('id, org_id, number, number_digits, e164, phone_number')
-      .eq('org_id', orgId);
+      .select('id, org_id, number, number_digits, e164, phone_number');
+    if (!isAdminUser) phoneQuery = phoneQuery.eq('org_id', orgId);
+    const { data: phoneRows, error: phoneErr } = await phoneQuery;
     if (phoneErr) throw phoneErr;
 
     const selectedFrom = (phoneRows || [])
       .map((phone: any) => ({
         id: String(phone?.id || '').trim() || null,
+        org_id: String(phone?.org_id || '').trim() || null,
         number: String(phone?.number || phone?.e164 || phone?.phone_number || '').trim(),
         digits: normalizePhoneDigits(phone?.number_digits || phone?.number || phone?.e164 || phone?.phone_number),
       }))
       .find((phone: any) => phone.number === requestedFrom || phone.digits === requestedFromDigits);
     if (!selectedFrom) return res.status(400).json({ error: 'missing_owned_sender_number' });
+    if (!isAdminUser && selectedFrom.org_id !== orgId) {
+      return res.status(403).json({ error: 'sender_not_assigned_to_organization' });
+    }
 
     let overrideCreds: any = undefined;
     try {
