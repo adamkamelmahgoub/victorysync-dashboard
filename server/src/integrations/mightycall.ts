@@ -313,7 +313,7 @@ export async function getMightyCallAccessToken(override?: { clientId?: string; c
   const base = (override?.baseUrl || MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const clientId = override?.clientId || MIGHTYCALL_API_KEY || '';
   const clientSecret = override?.clientSecret || MIGHTYCALL_USER_KEY || '';
-  const cacheKey = getTokenCacheKey(clientId, clientSecret);
+  const cacheKey = getTokenCacheKey(clientId, clientSecret, normalizeMightyCallAuthBase(base));
   const cached = mightyCallTokenCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.token;
@@ -421,8 +421,8 @@ function pickTokenFromAuthResponse(body: any): string | null {
   );
 }
 
-function getTokenCacheKey(clientId: string, clientSecret: string): string {
-  return `${clientId}::${clientSecret}`;
+function getTokenCacheKey(clientId: string, clientSecret: string, authBase = ''): string {
+  return `${authBase}::${clientId}::${clientSecret}`;
 }
 
 export async function fetchMightyCallPhoneNumbers(accessToken: string) {
@@ -827,7 +827,6 @@ export async function sendMightyCallSMS(
   request: { from: string; to: string[]; message: string; attachments?: Array<{ name: string; data: string }> },
   overrideCreds?: any
 ) {
-  const token = await getMightyCallAccessToken(overrideCreds);
   const apiKeyOverride = overrideCreds?.clientId || undefined;
   const base = (overrideCreds?.baseUrl || MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const body = {
@@ -842,13 +841,27 @@ export async function sendMightyCallSMS(
   const bases = /\/\/ccapi\.mightycall\.com/i.test(base)
     ? [productionApiBase, base]
     : [base, productionApiBase];
-  const urls = uniqueUrls(
-    bases.flatMap((candidateBase) =>
-      endpoints.flatMap((endpoint) => buildUrlVariants(candidateBase, endpoint))
-    )
+  const candidates = bases.flatMap((candidateBase) =>
+    uniqueUrls(endpoints.flatMap((endpoint) => buildUrlVariants(candidateBase, endpoint)))
+      .map((url) => ({ base: candidateBase, url }))
   );
   let lastError = '';
-  for (const url of urls) {
+  for (const candidate of candidates) {
+    const { base: candidateBase, url } = candidate;
+    let token: string;
+    try {
+      token = await getMightyCallAccessToken({
+        ...overrideCreds,
+        baseUrl: candidateBase,
+      });
+    } catch (error: any) {
+      lastError = error?.message || String(error);
+      console.warn('[MightyCall SMS] authentication failed for host, trying fallback:', {
+        host: new URL(url).host,
+        error: lastError,
+      });
+      continue;
+    }
     let response: Awaited<ReturnType<typeof tryPostJson>>;
     try {
       response = await tryPostJson(url, body, token, apiKeyOverride, 15000);
@@ -864,7 +877,7 @@ export async function sendMightyCallSMS(
     lastError = typeof response.body === 'string'
       ? response.body
       : response.body?.message || response.body?.error || JSON.stringify(response.body);
-    if (![404, 405].includes(response.status)) {
+    if (![401, 403, 404, 405].includes(response.status)) {
       throw new Error(`MightyCall SMS send failed (${response.status}): ${lastError}`);
     }
   }
