@@ -1,7 +1,9 @@
 import fetch from 'node-fetch';
+import { getOrgIntegration } from '../lib/integrationsStore';
 
-export async function syncLeadToHubSpot(contactId: string | null, properties: Record<string, string>) {
-  const token = process.env.HUBSPOT_ACCESS_TOKEN;
+export async function syncLeadToHubSpot(orgId: string | null, contactId: string | null, properties: Record<string, string>) {
+  const integration = orgId ? await getOrgIntegration(orgId, 'hubspot_ai') : null;
+  const token = integration?.credentials?.access_token || process.env.HUBSPOT_ACCESS_TOKEN;
   if (!token) return { synced: false, skipped: true, error: 'hubspot_not_configured' };
   if (!contactId) return { synced: false, skipped: true, error: 'hubspot_contact_id_missing' };
   const response = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, {

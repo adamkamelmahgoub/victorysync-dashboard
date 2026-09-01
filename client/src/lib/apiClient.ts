@@ -341,6 +341,18 @@ export async function getAiQualificationDashboard(userId?: string) {
   });
 }
 
+export async function getAiQualificationSettings(orgId: string, userId?: string) {
+  return fetchJson(`/api/admin/ai-qualification/settings?organization_id=${encodeURIComponent(orgId)}`, { cache: 'no-store', headers: { 'x-user-id': userId || '' } });
+}
+
+export async function saveAiQualificationSettings(payload: Record<string, any>, userId?: string) {
+  return fetchJson('/api/admin/ai-qualification/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, body: JSON.stringify(payload) });
+}
+
+export async function testAiQualificationConnection(orgId: string, provider: 'vapi' | 'hubspot', userId?: string) {
+  return fetchJson('/api/admin/ai-qualification/test-connection', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, body: JSON.stringify({ organization_id: orgId, provider }) });
+}
+
 export async function getAdminLogs(type: string, params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
   const q = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {

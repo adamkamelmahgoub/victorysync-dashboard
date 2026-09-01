@@ -268,7 +268,7 @@ function AppRouter() {
           path="/"
           element={
             <ProtectedRoute>
-              <DashboardNewV3 />
+              <FeatureRoute featureKey="dashboard"><DashboardNewV3 /></FeatureRoute>
             </ProtectedRoute>
           }
         />
@@ -276,7 +276,7 @@ function AppRouter() {
         path="/dashboard"
         element={
           <ProtectedRoute>
-            <DashboardNewV3 />
+            <FeatureRoute featureKey="dashboard"><DashboardNewV3 /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -300,7 +300,7 @@ function AppRouter() {
         path="/lead-gen"
         element={
           <ProtectedRoute>
-            <LeadGenRedirectPage />
+            <FeatureRoute featureKey="lead_gen"><LeadGenRedirectPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -308,7 +308,7 @@ function AppRouter() {
         path="/calls"
         element={
           <ProtectedRoute>
-            <FeatureRoute featureKey="reports"><CallsPage /></FeatureRoute>
+            <FeatureRoute featureKey="calls"><CallsPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -324,7 +324,7 @@ function AppRouter() {
         path="/settings"
         element={
           <ProtectedRoute>
-            <SettingsPage />
+            <FeatureRoute featureKey="settings"><SettingsPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -356,7 +356,7 @@ function AppRouter() {
         path="/account-settings"
         element={
           <ProtectedRoute>
-            <UserSettingsPage />
+            <FeatureRoute featureKey="account_settings"><UserSettingsPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />
@@ -364,7 +364,7 @@ function AppRouter() {
         path="/email-preferences"
         element={
           <ProtectedRoute>
-            <EmailPreferencesPage />
+            <FeatureRoute featureKey="email_preferences"><EmailPreferencesPage /></FeatureRoute>
           </ProtectedRoute>
         }
       />

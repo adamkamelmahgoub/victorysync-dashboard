@@ -13,6 +13,12 @@ export const FEATURE_DEFINITIONS = [
   { key: 'billing', label: 'Billing', defaultEnabled: false },
   { key: 'team', label: 'Team', defaultEnabled: false },
   { key: 'api_keys', label: 'API Keys', defaultEnabled: false },
+  { key: 'calls', label: 'Calls', defaultEnabled: true },
+  { key: 'settings', label: 'Organization Settings', defaultEnabled: true },
+  { key: 'account_settings', label: 'Account Settings', defaultEnabled: true },
+  { key: 'email_preferences', label: 'Email Preferences', defaultEnabled: true },
+  { key: 'lead_gen', label: 'Lead Gen Hub', defaultEnabled: true },
+  { key: 'ai_qualification', label: 'AI Qualification', defaultEnabled: false },
 ] as const;
 
 export type FeatureKey = typeof FEATURE_DEFINITIONS[number]['key'];

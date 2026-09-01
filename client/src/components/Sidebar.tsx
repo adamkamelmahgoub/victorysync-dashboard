@@ -161,7 +161,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
             { label: 'SMS', path: '/sms', featureKey: 'sms' },
             { label: 'Recordings', path: '/admin/recordings' },
             { label: 'Leads', path: '/leads', badge: 'Live', featureKey: 'leads' },
-            { label: 'AI Qualification', path: '/admin/ai-qualification', badge: 'Pilot' },
+            { label: 'AI Qualification', path: '/admin/ai-qualification', badge: 'Pilot', featureKey: 'ai_qualification' },
             { label: 'Lead Gen Hub', path: '/lead-gen' },
           ],
         },

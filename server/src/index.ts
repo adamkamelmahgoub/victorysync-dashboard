@@ -5022,6 +5022,8 @@ app.use('/api', async (req, res, next) => {
 function featureKeyForApiPath(pathname: string): FeatureKey | null {
   if (pathname.startsWith('/admin') || pathname.startsWith('/logs') || pathname === '/me/features' || pathname === '/csrf-token') return null;
   if (pathname.startsWith('/live-status')) return 'live_status';
+  if (pathname.startsWith('/dashboard/calls') || pathname.startsWith('/calls/initiate')) return 'ai_qualification';
+  if (pathname.startsWith('/calls')) return 'calls';
   if (pathname.startsWith('/reports') || pathname.startsWith('/calls/')) return 'reports';
   if (pathname.startsWith('/recordings')) return 'recordings';
   if (pathname.startsWith('/sms')) return 'sms';
