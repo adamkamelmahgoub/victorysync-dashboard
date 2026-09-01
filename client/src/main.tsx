@@ -37,6 +37,7 @@ const AdminInviteCodesPage = lazy(() => import("./pages/admin/AdminInviteCodesPa
 const AdminBillingPageV2 = lazy(() => import("./pages/admin/AdminBillingPageV2").then((m) => ({ default: m.AdminBillingPageV2 })));
 const AdminDiagnosticsPage = lazy(() => import("./pages/admin/AdminDiagnosticsPage"));
 const AdminLogsPage = lazy(() => import("./pages/admin/AdminLogsPage"));
+const AdminAiQualificationPage = lazy(() => import("./pages/admin/AdminAiQualificationPage"));
 const OrgManagePage = lazy(() => import("./pages/OrgManagePage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const NumbersPage = lazy(() => import("./pages/NumbersPage").then((m) => ({ default: m.NumbersPage })));
@@ -496,6 +497,14 @@ function AppRouter() {
         element={
           <AdminRoute>
             <AdminApiKeysPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/ai-qualification"
+        element={
+          <AdminRoute>
+            <AdminAiQualificationPage />
           </AdminRoute>
         }
       />

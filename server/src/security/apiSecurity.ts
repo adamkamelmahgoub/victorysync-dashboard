@@ -37,6 +37,7 @@ const publicApiRoutes = [
   /^\/leads\/inbound$/,
   /^\/billing\/stripe\/webhook$/,
   /^\/webhooks\/mightycall$/,
+  /^\/calls\/webhook$/,
   /^\/internal\/mightycall\/reconcile$/,
 ];
 

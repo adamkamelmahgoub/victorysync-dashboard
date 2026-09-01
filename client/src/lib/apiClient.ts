@@ -334,6 +334,13 @@ export async function sendSmsMessage(params: { orgId?: string; from: string; to:
   });
 }
 
+export async function getAiQualificationDashboard(userId?: string) {
+  return fetchJson('/api/dashboard/calls?limit=50', {
+    cache: 'no-store',
+    headers: { 'x-user-id': userId || '' },
+  });
+}
+
 export async function getAdminLogs(type: string, params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
   const q = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {
