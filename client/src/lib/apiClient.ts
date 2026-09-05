@@ -363,11 +363,11 @@ export type CrmDeal = {
 };
 
 export type CrmBootstrap = {
-  stages: PipelineStage[]; deals: CrmDeal[]; companies: CrmCompany[]; contacts: CrmContact[];
+  organization_id: string; stages: PipelineStage[]; deals: CrmDeal[]; companies: CrmCompany[]; contacts: CrmContact[];
 };
 
-export async function getCrmBootstrap(organizationId: string) {
-  return fetchJson(`/api/crm/bootstrap?organization_id=${encodeURIComponent(organizationId)}`) as Promise<CrmBootstrap>;
+export async function getCrmBootstrap() {
+  return fetchJson('/api/crm/bootstrap') as Promise<CrmBootstrap>;
 }
 
 export async function createCrmCompany(payload: Record<string, unknown>) {
@@ -423,8 +423,8 @@ export async function updateCrmTask(taskId: string, completed: boolean) {
   return fetchJson(`/api/crm/tasks/${encodeURIComponent(taskId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ completed }) }) as Promise<{ item: CrmTask }>;
 }
 
-export async function getCrmDashboard(organizationId: string) {
-  return fetchJson(`/api/crm/dashboard?organization_id=${encodeURIComponent(organizationId)}`) as Promise<{
+export async function getCrmDashboard() {
+  return fetchJson('/api/crm/dashboard') as Promise<{
     metrics: { calls_today: number; calls_week: number; companies_today: number; stage_changes_today: number; stage_changes_week: number; trials_active: number; awaiting_close: number };
     tasks: CrmTask[];
   }>;

@@ -1,6 +1,6 @@
 import express from 'express';
 import { z } from 'zod';
-import { isOrgMember, isPlatformAdmin } from '../auth/rbac';
+import { isPlatformAdmin } from '../auth/rbac';
 import { supabaseAdmin } from '../lib/supabaseClient';
 
 const router = express.Router();
@@ -81,10 +81,20 @@ function actorId(req: express.Request) {
 }
 
 async function requireOrgAccess(userId: string, orgId: string) {
-  if (await isPlatformAdmin(userId)) return;
-  if (!(await isOrgMember(userId, orgId))) {
-    throw Object.assign(new Error('forbidden'), { status: 403 });
-  }
+  void orgId;
+  if (!(await isPlatformAdmin(userId))) throw Object.assign(new Error('forbidden'), { status: 403 });
+}
+
+async function resolveInternalCrmOrg(requested?: string | null) {
+  if (requested) return uuid.parse(requested);
+  const configured = String(process.env.VICTORYSYNC_DEFAULT_ORG_ID || '').trim();
+  if (configured) return uuid.parse(configured);
+  const { data, error } = await supabaseAdmin.from('organizations').select('id,name').order('created_at').limit(100);
+  if (error) throw error;
+  const organizations = data || [];
+  const internal = organizations.find((org: any) => /victory\s*sync/i.test(String(org.name || '')));
+  if (!internal?.id) throw Object.assign(new Error('internal_crm_organization_not_configured'), { status: 409 });
+  return String(internal.id);
 }
 
 async function loadOwned(table: string, id: string) {
@@ -124,7 +134,7 @@ function sendError(res: express.Response, error: any, fallback: string) {
 router.get('/crm/bootstrap', async (req, res) => {
   try {
     const userId = actorId(req);
-    const orgId = uuid.parse(String(req.query.organization_id || ''));
+    const orgId = await resolveInternalCrmOrg(String(req.query.organization_id || '').trim() || null);
     await requireOrgAccess(userId, orgId);
     const [stagesResult, dealsResult, companiesResult, contactsResult] = await Promise.all([
       supabaseAdmin.from('crm_pipeline_stages').select('*').eq('organization_id', orgId).order('position'),
@@ -139,7 +149,7 @@ router.get('/crm/bootstrap', async (req, res) => {
       stages: stagesResult.data || [],
       deals: dealsResult.data || [],
       companies: companiesResult.data || [],
-      contacts: contactsResult.data || [],
+      contacts: contactsResult.data || [], organization_id: orgId,
     });
   } catch (error) { sendError(res, error, 'crm_bootstrap_failed'); }
 });
@@ -345,7 +355,7 @@ router.patch('/crm/tasks/:taskId', async (req, res) => {
 router.get('/crm/dashboard', async (req, res) => {
   try {
     const userId = actorId(req);
-    const orgId = uuid.parse(String(req.query.organization_id || ''));
+    const orgId = await resolveInternalCrmOrg(String(req.query.organization_id || '').trim() || null);
     await requireOrgAccess(userId, orgId);
     const now = new Date();
     const today = new Date(now); today.setHours(0, 0, 0, 0);

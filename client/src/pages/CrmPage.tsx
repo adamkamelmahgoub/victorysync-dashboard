@@ -4,7 +4,6 @@ import {
   EmptyStatePanel, ErrorStatePanel, FilterBar, LoadingSkeleton, MetricStatCard,
   SearchInput, SectionCard, SegmentedControl, StatusBadge,
 } from '../components/DashboardPrimitives';
-import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import {
   createCrmActivity, createCrmCompany, createCrmContact, createCrmDeal, createCrmTask,
@@ -40,8 +39,8 @@ function contactName(contact?: CrmContact | null) {
 }
 
 export default function CrmPage() {
-  const { selectedOrgId, orgs, globalRole } = useAuth();
   const toast = useToast();
+  const [internalOrgId, setInternalOrgId] = useState<string | null>(null);
   const [view, setView] = useState<View>('pipeline');
   const [modal, setModal] = useState<Modal>(null);
   const [companies, setCompanies] = useState<CrmCompany[]>([]);
@@ -61,14 +60,14 @@ export default function CrmPage() {
   const [draggingDeal, setDraggingDeal] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!selectedOrgId) return;
     setLoading(true); setError(null);
     try {
-      const data = await getCrmBootstrap(selectedOrgId);
+      const data = await getCrmBootstrap();
+      setInternalOrgId(data.organization_id);
       setCompanies(data.companies); setContacts(data.contacts); setDeals(data.deals); setStages(data.stages);
     } catch (err: any) { setError(err?.message || 'Unable to load CRM data.'); }
     finally { setLoading(false); }
-  }, [selectedOrgId]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -82,30 +81,30 @@ export default function CrmPage() {
   const filteredDeals = deals.filter((deal) => (stageFilter === 'all' || deal.stage_id === stageFilter) && matches(deal.title, deal.company?.name, contactName(deal.primary_contact), deal.next_action));
 
   const submitCompany = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); if (!selectedOrgId) return;
+    event.preventDefault(); if (!internalOrgId) return;
     const form = new FormData(event.currentTarget); setSaving(true);
     try {
-      await createCrmCompany({ organization_id: selectedOrgId, name: form.get('name'), phone: form.get('phone') || null, city: form.get('city') || null, state: form.get('state') || null, industry: form.get('industry') || null, source: form.get('source') || null, notes: form.get('notes') || null, tags: String(form.get('tags') || '').split(',').map((tag) => tag.trim()).filter(Boolean) });
+      await createCrmCompany({ organization_id: internalOrgId, name: form.get('name'), phone: form.get('phone') || null, city: form.get('city') || null, state: form.get('state') || null, industry: form.get('industry') || null, source: form.get('source') || null, notes: form.get('notes') || null, tags: String(form.get('tags') || '').split(',').map((tag) => tag.trim()).filter(Boolean) });
       toast.push('Company added to CRM', 'success'); setModal(null); await load();
     } catch (err: any) { toast.push(err?.message || 'Could not create company', 'error'); }
     finally { setSaving(false); }
   };
 
   const submitContact = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); if (!selectedOrgId) return;
+    event.preventDefault(); if (!internalOrgId) return;
     const form = new FormData(event.currentTarget); setSaving(true);
     try {
-      await createCrmContact({ organization_id: selectedOrgId, company_id: form.get('company_id') || null, first_name: form.get('first_name'), last_name: form.get('last_name') || null, title: form.get('title') || null, phone: form.get('phone') || null, email: form.get('email') || null, tags: String(form.get('tags') || '').split(',').map((tag) => tag.trim()).filter(Boolean) });
+      await createCrmContact({ organization_id: internalOrgId, company_id: form.get('company_id') || null, first_name: form.get('first_name'), last_name: form.get('last_name') || null, title: form.get('title') || null, phone: form.get('phone') || null, email: form.get('email') || null, tags: String(form.get('tags') || '').split(',').map((tag) => tag.trim()).filter(Boolean) });
       toast.push('Contact added to CRM', 'success'); setModal(null); await load();
     } catch (err: any) { toast.push(err?.message || 'Could not create contact', 'error'); }
     finally { setSaving(false); }
   };
 
   const submitDeal = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); if (!selectedOrgId) return;
+    event.preventDefault(); if (!internalOrgId) return;
     const form = new FormData(event.currentTarget); setSaving(true);
     try {
-      await createCrmDeal({ organization_id: selectedOrgId, company_id: form.get('company_id'), primary_contact_id: form.get('primary_contact_id') || null, stage_id: form.get('stage_id'), title: form.get('title'), next_action: form.get('next_action') || null });
+      await createCrmDeal({ organization_id: internalOrgId, company_id: form.get('company_id'), primary_contact_id: form.get('primary_contact_id') || null, stage_id: form.get('stage_id'), title: form.get('title'), next_action: form.get('next_action') || null });
       toast.push('Opportunity added to pipeline', 'success'); setModal(null); await load();
     } catch (err: any) { toast.push(err?.message || 'Could not create opportunity', 'error'); }
     finally { setSaving(false); }
@@ -135,7 +134,7 @@ export default function CrmPage() {
   };
 
   const submitActivity = async (event: FormEvent<HTMLFormElement>, type: 'call' | 'note') => {
-    event.preventDefault(); if (!selectedOrgId) return;
+    event.preventDefault(); if (!internalOrgId) return;
     const form = new FormData(event.currentTarget);
     const companyId = selectedDeal?.company_id || selectedCompany?.id;
     if (!companyId) return;
@@ -146,7 +145,7 @@ export default function CrmPage() {
         duration_minutes: Number(form.get('duration_minutes') || 0),
         response_time_minutes: form.get('response_time_minutes') ? Number(form.get('response_time_minutes')) : null,
       } : {};
-      const result = await createCrmActivity({ organization_id: selectedOrgId, company_id: companyId, contact_id: selectedDeal?.primary_contact_id || null, deal_id: selectedDeal?.id || null, type, body: form.get('body') || null, metadata });
+      const result = await createCrmActivity({ organization_id: internalOrgId, company_id: companyId, contact_id: selectedDeal?.primary_contact_id || null, deal_id: selectedDeal?.id || null, type, body: form.get('body') || null, metadata });
       toast.push(result.advanced_to_stage_id ? 'Activity logged and pipeline advanced' : `${type === 'call' ? 'Call' : 'Note'} logged`, 'success');
       setModal(null); await load(); if (selectedCompany) await openCompany(selectedCompany);
     } catch (err: any) { toast.push(err?.message || 'Could not log activity', 'error'); }
@@ -154,21 +153,17 @@ export default function CrmPage() {
   };
 
   const submitTask = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); if (!selectedOrgId) return;
+    event.preventDefault(); if (!internalOrgId) return;
     const form = new FormData(event.currentTarget);
     const companyId = selectedDeal?.company_id || selectedCompany?.id;
     if (!companyId) return;
     setSaving(true);
     try {
-      await createCrmTask({ organization_id: selectedOrgId, company_id: companyId, contact_id: selectedDeal?.primary_contact_id || null, deal_id: selectedDeal?.id || null, title: form.get('title'), description: form.get('description') || null, due_date: new Date(String(form.get('due_date'))).toISOString() });
+      await createCrmTask({ organization_id: internalOrgId, company_id: companyId, contact_id: selectedDeal?.primary_contact_id || null, deal_id: selectedDeal?.id || null, title: form.get('title'), description: form.get('description') || null, due_date: new Date(String(form.get('due_date'))).toISOString() });
       toast.push('Task scheduled', 'success'); setModal(null); if (selectedCompany) await openCompany(selectedCompany);
     } catch (err: any) { toast.push(err?.message || 'Could not schedule task', 'error'); }
     finally { setSaving(false); }
   };
-
-  if (!selectedOrgId) {
-    return <PageLayout title="CRM" eyebrow="Revenue workspace"><EmptyStatePanel title="Select an organization" description={globalRole === 'platform_admin' ? 'Choose an organization in the top bar to open its CRM workspace.' : 'Your account must be connected to an organization before CRM records can be used.'} /></PageLayout>;
-  }
 
   return (
     <PageLayout title="CRM" description="Companies, contacts, and opportunities in one organization-scoped workspace." eyebrow="Revenue workspace" actions={<div className="flex flex-wrap gap-2"><button className="vs-button-secondary" onClick={() => setModal('contact')}>Add contact</button><button className="vs-button-primary" onClick={() => setModal(view === 'pipeline' ? 'deal' : 'company')}>{view === 'pipeline' ? 'Add opportunity' : 'Add company'}</button></div>}>

@@ -7,16 +7,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select
-    public.is_platform_admin()
-    or exists (
-      select 1 from public.org_users ou
-      where ou.org_id = target_org_id and ou.user_id = auth.uid()
-    )
-    or exists (
-      select 1 from public.org_members om
-      where om.org_id = target_org_id and om.user_id = auth.uid()
-    );
+  select public.is_platform_admin() and target_org_id is not null;
 $$;
 
 create table if not exists public.crm_companies (

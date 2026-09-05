@@ -142,10 +142,10 @@ const DashboardNewV3: FC = () => {
   const hasReportSnapshotLoaded = useRef(false);
 
   const loadCrmSnapshot = useCallback(async () => {
-    if (!activeOrgId) { setCrmSnapshot(null); return; }
-    try { setCrmSnapshot(await getCrmDashboard(activeOrgId)); }
+    if (!isAdmin) { setCrmSnapshot(null); return; }
+    try { setCrmSnapshot(await getCrmDashboard()); }
     catch { setCrmSnapshot(null); }
-  }, [activeOrgId]);
+  }, [isAdmin]);
 
   useEffect(() => { void loadCrmSnapshot(); }, [loadCrmSnapshot]);
 
@@ -344,7 +344,7 @@ const DashboardNewV3: FC = () => {
           </div>
         )}
 
-        {activeOrgId && crmSnapshot && (
+        {isAdmin && crmSnapshot && (
           <Panel title="CRM Today" eyebrow="Revenue operations" action={<button className="vs-button-secondary" onClick={() => navigate('/crm')}>Open CRM</button>}>
             <div className="grid gap-px bg-slate-200/80 sm:grid-cols-3 lg:grid-cols-6">
               {[

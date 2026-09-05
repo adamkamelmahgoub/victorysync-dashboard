@@ -512,9 +512,9 @@ function AppRouter() {
       <Route
         path="/crm"
         element={
-          <ProtectedRoute>
-            <FeatureRoute featureKey="crm"><CrmPage /></FeatureRoute>
-          </ProtectedRoute>
+          <AdminRoute>
+            <CrmPage />
+          </AdminRoute>
         }
       />
       <Route path="/dashboard/crm" element={<Navigate to="/crm" replace />} />
