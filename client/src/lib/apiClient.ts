@@ -376,10 +376,18 @@ export async function createCrmCompany(payload: Record<string, unknown>) {
   }) as Promise<{ item: CrmCompany }>;
 }
 
+export async function updateCrmCompany(companyId: string, patch: Record<string, unknown>) {
+  return fetchJson(`/api/crm/companies/${encodeURIComponent(companyId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }) as Promise<{ item: CrmCompany }>;
+}
+
 export async function createCrmContact(payload: Record<string, unknown>) {
   return fetchJson('/api/crm/contacts', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   }) as Promise<{ item: CrmContact }>;
+}
+
+export async function updateCrmContact(contactId: string, patch: Record<string, unknown>) {
+  return fetchJson(`/api/crm/contacts/${encodeURIComponent(contactId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }) as Promise<{ item: CrmContact }>;
 }
 
 export async function createCrmDeal(payload: Record<string, unknown>) {

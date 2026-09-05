@@ -1,4 +1,5 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import {
   EmptyStatePanel, ErrorStatePanel, FilterBar, LoadingSkeleton, MetricStatCard,
@@ -40,6 +41,7 @@ function contactName(contact?: CrmContact | null) {
 
 export default function CrmPage() {
   const toast = useToast();
+  const navigate = useNavigate();
   const [internalOrgId, setInternalOrgId] = useState<string | null>(null);
   const [view, setView] = useState<View>('pipeline');
   const [modal, setModal] = useState<Modal>(null);
@@ -193,7 +195,7 @@ export default function CrmPage() {
                 <header className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-black text-slate-900">{stage.name}</h2><p className="text-xs text-slate-500">Position {stage.position}</p></div><StatusBadge tone={stage.is_won ? 'success' : stage.is_closed ? 'danger' : 'violet'}>{stageDeals.length}</StatusBadge></header>
                 <div className="space-y-3 min-h-[160px]">{stageDeals.map((deal) => <article key={deal.id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/crm-deal', deal.id); event.dataTransfer.effectAllowed = 'move'; setDraggingDeal(deal.id); }} onDragEnd={() => setDraggingDeal(null)} className={`cursor-grab rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md active:cursor-grabbing ${draggingDeal === deal.id ? 'opacity-50' : ''}`}>
                   <div className="text-sm font-black text-slate-950">{deal.company?.name || deal.title}</div><div className="mt-1 text-xs font-semibold text-slate-600">{contactName(deal.primary_contact)}</div>{(deal.primary_contact?.phone || deal.company?.phone) && <div className="mt-2 text-xs text-slate-500">{deal.primary_contact?.phone || deal.company?.phone}</div>}<div className="mt-3 line-clamp-1 rounded-xl bg-violet-50 px-3 py-2 text-xs font-medium text-violet-800">{deal.next_action || 'No next action set'}</div>
-                  <div className="mt-3 flex gap-2"><button type="button" draggable={false} onClick={() => openAction('call', deal)} className="vs-button-secondary flex-1 py-1.5 text-xs">Log call</button><button type="button" draggable={false} disabled={!deal.company} onClick={() => { if (deal.company) void openCompany(deal.company); }} className="vs-button-ghost px-2 py-1.5 text-xs">Open</button></div>
+                  <div className="mt-3 flex gap-2"><button type="button" draggable={false} onClick={() => openAction('call', deal)} className="vs-button-secondary flex-1 py-1.5 text-xs">Log call</button><button type="button" draggable={false} disabled={!deal.company} onClick={() => navigate(`/crm/companies/${deal.company_id}`)} className="vs-button-ghost px-2 py-1.5 text-xs">Open</button></div>
                 </article>)}{!stageDeals.length && <div className="rounded-xl border border-dashed border-slate-300 px-3 py-8 text-center text-xs text-slate-500">Drop an opportunity here</div>}</div>
               </section>;
             })}
@@ -201,7 +203,7 @@ export default function CrmPage() {
         )}
 
         {!loading && !error && view === 'companies' && <SectionCard title="Companies" description="Account records in the selected organization" actions={<button className="vs-button-primary" onClick={() => setModal('company')}>Add company</button>}>
-          {filteredCompanies.length ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{filteredCompanies.map((company) => <button key={company.id} onClick={() => void openCompany(company)} className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md"><div className="flex items-start justify-between gap-3"><div><h3 className="font-black text-slate-950">{company.name}</h3><p className="mt-1 text-sm text-slate-500">{company.industry || 'Industry not set'}</p></div><StatusBadge tone="neutral">{contacts.filter((contact) => contact.company_id === company.id).length} contacts</StatusBadge></div><div className="mt-4 text-sm text-slate-600">{company.phone || 'No phone'}</div><div className="mt-1 text-xs text-slate-500">{[company.city, company.state].filter(Boolean).join(', ') || 'Location not set'}</div></button>)}</div> : <EmptyStatePanel title="No companies found" description="Add the first company or change the current filters." />}
+          {filteredCompanies.length ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{filteredCompanies.map((company) => <button key={company.id} onClick={() => navigate(`/crm/companies/${company.id}`)} className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md"><div className="flex items-start justify-between gap-3"><div><h3 className="font-black text-slate-950">{company.name}</h3><p className="mt-1 text-sm text-slate-500">{company.industry || 'Industry not set'}</p></div><StatusBadge tone="neutral">{contacts.filter((contact) => contact.company_id === company.id).length} contacts</StatusBadge></div><div className="mt-4 text-sm text-slate-600">{company.phone || 'No phone'}</div><div className="mt-1 text-xs text-slate-500">{[company.city, company.state].filter(Boolean).join(', ') || 'Location not set'}</div></button>)}</div> : <EmptyStatePanel title="No companies found" description="Add the first company or change the current filters." />}
         </SectionCard>}
 
         {!loading && !error && view === 'contacts' && <SectionCard title="Contacts" description="People and their linked companies" actions={<button className="vs-button-primary" onClick={() => setModal('contact')}>Add contact</button>}>
