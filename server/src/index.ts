@@ -67,6 +67,7 @@ import stripeBillingRouter, { stripeWebhookHandler } from './routes/stripeBillin
 import notificationPreferencesRouter from './routes/notificationPreferences';
 import aiQualificationRouter from './routes/aiQualification';
 import crmRouter from './routes/crm';
+import salesHubRouter from './routes/salesHub';
 import { startMightyCallPolling } from './mightycall/sync';
 import { getBillingAccessForOrgIds, isBillingLockAllowedPath } from './services/billingAccess';
 import { Readable } from 'stream';
@@ -5067,6 +5068,7 @@ app.use('/api', csrfProtection as any);
 app.use('/api/billing/stripe', stripeBillingRouter);
 app.use('/api', aiQualificationRouter);
 app.use('/api', crmRouter);
+app.use('/api', salesHubRouter);
 
 app.put('/api/admin/orgs/:orgId/billing-lock', async (req, res) => {
   try {

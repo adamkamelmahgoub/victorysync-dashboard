@@ -475,6 +475,12 @@ export async function convertCrmLead(leadId: string, companyName: string, create
 export async function importCrmRows(objectType: 'companies' | 'contacts', fileName: string, rows: Record<string, unknown>[]) { return fetchJson('/api/crm/data/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_type: objectType, file_name: fileName, rows }), timeoutMs: 120000 }) as Promise<{ inserted: number; skipped: number; errors: any[] }>; }
 export async function getCrmSavedViews() { return fetchJson('/api/crm/saved-views') as Promise<{ items: any[] }>; }
 export async function saveCrmView(payload: { object_type: string; name: string; filters: Record<string, unknown>; is_default?: boolean }) { return fetchJson('/api/crm/saved-views', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); }
+export async function getSalesWorkspace(){return fetchJson('/api/sales/workspace') as Promise<any>}
+export async function createSalesProduct(payload:any){return fetchJson('/api/sales/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
+export async function createSalesQuote(payload:any){return fetchJson('/api/sales/quotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
+export async function createSalesMeeting(payload:any){return fetchJson('/api/sales/meetings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
+export async function createSalesGoal(payload:any){return fetchJson('/api/sales/goals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
+export async function createSalesSequence(payload:any){return fetchJson('/api/sales/sequences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
 
 export async function getAiQualificationDashboard(userId?: string) {
   return fetchJson('/api/dashboard/calls?limit=50', {
