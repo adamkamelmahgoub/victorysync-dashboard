@@ -469,6 +469,13 @@ export async function updateCrmOutcomeMapping(outcome: string, payload: { organi
   return fetchJson(`/api/crm/outcome-mappings/${encodeURIComponent(outcome)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
 }
 
+export async function getCrmDuplicates() { return fetchJson('/api/crm/data/duplicates') as Promise<{ groups: Array<{ kind: string; match: string; records: any[] }> }>; }
+export async function getCrmConvertibleLeads() { return fetchJson('/api/crm/data/leads') as Promise<{ items: any[] }>; }
+export async function convertCrmLead(leadId: string, companyName: string, createDeal = true) { return fetchJson(`/api/crm/data/leads/${encodeURIComponent(leadId)}/convert`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_name: companyName, create_deal: createDeal }) }); }
+export async function importCrmRows(objectType: 'companies' | 'contacts', fileName: string, rows: Record<string, unknown>[]) { return fetchJson('/api/crm/data/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ object_type: objectType, file_name: fileName, rows }), timeoutMs: 120000 }) as Promise<{ inserted: number; skipped: number; errors: any[] }>; }
+export async function getCrmSavedViews() { return fetchJson('/api/crm/saved-views') as Promise<{ items: any[] }>; }
+export async function saveCrmView(payload: { object_type: string; name: string; filters: Record<string, unknown>; is_default?: boolean }) { return fetchJson('/api/crm/saved-views', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); }
+
 export async function getAiQualificationDashboard(userId?: string) {
   return fetchJson('/api/dashboard/calls?limit=50', {
     cache: 'no-store',

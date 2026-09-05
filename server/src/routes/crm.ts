@@ -479,4 +479,77 @@ router.put('/crm/outcome-mappings/:outcome', async (req, res) => {
   } catch (error) { sendError(res, error, 'crm_outcome_mapping_update_failed'); }
 });
 
+router.get('/crm/data/duplicates', async (req, res) => {
+  try {
+    const userId = actorId(req); const orgId = await resolveInternalCrmOrg(); await requireOrgAccess(userId, orgId);
+    const [companies, contacts] = await Promise.all([
+      supabaseAdmin.from('crm_companies').select('id,name,phone,industry').eq('organization_id', orgId).limit(5000),
+      supabaseAdmin.from('crm_contacts').select('id,first_name,last_name,email,phone,company_id').eq('organization_id', orgId).limit(5000),
+    ]);
+    if (companies.error) throw companies.error; if (contacts.error) throw contacts.error;
+    const normalizePhone = (value: any) => String(value || '').replace(/\D/g, '');
+    const groups: any[] = [];
+    const collect = (rows: any[], kind: string, keys: (row: any) => string[]) => {
+      const index = new Map<string, any[]>();
+      for (const row of rows) for (const key of keys(row).filter(Boolean)) index.set(key, [...(index.get(key) || []), row]);
+      for (const [match, records] of index) if (records.length > 1 && !groups.some(group => group.kind === kind && group.records.every((r: any) => records.some(x => x.id === r.id)))) groups.push({ kind, match, records });
+    };
+    collect(companies.data || [], 'company', row => [`name:${String(row.name || '').trim().toLowerCase()}`, normalizePhone(row.phone) ? `phone:${normalizePhone(row.phone)}` : '']);
+    collect(contacts.data || [], 'contact', row => [row.email ? `email:${String(row.email).trim().toLowerCase()}` : '', normalizePhone(row.phone) ? `phone:${normalizePhone(row.phone)}` : '']);
+    res.json({ groups });
+  } catch (error) { sendError(res, error, 'crm_duplicates_fetch_failed'); }
+});
+
+router.get('/crm/data/leads', async (req, res) => {
+  try {
+    const userId = actorId(req); const orgId = await resolveInternalCrmOrg(); await requireOrgAccess(userId, orgId);
+    const { data: converted } = await supabaseAdmin.from('crm_contacts').select('source_lead_id').not('source_lead_id', 'is', null);
+    const convertedIds = new Set((converted || []).map((row: any) => row.source_lead_id));
+    const { data, error } = await supabaseAdmin.from('leads').select('id,first_name,last_name,phone,email,state,status,source,notes,created_at').order('created_at', { ascending: false }).limit(250);
+    if (error) throw error;
+    res.json({ items: (data || []).filter((lead: any) => !convertedIds.has(lead.id)) });
+  } catch (error) { sendError(res, error, 'crm_convertible_leads_fetch_failed'); }
+});
+
+router.post('/crm/data/leads/:leadId/convert', async (req, res) => {
+  try {
+    const userId = actorId(req); const orgId = await resolveInternalCrmOrg(); await requireOrgAccess(userId, orgId);
+    const input = z.object({ company_name: z.string().trim().min(1).max(240), create_deal: z.boolean().default(true) }).strict().parse(req.body);
+    const { data: lead, error: leadError } = await supabaseAdmin.from('leads').select('*').eq('id', uuid.parse(req.params.leadId)).maybeSingle();
+    if (leadError) throw leadError; if (!lead) throw Object.assign(new Error('lead_not_found'), { status: 404 });
+    const { data: existing } = await supabaseAdmin.from('crm_contacts').select('id').eq('source_lead_id', lead.id).maybeSingle();
+    if (existing) throw Object.assign(new Error('lead_already_converted'), { status: 409 });
+    let { data: company } = await supabaseAdmin.from('crm_companies').select('*').eq('organization_id', orgId).ilike('name', input.company_name).maybeSingle();
+    if (!company) { const created = await supabaseAdmin.from('crm_companies').insert({ organization_id: orgId, name: input.company_name, phone: lead.phone, source: lead.source, notes: lead.notes, created_by: userId }).select('*').single(); if (created.error) throw created.error; company = created.data; }
+    const contactResult = await supabaseAdmin.from('crm_contacts').insert({ organization_id: orgId, company_id: company.id, source_lead_id: lead.id, first_name: lead.first_name || 'Unknown', last_name: lead.last_name, phone: lead.phone, email: lead.email, created_by: userId }).select('*').single();
+    if (contactResult.error) throw contactResult.error;
+    let deal = null;
+    if (input.create_deal) { const { data: stage } = await supabaseAdmin.from('crm_pipeline_stages').select('id').eq('organization_id', orgId).order('position').limit(1).single(); if (stage) { const result = await supabaseAdmin.from('crm_deals').insert({ organization_id: orgId, company_id: company.id, primary_contact_id: contactResult.data.id, stage_id: stage.id, title: `${input.company_name} opportunity`, next_action: 'Make first contact', source_lead_id: lead.id, created_by: userId }).select('*').single(); if (result.error) throw result.error; deal = result.data; } }
+    res.status(201).json({ company, contact: contactResult.data, deal });
+  } catch (error) { sendError(res, error, 'crm_lead_conversion_failed'); }
+});
+
+router.post('/crm/data/import', async (req, res) => {
+  try {
+    const userId = actorId(req); const orgId = await resolveInternalCrmOrg(); await requireOrgAccess(userId, orgId);
+    const input = z.object({ object_type: z.enum(['companies','contacts']), file_name: z.string().max(255).optional(), rows: z.array(z.record(z.string(), z.unknown())).min(1).max(2000) }).strict().parse(req.body);
+    const jobResult = await supabaseAdmin.from('crm_import_jobs').insert({ organization_id: orgId, object_type: input.object_type, file_name: input.file_name, total_rows: input.rows.length, created_by: userId }).select('*').single();
+    if (jobResult.error) throw jobResult.error;
+    let inserted = 0; const errors: any[] = [];
+    for (let index = 0; index < input.rows.length; index += 1) { const row: any = input.rows[index]; try { if (input.object_type === 'companies') { const name = String(row.name || row.company || '').trim(); if (!name) throw new Error('name_required'); const result = await supabaseAdmin.from('crm_companies').insert({ organization_id: orgId, name, phone: row.phone || null, city: row.city || null, state: row.state || null, industry: row.industry || null, source: row.source || 'import', notes: row.notes || null, created_by: userId, custom_fields: row.custom_fields || {} }); if (result.error) throw result.error; } else { const firstName = String(row.first_name || row.firstname || '').trim(); if (!firstName) throw new Error('first_name_required'); const result = await supabaseAdmin.from('crm_contacts').insert({ organization_id: orgId, first_name: firstName, last_name: row.last_name || row.lastname || null, phone: row.phone || null, email: row.email || null, title: row.title || null, created_by: userId, custom_fields: row.custom_fields || {} }); if (result.error) throw result.error; } inserted += 1; } catch (error: any) { errors.push({ row: index + 2, error: error?.message || 'invalid_row' }); } }
+    await supabaseAdmin.from('crm_import_jobs').update({ status: errors.length === input.rows.length ? 'failed' : 'completed', inserted_rows: inserted, skipped_rows: errors.length, error_rows: errors.slice(0, 200), completed_at: new Date().toISOString() }).eq('id', jobResult.data.id);
+    res.status(201).json({ job_id: jobResult.data.id, inserted, skipped: errors.length, errors });
+  } catch (error) { sendError(res, error, 'crm_import_failed'); }
+});
+
+router.get('/crm/saved-views', async (req, res) => {
+  try { const userId = actorId(req); const orgId = await resolveInternalCrmOrg(); await requireOrgAccess(userId, orgId); const { data, error } = await supabaseAdmin.from('crm_saved_views').select('*').eq('organization_id', orgId).eq('user_id', userId).order('name'); if (error) throw error; res.json({ items: data || [] }); }
+  catch (error) { sendError(res, error, 'crm_saved_views_fetch_failed'); }
+});
+
+router.post('/crm/saved-views', async (req, res) => {
+  try { const userId = actorId(req); const orgId = await resolveInternalCrmOrg(); await requireOrgAccess(userId, orgId); const input = z.object({ object_type: z.enum(['companies','contacts','deals','tasks']), name: z.string().trim().min(1).max(120), filters: z.record(z.string(), z.unknown()), is_default: z.boolean().optional() }).strict().parse(req.body); const { data, error } = await supabaseAdmin.from('crm_saved_views').upsert({ ...input, organization_id: orgId, user_id: userId }, { onConflict: 'organization_id,user_id,object_type,name' }).select('*').single(); if (error) throw error; res.status(201).json({ item: data }); }
+  catch (error) { sendError(res, error, 'crm_saved_view_create_failed'); }
+});
+
 export default router;

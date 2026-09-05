@@ -10,6 +10,7 @@ import {
   createCrmActivity, createCrmCompany, createCrmContact, createCrmDeal, createCrmTask,
   CrmActivity, CrmCompany, CrmContact, CrmDeal, CrmTask, getCrmBootstrap,
   getCrmCompany, PipelineStage, updateCrmDeal, updateCrmTask,
+  getCrmSavedViews, saveCrmView,
 } from '../lib/apiClient';
 
 type View = 'pipeline' | 'companies' | 'contacts';
@@ -60,6 +61,7 @@ export default function CrmPage() {
   const [companyActivities, setCompanyActivities] = useState<CrmActivity[]>([]);
   const [companyTasks, setCompanyTasks] = useState<CrmTask[]>([]);
   const [draggingDeal, setDraggingDeal] = useState<string | null>(null);
+  const [savedViews, setSavedViews] = useState<any[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -67,6 +69,7 @@ export default function CrmPage() {
       const data = await getCrmBootstrap();
       setInternalOrgId(data.organization_id);
       setCompanies(data.companies); setContacts(data.contacts); setDeals(data.deals); setStages(data.stages);
+      void getCrmSavedViews().then(result => setSavedViews(result.items)).catch(() => setSavedViews([]));
     } catch (err: any) { setError(err?.message || 'Unable to load CRM data.'); }
     finally { setLoading(false); }
   }, []);
@@ -168,7 +171,7 @@ export default function CrmPage() {
   };
 
   return (
-    <PageLayout title="CRM" description="Companies, contacts, and opportunities in the internal Victory Sync workspace." eyebrow="Revenue workspace" actions={<div className="flex flex-wrap gap-2"><button className="vs-button-secondary" onClick={() => navigate('/crm/tasks')}>Tasks</button><button className="vs-button-secondary" onClick={() => navigate('/crm/settings')}>Pipeline settings</button><button className="vs-button-secondary" onClick={() => setModal('contact')}>Add contact</button><button className="vs-button-primary" onClick={() => setModal(view === 'pipeline' ? 'deal' : 'company')}>{view === 'pipeline' ? 'Add opportunity' : 'Add company'}</button></div>}>
+    <PageLayout title="CRM" description="Companies, contacts, and opportunities in the internal Victory Sync workspace." eyebrow="Revenue workspace" actions={<div className="flex flex-wrap gap-2"><button className="vs-button-secondary" onClick={() => navigate('/crm/data')}>Import & data</button><button className="vs-button-secondary" onClick={() => navigate('/crm/tasks')}>Tasks</button><button className="vs-button-secondary" onClick={() => navigate('/crm/settings')}>Pipeline settings</button><button className="vs-button-secondary" onClick={() => setModal('contact')}>Add contact</button><button className="vs-button-primary" onClick={() => setModal(view === 'pipeline' ? 'deal' : 'company')}>{view === 'pipeline' ? 'Add opportunity' : 'Add company'}</button></div>}>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricStatCard label="Companies" value={companies.length} hint="Organizations in this workspace" accent="violet" />
         <MetricStatCard label="Contacts" value={contacts.length} hint="People linked to accounts" accent="cyan" />
@@ -182,6 +185,8 @@ export default function CrmPage() {
           <SearchInput value={search} onChange={setSearch} placeholder="Search CRM records..." />
           {view === 'pipeline' && <select value={stageFilter} onChange={(event) => setStageFilter(event.target.value)} className={inputClass + ' sm:w-48'}><option value="all">All stages</option>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select>}
           {view === 'companies' && <select value={industry} onChange={(event) => setIndustry(event.target.value)} className={inputClass + ' sm:w-48'}><option value="all">All industries</option>{industries.map((item) => <option key={item}>{item}</option>)}</select>}
+          {savedViews.filter(item => item.object_type === (view === 'pipeline' ? 'deals' : view)).length > 0 && <select className={inputClass + ' sm:w-44'} defaultValue="" onChange={event => { const item=savedViews.find(saved => saved.id===event.target.value); if(!item)return; setSearch(item.filters?.search || ''); setIndustry(item.filters?.industry || 'all'); setStageFilter(item.filters?.stage_id || 'all'); }}><option value="">Saved views</option>{savedViews.filter(item => item.object_type === (view === 'pipeline' ? 'deals' : view)).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}
+          <button type="button" className="vs-button-ghost" onClick={async () => { const name=window.prompt('Name this view'); if(!name)return; await saveCrmView({object_type:view === 'pipeline' ? 'deals' : view,name,filters:{search,industry,stage_id:stageFilter}}); toast.push('View saved','success'); const result=await getCrmSavedViews(); setSavedViews(result.items); }}>Save view</button>
         </FilterBar>
 
         {error && <ErrorStatePanel error={error} onRetry={() => void load()} />}
