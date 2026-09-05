@@ -18,8 +18,9 @@ export default function AdminAiQualificationPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<any>({
-    campaign: { name: 'Google Ads Audit Booking', client_name: 'Revv Marketing / Randy James', active: true, qualified_threshold: 60, positive_signals: 'google ads, ad spend, audit, decision maker, interested', negative_signals: 'not interested, do not call, wrong number', booking_signals: 'booked, appointment confirmed, calendar confirmed', rall_id: '', shehab_id: '' },
+    campaign: { name: 'Google Ads Audit Booking', client_name: 'Revv Marketing / Randy James', active: true, qualified_threshold: 60, positive_signals: 'google ads, ad spend, audit, decision maker, interested', negative_signals: 'not interested, do not call, wrong number', booking_signals: 'booked, appointment confirmed, calendar confirmed', selected_agent_ids: [] },
     vapi: { private_api_key: '', assistant_id: '', phone_number_id: '', webhook_secret: '' }, hubspot: { access_token: '' }, webhook_url: '', configured: {},
+    agents: [],
   });
 
   const load = useCallback(async () => {
@@ -48,9 +49,9 @@ export default function AdminAiQualificationPage() {
       const agents = campaign?.routing_config?.agents || [];
       setSettings((current: any) => ({ ...current, campaign: { ...current.campaign, id: campaign?.id, name: campaign?.name || current.campaign.name, client_name: campaign?.client_name || current.campaign.client_name, active: campaign?.active ?? true,
         qualified_threshold: qc.qualified_threshold ?? 60, positive_signals: (qc.positive_signals || []).join(', '), negative_signals: (qc.negative_signals || []).join(', '), booking_signals: (qc.booking_signals || []).join(', '),
-        rall_id: agents.find((a: any) => a.name === 'Rall')?.id || '', shehab_id: agents.find((a: any) => a.name === 'Shehab')?.id || '' },
+        selected_agent_ids: agents.map((agent: any) => agent.id).filter(Boolean) },
         vapi: { ...current.vapi, assistant_id: payload.integrations?.vapi?.assistant_id || '', phone_number_id: payload.integrations?.vapi?.phone_number_id || '' },
-        configured: payload.integrations, webhook_url: payload.webhook_url || '' }));
+        agents: payload.agents || [], configured: payload.integrations, webhook_url: payload.webhook_url || '' }));
     }).catch((err: any) => setError(err?.message || 'Unable to load configuration.'));
   }, [selectedOrgId, user?.id]);
 
@@ -61,7 +62,7 @@ export default function AdminAiQualificationPage() {
       const list = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
       await saveAiQualificationSettings({ organization_id: selectedOrgId, campaign: { id: settings.campaign.id, name: settings.campaign.name, client_name: settings.campaign.client_name, active: settings.campaign.active,
         qualification_config: { qualified_threshold: Number(settings.campaign.qualified_threshold), positive_signals: list(settings.campaign.positive_signals), negative_signals: list(settings.campaign.negative_signals), booking_signals: list(settings.campaign.booking_signals) },
-        routing_config: { agents: [{ name: 'Rall', id: settings.campaign.rall_id || null }, { name: 'Shehab', id: settings.campaign.shehab_id || null }] } }, vapi: settings.vapi, hubspot: settings.hubspot }, user.id);
+        routing_config: { agents: settings.agents.filter((agent: any) => settings.campaign.selected_agent_ids.includes(agent.id)).map((agent: any) => ({ id: agent.id, name: agent.name, email: agent.email })) } }, vapi: settings.vapi, hubspot: settings.hubspot }, user.id);
       setSettings((value: any) => ({ ...value, vapi: { ...value.vapi, private_api_key: '', webhook_secret: '' }, hubspot: { access_token: '' } }));
       await load();
     } catch (err: any) { setError(err?.message || 'Unable to save configuration.'); } finally { setSaving(false); }
@@ -105,7 +106,14 @@ export default function AdminAiQualificationPage() {
               <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600"><div className="font-semibold">Vapi Server URL</div><div className="mt-1 break-all">{settings.webhook_url || 'Save configuration to load URL'}</div><div className="mt-2">Configure Vapi to send this value as <code>X-Vapi-Secret</code>.</div></div>
               <button className="vs-button-secondary" disabled={!selectedOrgId} onClick={() => selectedOrgId && void testAiQualificationConnection(selectedOrgId, 'vapi', user?.id).then(() => alert('Vapi connection succeeded')).catch((e) => setError(e.message))}>Test Vapi</button></div>
             <div className="space-y-3"><div className="flex items-center justify-between"><h3 className="font-semibold text-slate-950">Routing & HubSpot</h3><StatusBadge tone={settings.configured?.hubspot?.configured ? 'success' : 'warning'}>{settings.configured?.hubspot?.configured ? 'HubSpot connected' : 'HubSpot not configured'}</StatusBadge></div>
-              {field('campaign', 'rall_id', 'Rall user UUID')}{field('campaign', 'shehab_id', 'Shehab user UUID')}{field('hubspot', 'access_token', 'HubSpot private-app token', 'password', settings.configured?.hubspot?.configured ? 'Leave blank to keep saved token' : 'Optional')}
+              <label className="block"><span className="mb-1.5 block text-xs font-semibold uppercase text-slate-500">Escalation agents</span>
+                <select multiple value={settings.campaign.selected_agent_ids} onChange={(event) => setSettings((value: any) => ({ ...value, campaign: { ...value.campaign, selected_agent_ids: Array.from(event.target.selectedOptions, (option) => option.value) } }))} className="vs-input min-h-32 w-full">
+                  {settings.agents.map((agent: any) => <option key={agent.id} value={agent.id}>{agent.name}{agent.email && agent.email !== agent.name ? ` — ${agent.email}` : ''}</option>)}
+                </select>
+                <span className="mt-1.5 block text-xs text-slate-500">Choose one or more agents already assigned to this organization. Calls rotate across the selected agents automatically.</span>
+              </label>
+              {!settings.agents.length && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">No agents are assigned to this organization yet. Add them in Agent Management, then return here.</div>}
+              {field('hubspot', 'access_token', 'HubSpot private-app token', 'password', settings.configured?.hubspot?.configured ? 'Leave blank to keep saved token' : 'Optional')}
               <button className="vs-button-secondary" disabled={!selectedOrgId || !settings.configured?.hubspot?.configured} onClick={() => selectedOrgId && void testAiQualificationConnection(selectedOrgId, 'hubspot', user?.id).then(() => alert('HubSpot connection succeeded')).catch((e) => setError(e.message))}>Test HubSpot</button></div>
           </div>
         </SectionCard>

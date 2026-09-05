@@ -71,9 +71,8 @@ async function routeLead(leadId: string, qualificationResultId?: string) {
   const { count } = await supabaseAdmin.from('lead_routing_events').select('id', { count: 'exact', head: true });
   const campaign: any = Array.isArray((lead as any).ai_campaigns) ? (lead as any).ai_campaigns[0] : (lead as any).ai_campaigns;
   const configuredAgents = Array.isArray(campaign?.routing_config?.agents) ? campaign.routing_config.agents : [];
-  const agents = configuredAgents.length ? configuredAgents.map((agent: any) => ({ name: String(agent.name), id: agent.id || null })) : [
-    { name: 'Rall', id: process.env.ROUTING_AGENT_RALL_ID || null }, { name: 'Shehab', id: process.env.ROUTING_AGENT_SHEHAB_ID || null },
-  ];
+  const agents = configuredAgents.map((agent: any) => ({ name: String(agent.name || agent.email || 'Agent'), id: agent.id || null }));
+  if (!agents.length) throw new Error('no_routing_agents_configured');
   const agent = agents[(count || 0) % agents.length];
   const now = new Date().toISOString();
   const hubspot = await syncLeadToHubSpot(lead.organization_id, lead.hubspot_contact_id, {
@@ -185,15 +184,25 @@ const settingsSchema = z.object({
 router.get('/admin/ai-qualification/settings', requirePlatformAdmin, async (req, res) => {
   try {
     const orgId = uuid.parse(req.query.organization_id);
-    const [{ data: campaigns, error }, vapi, hubspot] = await Promise.all([
+    const [{ data: campaigns, error }, vapi, hubspot, memberships, authUsers] = await Promise.all([
       supabaseAdmin.from('ai_campaigns').select('*').eq('organization_id', orgId).order('created_at', { ascending: false }),
       getOrgIntegration(orgId, 'vapi'), getOrgIntegration(orgId, 'hubspot_ai'),
+      supabaseAdmin.from('org_users').select('user_id, role').eq('org_id', orgId).in('role', ['agent', 'org_manager']),
+      supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     ]);
     if (error) throw error;
+    if (memberships.error) throw memberships.error;
+    if (authUsers.error) throw authUsers.error;
+    const userMap = new Map((authUsers.data?.users || []).map((user) => [user.id, user]));
+    const agents = (memberships.data || []).map((membership: any) => {
+      const authUser: any = userMap.get(membership.user_id);
+      const name = String(authUser?.user_metadata?.full_name || authUser?.user_metadata?.name || authUser?.email || 'Agent');
+      return { id: membership.user_id, name, email: authUser?.email || null, role: membership.role };
+    });
     res.json({ campaigns: campaigns || [], integrations: {
       vapi: { configured: Boolean(vapi?.credentials?.private_api_key), assistant_id: vapi?.credentials?.assistant_id || '', phone_number_id: vapi?.credentials?.phone_number_id || '', webhook_secret_configured: Boolean(vapi?.credentials?.webhook_secret) },
       hubspot: { configured: Boolean(hubspot?.credentials?.access_token) },
-    }, webhook_url: `${process.env.PUBLIC_API_URL || 'https://api.victorysync.com'}/api/calls/webhook` });
+    }, agents, webhook_url: `${process.env.PUBLIC_API_URL || 'https://api.victorysync.com'}/api/calls/webhook` });
   } catch (error: any) {
     if (error instanceof z.ZodError) return res.status(400).json({ error: 'invalid_organization_id' });
     res.status(500).json({ error: dbError(error) });
@@ -203,6 +212,8 @@ router.get('/admin/ai-qualification/settings', requirePlatformAdmin, async (req,
 router.put('/admin/ai-qualification/settings', requirePlatformAdmin, async (req, res) => {
   try {
     const input = settingsSchema.parse(req.body);
+    const selectedAgents = Array.isArray(input.campaign.routing_config.agents) ? input.campaign.routing_config.agents : [];
+    if (input.campaign.active && selectedAgents.length === 0) return res.status(400).json({ error: 'at_least_one_routing_agent_required' });
     const currentVapi = await getOrgIntegration(input.organization_id, 'vapi');
     const currentHubspot = await getOrgIntegration(input.organization_id, 'hubspot_ai');
     const vapiCredentials = {
