@@ -168,7 +168,7 @@ export default function CrmPage() {
   };
 
   return (
-    <PageLayout title="CRM" description="Companies, contacts, and opportunities in one organization-scoped workspace." eyebrow="Revenue workspace" actions={<div className="flex flex-wrap gap-2"><button className="vs-button-secondary" onClick={() => setModal('contact')}>Add contact</button><button className="vs-button-primary" onClick={() => setModal(view === 'pipeline' ? 'deal' : 'company')}>{view === 'pipeline' ? 'Add opportunity' : 'Add company'}</button></div>}>
+    <PageLayout title="CRM" description="Companies, contacts, and opportunities in the internal Victory Sync workspace." eyebrow="Revenue workspace" actions={<div className="flex flex-wrap gap-2"><button className="vs-button-secondary" onClick={() => navigate('/crm/settings')}>Pipeline settings</button><button className="vs-button-secondary" onClick={() => setModal('contact')}>Add contact</button><button className="vs-button-primary" onClick={() => setModal(view === 'pipeline' ? 'deal' : 'company')}>{view === 'pipeline' ? 'Add opportunity' : 'Add company'}</button></div>}>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricStatCard label="Companies" value={companies.length} hint="Organizations in this workspace" accent="violet" />
         <MetricStatCard label="Contacts" value={contacts.length} hint="People linked to accounts" accent="cyan" />

@@ -74,6 +74,17 @@ const taskInput = z.object({
   assigned_to: uuid.nullable().optional(),
 }).strict();
 
+const stageInput = z.object({
+  organization_id: uuid,
+  name: z.string().trim().min(1).max(120),
+  position: z.number().int().min(0),
+  color: z.enum(['slate', 'sky', 'violet', 'indigo', 'amber', 'orange', 'teal', 'emerald', 'rose']).nullable().optional(),
+  is_closed: z.boolean().optional(),
+  is_won: z.boolean().optional(),
+}).strict();
+
+const stagePatch = stageInput.omit({ organization_id: true }).partial().strict();
+
 function actorId(req: express.Request) {
   const id = String((req as any).actorId || '');
   if (!id) throw Object.assign(new Error('unauthenticated'), { status: 401 });
@@ -376,6 +387,75 @@ router.get('/crm/dashboard', async (req, res) => {
     const awaitingClose = (deals.data || []).filter((deal: any) => deal.stage_id === stageByName.get('Trial Completed')).length;
     res.json({ metrics: { calls_today: callsToday.count || 0, calls_week: callsWeek.count || 0, companies_today: companiesToday.count || 0, stage_changes_today: stageChangesToday.count || 0, stage_changes_week: stageChangesWeek.count || 0, trials_active: trialActive, awaiting_close: awaitingClose }, tasks: tasks.data || [] });
   } catch (error) { sendError(res, error, 'crm_dashboard_failed'); }
+});
+
+router.get('/crm/settings', async (req, res) => {
+  try {
+    const userId = actorId(req);
+    const orgId = await resolveInternalCrmOrg();
+    await requireOrgAccess(userId, orgId);
+    const [stages, mappings] = await Promise.all([
+      supabaseAdmin.from('crm_pipeline_stages').select('*').eq('organization_id', orgId).order('position'),
+      supabaseAdmin.from('call_outcome_stage_mappings').select('*, stage:crm_pipeline_stages(id,name)').eq('organization_id', orgId).order('outcome'),
+    ]);
+    if (stages.error) throw stages.error;
+    if (mappings.error) throw mappings.error;
+    res.json({ organization_id: orgId, stages: stages.data || [], mappings: mappings.data || [] });
+  } catch (error) { sendError(res, error, 'crm_settings_fetch_failed'); }
+});
+
+router.post('/crm/stages', async (req, res) => {
+  try {
+    const userId = actorId(req);
+    const input = stageInput.parse(req.body);
+    await requireOrgAccess(userId, input.organization_id);
+    const { data, error } = await supabaseAdmin.from('crm_pipeline_stages').insert(input).select('*').single();
+    if (error) throw error;
+    res.status(201).json({ item: data });
+  } catch (error) { sendError(res, error, 'crm_stage_create_failed'); }
+});
+
+router.patch('/crm/stages/:stageId', async (req, res) => {
+  try {
+    const userId = actorId(req);
+    const existing = await loadOwned('crm_pipeline_stages', uuid.parse(req.params.stageId));
+    await requireOrgAccess(userId, existing.organization_id);
+    const patch = stagePatch.parse(req.body);
+    if (patch.is_won) patch.is_closed = true;
+    const { data, error } = await supabaseAdmin.from('crm_pipeline_stages').update(patch).eq('id', existing.id).select('*').single();
+    if (error) throw error;
+    res.json({ item: data });
+  } catch (error) { sendError(res, error, 'crm_stage_update_failed'); }
+});
+
+router.put('/crm/stages/reorder', async (req, res) => {
+  try {
+    const userId = actorId(req);
+    const input = z.object({ organization_id: uuid, stage_ids: z.array(uuid).min(1).max(100) }).strict().parse(req.body);
+    await requireOrgAccess(userId, input.organization_id);
+    const { data: owned, error } = await supabaseAdmin.from('crm_pipeline_stages').select('id').eq('organization_id', input.organization_id);
+    if (error) throw error;
+    const ownedIds = new Set((owned || []).map((row: any) => row.id));
+    if (input.stage_ids.length !== ownedIds.size || input.stage_ids.some((id) => !ownedIds.has(id))) throw Object.assign(new Error('stage_order_must_include_every_stage'), { status: 400 });
+    // Use a reserved high range to avoid the per-organization position uniqueness constraint.
+    for (let index = 0; index < input.stage_ids.length; index += 1) await supabaseAdmin.from('crm_pipeline_stages').update({ position: 1000000 + index }).eq('id', input.stage_ids[index]);
+    for (let index = 0; index < input.stage_ids.length; index += 1) await supabaseAdmin.from('crm_pipeline_stages').update({ position: (index + 1) * 10 }).eq('id', input.stage_ids[index]);
+    res.json({ success: true });
+  } catch (error) { sendError(res, error, 'crm_stage_reorder_failed'); }
+});
+
+router.put('/crm/outcome-mappings/:outcome', async (req, res) => {
+  try {
+    const userId = actorId(req);
+    const outcome = z.string().trim().min(1).max(120).parse(req.params.outcome);
+    const input = z.object({ organization_id: uuid, target_stage_id: uuid, enabled: z.boolean().default(true) }).strict().parse(req.body);
+    await requireOrgAccess(userId, input.organization_id);
+    const stage = await loadOwned('crm_pipeline_stages', input.target_stage_id);
+    if (stage.organization_id !== input.organization_id) throw Object.assign(new Error('cross_organization_reference'), { status: 400 });
+    const { data, error } = await supabaseAdmin.from('call_outcome_stage_mappings').upsert({ ...input, outcome }, { onConflict: 'organization_id,outcome' }).select('*').single();
+    if (error) throw error;
+    res.json({ item: data });
+  } catch (error) { sendError(res, error, 'crm_outcome_mapping_update_failed'); }
 });
 
 export default router;

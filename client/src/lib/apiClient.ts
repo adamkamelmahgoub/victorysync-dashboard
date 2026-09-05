@@ -438,6 +438,28 @@ export async function getCrmDashboard() {
   }>;
 }
 
+export type CrmOutcomeMapping = { id: string; outcome: string; target_stage_id: string; enabled: boolean; stage?: { id: string; name: string } | null };
+
+export async function getCrmSettings() {
+  return fetchJson('/api/crm/settings') as Promise<{ organization_id: string; stages: PipelineStage[]; mappings: CrmOutcomeMapping[] }>;
+}
+
+export async function createCrmStage(payload: Record<string, unknown>) {
+  return fetchJson('/api/crm/stages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+}
+
+export async function updateCrmStage(stageId: string, patch: Record<string, unknown>) {
+  return fetchJson(`/api/crm/stages/${encodeURIComponent(stageId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+}
+
+export async function reorderCrmStages(organizationId: string, stageIds: string[]) {
+  return fetchJson('/api/crm/stages/reorder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organization_id: organizationId, stage_ids: stageIds }) });
+}
+
+export async function updateCrmOutcomeMapping(outcome: string, payload: { organization_id: string; target_stage_id: string; enabled: boolean }) {
+  return fetchJson(`/api/crm/outcome-mappings/${encodeURIComponent(outcome)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+}
+
 export async function getAiQualificationDashboard(userId?: string) {
   return fetchJson('/api/dashboard/calls?limit=50', {
     cache: 'no-store',
