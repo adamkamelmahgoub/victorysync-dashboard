@@ -55,6 +55,7 @@ const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const LeadGenRedirectPage = lazy(() => import("./pages/LeadGenRedirectPage"));
 const CallsPage = lazy(() => import("./pages/CallsPage"));
 const EmailPreferencesPage = lazy(() => import("./pages/EmailPreferencesPage"));
+const CrmPage = lazy(() => import("./pages/CrmPage"));
 
 declare global {
   interface Window {
@@ -508,6 +509,15 @@ function AppRouter() {
           </AdminRoute>
         }
       />
+      <Route
+        path="/crm"
+        element={
+          <ProtectedRoute>
+            <FeatureRoute featureKey="crm"><CrmPage /></FeatureRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/dashboard/crm" element={<Navigate to="/crm" replace />} />
       <Route
         path="/admin/mightycall"
         element={

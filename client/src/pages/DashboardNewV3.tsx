@@ -14,7 +14,7 @@ import {
 } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
 import { useDashboardMetrics } from '../hooks/useDashboardMetrics';
-import { fetchJson, getLiveAgentStatus } from '../lib/apiClient';
+import { CrmTask, fetchJson, getCrmDashboard, getLiveAgentStatus, updateCrmTask } from '../lib/apiClient';
 import { supabase } from '../lib/supabaseClient';
 import { PageLayout } from '../components/PageLayout';
 import { answerRate as calculateAnswerRate } from '../lib/reportingMetrics';
@@ -137,8 +137,17 @@ const DashboardNewV3: FC = () => {
   const [reportCalls, setReportCalls] = useState<Array<Record<string, any>>>([]);
   const [reportLoading, setReportLoading] = useState(true);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [crmSnapshot, setCrmSnapshot] = useState<{ metrics: Record<string, number>; tasks: CrmTask[] } | null>(null);
   const requestInFlight = useRef(false);
   const hasReportSnapshotLoaded = useRef(false);
+
+  const loadCrmSnapshot = useCallback(async () => {
+    if (!activeOrgId) { setCrmSnapshot(null); return; }
+    try { setCrmSnapshot(await getCrmDashboard(activeOrgId)); }
+    catch { setCrmSnapshot(null); }
+  }, [activeOrgId]);
+
+  useEffect(() => { void loadCrmSnapshot(); }, [loadCrmSnapshot]);
 
   const loadLiveAgents = useCallback(async (force = false) => {
     if (!user?.id || requestInFlight.current) return;
@@ -333,6 +342,22 @@ const DashboardNewV3: FC = () => {
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {reportError}
           </div>
+        )}
+
+        {activeOrgId && crmSnapshot && (
+          <Panel title="CRM Today" eyebrow="Revenue operations" action={<button className="vs-button-secondary" onClick={() => navigate('/crm')}>Open CRM</button>}>
+            <div className="grid gap-px bg-slate-200/80 sm:grid-cols-3 lg:grid-cols-6">
+              {[
+                ['Calls today', crmSnapshot.metrics.calls_today || 0],
+                ['Calls this week', crmSnapshot.metrics.calls_week || 0],
+                ['New companies', crmSnapshot.metrics.companies_today || 0],
+                ['Stage changes', crmSnapshot.metrics.stage_changes_today || 0],
+                ['Trials active', crmSnapshot.metrics.trials_active || 0],
+                ['Awaiting close', crmSnapshot.metrics.awaiting_close || 0],
+              ].map(([label, value]) => <div key={String(label)} className="bg-white p-4"><div className="text-xs font-bold uppercase text-slate-500">{label}</div><div className="mt-2 text-2xl font-black text-slate-950">{value}</div></div>)}
+            </div>
+            <div className="border-t border-slate-200 p-5"><div className="mb-3 text-sm font-black text-slate-950">My tasks today</div>{crmSnapshot.tasks.length ? <div className="space-y-2">{crmSnapshot.tasks.map((task) => <label key={task.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3 text-sm"><span className="flex items-center gap-3"><input type="checkbox" onChange={async () => { await updateCrmTask(task.id, true); await loadCrmSnapshot(); }} /><span><span className="font-semibold text-slate-900">{task.title}</span><span className="ml-2 text-xs text-slate-500">{task.company?.name || ''}</span></span></span><span className="text-xs text-slate-500">{new Date(task.due_date).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></label>)}</div> : <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No CRM tasks due today.</div>}</div>
+          </Panel>
         )}
 
         <section className="vs-surface overflow-hidden">

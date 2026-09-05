@@ -334,6 +334,102 @@ export async function sendSmsMessage(params: { orgId?: string; from: string; to:
   });
 }
 
+export type CrmCompany = {
+  id: string; organization_id: string; name: string; phone?: string | null;
+  city?: string | null; state?: string | null; industry?: string | null;
+  source?: string | null; notes?: string | null; tags: string[];
+  custom_fields: Record<string, unknown>; created_at: string; updated_at: string;
+};
+
+export type CrmContact = {
+  id: string; organization_id: string; company_id?: string | null;
+  first_name: string; last_name?: string | null; title?: string | null;
+  phone?: string | null; email?: string | null; tags: string[];
+  custom_fields: Record<string, unknown>; company?: Pick<CrmCompany, 'id' | 'name'> | null;
+  created_at: string; updated_at: string;
+};
+
+export type PipelineStage = {
+  id: string; organization_id: string; name: string; position: number;
+  color?: string | null; is_closed: boolean; is_won: boolean;
+};
+
+export type CrmDeal = {
+  id: string; organization_id: string; company_id: string;
+  primary_contact_id?: string | null; stage_id: string; title: string;
+  next_action?: string | null; assigned_to?: string | null;
+  company?: CrmCompany | null; primary_contact?: CrmContact | null;
+  created_at: string; updated_at: string;
+};
+
+export type CrmBootstrap = {
+  stages: PipelineStage[]; deals: CrmDeal[]; companies: CrmCompany[]; contacts: CrmContact[];
+};
+
+export async function getCrmBootstrap(organizationId: string) {
+  return fetchJson(`/api/crm/bootstrap?organization_id=${encodeURIComponent(organizationId)}`) as Promise<CrmBootstrap>;
+}
+
+export async function createCrmCompany(payload: Record<string, unknown>) {
+  return fetchJson('/api/crm/companies', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }) as Promise<{ item: CrmCompany }>;
+}
+
+export async function createCrmContact(payload: Record<string, unknown>) {
+  return fetchJson('/api/crm/contacts', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }) as Promise<{ item: CrmContact }>;
+}
+
+export async function createCrmDeal(payload: Record<string, unknown>) {
+  return fetchJson('/api/crm/deals', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }) as Promise<{ item: CrmDeal }>;
+}
+
+export async function updateCrmDeal(dealId: string, patch: Record<string, unknown>) {
+  return fetchJson(`/api/crm/deals/${encodeURIComponent(dealId)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+  }) as Promise<{ item: CrmDeal }>;
+}
+
+export type CrmActivity = {
+  id: string; company_id: string; contact_id?: string | null; deal_id?: string | null;
+  type: 'call' | 'note' | 'email' | 'task' | 'stage_change'; body?: string | null;
+  occurred_at: string; metadata: Record<string, any>;
+};
+
+export type CrmTask = {
+  id: string; company_id: string; title: string; description?: string | null;
+  due_date: string; completed: boolean; company?: { id: string; name: string } | null;
+};
+
+export async function getCrmCompany(companyId: string) {
+  return fetchJson(`/api/crm/companies/${encodeURIComponent(companyId)}`) as Promise<{
+    item: CrmCompany; contacts: CrmContact[]; deals: CrmDeal[]; activities: CrmActivity[]; tasks: CrmTask[];
+  }>;
+}
+
+export async function createCrmActivity(payload: Record<string, unknown>) {
+  return fetchJson('/api/crm/activities', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) as Promise<{ item: CrmActivity; advanced_to_stage_id?: string | null }>;
+}
+
+export async function createCrmTask(payload: Record<string, unknown>) {
+  return fetchJson('/api/crm/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }) as Promise<{ item: CrmTask }>;
+}
+
+export async function updateCrmTask(taskId: string, completed: boolean) {
+  return fetchJson(`/api/crm/tasks/${encodeURIComponent(taskId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ completed }) }) as Promise<{ item: CrmTask }>;
+}
+
+export async function getCrmDashboard(organizationId: string) {
+  return fetchJson(`/api/crm/dashboard?organization_id=${encodeURIComponent(organizationId)}`) as Promise<{
+    metrics: { calls_today: number; calls_week: number; companies_today: number; stage_changes_today: number; stage_changes_week: number; trials_active: number; awaiting_close: number };
+    tasks: CrmTask[];
+  }>;
+}
+
 export async function getAiQualificationDashboard(userId?: string) {
   return fetchJson('/api/dashboard/calls?limit=50', {
     cache: 'no-store',
