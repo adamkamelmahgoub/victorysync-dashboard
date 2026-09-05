@@ -413,6 +413,15 @@ export type CrmTask = {
   due_date: string; completed: boolean; company?: { id: string; name: string } | null;
 };
 
+export async function getCrmTasks(params: { completed?: boolean; assigned_to?: 'me'; start?: string; end?: string } = {}) {
+  const query = new URLSearchParams();
+  if (params.completed !== undefined) query.set('completed', String(params.completed));
+  if (params.assigned_to) query.set('assigned_to', params.assigned_to);
+  if (params.start) query.set('start', params.start);
+  if (params.end) query.set('end', params.end);
+  return fetchJson(`/api/crm/tasks?${query}`) as Promise<{ organization_id: string; items: Array<CrmTask & { contact?: { id: string; first_name: string; last_name?: string }; deal?: { id: string; title: string } }> }>;
+}
+
 export async function getCrmCompany(companyId: string) {
   return fetchJson(`/api/crm/companies/${encodeURIComponent(companyId)}`) as Promise<{
     item: CrmCompany; contacts: CrmContact[]; deals: CrmDeal[]; activities: CrmActivity[]; tasks: CrmTask[];

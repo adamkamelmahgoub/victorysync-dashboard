@@ -343,6 +343,27 @@ router.post('/crm/tasks', async (req, res) => {
   } catch (error) { sendError(res, error, 'crm_task_create_failed'); }
 });
 
+router.get('/crm/tasks', async (req, res) => {
+  try {
+    const userId = actorId(req);
+    const orgId = await resolveInternalCrmOrg();
+    await requireOrgAccess(userId, orgId);
+    const completed = String(req.query.completed || 'false');
+    let query = supabaseAdmin.from('crm_tasks')
+      .select('*, company:crm_companies(id,name), contact:crm_contacts(id,first_name,last_name), deal:crm_deals(id,title)')
+      .eq('organization_id', orgId)
+      .order('due_date', { ascending: true })
+      .limit(1000);
+    if (completed === 'true' || completed === 'false') query = query.eq('completed', completed === 'true');
+    if (req.query.assigned_to === 'me') query = query.eq('assigned_to', userId);
+    if (req.query.start) query = query.gte('due_date', String(req.query.start));
+    if (req.query.end) query = query.lte('due_date', String(req.query.end));
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ organization_id: orgId, items: data || [] });
+  } catch (error) { sendError(res, error, 'crm_tasks_fetch_failed'); }
+});
+
 router.patch('/crm/tasks/:taskId', async (req, res) => {
   try {
     const userId = actorId(req);
