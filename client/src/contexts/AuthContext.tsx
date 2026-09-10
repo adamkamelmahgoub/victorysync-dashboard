@@ -1,6 +1,7 @@
 import type { FC, ReactNode } from "react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { authStorage, persistLoginChoice, clearLoginChoice, getLoginSessionId } from "../lib/authStorage";
 import { buildApiUrl } from "../config";
 import { postLog } from "../lib/logging";
 
@@ -47,24 +48,17 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs = 5000) {
-  const timeoutPromise = new Promise<null>((resolve) => {
-    window.setTimeout(() => resolve(null), timeoutMs);
-  });
-
-  const response = await Promise.race([
-    fetch(url, init).catch(() => null),
-    timeoutPromise,
-  ]);
-
-  if (!response || !(response instanceof Response) || !response.ok) {
-    return null;
-  }
-
+async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) return null;
     return await response.json();
   } catch {
     return null;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -72,53 +66,18 @@ function mfaSessionKey(userId: string) {
   return `victorysync:mfa-verified:${userId}`;
 }
 
-function hasMfaVerifiedSession(userId: string) {
-  try {
-    return window.sessionStorage.getItem(mfaSessionKey(userId)) === "true";
-  } catch {
-    return false;
-  }
+function hasMfaVerifiedSession(userId: string, accessToken: string) {
+  const sessionId = getLoginSessionId(accessToken);
+  return !!sessionId && authStorage.getItem(mfaSessionKey(userId)) === sessionId;
 }
 
-function setMfaVerifiedSession(userId: string) {
-  try {
-    window.sessionStorage.setItem(mfaSessionKey(userId), "true");
-  } catch {}
+function setMfaVerifiedSession(userId: string, accessToken: string) {
+  const sessionId = getLoginSessionId(accessToken);
+  if (sessionId) authStorage.setItem(mfaSessionKey(userId), sessionId);
 }
 
 function clearMfaVerifiedSession(userId?: string | null) {
-  if (!userId) return;
-  try {
-    window.sessionStorage.removeItem(mfaSessionKey(userId));
-  } catch {}
-}
-
-const REMEMBER_LOGIN_KEY = "victorysync:remember-login";
-const TAB_LOGIN_KEY = "victorysync:tab-login";
-
-function persistLoginChoice(rememberLogin: boolean) {
-  try {
-    if (rememberLogin) {
-      window.localStorage.setItem(REMEMBER_LOGIN_KEY, "true");
-      window.sessionStorage.removeItem(TAB_LOGIN_KEY);
-    } else {
-      window.localStorage.removeItem(REMEMBER_LOGIN_KEY);
-      window.sessionStorage.setItem(TAB_LOGIN_KEY, "true");
-    }
-  } catch {}
-}
-
-function hasRestorableLogin() {
-  try {
-    return window.localStorage.getItem(REMEMBER_LOGIN_KEY) === "true" || window.sessionStorage.getItem(TAB_LOGIN_KEY) === "true";
-  } catch { return false; }
-}
-
-function clearLoginChoice() {
-  try {
-    window.localStorage.removeItem(REMEMBER_LOGIN_KEY);
-    window.sessionStorage.removeItem(TAB_LOGIN_KEY);
-  } catch {}
+  if (userId) authStorage.removeItem(mfaSessionKey(userId));
 }
 
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
@@ -127,6 +86,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [pendingMfa, setPendingMfa] = useState<PendingMfaChallenge | null>(null);
   const [globalRole, setGlobalRole] = useState<string | null>(null);
   const [featureAccess, setFeatureAccess] = useState<Record<string, boolean>>({});
@@ -137,6 +97,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const mfaGateUserIdRef = useRef<string | null>(null);
 
   const resetAuthState = (clearMfa = true) => {
+    setRestoreError(null);
     setUser(null);
     setOrgs([]);
     setSelectedOrgId(null);
@@ -166,7 +127,9 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   const hydrateUserContext = async () => {
     const [profileData, orgsData] = await Promise.all([
-      fetchJsonWithTimeout(buildApiUrl("/api/user/profile")),
+      fetchJsonWithTimeout(buildApiUrl("/api/user/profile")).then((data) =>
+        data || fetchJsonWithTimeout(buildApiUrl("/api/user/profile"))
+      ),
       fetchJsonWithTimeout(buildApiUrl("/api/user/orgs")),
     ]);
 
@@ -186,7 +149,6 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     }
 
     setAuthError(null);
-    currentUserIdRef.current = internalUser.id;
     setUser(internalUser);
     setGlobalRole(profileData?.profile?.global_role ?? null);
 
@@ -217,8 +179,9 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     const data = await fetchJsonWithTimeout(
       buildApiUrl("/api/user/mfa/factors"),
       { headers: { "x-user-id": userId } },
-      5000
+      15000
     );
+    if (!data) throw new Error("Unable to check two-factor authentication. Please retry.");
     return (data?.factors || []).filter((factor: MfaFactor) => factor?.verified);
   };
 
@@ -235,20 +198,18 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   };
 
   useEffect(() => {
+    let active = true;
+    let initializing = true;
     // Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!active) return;
       if (session?.user) {
-        if (!hasRestorableLogin()) {
-          void supabase.auth.signOut().finally(() => {
-            resetAuthState();
-            setLoading(false);
-          });
-          return;
-        }
+        currentUserIdRef.current = session.user.id;
         setLoading(true);
-        loadVerifiedMfaFactors(session.user.id)
+        return loadVerifiedMfaFactors(session.user.id)
           .then((factors) => {
-            if (factors.length > 0 && !hasMfaVerifiedSession(session.user.id)) {
+            if (!active) return;
+            if (factors.length > 0 && !hasMfaVerifiedSession(session.user.id, session.access_token)) {
               mfaGateUserIdRef.current = session.user.id;
               resetAuthState(false);
               setPendingMfa({ userId: session.user.id, email: session.user.email || null, factors });
@@ -257,16 +218,21 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
             return hydrateUserContext();
           })
           .catch((err) => {
+            if (!active) return;
             console.error("Error initializing auth:", err);
-            setAuthError(err?.message || "Unable to restore your session.");
             resetAuthState();
+            setRestoreError(err?.message || "Unable to restore your session.");
           })
-          .finally(() => setLoading(false));
+          .finally(() => { if (active) setLoading(false); });
       } else {
         resetAuthState();
         setLoading(false);
       }
-    });
+    }).catch((err) => {
+      if (!active) return;
+      setRestoreError(err?.message || "Unable to restore your session.");
+      setLoading(false);
+    }).finally(() => { initializing = false; });
 
     // Listen for sign-in / sign-out.
     // Skip TOKEN_REFRESHED and INITIAL_SESSION — those fire on every tab-focus/token
@@ -274,20 +240,29 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     // caused the "Loading…" flash every time the user switched apps).
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') return;
+      // Restoration owns startup, including SIGNED_IN emitted during recovery.
+      if (initializing && session?.user) return;
       if (event === 'SIGNED_IN' && passwordSignInInProgressRef.current) return;
       if (session?.user?.id && mfaGateUserIdRef.current === session.user.id) return;
       if (session?.user) {
         const sameUser = currentUserIdRef.current === session.user.id;
-        if (sameUser) {
-          void hydrateUserContext().catch((err) => console.error("Error refreshing auth context:", err));
-          return;
-        }
+        if (sameUser) return;
+        currentUserIdRef.current = session.user.id;
         setLoading(true);
-        hydrateUserContext()
+        loadVerifiedMfaFactors(session.user.id).then((factors) => {
+          if (!active) return;
+          if (factors.length > 0 && !hasMfaVerifiedSession(session.user.id, session.access_token)) {
+            mfaGateUserIdRef.current = session.user.id;
+            resetAuthState(false);
+            setPendingMfa({ userId: session.user.id, email: session.user.email || null, factors });
+            return;
+          }
+          return hydrateUserContext();
+        })
           .catch((err) => {
             console.error("Error on auth state change:", err);
-            setAuthError(err?.message || "Unable to load your account access.");
             resetAuthState();
+            setRestoreError(err?.message || "Unable to load your account access.");
           })
           .finally(() => setLoading(false));
       } else {
@@ -297,7 +272,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => { active = false; subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
@@ -329,6 +304,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       if (!sessionUser?.id) {
         throw new Error("We could not start your authenticated session. Please try again.");
       }
+      currentUserIdRef.current = sessionUser.id;
 
       const factors = await loadVerifiedMfaFactors(sessionUser.id);
       if (factors.length > 0) {
@@ -386,7 +362,9 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     try {
       mfaGateUserIdRef.current = null;
       setPendingMfa(null);
-      setMfaVerifiedSession(pendingMfa.userId);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Your session expired. Please sign in again.");
+      setMfaVerifiedSession(pendingMfa.userId, session.access_token);
       setLoading(true);
       await hydrateUserContext();
       void notifyLoginCompleted(method === "email" ? "Password + email 2FA" : "Password + authenticator 2FA");
@@ -403,14 +381,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const signOut = async () => {
     try {
       postLog("/api/logs/auth", { event_type: "logout", email: user?.email || null });
-      clearMfaVerifiedSession(user?.id || pendingMfa?.userId || currentUserIdRef.current);
-      clearLoginChoice();
+      clearMfaVerifiedSession(currentUserIdRef.current || pendingMfa?.userId || user?.id);
       await supabase.auth.signOut();
+      clearLoginChoice();
       resetAuthState();
       currentUserIdRef.current = null;
     } catch (err) {
       console.error("Sign out error:", err);
-      clearMfaVerifiedSession(user?.id || pendingMfa?.userId || currentUserIdRef.current);
+      clearMfaVerifiedSession(currentUserIdRef.current || pendingMfa?.userId || user?.id);
       clearLoginChoice();
       resetAuthState();
       currentUserIdRef.current = null;
@@ -430,6 +408,21 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const refreshFeatures = async () => {
     await loadFeatures(user, selectedOrgId);
   };
+
+  if (restoreError && !user && !loading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <section className="max-w-md rounded-2xl bg-white p-6 shadow-sm">
+          <h1 className="text-xl font-bold text-slate-950">Unable to load your account</h1>
+          <p className="mt-3 text-sm text-slate-600">Your saved session has been kept. {restoreError}</p>
+          <div className="mt-5 flex gap-3">
+            <button className="vs-button-primary" onClick={() => window.location.reload()}>Retry</button>
+            <button className="vs-button-secondary" onClick={() => void signOut()}>Sign out</button>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <AuthContext.Provider value={{ user, orgs, selectedOrgId, loading, authError, pendingMfa, globalRole, featureAccess, featureAccessLoaded, profile, refreshProfile, refreshFeatures, signIn, sendMfaEmailCode, verifyMfa, signOut, setSelectedOrgId }}>

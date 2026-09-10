@@ -37,7 +37,6 @@ const AdminInviteCodesPage = lazy(() => import("./pages/admin/AdminInviteCodesPa
 const AdminBillingPageV2 = lazy(() => import("./pages/admin/AdminBillingPageV2").then((m) => ({ default: m.AdminBillingPageV2 })));
 const AdminDiagnosticsPage = lazy(() => import("./pages/admin/AdminDiagnosticsPage"));
 const AdminLogsPage = lazy(() => import("./pages/admin/AdminLogsPage"));
-const AdminAiQualificationPage = lazy(() => import("./pages/admin/AdminAiQualificationPage"));
 const OrgManagePage = lazy(() => import("./pages/OrgManagePage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const NumbersPage = lazy(() => import("./pages/NumbersPage").then((m) => ({ default: m.NumbersPage })));
@@ -55,11 +54,6 @@ const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const LeadGenRedirectPage = lazy(() => import("./pages/LeadGenRedirectPage"));
 const CallsPage = lazy(() => import("./pages/CallsPage"));
 const EmailPreferencesPage = lazy(() => import("./pages/EmailPreferencesPage"));
-const CrmPage = lazy(() => import("./pages/CrmPage"));
-const CrmCompanyPage = lazy(() => import("./pages/CrmCompanyPage"));
-const CrmSettingsPage = lazy(() => import("./pages/CrmSettingsPage"));
-const CrmTasksPage = lazy(() => import("./pages/CrmTasksPage"));
-const CrmDataPage = lazy(() => import("./pages/CrmDataPage"));
 const SalesHubPage = lazy(() => import("./pages/SalesHubPage"));
 
 declare global {
@@ -506,28 +500,10 @@ function AppRouter() {
           </AdminRoute>
         }
       />
-      <Route
-        path="/admin/ai-qualification"
-        element={
-          <AdminRoute>
-            <AdminAiQualificationPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/crm"
-        element={
-          <AdminRoute>
-            <CrmPage />
-          </AdminRoute>
-        }
-      />
-      <Route path="/crm/companies/:companyId" element={<AdminRoute><CrmCompanyPage /></AdminRoute>} />
-      <Route path="/crm/settings" element={<AdminRoute><CrmSettingsPage /></AdminRoute>} />
-      <Route path="/crm/tasks" element={<AdminRoute><CrmTasksPage /></AdminRoute>} />
-      <Route path="/crm/data" element={<AdminRoute><CrmDataPage /></AdminRoute>} />
+      <Route path="/admin/ai-qualification" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/crm/*" element={<Navigate to="/dashboard" replace />} />
       <Route path="/sales" element={<AdminRoute><SalesHubPage /></AdminRoute>} />
-      <Route path="/dashboard/crm" element={<Navigate to="/crm" replace />} />
+      <Route path="/dashboard/crm" element={<Navigate to="/dashboard" replace />} />
       <Route
         path="/admin/mightycall"
         element={
