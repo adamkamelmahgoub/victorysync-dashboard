@@ -16,7 +16,6 @@ import { LoginPage } from "./pages/LoginPage";
 import OrgAdminRoute from './components/OrgAdminRoute';
 import ErrorBoundary from "./components/ErrorBoundary";
 import LoggingProvider from "./components/LoggingProvider";
-import LeadAlertOverlay from "./components/LeadAlertOverlay";
 import { installAuthenticatedFetch } from "./lib/installAuthenticatedFetch";
 import { installConsoleRedaction } from "./lib/redactConsole";
 import { warmCoreRoutes } from "./lib/routePreloader";
@@ -50,11 +49,9 @@ const DebugAuthPage = lazy(() => import("./pages/DebugAuthPage").then((m) => ({ 
 const APIKeysPage = lazy(() => import("./pages/APIKeysPage").then((m) => ({ default: m.APIKeysPage })));
 const BillingPage = lazy(() => import("./pages/BillingPage"));
 const LiveStatusPage = lazy(() => import("./pages/LiveStatusPage"));
-const LeadsPage = lazy(() => import("./pages/LeadsPage"));
 const LeadGenRedirectPage = lazy(() => import("./pages/LeadGenRedirectPage"));
 const CallsPage = lazy(() => import("./pages/CallsPage"));
 const EmailPreferencesPage = lazy(() => import("./pages/EmailPreferencesPage"));
-const SalesHubPage = lazy(() => import("./pages/SalesHubPage"));
 
 declare global {
   interface Window {
@@ -280,22 +277,8 @@ function AppRouter() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/dashboard/leads"
-        element={
-          <ProtectedRoute>
-            <FeatureRoute featureKey="leads"><LeadsPage /></FeatureRoute>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/leads"
-        element={
-          <ProtectedRoute>
-            <FeatureRoute featureKey="leads"><LeadsPage /></FeatureRoute>
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/dashboard/leads" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/leads/*" element={<Navigate to="/dashboard" replace />} />
       <Route
         path="/lead-gen"
         element={
@@ -502,7 +485,7 @@ function AppRouter() {
       />
       <Route path="/admin/ai-qualification" element={<Navigate to="/dashboard" replace />} />
       <Route path="/crm/*" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/sales" element={<AdminRoute><SalesHubPage /></AdminRoute>} />
+      <Route path="/sales/*" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard/crm" element={<Navigate to="/dashboard" replace />} />
       <Route
         path="/admin/mightycall"
@@ -600,7 +583,6 @@ createRoot(document.getElementById("root") as HTMLElement).render(
               <LoggingProvider />
               <ToastProvider>
                 <InteractionFeedback />
-                <LeadAlertOverlay />
                 <AppRouter />
               </ToastProvider>
             </ErrorBoundary>

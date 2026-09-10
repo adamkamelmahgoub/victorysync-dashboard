@@ -334,13 +334,6 @@ export async function sendSmsMessage(params: { orgId?: string; from: string; to:
   });
 }
 
-export async function getSalesWorkspace(){return fetchJson('/api/sales/workspace') as Promise<any>}
-export async function createSalesProduct(payload:any){return fetchJson('/api/sales/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
-export async function createSalesQuote(payload:any){return fetchJson('/api/sales/quotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
-export async function createSalesMeeting(payload:any){return fetchJson('/api/sales/meetings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
-export async function createSalesGoal(payload:any){return fetchJson('/api/sales/goals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
-export async function createSalesSequence(payload:any){return fetchJson('/api/sales/sequences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}
-
 export async function getAdminLogs(type: string, params?: Record<string, string | number | boolean | null | undefined>, userId?: string) {
   const q = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {
