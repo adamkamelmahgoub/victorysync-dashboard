@@ -11,7 +11,7 @@ export default function AdminTopNav() {
   const isPlatformAdmin = (user?.user_metadata as any)?.role === 'platform_admin';
 
   const items: Array<{ to: string; label: string }> = [
-    { to: '/admin/orgs', label: 'Orgs' },
+    { to: '/admin/orgs', label: 'Clients' },
     { to: '/admin/users', label: 'Users' },
     { to: '/admin/agents-management', label: 'Agent Management' },
     { to: '/admin/invites', label: 'Invites' },

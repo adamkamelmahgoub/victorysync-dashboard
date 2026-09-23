@@ -167,6 +167,18 @@ test('leads endpoints use canonical organization membership lookup', () => {
   assert.doesNotMatch(leadsBlock, /from\('org_members'\)\s*\.select\('org_id'\)\s*\.eq\('user_id', actorId\)\s*\.maybeSingle/);
 });
 
+test('internal client lead workspace is platform-admin only and organization scoped', () => {
+  const route = readFileSync(join(repoRoot, 'server', 'src', 'routes', 'adminClientLeads.ts'), 'utf8');
+  const router = readFileSync(join(repoRoot, 'client', 'src', 'main.tsx'), 'utf8');
+  const migration = readFileSync(join(repoRoot, 'supabase', 'migrations', '045_admin_client_leads.sql'), 'utf8');
+
+  assert.match(route, /router\.use\([\s\S]*?isPlatformAdmin\(id\)[\s\S]*?status\(403\)/);
+  assert.match(route, /\.eq\('organization_id', orgId\)/);
+  assert.match(router, /path="\/admin\/clients\/:orgId\/leads"[\s\S]*?<AdminRoute>[\s\S]*?<AdminClientLeadsPage \/>/);
+  assert.match(migration, /alter table public\.admin_client_leads enable row level security/);
+  assert.doesNotMatch(migration, /create policy[\s\S]*admin_client_leads/i);
+});
+
 test('production diagnostics include live RLS and storage verification', () => {
   const migration = readFileSync(join(repoRoot, 'supabase', 'migrations', '031_feature_access_and_security_verification.sql'), 'utf8');
   const schemaHealth = readFileSync(join(process.cwd(), 'src', 'lib', 'schemaHealth.ts'), 'utf8');

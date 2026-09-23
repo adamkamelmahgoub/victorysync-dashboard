@@ -66,6 +66,7 @@ import mightyCallReliabilityRouter from './routes/mightycallReliability';
 import stripeBillingRouter, { stripeWebhookHandler } from './routes/stripeBilling';
 import notificationPreferencesRouter from './routes/notificationPreferences';
 import aiQualificationRouter from './routes/aiQualification';
+import adminClientLeadsRouter from './routes/adminClientLeads';
 import { startMightyCallPolling } from './mightycall/sync';
 import { getBillingAccessForOrgIds, isBillingLockAllowedPath } from './services/billingAccess';
 import { Readable } from 'stream';
@@ -18966,6 +18967,7 @@ app.get('/api/recordings', async (req, res) => {
 
 // Register the users router for admin endpoints
 app.use('/api/admin', usersRouter);
+app.use('/api/admin', adminClientLeadsRouter);
 
 app.use('/api', (err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const status = Number.isFinite(Number(err?.status || err?.statusCode))

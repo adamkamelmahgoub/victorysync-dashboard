@@ -753,13 +753,13 @@ export default function AdminOrgsPage() {
   };
 
   return (
-    <PageLayout title="Organizations">
+    <PageLayout title="Clients">
       <div className="space-y-6">
         <header className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold">Organizations</h1>
+            <h1 className="text-xl font-semibold">Clients</h1>
             <p className="text-xs text-slate-400 mt-1">
-              Create and manage organizations, view members and call metrics.
+              Select a client to manage its private lead workspace, members, and call metrics.
             </p>
           </div>
           <button
@@ -814,7 +814,7 @@ export default function AdminOrgsPage() {
           </SectionCard>
 
           {/* RIGHT PANEL: Organizations list */}
-          <SectionCard title="Organizations" description="Platform-wide client workspaces and current period metrics." contentClassName="p-0">
+          <SectionCard title="Clients" description="Platform-wide client workspaces and current period metrics." contentClassName="p-0">
 
             {error && (
               <div className="m-5 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
@@ -843,7 +843,7 @@ export default function AdminOrgsPage() {
                     {orgs.map((org) => (
                       <tr key={org.id} className="hover:bg-violet-50/40">
                         <td className="px-4 py-3">
-                          <div className="font-medium text-slate-900">{org.name}</div>
+                          <button onClick={() => navigate(`/admin/clients/${org.id}/leads`)} className="font-medium text-violet-700 hover:text-violet-900 hover:underline">{org.name}</button>
                           <div className="text-xs text-slate-500">Created {new Date(org.created_at).toLocaleDateString()}</div>
                         </td>
                         <td className="px-4 py-3 text-slate-700">{org.assigned_numbers_count ?? org.phone_numbers_count ?? '-'}</td>
@@ -854,7 +854,7 @@ export default function AdminOrgsPage() {
                         <td className="px-4 py-3"><StatusBadge tone={org.billing_status ? 'info' : 'neutral'}>{org.billing_status || 'Not configured'}</StatusBadge></td>
                         <td className="px-4 py-3"><StatusBadge tone={org.status === 'inactive' ? 'warning' : 'success'}>{org.status || 'Active'}</StatusBadge></td>
                         <td className="px-4 py-3">
-                          <button onClick={() => setSelectedOrg(org)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Manage</button>
+                          <div className="flex gap-2"><button onClick={() => navigate(`/admin/clients/${org.id}/leads`)} className="vs-button-primary !px-3 !py-1.5 !text-xs">Leads</button><button onClick={() => setSelectedOrg(org)} className="vs-button-secondary !px-3 !py-1.5 !text-xs">Settings</button></div>
                         </td>
                       </tr>
                     ))}

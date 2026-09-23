@@ -168,7 +168,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           items: [
             { label: 'Agents', path: '/admin/agents-management' },
             { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
-            { label: 'Organizations', path: '/admin/orgs' },
+            { label: 'Clients', path: '/admin/orgs' },
             ...(selectedOrgId ? [{ label: 'Org Dashboard', path: `/admin/orgs/${selectedOrgId}/dashboard` }] : []),
             { label: 'Users', path: '/admin/users' },
             { label: 'Ops Console', path: '/admin/operations' },

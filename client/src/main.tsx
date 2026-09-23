@@ -23,6 +23,7 @@ import { warmCoreRoutes } from "./lib/routePreloader";
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
 const DashboardNewV3 = lazy(() => import("./pages/DashboardNewV3"));
 const AdminOrgsPage = lazy(() => import("./pages/admin/AdminOrgsPage"));
+const AdminClientLeadsPage = lazy(() => import("./pages/admin/AdminClientLeadsPage"));
 const AdminOrgOverviewPage = lazy(() => import("./pages/admin/AdminOrgOverviewPage").then((m) => ({ default: m.AdminOrgOverviewPage })));
 const AdminApiKeysPage = lazy(() => import("./pages/admin/AdminApiKeysPage"));
 const AdminMightyCallPage = lazy(() => import("./pages/admin/AdminMightyCallPage"));
@@ -432,6 +433,14 @@ function AppRouter() {
         element={
           <AdminRoute>
             <OrgDashboardPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/clients/:orgId/leads"
+        element={
+          <AdminRoute>
+            <AdminClientLeadsPage />
           </AdminRoute>
         }
       />
