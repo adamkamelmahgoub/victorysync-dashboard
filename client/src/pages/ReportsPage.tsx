@@ -196,7 +196,7 @@ export function ReportsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wider">Date Range</label>
-                  <select
+                  <select aria-label="Date Range"
                     value={dateRange}
                     onChange={(e) => setDateRange(e.target.value)}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
@@ -210,7 +210,7 @@ export function ReportsPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wider">Direction</label>
-                  <select
+                  <select aria-label="Direction"
                     value={directionFilter}
                     onChange={(e) => setDirectionFilter(e.target.value)}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
@@ -223,7 +223,7 @@ export function ReportsPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-2.5 uppercase tracking-wider">Status</label>
-                  <select
+                  <select aria-label="Status"
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20 transition"
@@ -302,10 +302,10 @@ export function ReportsPage() {
                               {rec.direction === 'inbound' ? '↓ Inbound' : '↑ Outbound'}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-slate-300 font-mono text-xs font-bold">{rec.from_number || '—'}</td>
-                          <td className="px-4 py-3 text-slate-300 font-mono text-xs font-bold">{rec.to_number || rec.phone_number_id || '—'}</td>
+                          <td className="px-4 py-3 text-slate-300 font-mono text-xs font-bold">{rec.from_number || '-'}</td>
+                          <td className="px-4 py-3 text-slate-300 font-mono text-xs font-bold">{rec.to_number || rec.phone_number_id || '-'}</td>
                           <td className="px-4 py-3 text-center text-slate-300">
-                            {rec.duration ? `${Math.floor(rec.duration / 60)}m ${rec.duration % 60}s` : '—'}
+                            {rec.duration ? `${Math.floor(rec.duration / 60)}m ${rec.duration % 60}s` : '-'}
                           </td>
                           <td className="px-4 py-3">
                             <span className={`px-2 py-1 rounded-md text-xs font-medium inline-block ${

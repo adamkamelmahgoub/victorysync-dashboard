@@ -399,7 +399,7 @@ export const AdminUsersPage: FC = () => {
             <div className="space-y-3 mb-4">
               <div>
                 <label className="block text-xs text-slate-300 mb-1">Global role</label>
-                <select value={globalRole || ''} onChange={(e) => setGlobalRole(e.target.value || null)} className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded text-sm">
+                <select aria-label="Global role" value={globalRole || ''} onChange={(e) => setGlobalRole(e.target.value || null)} className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded text-sm">
                   <option value="">None</option>
                   <option value="platform_manager">Platform Manager</option>
                   <option value="platform_admin">Platform Admin</option>
@@ -483,7 +483,7 @@ export const AdminUsersPage: FC = () => {
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Invite type
                   </label>
-                  <select
+                  <select aria-label="Invite type"
                     value={createScope}
                     onChange={(e) => {
                       const next = e.target.value as "org" | "platform";
@@ -505,7 +505,7 @@ export const AdminUsersPage: FC = () => {
                   {orgsLoading ? (
                     <div className="text-xs text-slate-400">Loading...</div>
                   ) : (
-                    <select
+                    <select aria-label="Organization"
                       value={createOrgId}
                       onChange={(e) => setCreateOrgId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
@@ -525,7 +525,7 @@ export const AdminUsersPage: FC = () => {
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Role
                   </label>
-                  <select
+                  <select aria-label="Role"
                     value={createRole}
                     onChange={(e) => setCreateRole(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"
@@ -570,7 +570,7 @@ export const AdminUsersPage: FC = () => {
                   )}
                 <div>
                   <label className="block text-xs text-slate-300 mb-1">User</label>
-                  <select
+                  <select aria-label="User"
                     value={assignUserId}
                     onChange={(e) => setAssignUserId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 text-sm"
@@ -584,7 +584,7 @@ export const AdminUsersPage: FC = () => {
 
                 <div>
                   <label className="block text-xs text-slate-300 mb-1">Organization</label>
-                  <select
+                  <select aria-label="Organization"
                     value={assignOrgId}
                     onChange={(e) => setAssignOrgId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 text-sm"
@@ -598,7 +598,7 @@ export const AdminUsersPage: FC = () => {
 
                 <div>
                   <label className="block text-xs text-slate-300 mb-1">Role</label>
-                  <select
+                  <select aria-label="Role"
                     value={assignRole}
                     onChange={(e) => setAssignRole(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-50 text-sm"
@@ -760,7 +760,7 @@ export const AdminUsersPage: FC = () => {
                                     {org?.name || record.org_id}
                                   </td>
                                   <td className="px-3 py-2">
-                                    <select
+                                    <select aria-label="Role"
                                       value={editRole}
                                       onChange={(e) => setEditRole(e.target.value)}
                                       className="px-2 py-1 bg-slate-700 border border-slate-600 rounded text-xs text-slate-200"
@@ -893,7 +893,7 @@ export const AdminUsersPage: FC = () => {
                                   {org?.name || record.org_id}
                                 </td>
                                 <td className="px-3 py-2 text-slate-400">
-                                  {record.mightycall_extension || '—'}
+                                  {record.mightycall_extension || '-'}
                                 </td>
                                 <td className="px-3 py-2 text-right">
                                   <button

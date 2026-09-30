@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PageLayout } from '../../components/PageLayout';
 import AdminTopNav from '../../components/AdminTopNav';
-import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
+import { ErrorStatePanel, EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../../components/DashboardPrimitives';
 import { useAuth } from '../../contexts/AuthContext';
 import { getAdminAuditLogs, getMembershipDrift, getProductionHealth } from '../../lib/apiClient';
 
@@ -10,12 +10,14 @@ export default function AdminDiagnosticsPage() {
   const [productionHealth, setProductionHealth] = useState<any | null>(null);
   const [membershipDrift, setMembershipDrift] = useState<any | null>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     if (!user?.id) return;
     try {
       setLoading(true);
+      setError(null);
       const [health, drift, audits] = await Promise.all([
         getProductionHealth(user.id),
         getMembershipDrift(user.id, 25),
@@ -24,6 +26,8 @@ export default function AdminDiagnosticsPage() {
       setProductionHealth(health);
       setMembershipDrift(drift);
       setAuditLogs(audits.logs || []);
+    } catch (error: any) {
+      setError(error?.message || 'Diagnostics could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -42,6 +46,7 @@ export default function AdminDiagnosticsPage() {
     >
       <div className="space-y-6">
         <AdminTopNav />
+        {error && <ErrorStatePanel error={error} onRetry={() => void load()} />}
 
         <SectionCard
           title="Readiness"
@@ -54,7 +59,7 @@ export default function AdminDiagnosticsPage() {
             <div className="space-y-4">
               <div className="grid gap-4 lg:grid-cols-5">
                 <MetricStatCard label="Schema" value={productionHealth.schema?.ok ? 'Healthy' : 'Drift'} accent={productionHealth.schema?.ok ? 'emerald' : 'amber'} hint={`${productionHealth.schema?.missing_tables?.length || 0} missing tables`} />
-                <MetricStatCard label="RLS / Storage" value={productionHealth.security?.ok ? 'Healthy' : 'Review'} accent={productionHealth.security?.ok ? 'emerald' : 'amber'} hint={`${productionHealth.security?.missing_rls?.length || 0} RLS gaps`} />
+                <MetricStatCard label="RLS / Storage" value={productionHealth.security?.ok ? 'Checks passed' : 'Review'} accent={productionHealth.security?.ok ? 'emerald' : 'amber'} hint="Policy presence checks. Tenant isolation needs separate testing." />
                 <MetricStatCard label="Memberships" value={membershipDrift && (membershipDrift.org_users_only || membershipDrift.org_members_only || membershipDrift.mismatched_records) ? 'Drift' : 'Aligned'} accent={membershipDrift && (membershipDrift.org_users_only || membershipDrift.org_members_only || membershipDrift.mismatched_records) ? 'amber' : 'emerald'} hint={`${membershipDrift?.org_users_only || 0} org_users-only rows`} />
                 <MetricStatCard label="Auth Users" value={String(productionHealth.auth_users_count || 0)} accent="neutral" hint="Current authentication footprint" />
                 <MetricStatCard label="Environment" value={productionHealth.env?.ok ? 'Configured' : 'Missing'} accent={productionHealth.env?.ok ? 'emerald' : 'amber'} hint={`CORS restricted: ${productionHealth.env?.recommendations?.restrict_cors_origin ? 'no' : 'yes'}`} />

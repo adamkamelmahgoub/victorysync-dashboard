@@ -736,7 +736,7 @@ export default function UserSettingsPage() {
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-700">Authenticator code</label>
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    <input
+                    <input aria-label="Authenticator code"
                       className="vs-input tracking-[0.22em]"
                       inputMode="numeric"
                       value={mfaCode}
@@ -766,7 +766,7 @@ export default function UserSettingsPage() {
                   </p>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <input
+                  <input aria-label="Email verification code"
                     className="vs-input tracking-[0.22em]"
                     inputMode="numeric"
                     value={emailMfaCode}
@@ -888,7 +888,7 @@ export default function UserSettingsPage() {
             <div className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm font-semibold text-slate-700">Upload Picture</label>
-                <input
+                <input aria-label="Upload Picture"
                   type="file"
                   accept="image/*"
                   onChange={handleProfilePicChange}
@@ -912,7 +912,7 @@ export default function UserSettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Full Name</label>
-              <input
+              <input aria-label="Full Name"
                 type="text"
                 value={formData.full_name}
                 onChange={(e) => handleProfileChange('full_name', e.target.value)}
@@ -921,7 +921,7 @@ export default function UserSettingsPage() {
             </div>
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Email</label>
-              <input
+              <input aria-label="Email"
                 type="email"
                 value={formData.email}
                 onChange={(e) => handleProfileChange('email', e.target.value)}
@@ -930,7 +930,7 @@ export default function UserSettingsPage() {
             </div>
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Phone Number</label>
-              <input
+              <input aria-label="Phone Number"
                 type="tel"
                 value={formData.phone_number}
                 onChange={(e) => handleProfileChange('phone_number', e.target.value)}
@@ -968,7 +968,7 @@ export default function UserSettingsPage() {
             <div className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm font-semibold text-slate-700">Upload Logo</label>
-                <input
+                <input aria-label="Upload Logo"
                   type="file"
                   accept="image/*"
                   onChange={handleLogoPicChange}
@@ -996,7 +996,7 @@ export default function UserSettingsPage() {
           <div className="mb-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <label className="mb-3 block text-sm font-semibold text-slate-700">Generate New API Key</label>
             <div className="flex gap-3">
-              <input
+              <input aria-label="Generate New API Key"
                 type="text"
                 placeholder="Label (e.g., 'Production', 'Testing')"
                 value={newKeyLabel}
@@ -1019,7 +1019,7 @@ export default function UserSettingsPage() {
               <p className="text-sm font-semibold text-amber-300 mb-3">⚠️ Save Your API Key</p>
               <p className="text-sm text-amber-200 mb-3">This is the only time you'll see this key. Copy it and store it securely.</p>
               <div className="flex gap-2">
-                <input
+                <input aria-label="New API key"
                   type="text"
                   value={showNewKeyPlaintext || ''}
                   readOnly
@@ -1114,7 +1114,7 @@ export default function UserSettingsPage() {
               <div key={index} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr,1fr]">
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-700">Question {index + 1}</label>
-                  <select
+                  <select aria-label="Question"
                     value={item.question}
                     onChange={(event) => handleSecurityQuestionChange(index, 'question', event.target.value)}
                     className="vs-input w-full"
@@ -1126,7 +1126,7 @@ export default function UserSettingsPage() {
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-700">Answer</label>
-                  <input
+                  <input aria-label="Answer"
                     type="password"
                     value={item.answer}
                     onChange={(event) => handleSecurityQuestionChange(index, 'answer', event.target.value)}
@@ -1154,7 +1154,7 @@ export default function UserSettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Current Password</label>
-              <input
+              <input aria-label="Current Password"
                 type="password"
                 autoComplete="current-password"
                 value={passwordData.currentPassword}
@@ -1165,7 +1165,7 @@ export default function UserSettingsPage() {
             <div></div>
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">New Password</label>
-              <input
+              <input aria-label="New Password"
                 type="password"
                 autoComplete="new-password"
                 value={passwordData.newPassword}
@@ -1175,7 +1175,7 @@ export default function UserSettingsPage() {
             </div>
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Confirm Password</label>
-              <input
+              <input aria-label="Confirm Password"
                 type="password"
                 autoComplete="new-password"
                 value={passwordData.confirmPassword}
@@ -1186,7 +1186,7 @@ export default function UserSettingsPage() {
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Verification Code</label>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <input
+                <input aria-label="Verification Code"
                   type="text"
                   inputMode="numeric"
                   autoComplete="one-time-code"

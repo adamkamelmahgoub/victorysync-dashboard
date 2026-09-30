@@ -235,7 +235,7 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
           </div>
           <div>
             <label className="block text-xs font-semibold mb-1">Role</label>
-            <select
+            <select aria-label="Role"
               className="p-2 rounded bg-slate-800 border border-slate-700 w-full text-sm text-slate-200"
               value={inviteRole}
               onChange={e => setInviteRole(e.target.value)}
@@ -284,7 +284,7 @@ export default function OrgMembersTab({ orgId, isOrgAdmin, adminCheckDone }: { o
                       {member.pending_invite ? (
                         <span className="text-slate-200">{member.role}</span>
                       ) : (
-                        <select
+                        <select aria-label="Role"
                           className="p-1.5 rounded bg-slate-800 border border-slate-700 text-sm text-slate-200"
                           value={roleDrafts[member.id] || member.role}
                           disabled={apiUnavailable || (adminCheckDone && !isOrgAdmin)}

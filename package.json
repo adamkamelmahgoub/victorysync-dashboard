@@ -10,10 +10,16 @@
     "client:test": "npm run build --workspace=client",
     "test:auth": "node --test tests/auth-persistence.test.js",
     "test:e2e": "node tests/smoke-e2e.js",
-    "security:scan": "node scripts/security_scan.mjs && node scripts/security_endpoint_audit.mjs"
+    "security:scan": "node scripts/security_scan.mjs && node scripts/security_endpoint_audit.mjs",
+    "test:workforce": "node --test tests/workforce-database.test.mjs"
   },
   "workspaces": [
     "server",
     "client"
-  ]
+  ],
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "playwright": "^1.61.1"
+  }
 }

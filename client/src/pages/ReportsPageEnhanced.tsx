@@ -301,8 +301,8 @@ export default function ReportsPageEnhanced() {
                             
                             return (
                               <tr key={call.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition">
-                                <td className="px-4 py-3 text-white font-medium">{call.from_number || '—'}</td>
-                                <td className="px-4 py-3 text-white">{call.to_number || '—'}</td>
+                                <td className="px-4 py-3 text-white font-medium">{call.from_number || '-'}</td>
+                                <td className="px-4 py-3 text-white">{call.to_number || '-'}</td>
                                 <td className="px-4 py-3">
                                   <span className={`px-2 py-1 rounded-md text-xs font-medium ${
                                     call.status === 'answered' || call.status === 'Answered' ? 'bg-emerald-900/40 text-emerald-300' :
@@ -319,7 +319,7 @@ export default function ReportsPageEnhanced() {
                                   ${(call.revenue_generated || 0).toFixed(2)}
                                 </td>
                                 <td className="px-4 py-3 text-slate-400 text-xs">
-                                  {callDate ? new Date(callDate).toLocaleString() : '—'}
+                                  {callDate ? new Date(callDate).toLocaleString() : '-'}
                                 </td>
                               </tr>
                             );

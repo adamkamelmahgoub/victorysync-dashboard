@@ -1281,7 +1281,7 @@ async function saveRecordingRow(row: Record<string, any>) {
 async function upsertTransfer(callRow: any, raw: any, transfer: NonNullable<ReturnType<typeof detectTransferFromCallDetail>>) {
   const externalCallId = String(callRow.external_call_id || callRow.external_id || '');
   const id = [externalCallId, transfer.transferTarget || 'target', transfer.transferType || 'unknown'].join(':');
-  await supabaseAdmin.from('call_transfers').upsert({
+  const saved = await supabaseAdmin.from('call_transfers').upsert({
     org_id: callRow.org_id,
     external_transfer_id: id,
     external_call_id: externalCallId,
@@ -1299,6 +1299,19 @@ async function upsertTransfer(callRow: any, raw: any, transfer: NonNullable<Retu
     transferred_at: firstIso(raw?.transferredAt, raw?.transfer?.createdAt, callRow.started_at) || new Date().toISOString(),
     raw_payload: raw,
   }, { onConflict: 'org_id,external_transfer_id' });
+  if (saved.error) throw saved.error;
+  if (process.env.WORKFORCE_MIGHTYCALL_SYNC === 'true') {
+    const occurredAt = firstIso(raw?.transferredAt, raw?.transfer?.createdAt);
+    const providerId = raw?.transfer?.id || raw?.transferId;
+    const result = await supabaseAdmin.rpc('wf_ingest_transfer', {event: {
+      source_key: String(providerId || [externalCallId, callRow.agent_extension || '', transfer.transferTarget || 'target', occurredAt || 'timestamp-missing'].join(':')),
+      client_id: callRow.org_id, occurred_at: occurredAt || null,
+      extension: String(callRow.agent_extension || ''), business_number: String(callRow.business_number || ''),
+      phone: String(callRow.direction === 'outbound' ? callRow.to_number || '' : callRow.from_number || ''),
+      outcome: transfer.transferStatus || null, external_call_id: externalCallId,
+    }});
+    if (result.error) throw result.error;
+  }
 }
 
 export async function syncRecordingsFromCallDetails(): Promise<number> {

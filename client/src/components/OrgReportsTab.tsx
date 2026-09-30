@@ -164,7 +164,7 @@ export default function OrgReportsTab({ orgId }: { orgId: string }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-slate-300 mb-2">Date Range</label>
-            <select
+            <select aria-label="Date Range"
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
               className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-100 text-sm"
@@ -177,7 +177,7 @@ export default function OrgReportsTab({ orgId }: { orgId: string }) {
           </div>
           <div>
             <label className="block text-sm text-slate-300 mb-2">Phone Number</label>
-            <select
+            <select aria-label="Phone Number"
               value={phoneFilter}
               onChange={(e) => setPhoneFilter(e.target.value)}
               className="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-slate-100 text-sm"
@@ -226,7 +226,7 @@ export default function OrgReportsTab({ orgId }: { orgId: string }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-300">
-                      {rec.duration ? `${Math.round(rec.duration / 60)}m ${rec.duration % 60}s` : '—'}
+                      {rec.duration ? `${Math.round(rec.duration / 60)}m ${rec.duration % 60}s` : '-'}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded text-xs font-medium ${

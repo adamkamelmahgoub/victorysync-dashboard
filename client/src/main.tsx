@@ -7,7 +7,11 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
+import "@fontsource/inter/latin-400.css";
+import "@fontsource/inter/latin-600.css";
+import "@fontsource/inter/latin-700.css";
 import "./index.css";
+import "./accessibility.css";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { OrgProvider, useOrg } from "./contexts/OrgContext";
@@ -21,6 +25,7 @@ import { installConsoleRedaction } from "./lib/redactConsole";
 import { warmCoreRoutes } from "./lib/routePreloader";
 
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
+const WorkforcePage = lazy(() => import('./pages/WorkforcePage'));
 const DashboardNewV3 = lazy(() => import("./pages/DashboardNewV3"));
 const AdminOrgsPage = lazy(() => import("./pages/admin/AdminOrgsPage"));
 const AdminClientLeadsPage = lazy(() => import("./pages/admin/AdminClientLeadsPage"));
@@ -175,7 +180,7 @@ function InteractionFeedback() {
 }
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const { user, loading: authLoading, authError } = useAuth();
+  const { user, loading: authLoading, authError, globalRole } = useAuth();
   const { loading: orgLoading } = useOrg();
   const location = useLocation();
 
@@ -193,6 +198,7 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
     return <Navigate to="/login" replace state={{ from: location, authError }} />;
   }
 
+  if (!['platform_admin','admin','super_admin'].includes(String(globalRole)) && location.pathname !== '/workforce') return <Navigate to="/workforce" replace />;
   return children;
 }
 
@@ -261,6 +267,7 @@ function AppRouter() {
       <Suspense fallback={<AppLoadingFallback />}>
         <PageTransition>
           <Routes>
+        <Route path="/workforce" element={<ProtectedRoute><WorkforcePage /></ProtectedRoute>} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/"

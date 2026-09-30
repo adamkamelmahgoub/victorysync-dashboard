@@ -155,6 +155,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           label: 'Command',
           items: [
             { label: 'Overview', path: '/' },
+            { label: 'Workforce', path: '/workforce' },
             { label: 'Live Status', path: '/live-status', badge: 'Live', featureKey: 'live_status' },
             { label: 'Reports', path: '/admin/reports' },
             { label: 'Calls', path: '/calls', featureKey: 'reports' },
@@ -197,28 +198,7 @@ export const Sidebar: FC<SidebarProps> = ({ isAdmin, currentPath }) => {
           ],
         },
       ]
-    : [
-        {
-          label: 'Workspace',
-          items: [
-            { label: 'Overview', path: '/' },
-            { label: 'Live Status', path: '/live-status', badge: 'Live', featureKey: 'live_status' },
-            { label: 'Reports', path: '/reports', featureKey: 'reports' },
-            { label: 'Calls', path: '/calls', featureKey: 'reports' },
-            { label: 'SMS', path: '/sms', featureKey: 'sms' },
-            { label: 'Recordings', path: '/recordings', featureKey: 'recordings' },
-            { label: 'Agents', path: '/team', featureKey: 'team' },
-            { label: 'Phone Numbers', path: '/numbers', featureKey: 'numbers' },
-            { label: 'Lead Gen Hub', path: '/lead-gen' },
-            { label: 'Billing', path: '/billing', featureKey: 'billing' },
-            { label: 'API Keys', path: '/api-keys', featureKey: 'api_keys' },
-            { label: 'Org Settings', path: '/settings' },
-            { label: 'Account Settings', path: '/account-settings' },
-            { label: 'Email Preferences', path: '/email-preferences' },
-            { label: 'Support', path: '/support', featureKey: 'support' },
-          ],
-        },
-      ];
+    : [{ label: 'Workspace', items: [{ label: 'Workforce', path: '/workforce' }] }];
 
   const selectedOrgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
   const selectedOrgLogo = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.logo_url || '' : '';

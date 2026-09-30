@@ -157,7 +157,7 @@ const AdminSupportPage: FC = () => {
           <SectionCard title="Ticket queue" description="Filter the queue and choose a ticket for triage.">
             <div className="mb-4">
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status Filter</label>
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="vs-input w-full">
+              <select aria-label="Status Filter" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="vs-input w-full">
                 <option value="all">All</option>
                 <option value="open">Open</option>
                 <option value="in-progress">In Progress</option>
@@ -207,7 +207,7 @@ const AdminSupportPage: FC = () => {
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status</label>
-                    <select
+                    <select aria-label="Status"
                       value={selectedTicket.status}
                       onChange={(e) => {
                         handleStatusChange(e.target.value);

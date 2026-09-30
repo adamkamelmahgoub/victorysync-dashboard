@@ -1,0 +1,761 @@
+{
+  "method": "Synthetic fixtures, 3 roles, 3 widths, 2 themes. Axe WCAG AA checks on workforce content. Does not exercise production.",
+  "results": [
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 390,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 390,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 390,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 390,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 390,
+      "tab": "Administration",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 390,
+      "tab": "Audit",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 768,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 768,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 768,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 768,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 768,
+      "tab": "Administration",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 768,
+      "tab": "Audit",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Administration",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Audit",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Administration",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Audit",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Administration",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Audit",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Administration",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "admin",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Audit",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 390,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 390,
+      "tab": "Timer",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 390,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 390,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 390,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 768,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 768,
+      "tab": "Timer",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 768,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 768,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 768,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Timer",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Timer",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Timer",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Timer",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "agent",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Monitoring",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 390,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 390,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 390,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 768,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 768,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 768,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "light",
+      "width": 1440,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 390,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 768,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Overview",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Transfers",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    },
+    {
+      "role": "client",
+      "theme": "dark",
+      "width": 1440,
+      "tab": "Timesheets",
+      "overflow": false,
+      "errors": [],
+      "violations": []
+    }
+  ]
+}

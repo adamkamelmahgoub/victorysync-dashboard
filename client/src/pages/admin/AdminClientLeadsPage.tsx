@@ -31,7 +31,7 @@ type Activity = { id: string; activity_type: string; summary: string; actor_name
 const statuses = ['new', 'working', 'contacted', 'qualified', 'follow_up', 'closed'];
 const dispositions = ['unworked', 'no_answer', 'voicemail', 'callback', 'interested', 'not_interested', 'wrong_number', 'do_not_contact', 'converted'];
 const priorities = ['low', 'normal', 'high', 'urgent'];
-const label = (value: string) => value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+const label = (value: string) => value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 const localDateTime = (value: string | null) => value ? new Date(value).toISOString().slice(0, 16) : '';
 
 function parseCsv(text: string) {

@@ -26,20 +26,6 @@ export async function isPlatformAdmin(userId: string): Promise<boolean> {
     // Accept both legacy 'admin' and canonical 'platform_admin' as platform-level admin
     if (data.global_role === "platform_admin" || data.global_role === "admin") return true;
 
-    // Fallback: some deployments store role in auth.user.user_metadata.role (Supabase Auth). Check that.
-    try {
-      const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.getUserById(userId as string) as any;
-      if (!authErr && authUser && (authUser as any).user && (authUser as any).user.user_metadata) {
-        const metaRole = (authUser as any).user.user_metadata?.role;
-        console.log('[isPlatformAdmin] fallback auth user metadata role for', userId, ':', metaRole);
-        if (metaRole === 'platform_admin' || metaRole === 'admin') return true;
-      } else if (authErr) {
-        console.log('[isPlatformAdmin] auth.getUserById error for', userId, authErr);
-      }
-    } catch (e) {
-      console.log('[isPlatformAdmin] fallback auth lookup failed for', userId, e);
-    }
-
     return false;
   } catch (err) {
     console.error("isPlatformAdmin check failed:", err);
@@ -120,17 +106,15 @@ export async function isOrgManagerWith(
         .eq("org_member_id", member.id)
         .maybeSingle();
       if (permsErr) {
-        // If the table or column is missing in this deployment, fall back to legacy behavior
-        console.log('[isOrgManagerWith] org_manager_permissions lookup failed, falling back to role-only behavior', permsErr);
-        return true;
+        // Permission lookup failures must deny access.
+        return false;
       }
       // If there is no explicit permissions row, deny by default (admins should set manager perms)
       if (!perms) return false;
       return Boolean((perms as any)[permission]) === true;
     } catch (e) {
-      // If any error occurs querying permissions, be permissive for backward-compatibility
-      console.log('[isOrgManagerWith] perms table query exception, falling back to role-only behavior', e);
-      return true;
+      // Permission lookup failures must deny access.
+      return false;
     }
   } catch (err) {
     console.error("isOrgManagerWith check failed:", err);

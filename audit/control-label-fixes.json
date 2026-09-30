@@ -1,0 +1,447 @@
+[
+  {
+    "file": "client/src/components/AdminTopNav.tsx",
+    "line": 37,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/components/AgentsTab.tsx",
+    "line": 236,
+    "label": "Extension"
+  },
+  {
+    "file": "client/src/components/OrgMembersTab.tsx",
+    "line": 238,
+    "label": "Role"
+  },
+  {
+    "file": "client/src/components/OrgMembersTab.tsx",
+    "line": 286,
+    "label": "Role"
+  },
+  {
+    "file": "client/src/components/OrgReportsTab.tsx",
+    "line": 167,
+    "label": "Date Range"
+  },
+  {
+    "file": "client/src/components/OrgReportsTab.tsx",
+    "line": 180,
+    "label": "Phone Number"
+  },
+  {
+    "file": "client/src/pages/admin/AdminAgentsManagementPage.tsx",
+    "line": 558,
+    "label": "User"
+  },
+  {
+    "file": "client/src/pages/admin/AdminAgentsManagementPage.tsx",
+    "line": 564,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminAgentsManagementPage.tsx",
+    "line": 570,
+    "label": "Role"
+  },
+  {
+    "file": "client/src/pages/admin/AdminAgentsManagementPage.tsx",
+    "line": 574,
+    "label": "Extension"
+  },
+  {
+    "file": "client/src/pages/admin/AdminAgentsManagementPage.tsx",
+    "line": 718,
+    "label": "Role"
+  },
+  {
+    "file": "client/src/pages/admin/AdminAgentsManagementPage.tsx",
+    "line": 728,
+    "label": "Extension"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPage.tsx",
+    "line": 305,
+    "label": "Type"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 624,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 902,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 908,
+    "label": "User"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 932,
+    "label": "Record type"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 941,
+    "label": "Status"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 949,
+    "label": "Currency"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 989,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 995,
+    "label": "Status"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 1004,
+    "label": "Currency"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 1086,
+    "label": "Currency"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 1094,
+    "label": "Billing interval"
+  },
+  {
+    "file": "client/src/pages/admin/AdminBillingPageV2.tsx",
+    "line": 1123,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminInviteCodesPage.tsx",
+    "line": 168,
+    "label": "Invite type"
+  },
+  {
+    "file": "client/src/pages/admin/AdminInviteCodesPage.tsx",
+    "line": 184,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminInviteCodesPage.tsx",
+    "line": 208,
+    "label": "Role"
+  },
+  {
+    "file": "client/src/pages/admin/AdminInviteCodesPage.tsx",
+    "line": 239,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminLogsPage.tsx",
+    "line": 167,
+    "label": "Date range"
+  },
+  {
+    "file": "client/src/pages/admin/AdminLogsPage.tsx",
+    "line": 177,
+    "label": "Error resolution"
+  },
+  {
+    "file": "client/src/pages/admin/AdminMightyCallPage.tsx",
+    "line": 194,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminNumberChangeRequestsPage.tsx",
+    "line": 127,
+    "label": "Filter by Status"
+  },
+  {
+    "file": "client/src/pages/admin/AdminNumberChangeRequestsPage.tsx",
+    "line": 141,
+    "label": "Filter by Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminNumberChangeRequestsPage.tsx",
+    "line": 199,
+    "label": "Status"
+  },
+  {
+    "file": "client/src/pages/admin/AdminOperationsPage.tsx",
+    "line": 1006,
+    "label": "Feature permission"
+  },
+  {
+    "file": "client/src/pages/admin/AdminRecordingsPage.tsx",
+    "line": 217,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminRecordingsPage.tsx",
+    "line": 224,
+    "label": "Search Number"
+  },
+  {
+    "file": "client/src/pages/admin/AdminReportsPage.tsx",
+    "line": 266,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminReportsPage.tsx",
+    "line": 273,
+    "label": "Report Type"
+  },
+  {
+    "file": "client/src/pages/admin/AdminSupportPage.tsx",
+    "line": 160,
+    "label": "Status Filter"
+  },
+  {
+    "file": "client/src/pages/admin/AdminSupportPage.tsx",
+    "line": 210,
+    "label": "Status"
+  },
+  {
+    "file": "client/src/pages/admin/AdminUsersPage.tsx",
+    "line": 402,
+    "label": "Global role"
+  },
+  {
+    "file": "client/src/pages/admin/AdminUsersPage.tsx",
+    "line": 486,
+    "label": "Invite type"
+  },
+  {
+    "file": "client/src/pages/admin/AdminUsersPage.tsx",
+    "line": 507,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminUsersPage.tsx",
+    "line": 528,
+    "label": "Role"
+  },
+  {
+    "file": "client/src/pages/admin/AdminUsersPage.tsx",
+    "line": 573,
+    "label": "User"
+  },
+  {
+    "file": "client/src/pages/admin/AdminUsersPage.tsx",
+    "line": 587,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/admin/AdminUsersPage.tsx",
+    "line": 601,
+    "label": "Role"
+  },
+  {
+    "file": "client/src/pages/admin/AdminUsersPage.tsx",
+    "line": 763,
+    "label": "Role"
+  },
+  {
+    "file": "client/src/pages/admin/OrgDashboardPage.tsx",
+    "line": 192,
+    "label": "View:"
+  },
+  {
+    "file": "client/src/pages/AdminSupportPage.tsx",
+    "line": 195,
+    "label": "Status"
+  },
+  {
+    "file": "client/src/pages/AdminSupportPage.tsx",
+    "line": 209,
+    "label": "Priority"
+  },
+  {
+    "file": "client/src/pages/NumbersPage.tsx",
+    "line": 318,
+    "label": "Request Type"
+  },
+  {
+    "file": "client/src/pages/RecordingsPage.tsx",
+    "line": 338,
+    "label": "Search Number"
+  },
+  {
+    "file": "client/src/pages/RecordingsPage.tsx",
+    "line": 342,
+    "label": "Start Date"
+  },
+  {
+    "file": "client/src/pages/RecordingsPage.tsx",
+    "line": 346,
+    "label": "End Date"
+  },
+  {
+    "file": "client/src/pages/RecordingsPage.tsx",
+    "line": 350,
+    "label": "Direction"
+  },
+  {
+    "file": "client/src/pages/ReportPage.tsx",
+    "line": 361,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/ReportPage.tsx",
+    "line": 367,
+    "label": "Start date"
+  },
+  {
+    "file": "client/src/pages/ReportPage.tsx",
+    "line": 368,
+    "label": "End date"
+  },
+  {
+    "file": "client/src/pages/ReportPage.tsx",
+    "line": 369,
+    "label": "Phone number"
+  },
+  {
+    "file": "client/src/pages/ReportPage.tsx",
+    "line": 375,
+    "label": "Direction"
+  },
+  {
+    "file": "client/src/pages/ReportPage.tsx",
+    "line": 380,
+    "label": "Status"
+  },
+  {
+    "file": "client/src/pages/ReportsPage.tsx",
+    "line": 199,
+    "label": "Date Range"
+  },
+  {
+    "file": "client/src/pages/ReportsPage.tsx",
+    "line": 213,
+    "label": "Direction"
+  },
+  {
+    "file": "client/src/pages/ReportsPage.tsx",
+    "line": 226,
+    "label": "Status"
+  },
+  {
+    "file": "client/src/pages/ReportsPageFixed.tsx",
+    "line": 181,
+    "label": "Date Range"
+  },
+  {
+    "file": "client/src/pages/ReportsPageFixed.tsx",
+    "line": 195,
+    "label": "Direction"
+  },
+  {
+    "file": "client/src/pages/ReportsPageFixed.tsx",
+    "line": 208,
+    "label": "Status"
+  },
+  {
+    "file": "client/src/pages/SettingsPage.tsx",
+    "line": 126,
+    "label": "Timezone"
+  },
+  {
+    "file": "client/src/pages/SMSPage.tsx",
+    "line": 423,
+    "label": "From"
+  },
+  {
+    "file": "client/src/pages/SMSPage.tsx",
+    "line": 443,
+    "label": "Organization"
+  },
+  {
+    "file": "client/src/pages/SupportPage.tsx",
+    "line": 190,
+    "label": "Priority"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 739,
+    "label": "Authenticator code"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 769,
+    "label": "Email verification code"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 891,
+    "label": "Upload Picture"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 915,
+    "label": "Full Name"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 924,
+    "label": "Email"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 933,
+    "label": "Phone Number"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 971,
+    "label": "Upload Logo"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 999,
+    "label": "Generate New API Key"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 1022,
+    "label": "New API key"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 1117,
+    "label": "Question"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 1129,
+    "label": "Answer"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 1157,
+    "label": "Current Password"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 1168,
+    "label": "New Password"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 1178,
+    "label": "Confirm Password"
+  },
+  {
+    "file": "client/src/pages/UserSettingsPage.tsx",
+    "line": 1189,
+    "label": "Verification Code"
+  }
+]

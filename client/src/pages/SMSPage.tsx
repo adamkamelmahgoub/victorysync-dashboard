@@ -420,7 +420,7 @@ export function SMSPage() {
             <div className="space-y-4">
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From</label>
-                <select
+                <select aria-label="From"
                   value={fromNumber}
                   onChange={(e) => setFromNumber(e.target.value)}
                   className="vs-input w-full"
@@ -440,7 +440,7 @@ export function SMSPage() {
               {isPlatformAdmin && !orgId && (
                 <div>
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Organization</label>
-                  <select
+                  <select aria-label="Organization"
                     value={sendOrgOverride}
                     onChange={(e) => setSendOrgOverride(e.target.value)}
                     className="vs-input w-full"

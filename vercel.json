@@ -9,7 +9,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co https://api.victorysync.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co https://api.victorysync.com; img-src 'self' data: blob: https://*.supabase.co; style-src 'self' 'unsafe-inline'; frame-ancestors 'none';"
         },
         {
           "key": "X-Frame-Options",
@@ -34,8 +34,9 @@
       ]
     }
   ],
-  
-  "regions": ["bom1"],
+  "regions": [
+    "bom1"
+  ],
   "routes": [
     {
       "src": "^/api/(.*)",

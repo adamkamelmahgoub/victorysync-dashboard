@@ -621,7 +621,7 @@ export const AdminBillingPageV2: React.FC = () => {
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="grid gap-3 md:grid-cols-[1.2fr_1fr]">
                   <Field label="Organization">
-                    <select value={lockOrgId} onChange={(e) => setLockOrgId(e.target.value)} className="vs-input w-full">
+                    <select aria-label="Organization" value={lockOrgId} onChange={(e) => setLockOrgId(e.target.value)} className="vs-input w-full">
                       <option value="">Select organization</option>
                       {orgs.map((org) => {
                         const lock = lockByOrgId.get(org.id);
@@ -899,13 +899,13 @@ export const AdminBillingPageV2: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Organization">
-              <select className="vs-input w-full" value={recordForm.org_id} onChange={(e) => setRecordForm({ ...recordForm, org_id: e.target.value })}>
+              <select aria-label="Organization" className="vs-input w-full" value={recordForm.org_id} onChange={(e) => setRecordForm({ ...recordForm, org_id: e.target.value })}>
                 <option value="">Select organization (optional)</option>
                 {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
               </select>
             </Field>
             <Field label="User">
-              <select
+              <select aria-label="User"
                 className="vs-input w-full"
                 value={recordForm.user_id}
                 onChange={(e) => {
@@ -929,7 +929,7 @@ export const AdminBillingPageV2: React.FC = () => {
               <input className="vs-input w-full" placeholder="Amount" type="number" step="0.01" value={recordForm.amount} onChange={(e) => setRecordForm({ ...recordForm, amount: e.target.value })} />
             </Field>
             <Field label="Type">
-              <select className="vs-input w-full" value={recordForm.type} onChange={(e) => setRecordForm({ ...recordForm, type: e.target.value })}>
+              <select aria-label="Record type" className="vs-input w-full" value={recordForm.type} onChange={(e) => setRecordForm({ ...recordForm, type: e.target.value })}>
                 <option value="subscription">subscription</option>
                 <option value="one_time">one_time</option>
                 <option value="usage">usage</option>
@@ -938,7 +938,7 @@ export const AdminBillingPageV2: React.FC = () => {
               </select>
             </Field>
             <Field label="Status">
-              <select className="vs-input w-full" value={recordForm.status} onChange={(e) => setRecordForm({ ...recordForm, status: e.target.value })}>
+              <select aria-label="Status" className="vs-input w-full" value={recordForm.status} onChange={(e) => setRecordForm({ ...recordForm, status: e.target.value })}>
                 <option value="pending">pending</option>
                 <option value="paid">paid</option>
                 <option value="failed">failed</option>
@@ -946,7 +946,7 @@ export const AdminBillingPageV2: React.FC = () => {
               </select>
             </Field>
             <Field label="Currency">
-              <select className="vs-input w-full" value={recordForm.currency} onChange={(e) => setRecordForm({ ...recordForm, currency: e.target.value })}>
+              <select aria-label="Currency" className="vs-input w-full" value={recordForm.currency} onChange={(e) => setRecordForm({ ...recordForm, currency: e.target.value })}>
                 <option value="USD">USD</option>
                 <option value="EUR">EUR</option>
                 <option value="GBP">GBP</option>
@@ -986,13 +986,13 @@ export const AdminBillingPageV2: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Organization">
-              <select className="vs-input w-full" value={invoiceForm.org_id} onChange={(e) => setInvoiceForm({ ...invoiceForm, org_id: e.target.value })}>
+              <select aria-label="Organization" className="vs-input w-full" value={invoiceForm.org_id} onChange={(e) => setInvoiceForm({ ...invoiceForm, org_id: e.target.value })}>
                 <option value="">Select organization</option>
                 {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
               </select>
             </Field>
             <Field label="Status">
-              <select className="vs-input w-full" value={invoiceForm.status} onChange={(e) => setInvoiceForm({ ...invoiceForm, status: e.target.value })}>
+              <select aria-label="Status" className="vs-input w-full" value={invoiceForm.status} onChange={(e) => setInvoiceForm({ ...invoiceForm, status: e.target.value })}>
                 <option value="draft">draft</option>
                 <option value="sent">sent</option>
                 <option value="paid">paid</option>
@@ -1001,7 +1001,7 @@ export const AdminBillingPageV2: React.FC = () => {
               </select>
             </Field>
             <Field label="Currency">
-              <select className="vs-input w-full" value={invoiceForm.currency} onChange={(e) => setInvoiceForm({ ...invoiceForm, currency: e.target.value })}>
+              <select aria-label="Currency" className="vs-input w-full" value={invoiceForm.currency} onChange={(e) => setInvoiceForm({ ...invoiceForm, currency: e.target.value })}>
                 <option value="USD">USD</option>
                 <option value="EUR">EUR</option>
                 <option value="GBP">GBP</option>
@@ -1083,7 +1083,7 @@ export const AdminBillingPageV2: React.FC = () => {
               <input className="vs-input w-full" type="number" step="0.01" value={packageForm.base_monthly_cost} onChange={(e) => setPackageForm({ ...packageForm, base_monthly_cost: e.target.value })} />
             </Field>
             <Field label="Currency">
-              <select className="vs-input w-full" value={packageForm.currency} onChange={(e) => setPackageForm({ ...packageForm, currency: e.target.value })}>
+              <select aria-label="Currency" className="vs-input w-full" value={packageForm.currency} onChange={(e) => setPackageForm({ ...packageForm, currency: e.target.value })}>
                 <option value="USD">USD</option>
                 <option value="CAD">CAD</option>
                 <option value="EUR">EUR</option>
@@ -1091,7 +1091,7 @@ export const AdminBillingPageV2: React.FC = () => {
               </select>
             </Field>
             <Field label="Billing Interval">
-              <select className="vs-input w-full" value={packageForm.billing_interval} onChange={(e) => setPackageForm({ ...packageForm, billing_interval: e.target.value })}>
+              <select aria-label="Billing interval" className="vs-input w-full" value={packageForm.billing_interval} onChange={(e) => setPackageForm({ ...packageForm, billing_interval: e.target.value })}>
                 <option value="month">month</option>
                 <option value="year">year</option>
               </select>
@@ -1120,7 +1120,7 @@ export const AdminBillingPageV2: React.FC = () => {
               <input className="vs-input w-full" placeholder="price_..." value={packageForm.stripe_price_id} onChange={(e) => setPackageForm({ ...packageForm, stripe_price_id: e.target.value })} />
             </Field>
             <Field label="Assign to Organization">
-              <select className="vs-input w-full" value={packageForm.autoAssignOrgId} onChange={(e) => setPackageForm({ ...packageForm, autoAssignOrgId: e.target.value })}>
+              <select aria-label="Organization" className="vs-input w-full" value={packageForm.autoAssignOrgId} onChange={(e) => setPackageForm({ ...packageForm, autoAssignOrgId: e.target.value })}>
                 <option value="">No assignment yet</option>
                 {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
               </select>

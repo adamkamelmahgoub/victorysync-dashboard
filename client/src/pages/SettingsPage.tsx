@@ -9,7 +9,7 @@ import StripePortalButton from "../components/StripePortalButton";
 export const SettingsPage: FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { org, isAdmin, refresh } = useOrg();
+  const { org, isAdmin, refresh, loading: orgLoading, error: orgError } = useOrg();
   const [loading, setLoading] = useState(false);
   const [billingMessage, setBillingMessage] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -40,33 +40,11 @@ export const SettingsPage: FC = () => {
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('organizations')
-        .update({
-          name: formData.name,
-          timezone: formData.timezone,
-          sla_target_percent: formData.sla_target_percent,
-          sla_target_seconds: formData.sla_target_seconds,
-          business_hours: formData.business_hours,
-          escalation_email: formData.escalation_email || null
-        })
-        .eq('id', org.id);
-
+      const { error } = await supabase.rpc('wf_update_org_settings', {organization_id:org.id,settings:formData});
       if (error) throw error;
-
-      // Log audit
-      await supabase.from('audit_logs').insert({
-        org_id: org.id,
-        user_id: user?.id || null,
-        action: 'update_org_settings',
-        entity_type: 'organization',
-        entity_id: org.id,
-        metadata: { changes: formData }
-      });
-
       await refresh();
     } catch (error) {
-      console.error('Error updating settings:', error);
+      setBillingMessage('Settings could not be saved. Please retry.');
     } finally {
       setLoading(false);
     }
@@ -75,7 +53,7 @@ export const SettingsPage: FC = () => {
   if (!org) {
     return (
       <PageLayout title="Organization Settings" description="Manage your organization settings, SLA targets, and business hours">
-        <div className="vs-surface p-6 text-sm text-slate-600">Loading organization settings...</div>
+        <div className="vs-surface p-6 text-sm text-slate-600">{orgLoading ? 'Loading organization settings...' : orgError || 'Select an organization to manage its settings.'}</div>
       </PageLayout>
     );
   }
@@ -123,7 +101,7 @@ export const SettingsPage: FC = () => {
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">Timezone</label>
-              <select
+              <select aria-label="Timezone"
                 value={formData.timezone}
                 onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
                 className="vs-input w-full"

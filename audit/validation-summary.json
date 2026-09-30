@@ -1,0 +1,39 @@
+{
+  "recorded_at": "2026-09-30T01:06:22.412Z",
+  "environment": "Local Windows builds and disposable PostgreSQL/browser fixtures. No production writes.",
+  "browser": [
+    {
+      "artifact": "legacy-browser-after.json",
+      "checks": 210,
+      "issues": 0
+    },
+    {
+      "artifact": "workforce-browser.json",
+      "checks": 84,
+      "issues": 0
+    },
+    {
+      "artifact": "final-populated-browser.json",
+      "checks": 24,
+      "issues": 0
+    }
+  ],
+  "client_build": "passed",
+  "client_typecheck": "passed",
+  "server_tests": 25,
+  "auth_tests": 7,
+  "database_suite": "passed",
+  "desktop_unit_tests": 2,
+  "desktop_smoke": "passed",
+  "installer_signature": "NotSigned",
+  "clerk": "deferred by user",
+  "production_migrations": "not applied",
+  "migration_files": [
+    "050_workforce_access.sql",
+    "051_workforce_time_transfers.sql",
+    "052_workforce_monitoring.sql",
+    "053_workforce_operations.sql",
+    "054_atomic_organization_settings.sql"
+  ],
+  "upstream_integration": "Preserved 004ad13. Database suite also applies 045_admin_client_leads.sql and verifies client denial. Browser artifacts predate the incoming client-leads page."
+}

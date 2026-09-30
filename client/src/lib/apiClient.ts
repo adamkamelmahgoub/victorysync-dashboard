@@ -44,8 +44,9 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
   const requestInit = await withBrowserAuthHeaders(url, init);
   const method = String(requestInit?.method || "GET").toUpperCase();
   const cacheableRead = method === "GET" && /\/api\/(dashboard|kpi|client-metrics|reports|calls|recordings|sms)/.test(url);
+  const cacheKey = `${new Headers(requestInit?.headers).get('Authorization') || 'anonymous'}:${url}`;
   if (cacheableRead) {
-    const cached = readCache.get(url);
+    const cached = readCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
   }
   // Keep ordinary reads bounded, but give heavier report views enough room to
@@ -115,7 +116,7 @@ export async function fetchJson(path: string, init?: FetchJsonInit) {
   }
   if (res.status === 204) return null as any;
   const json = await res.json() as Json;
-  if (cacheableRead) readCache.set(url, { value: json, expiresAt: Date.now() + READ_CACHE_TTL_MS });
+  if (cacheableRead) readCache.set(cacheKey, { value: json, expiresAt: Date.now() + READ_CACHE_TTL_MS });
   return json;
 }
 

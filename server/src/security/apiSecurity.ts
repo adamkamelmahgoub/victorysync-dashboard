@@ -277,7 +277,7 @@ export function createClerkSessionMiddleware(supabaseAdmin: SupabaseAdmin) {
         }
       }
 
-      if (!actor && process.env.NODE_ENV !== 'production') {
+      if (!actor && process.env.NODE_ENV === 'development' && process.env.ALLOW_LOCAL_AUTH_BYPASS === 'true') {
         if (req.header('x-dev-bypass') === 'true') {
           actor = process.env.DEV_BYPASS_USER_ID || 'a5f6f998-5ed5-4c0c-88ac-9f27d677697a';
           req.headers['x-user-id'] = actor;

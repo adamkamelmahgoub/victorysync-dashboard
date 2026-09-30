@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { fetchJson } from '../lib/apiClient';
 
 interface APIKey {
   id: string;
   name: string;
-  key: string;
+  key?: string;
   created_at: string;
   last_used_at: string | null;
   is_active: boolean;
@@ -19,6 +19,10 @@ export default function OrgAPIKeysTab({ orgId, isOrgAdmin }: { orgId: string; is
   const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    setApiKeys([]);
+    setRevealedKeys(new Set());
+    setNewKeyName('');
+    setShowForm(false);
     loadAPIKeys();
   }, [orgId]);
 
@@ -27,21 +31,8 @@ export default function OrgAPIKeysTab({ orgId, isOrgAdmin }: { orgId: string; is
       setLoading(true);
       setError(null);
       
-      // In production, you'd fetch from /api/orgs/:orgId/api-keys
-      // For now, try to fetch from Supabase if the table exists
-      const { data, error: err } = await supabase
-        .from('org_api_keys')
-        .select('*')
-        .eq('org_id', orgId)
-        .order('created_at', { ascending: false });
-
-      if (err) {
-        // Table might not exist in production yet
-        setError('API keys table not yet deployed. Contact admin to enable this feature.');
-        setApiKeys([]);
-      } else {
-        setApiKeys(data || []);
-      }
+      const data = await fetchJson(`/api/orgs/${orgId}/api-keys`);
+      setApiKeys((data.keys || []).map((row: any) => ({ id: row.id, name: row.label || 'Unnamed key', created_at: row.created_at, last_used_at: row.last_used_at, is_active: true })));
     } catch (e) {
       setError('Failed to load API keys');
       console.error(e);
@@ -63,7 +54,7 @@ export default function OrgAPIKeysTab({ orgId, isOrgAdmin }: { orgId: string; is
       const response = await fetch(`/api/orgs/${orgId}/api-keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newKeyName }),
+        body: JSON.stringify({ label: newKeyName }),
       });
 
       if (!response.ok) {
@@ -72,7 +63,8 @@ export default function OrgAPIKeysTab({ orgId, isOrgAdmin }: { orgId: string; is
         return;
       }
 
-      const newKey = await response.json();
+      const result = await response.json();
+      const newKey: APIKey = { id: result.key.id, name: result.key.label || 'Unnamed key', key: result.apiKey, created_at: result.key.created_at, last_used_at: null, is_active: true };
       setApiKeys([newKey, ...apiKeys]);
       setNewKeyName('');
       setShowForm(false);
@@ -121,13 +113,14 @@ export default function OrgAPIKeysTab({ orgId, isOrgAdmin }: { orgId: string; is
       {error && (
         <div className="bg-rose-900/20 border border-rose-800 rounded-lg p-4">
           <p className="text-rose-400 text-sm">{error}</p>
+          <button className="vs-btn vs-btn-secondary mt-2" onClick={loadAPIKeys}>Retry</button>
         </div>
       )}
 
       {/* Info Box */}
-      <div className="bg-blue-900/20 border border-blue-800 rounded-lg p-4">
-        <p className="text-blue-300 text-sm">
-          API keys are used to authenticate requests to the VictorySync API. Keep them secret and rotate them regularly.
+      <div className="vs-surface rounded-lg p-4">
+        <p className="text-[var(--vs-text)] text-sm">
+          Copy a new key before leaving this page. Existing keys cannot be revealed again. Keep keys secret and rotate them regularly.
         </p>
       </div>
 
@@ -146,6 +139,7 @@ export default function OrgAPIKeysTab({ orgId, isOrgAdmin }: { orgId: string; is
               <div>
                 <label className="block text-sm text-slate-300 mb-2">Key Name</label>
                 <input
+                  aria-label="Key name"
                   type="text"
                   value={newKeyName}
                   onChange={(e) => setNewKeyName(e.target.value)}
@@ -190,18 +184,19 @@ export default function OrgAPIKeysTab({ orgId, isOrgAdmin }: { orgId: string; is
                   <div className="mt-2 space-y-1">
                     <div className="flex items-center gap-2">
                       <code className="bg-slate-800 px-2 py-1 rounded text-xs text-slate-300 font-mono flex-1 block overflow-x-auto">
-                        {revealedKeys.has(key.id) ? key.key : '••••••••••••••••'}
+                        {key.key ? (revealedKeys.has(key.id) ? key.key : '••••••••••••••••') : 'Stored securely. Rotate to obtain a new key.'}
                       </code>
                       <button
+                        disabled={!key.key}
                         onClick={() => toggleRevealKey(key.id)}
                         className="px-2 py-1 text-xs text-slate-400 hover:text-slate-300 transition-colors"
                       >
                         {revealedKeys.has(key.id) ? 'Hide' : 'Show'}
                       </button>
                       <button
+                        disabled={!key.key}
                         onClick={() => {
-                          const text = revealedKeys.has(key.id) ? key.key : 'Key hidden - click Show first';
-                          navigator.clipboard.writeText(text);
+                          if (key.key) void navigator.clipboard.writeText(key.key).catch(() => setError('Copy failed. Select and copy the revealed key manually.'));
                         }}
                         className="px-2 py-1 text-xs text-slate-400 hover:text-slate-300 transition-colors"
                       >

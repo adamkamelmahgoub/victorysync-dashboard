@@ -60,6 +60,7 @@ import {
 import { getMightyCallAccessToken } from './integrations/mightycall';
 import { isPlatformAdmin, isPlatformManagerWith, isOrgAdmin, isOrgMember, isOrgManagerWith } from './auth/rbac';
 import usersRouter from './routes/users';
+import workforceRouter from './routes/workforce';
 import reportsRouter from './routes/reports';
 import mightyCallApiRouter from './routes/mightycallApi';
 import mightyCallReliabilityRouter from './routes/mightycallReliability';
@@ -1763,7 +1764,7 @@ async function upsertWebhookTransfer(orgId: string, call: ReturnType<typeof norm
   try {
     const transferId = firstWebhookValue(call.payload?.transfer_id, call.payload?.transferId, call.payload?.event_id, call.payload?.eventId)
       || [call.external_id, normalizeExtension(call.agent_extension), call.transfer_target || 'target', webhookIso(call.payload?.Timestamp || call.payload?.timestamp) || new Date().toISOString()].join(':');
-    await supabaseAdmin.from('call_transfers').upsert({
+    const saved = await supabaseAdmin.from('call_transfers').upsert({
       org_id: orgId,
       external_transfer_id: transferId,
       external_call_id: call.external_id,
@@ -1777,6 +1778,20 @@ async function upsertWebhookTransfer(orgId: string, call: ReturnType<typeof norm
       transferred_at: webhookIso(call.payload?.Timestamp || call.payload?.timestamp || call.started_at) || new Date().toISOString(),
       raw_payload: call.payload,
     }, { onConflict: 'org_id,external_transfer_id' });
+    if (saved.error) throw saved.error;
+    if (process.env.WORKFORCE_MIGHTYCALL_SYNC === 'true') {
+      const occurredAt = webhookIso(call.payload?.transferredAt || call.payload?.Timestamp || call.payload?.timestamp);
+      const stableId = firstWebhookValue(call.payload?.transfer_id, call.payload?.transferId)
+        || [call.external_id, normalizeExtension(call.agent_extension), call.transfer_target || 'target', occurredAt || 'timestamp-missing'].join(':');
+      const result = await supabaseAdmin.rpc('wf_ingest_transfer', {event: {
+        source_key: String(stableId), identity_confirmed: Boolean(firstWebhookValue(call.payload?.transfer_id, call.payload?.transferId)), occurred_at: occurredAt || null,
+        client_id: orgId, extension: normalizeExtension(call.agent_extension), business_number: call.payload?.businessNumber || call.payload?.business_number || (call.direction === 'outbound' ? call.from_number : call.to_number) || '',
+        phone: call.direction === 'outbound' ? call.to_number : call.from_number,
+        outcome: call.payload?.transferStatus || call.payload?.transfer_status || null,
+        external_call_id: call.external_id
+      }});
+      if (result.error) throw result.error;
+    }
   } catch (err: any) {
     console.warn('[mightycall webhook] call_transfers write skipped:', fmtErr(err));
   }
@@ -4951,6 +4966,17 @@ app.get('/api/csrf-token', enforceAuthenticatedApi as any, (req, res) => {
   res.json({ csrfToken: createCsrfToken(String(req.actorId || '')) });
 });
 app.use('/api', enforceAuthenticatedApi as any);
+app.use('/api/workforce', csrfProtection as any, workforceRouter);
+// Service-role legacy routes are only available to staff. Auth bootstrap stays scoped.
+app.use('/api', async (req, res, next) => {
+  if (req.apiKeyScope?.scope === 'org') return res.status(403).json({message:'Client API keys cannot access legacy operations.'});
+  if (!req.actorId) return next(); // Public integrations retain their own authentication.
+  const bootstrap = ['/user/profile','/user/orgs','/user/mfa/factors','/me/features','/csrf-token'];
+  if (req.method === 'GET' && bootstrap.includes(req.path)) return next();
+  if (['/user/mfa-login/email/send','/user/mfa-login/verify','/user/security/login-notification','/logs/auth','/logs/page-view','/logs/activity'].includes(req.path)) return next();
+  if (await isPlatformAdmin(req.actorId)) return next();
+  return res.status(403).json({message:'Use the scoped workforce workspace for this account.'});
+});
 
 app.get('/api/client/billing/access', async (req, res) => {
   try {

@@ -1,0 +1,2519 @@
+{
+  "method": "Synthetic admin auth and empty responses, 35 routes at 3 widths in both themes. Redirects and empty states are recorded. Axe cannot certify populated charts, translucency, all interactive states or production behavior.",
+  "results": [
+    {
+      "route": "/login",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/calls",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/calls",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/live-status",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/live-status",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/settings",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/numbers",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/numbers",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/account-settings",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/account-settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/email-preferences",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/recordings",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/sms",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/support",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/billing",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/team",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/team",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/debug-auth",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/debug-auth",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/users",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/users",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/agents-management",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/agents-management",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/orgs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/orgs/00000000-0000-4000-8000-000000000002/manage",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/operations",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/operations",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/org-overview",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/org-overview",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/logs",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/logs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/api-keys",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/mightycall",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/mightycall",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast",
+        "th-has-data-cells"
+      ]
+    },
+    {
+      "route": "/admin/support",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/number-change-requests",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/number-change-requests",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/invites",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/invites",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/reports",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/recordings",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/sms",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/billing",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/email-preferences",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/login",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/calls",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/calls",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/live-status",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/live-status",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/settings",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/numbers",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/numbers",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/account-settings",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/account-settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/email-preferences",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/recordings",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/sms",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/support",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/billing",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/team",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/team",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/debug-auth",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/debug-auth",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/users",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/users",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/agents-management",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/agents-management",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/orgs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/orgs/00000000-0000-4000-8000-000000000002/manage",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/operations",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/operations",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/org-overview",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/org-overview",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/logs",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/logs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/api-keys",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/mightycall",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/mightycall",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast",
+        "th-has-data-cells"
+      ]
+    },
+    {
+      "route": "/admin/support",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/number-change-requests",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/number-change-requests",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/invites",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/invites",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/reports",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/recordings",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/sms",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/billing",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/email-preferences",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/login",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/calls",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/calls",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/live-status",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/live-status",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/settings",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/numbers",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/numbers",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/account-settings",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/account-settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/email-preferences",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/recordings",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/sms",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/support",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/billing",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/team",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/team",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/debug-auth",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/debug-auth",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/users",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/users",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/agents-management",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/agents-management",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/orgs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/orgs/00000000-0000-4000-8000-000000000002/manage",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/operations",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/operations",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/org-overview",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/org-overview",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/logs",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/logs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/api-keys",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/mightycall",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/mightycall",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast",
+        "th-has-data-cells"
+      ]
+    },
+    {
+      "route": "/admin/support",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/number-change-requests",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/number-change-requests",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/invites",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/invites",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/reports",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/recordings",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/sms",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/billing",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/email-preferences",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/login",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/calls",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/calls",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/live-status",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/live-status",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/settings",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/numbers",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/numbers",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/account-settings",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/account-settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/email-preferences",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/recordings",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/sms",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/support",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/billing",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/team",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/team",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/debug-auth",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/debug-auth",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/users",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/users",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/agents-management",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/agents-management",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/orgs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": []
+    },
+    {
+      "route": "/orgs/00000000-0000-4000-8000-000000000002/manage",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/operations",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/operations",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/org-overview",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/org-overview",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/logs",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/logs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/api-keys",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/mightycall",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/mightycall",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast",
+        "th-has-data-cells"
+      ]
+    },
+    {
+      "route": "/admin/support",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/number-change-requests",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/number-change-requests",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/invites",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/invites",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/reports",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/recordings",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/sms",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/billing",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/email-preferences",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/login",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/calls",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/calls",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/live-status",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/live-status",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/settings",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": []
+    },
+    {
+      "route": "/numbers",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/numbers",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/account-settings",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/account-settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/email-preferences",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/recordings",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/sms",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/support",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/billing",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/team",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/team",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/debug-auth",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/debug-auth",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": []
+    },
+    {
+      "route": "/admin/users",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/users",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/agents-management",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/agents-management",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/orgs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": []
+    },
+    {
+      "route": "/orgs/00000000-0000-4000-8000-000000000002/manage",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/operations",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/operations",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/org-overview",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/org-overview",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/logs",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/logs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/api-keys",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/mightycall",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/mightycall",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast",
+        "th-has-data-cells"
+      ]
+    },
+    {
+      "route": "/admin/support",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/number-change-requests",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/number-change-requests",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/invites",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/invites",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/reports",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/recordings",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/sms",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/billing",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/email-preferences",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/login",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/calls",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/calls",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/live-status",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/live-status",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/settings",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/numbers",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/numbers",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/account-settings",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/account-settings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/email-preferences",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/recordings",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/sms",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/support",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/billing",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/team",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/team",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/debug-auth",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/debug-auth",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": []
+    },
+    {
+      "route": "/admin/users",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/users",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/agents-management",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/agents-management",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/orgs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/orgs/00000000-0000-4000-8000-000000000002/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": []
+    },
+    {
+      "route": "/orgs/00000000-0000-4000-8000-000000000002/manage",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/operations",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/operations",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/org-overview",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/org-overview",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/logs",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/logs",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/api-keys",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/mightycall",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/mightycall",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast",
+        "th-has-data-cells"
+      ]
+    },
+    {
+      "route": "/admin/support",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/support",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/number-change-requests",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/number-change-requests",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/invites",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/invites",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/reports",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/recordings",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/recordings",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/sms",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/sms",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/billing",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/billing",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/email-preferences",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/email-preferences",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    }
+  ]
+}

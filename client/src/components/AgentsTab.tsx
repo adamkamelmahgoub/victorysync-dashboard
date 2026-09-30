@@ -29,9 +29,9 @@ interface ExtensionOption {
 }
 
 function fmtDateTime(value?: string | null) {
-  if (!value) return '—';
+  if (!value) return '-';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
+  if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString();
 }
 
@@ -234,7 +234,7 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                   <td className="p-3 text-slate-700">{agent.role}</td>
 	                  <td className="p-3">
 	                    {editing === agent.id ? (
-	                      <select
+	                      <select aria-label="Extension"
 	                        className="vs-input min-w-[180px] !p-1"
 	                        value={newExt}
 	                        onChange={e => setNewExt(e.target.value)}
@@ -257,9 +257,9 @@ export default function AgentsTab({ orgId }: { orgId: string }) {
                       {live?.on_call ? 'On Call' : (live?.status || 'Idle')}
                     </span>
                   </td>
-                  <td className="p-3 text-sm text-slate-700">{live?.counterpart || '—'}</td>
+                  <td className="p-3 text-sm text-slate-700">{live?.counterpart || '-'}</td>
                   <td className="p-3 text-sm text-slate-700">
-                    <div>{live?.status || '—'}</div>
+                    <div>{live?.status || '-'}</div>
                     {live?.started_at && <div className="text-xs text-slate-500">Started {fmtDateTime(live.started_at)}</div>}
                   </td>
                   <td className="p-3">

@@ -6,9 +6,9 @@ import { preloadRoute } from '../lib/routePreloader';
 export default function AdminTopNav() {
   const navigate = useNavigate();
   const loc = useLocation();
-  const { user, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
+  const { globalRole, orgs, selectedOrgId, setSelectedOrgId } = useAuth();
 
-  const isPlatformAdmin = (user?.user_metadata as any)?.role === 'platform_admin';
+  const isPlatformAdmin = ['platform_admin', 'admin', 'super_admin'].includes(globalRole || '');
 
   const items: Array<{ to: string; label: string }> = [
     { to: '/admin/orgs', label: 'Clients' },
@@ -35,7 +35,7 @@ export default function AdminTopNav() {
           <div className="mt-2 text-sm text-slate-600">Cross-client operations, configuration, and monitoring</div>
         </div>
         {orgs && orgs.length > 0 && (
-          <select
+          <select aria-label="Organization"
             value={selectedOrgId ?? ''}
             onChange={(e) => setSelectedOrgId(e.target.value || null)}
             className="vs-input min-w-[220px]"

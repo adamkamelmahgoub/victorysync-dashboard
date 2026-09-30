@@ -214,14 +214,14 @@ const AdminRecordingsPage: FC = () => {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,240px),minmax(0,240px),1fr] md:items-end">
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Organization</label>
-              <select value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="vs-input w-full">
+              <select aria-label="Organization" value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="vs-input w-full">
                 <option value="">All Organizations</option>
                 {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
               </select>
             </div>
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Search Number</label>
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="vs-input w-full" />
+              <input aria-label="Search Number" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="+1212..." className="vs-input w-full" />
             </div>
             <label className="flex items-center justify-start gap-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
               <input type="checkbox" checked={autoRefreshEnabled} onChange={(e) => setAutoRefreshEnabled(e.target.checked)} />

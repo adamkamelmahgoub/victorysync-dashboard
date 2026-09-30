@@ -21,7 +21,9 @@ export const LoginPage: FC = () => {
   const { signIn, sendMfaEmailCode, verifyMfa, pendingMfa, signOut, user, globalRole, authError, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = (location.state as any)?.from?.pathname || (globalRole === "platform_admin" ? "/admin" : "/dashboard");
+  const requestedPath = (location.state as any)?.from?.pathname;
+  const redirectTo = typeof requestedPath === 'string' && requestedPath.startsWith('/') && !requestedPath.startsWith('//') && !requestedPath.includes('\\')
+    ? requestedPath : (globalRole === "platform_admin" ? "/admin" : "/dashboard");
 
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");

@@ -55,7 +55,9 @@ function formatDateTime(value?: string | null) {
 }
 
 function isoDateDaysAgo(days: number) {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 const DEFAULT_VIEW_DAYS = 7;
@@ -72,8 +74,8 @@ function callTime(row: Record<string, any>) {
 function rowInDateRange(row: Record<string, any>, startDate: string, endDate: string) {
   const timestamp = Date.parse(String(callTime(row) || ''));
   if (!Number.isFinite(timestamp)) return false;
-  const start = Date.parse(`${startDate}T00:00:00.000Z`);
-  const end = Date.parse(`${endDate}T23:59:59.999Z`);
+  const start = Date.parse(`${startDate}T00:00:00.000`);
+  const end = Date.parse(`${endDate}T23:59:59.999`);
   return timestamp >= start && timestamp <= end;
 }
 
@@ -84,8 +86,8 @@ function callStatus(row: Record<string, any>) {
 function callDirection(row: Record<string, any>) {
   const raw = String(row.direction || row.current_call_direction || '').toLowerCase();
   if (raw.includes('out')) return 'Outbound';
-  if (raw.includes('in')) return 'Inbound';
   if (raw.includes('internal')) return 'Internal';
+  if (raw.includes('in')) return 'Inbound';
   return 'Unknown';
 }
 
@@ -148,7 +150,7 @@ const DashboardNewV3: FC = () => {
     try {
       const json = await getLiveAgentStatus({ orgId: activeOrgId }, user.id);
       setLiveAgents((json.items || []) as LiveAgentStatus[]);
-      setLiveRefreshedAt(json.refreshed_at || new Date().toISOString());
+      setLiveRefreshedAt(json.refreshed_at || null);
     } catch (e: any) {
       setLiveError(e?.message || 'Failed to load live status');
     } finally {
@@ -175,10 +177,10 @@ const DashboardNewV3: FC = () => {
       const callsQuery = new URLSearchParams();
       if (activeOrgId) query.set('org_id', activeOrgId);
       if (activeOrgId) callsQuery.set('org_id', activeOrgId);
-      if (startDate) query.set('start_date', startDate);
-      if (startDate) callsQuery.set('start_date', startDate);
-      if (endDate) query.set('end_date', endDate);
-      if (endDate) callsQuery.set('end_date', endDate);
+      if (startDate) query.set('start_date', new Date(`${startDate}T00:00:00`).toISOString());
+      if (startDate) callsQuery.set('start_date', new Date(`${startDate}T00:00:00`).toISOString());
+      if (endDate) query.set('end_date', new Date(`${endDate}T23:59:59.999`).toISOString());
+      if (endDate) callsQuery.set('end_date', new Date(`${endDate}T23:59:59.999`).toISOString());
       const headers = { 'x-user-id': user.id };
       const [overviewJson, callsJson] = await Promise.all([
         fetchJson(`/api/reports/overview?${query.toString()}`, { headers, timeoutMs: 30000 }),
@@ -233,7 +235,7 @@ const DashboardNewV3: FC = () => {
   const avgDuration = safeNumber(reportOverview.avg_duration_seconds);
   const answerRate = calculateAnswerRate(answered, total);
   const onCall = liveAgents.filter(isAgentOnCall).length;
-  const available = Math.max(liveAgents.length - onCall, 0);
+  const available = liveAgents.filter(agent => ['available', 'ready'].includes(String(agent.status || '').toLowerCase()) && !isAgentOnCall(agent)).length;
 
   const topAgents = useMemo(() => liveAgents.slice(0, 6), [liveAgents]);
   const visibleReportCalls = useMemo(
@@ -363,7 +365,7 @@ const DashboardNewV3: FC = () => {
               <div className="mt-4 space-y-3">
                 <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                   <span className="text-sm text-slate-600">Live status</span>
-                  <span className="text-sm font-semibold text-emerald-700">{liveError ? 'Needs review' : 'Connected'}</span>
+                  <span className="text-sm font-semibold text-emerald-700">{liveError ? 'Needs review' : liveLoading ? 'Checking' : liveRefreshedAt ? 'Status received' : 'Refresh time unavailable'}</span>
                 </div>
                 <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                   <span className="text-sm text-slate-600">Last sync</span>
@@ -389,11 +391,12 @@ const DashboardNewV3: FC = () => {
           <MetricStatCard label="Recordings" value={formatNumber(recordings)} hint="Available recording records in the selected period." accent="violet" icon="RC" loading={reportLoading} />
           <MetricStatCard label="Active agents" value={formatNumber(liveAgents.length)} hint="Agents/extensions returned by the live status endpoint." accent="neutral" icon="AG" loading={liveLoading && liveAgents.length === 0} />
           <MetricStatCard label="On-call agents" value={formatNumber(onCall)} hint="Agents currently mapped to ringing, dialing, connected, or on-call states." accent="emerald" icon="OC" loading={liveLoading && liveAgents.length === 0} />
-          <MetricStatCard label="Available agents" value={formatNumber(available)} hint="Live agents not currently mapped to active call states." accent="cyan" icon="AV" loading={liveLoading && liveAgents.length === 0} />
+          <MetricStatCard label="Available agents" value={formatNumber(available)} hint="Agents explicitly reported as ready or available." accent="cyan" icon="AV" loading={liveLoading && liveAgents.length === 0} />
         </div>
 
+        <p className="text-sm text-slate-600">Call charts show the loaded record sample. Legacy report totals use bounded scans and may omit older records in large ranges. Use Workforce for complete transfer and timesheet reports.</p>
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.55fr,0.95fr]">
-          <Panel title="Calls By Hour" eyebrow="Report data">
+          <Panel title="Calls By Hour" eyebrow="Loaded call sample">
             <div className="h-[360px] p-5">
               {reportLoading ? (
                 <LoadingSkeleton className="h-full rounded-xl" />

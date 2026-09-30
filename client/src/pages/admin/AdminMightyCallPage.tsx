@@ -191,7 +191,7 @@ export default function AdminMightyCallPage() {
 
         {globalRole === 'platform_admin' && orgs && orgs.length > 0 && (
           <SectionCard title="Active organization" description="Diagnostics and credentials are scoped to the selected organization.">
-            <select value={activeOrgId || ''} onChange={(e) => setActiveOrgId(e.target.value)} className="vs-input w-full max-w-xl">
+            <select aria-label="Organization" value={activeOrgId || ''} onChange={(e) => setActiveOrgId(e.target.value)} className="vs-input w-full max-w-xl">
               {orgs.map((org) => (
                 <option key={org.id} value={org.id}>{org.name}</option>
               ))}
@@ -245,7 +245,7 @@ export default function AdminMightyCallPage() {
               <MetricStatCard label="Recordings" value={reliability?.recordings_sync_ok ? 'Observed' : 'Missing'} accent={reliability?.recordings_sync_ok ? 'emerald' : 'amber'} hint={reliability?.last_recording_sync_at ? new Date(reliability.last_recording_sync_at).toLocaleString() : 'No recording sync'} />
               <MetricStatCard label="Open alerts" value={String(reliability?.alerts?.length || 0)} accent={reliability?.alerts?.length ? 'amber' : 'emerald'} hint={reliability?.last_error_code || 'No current processing error'} />
             </div>
-            <div className="mt-5 overflow-x-auto">
+            <div tabIndex={0} className="mt-5 overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="text-left text-slate-500"><tr><th className="px-3 py-2">Event</th><th className="px-3 py-2">Extension</th><th className="px-3 py-2">State</th><th className="px-3 py-2">Received</th><th className="px-3 py-2">Action</th></tr></thead>
                 <tbody>{webhookEvents.map((event) => <tr key={event.id} className="border-t border-white/[0.04] text-slate-200"><td className="px-3 py-3">{event.event_type || '-'}</td><td className="px-3 py-3">{event.extension || '-'}</td><td className="px-3 py-3">{event.status}{event.error_code ? `: ${event.error_code}` : ''}</td><td className="px-3 py-3">{new Date(event.created_at).toLocaleString()}</td><td className="px-3 py-3">{event.status !== 'processed' ? <button className="vs-button-secondary" onClick={() => handleReplay(event.id)}>Replay</button> : '-'}</td></tr>)}</tbody>
@@ -303,7 +303,7 @@ export default function AdminMightyCallPage() {
           {syncJobs.length === 0 ? (
             <EmptyStatePanel title="No sync jobs recorded" description="Sync jobs will appear here once reports, recordings, SMS, or webhook-backed jobs run for this organization." />
           ) : (
-            <div className="overflow-x-auto">
+            <div tabIndex={0} className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="text-left text-slate-500">
                   <tr>

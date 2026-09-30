@@ -1,0 +1,29 @@
+name: Workforce retention and timer maintenance
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: workforce-maintenance
+  cancel-in-progress: false
+jobs:
+  maintain:
+    # Enable only after the reviewed migrations and scheduler credentials are deployed.
+    if: vars.WORKFORCE_MAINTENANCE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: workforce-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace server
+      - run: node server/dist/scripts/workforce_maintenance.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

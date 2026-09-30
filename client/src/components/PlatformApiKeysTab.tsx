@@ -162,7 +162,7 @@ export const PlatformApiKeysTab: FC = () => {
                     {new Date(k.created_at).toLocaleString()}
                   </td>
                   <td className="px-3 py-2 text-slate-400">
-                    {k.last_used_at ? new Date(k.last_used_at).toLocaleString() : '—'}
+                    {k.last_used_at ? new Date(k.last_used_at).toLocaleString() : '-'}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <button

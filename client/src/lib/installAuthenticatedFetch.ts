@@ -2,7 +2,7 @@ import { API_BASE_URL } from "../config";
 import { supabase } from "./supabaseClient";
 
 let installed = false;
-let csrfTokenCache: { token: string; fetchedAt: number } | null = null;
+let csrfTokenCache: { token: string; fetchedAt: number; actor: string } | null = null;
 
 function shouldAttachAuth(input: RequestInfo | URL): boolean {
   const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -27,7 +27,7 @@ export function installAuthenticatedFetch() {
   const originalFetch = window.fetch.bind(window);
 
   async function getCsrfToken(headers: Headers): Promise<string | null> {
-    if (csrfTokenCache && Date.now() - csrfTokenCache.fetchedAt < 10 * 60 * 1000) {
+    if (csrfTokenCache && csrfTokenCache.actor === headers.get('Authorization') && Date.now() - csrfTokenCache.fetchedAt < 10 * 60 * 1000) {
       return csrfTokenCache.token;
     }
     const base = API_BASE_URL ? API_BASE_URL.replace(/\/$/, "") : "";
@@ -36,7 +36,7 @@ export function installAuthenticatedFetch() {
     if (!response?.ok) return null;
     const json = await response.json().catch(() => null);
     const token = typeof json?.csrfToken === "string" ? json.csrfToken : null;
-    if (token) csrfTokenCache = { token, fetchedAt: Date.now() };
+    if (token) csrfTokenCache = { token, fetchedAt: Date.now(), actor: headers.get('Authorization') || '' };
     return token;
   }
 

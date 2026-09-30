@@ -3,8 +3,7 @@ import { supabaseAdmin } from './supabaseClient';
 async function tableExists(table: string) {
   try {
     const { error } = await supabaseAdmin.from(table).select('*').limit(1);
-    if (!error) return true;
-    return !String(error.message || '').includes('Could not find the table');
+    return !error;
   } catch {
     return false;
   }
@@ -62,28 +61,12 @@ export async function getSchemaHealth() {
   const missingTables = tableChecks.filter((row) => !row.ok).map((row) => row.table);
   const missingColumns = columnChecks.filter((row) => !row.ok).map((row) => `${row.table}.${row.column}`);
 
-  let profileTriggerHealthy = true;
-  let profileTriggerMessage: string | null = null;
-  try {
-    const { error } = await supabaseAdmin
-      .from('profiles')
-      .update({ global_role: 'platform_admin' })
-      .eq('id', '00000000-0000-0000-0000-000000000000')
-      .select('id')
-      .maybeSingle();
-    if (error && String(error.message || '').includes('updated_at')) {
-      profileTriggerHealthy = false;
-      profileTriggerMessage = error.message;
-    }
-  } catch (err: any) {
-    if (String(err?.message || '').includes('updated_at')) {
-      profileTriggerHealthy = false;
-      profileTriggerMessage = err.message;
-    }
-  }
+  // Trigger execution belongs in disposable-database tests, never a health read.
+  const profileTriggerHealthy = null;
+  const profileTriggerMessage = 'Not exercised by read-only diagnostics';
 
   return {
-    ok: missingTables.length === 0 && missingColumns.length === 0 && profileTriggerHealthy,
+    ok: missingTables.length === 0 && missingColumns.length === 0,
     missing_tables: missingTables,
     missing_columns: missingColumns,
     profile_trigger_healthy: profileTriggerHealthy,
@@ -135,17 +118,22 @@ export async function getSecurityPolicyHealth() {
   }
 
   const missingRls = tableStatus
-    .filter((row) => orgScopedTables.has(row.table_name) && !row.rls_enabled)
+    .filter((row) => !row.rls_enabled)
     .map((row) => row.table_name);
   const missingPolicies = tableStatus
-    .filter((row) => orgScopedTables.has(row.table_name) && Number(row.policy_count || 0) === 0)
+    .filter((row) => Number(row.policy_count || 0) === 0)
     .map((row) => row.table_name);
+  const missingTables = [...orgScopedTables].filter(name => !tableStatus.some(row => row.table_name === name));
   const publicBuckets = bucketStatus
     .filter((row) => row.public === true)
     .map((row) => row.name || row.id);
 
+  const unexpectedPublicBuckets = publicBuckets.filter(name => name !== 'brand-assets');
   return {
-    ok: !tableError && !bucketError && missingRls.length === 0 && missingPolicies.length === 0,
+    coverage: 'RLS and policy presence only. Tenant isolation requires separate behavioral tests.',
+    missing_tables: missingTables,
+    unexpected_public_buckets: unexpectedPublicBuckets,
+    ok: missingTables.length === 0 && unexpectedPublicBuckets.length === 0 && !tableError && !bucketError && missingRls.length === 0 && missingPolicies.length === 0,
     table_status: tableStatus,
     bucket_status: bucketStatus,
     missing_rls: missingRls,

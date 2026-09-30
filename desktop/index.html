@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self';"
+    />
+    <title>Victory Sync Tracker</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Victory Sync</h1>
+      <p>Desktop tracker</p>
+      <p id="indicator" role="status">Tracking off</p>
+      <p id="error" role="alert"></p>
+      <form id="login">
+        <label
+          >Email<input
+            name="email"
+            type="email"
+            required
+            autocomplete="username" /></label
+        ><label
+          >Password<input
+            name="password"
+            type="password"
+            required
+            autocomplete="current-password" /></label
+        ><button>Sign in</button>
+      </form>
+      <section id="disclosure" hidden>
+        <h2>Monitoring disclosure</h2>
+        <p id="disclosure-text"></p>
+        <button id="accept">I understand and accept</button>
+      </section>
+      <section id="work" hidden>
+        <label>Campaign<select id="campaign"></select></label>
+        <p id="status"></p>
+        <div class="buttons">
+          <button id="start">Clock in</button
+          ><button id="pause">Take a break</button
+          ><button id="resume">Resume</button
+          ><button id="stop">Clock out</button>
+        </div>
+        <p id="settings"></p>
+        <p>View your screenshots and activity in the Workforce dashboard.</p>
+      </section>
+      <button id="logout" hidden>Sign out</button>
+    </main>
+    <script src="renderer.js"></script>
+  </body>
+</html>

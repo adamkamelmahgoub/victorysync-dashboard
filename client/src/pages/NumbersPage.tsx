@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { triggerMightyCallPhoneNumberSync } from '../lib/apiClient';
 import { getOrgPhoneNumbers, syncPhoneNumbers } from '../lib/phonesApi';
 import { PageLayout } from '../components/PageLayout';
-import { EmptyStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
+import { EmptyStatePanel, ErrorStatePanel, MetricStatCard, SectionCard, StatusBadge } from '../components/DashboardPrimitives';
 import { buildApiUrl } from '../config';
 
 interface Recording {
@@ -93,6 +93,7 @@ const NumbersPage: FC = () => {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
   const [recordingsLoading, setRecordingsLoading] = useState(false);
+  const [recordingsError, setRecordingsError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [requestType, setRequestType] = useState('add');
   const [requestDetails, setRequestDetails] = useState('');
@@ -179,6 +180,7 @@ const NumbersPage: FC = () => {
 
     try {
       setRecordingsLoading(true);
+      setRecordingsError(null);
       const response = await fetch(buildApiUrl(`/api/recordings?org_id=${encodeURIComponent(activeOrgId)}&limit=500`), {
         headers: { 'x-user-id': userId },
       });
@@ -199,7 +201,7 @@ const NumbersPage: FC = () => {
       }));
       setRecordings(normalized);
     } catch (error) {
-      console.error('Error fetching recordings:', error);
+      setRecordingsError('Unable to load recordings. Please retry.');
       setRecordings([]);
     } finally {
       setRecordingsLoading(false);
@@ -315,7 +317,7 @@ const NumbersPage: FC = () => {
               <form onSubmit={handleRequestPhoneNumber} className="space-y-4">
                 <div>
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Request Type</label>
-                  <select value={requestType} onChange={(e) => setRequestType(e.target.value)} className="vs-input w-full">
+                  <select aria-label="Request Type" value={requestType} onChange={(e) => setRequestType(e.target.value)} className="vs-input w-full">
                     <option value="add">Add phone number</option>
                     <option value="remove">Remove phone number</option>
                     <option value="replace">Replace phone number</option>
@@ -415,7 +417,7 @@ const NumbersPage: FC = () => {
                 ) : undefined
               }
             >
-              {recordingsLoading ? (
+              {recordingsError ? <ErrorStatePanel error={recordingsError} onRetry={() => void fetchRecordings()} /> : recordingsLoading ? (
                 <div className="text-sm text-slate-400">Loading recordings...</div>
               ) : !selectedPhone ? (
                 <EmptyStatePanel

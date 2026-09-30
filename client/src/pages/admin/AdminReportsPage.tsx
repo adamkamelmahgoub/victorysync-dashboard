@@ -263,14 +263,14 @@ const AdminReportsPage: FC = () => {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,240px),minmax(0,240px),1fr] md:items-end">
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Organization</label>
-              <select value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="vs-input w-full">
+              <select aria-label="Organization" value={filterOrgId} onChange={(e) => setFilterOrgId(e.target.value)} className="vs-input w-full">
                 <option value="">All Organizations</option>
                 {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
             </div>
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Report Type</label>
-              <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="vs-input w-full">
+              <select aria-label="Report Type" value={filterType} onChange={(e) => setFilterType(e.target.value)} className="vs-input w-full">
                 <option value="calls">Calls</option>
                 <option value="messages">Messages</option>
                 <option value="analytics">Analytics</option>

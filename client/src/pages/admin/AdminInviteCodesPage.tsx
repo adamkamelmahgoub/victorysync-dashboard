@@ -165,7 +165,7 @@ export default function AdminInviteCodesPage() {
           <form onSubmit={issueInvite} className="space-y-3">
             <div>
               <label className="block text-xs text-slate-400 mb-1">Invite type</label>
-              <select
+              <select aria-label="Invite type"
                 value={issueScope}
                 onChange={(e) => {
                   const next = e.target.value as 'org' | 'platform';
@@ -181,7 +181,7 @@ export default function AdminInviteCodesPage() {
             {issueScope === 'org' && (
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Organization</label>
-                <select
+                <select aria-label="Organization"
                   value={issueOrgId}
                   onChange={(e) => setIssueOrgId(e.target.value)}
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
@@ -205,7 +205,7 @@ export default function AdminInviteCodesPage() {
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">Role</label>
-              <select
+              <select aria-label="Role"
                 value={issueRole}
                 onChange={(e) => setIssueRole(e.target.value)}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
@@ -236,7 +236,7 @@ export default function AdminInviteCodesPage() {
 
         <section className="xl:col-span-2 rounded-xl border border-slate-800 bg-slate-900/40 p-5">
           <div className="flex flex-wrap items-center gap-2 mb-4">
-            <select
+            <select aria-label="Organization"
               value={filterOrgId}
               onChange={(e) => setFilterOrgId(e.target.value)}
               className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
@@ -260,7 +260,7 @@ export default function AdminInviteCodesPage() {
             </button>
           </div>
 
-          <div className="max-h-[520px] overflow-auto rounded-lg border border-slate-800">
+          <div tabIndex={0} className="max-h-[520px] overflow-auto rounded-lg border border-slate-800">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-900/80 text-slate-300">
                 <tr>

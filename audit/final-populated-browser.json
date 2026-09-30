@@ -1,0 +1,293 @@
+{
+  "method": "Synthetic admin auth and intercepted responses, routes at 3 widths in both themes. Redirects and empty states are recorded. Axe cannot certify all populated charts, translucency, interactive states or production behavior.",
+  "results": [
+    {
+      "route": "/dashboard",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "light",
+      "width": 390,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "light",
+      "width": 768,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "light",
+      "width": 1440,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "dark",
+      "width": 390,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "dark",
+      "width": 768,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/dashboard",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/api-keys",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/api-keys",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/admin/diagnostics",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/admin/diagnostics",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    },
+    {
+      "route": "/reports",
+      "theme": "dark",
+      "width": 1440,
+      "renderedPath": "/reports",
+      "overflow": false,
+      "errors": [],
+      "violations": [],
+      "incomplete": [
+        "color-contrast"
+      ]
+    }
+  ]
+}

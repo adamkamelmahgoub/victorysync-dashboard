@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardShellHeader } from './DashboardPrimitives';
 import StripePortalButton from './StripePortalButton';
+import { useTheme } from '../contexts/ThemeContext';
 import { buildApiUrl } from '../config';
 import victorySyncLogo from '../assets/victorysync-logo.png';
 
@@ -18,16 +19,17 @@ interface PageLayoutProps {
 
 export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, actions, meta, children }) => {
   const { globalRole, selectedOrgId, setSelectedOrgId, orgs, user, profile, signOut } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
-  const isAdmin = globalRole === 'platform_admin';
+  const isAdmin = ['platform_admin','admin','super_admin'].includes(String(globalRole));
   const selectedOrgName = selectedOrgId ? orgs.find((org) => org.id === selectedOrgId)?.name || 'Selected organization' : 'All organizations';
   const userName = profile?.full_name || user?.email || 'Signed in';
   const [topbarSearch, setTopbarSearch] = useState('');
   const [profileOpen, setProfileOpen] = useState(false);
   const [billingAccess, setBillingAccess] = useState<{ locked: boolean; reason?: string | null; primary_org_id?: string | null } | null>(null);
   const [syncHealth, setSyncHealth] = useState<{ label: string; tone: 'ok' | 'syncing' | 'stale' }>({
-    label: 'Sync online',
+    label: 'Sync not checked',
     tone: 'syncing',
   });
 
@@ -36,7 +38,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!user?.id || isAdmin) {
+    if (!user?.id || isAdmin || location.pathname === '/workforce') {
       setBillingAccess(null);
       return;
     }
@@ -59,10 +61,10 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [isAdmin, user?.id]);
+  }, [isAdmin, user?.id, location.pathname]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || !isAdmin) return;
     let cancelled = false;
     const loadSyncHealth = async () => {
       try {
@@ -71,7 +73,8 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
           cache: 'no-store',
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok || cancelled) return;
+        if (cancelled) return;
+        if (!response.ok) { setSyncHealth({ label: 'Sync unavailable', tone: 'stale' }); return; }
         const sync = payload.sync || {};
         const running = Object.values(sync.running || {}).some(Boolean);
         const lastValues = Object.values(sync.lastSyncAt || {})
@@ -122,7 +125,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
 
       <main className="min-h-screen pt-14 lg:ml-[280px] lg:pt-0">
         <div className="sticky top-14 z-50 border-b border-slate-200/80 bg-white/88 px-4 shadow-[0_1px_0_rgba(15,23,42,0.03),0_12px_34px_rgba(15,23,42,0.04)] backdrop-blur-xl transition-[box-shadow,background-color] duration-300 lg:top-0 lg:px-6">
-          <div className="mx-auto flex h-16 max-w-[1680px] items-center justify-between gap-4">
+          <div className="mx-auto flex min-h-16 max-w-[1680px] items-center justify-between gap-4 py-3 md:h-16 md:py-0">
             <div className="hidden min-w-0 items-center gap-3 lg:flex">
               <img src={victorySyncLogo} alt="VictorySync logo" className="h-10 w-10 rounded-2xl object-cover shadow-sm ring-1 ring-slate-300" />
               <div className="min-w-0">
@@ -132,8 +135,8 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
               </div>
             </div>
 
-            <form onSubmit={submitSearch} className="flex flex-1 items-center gap-3 lg:max-w-3xl">
-              <label className="relative flex-1">
+            <form onSubmit={submitSearch} className="flex min-w-0 flex-1 flex-col items-stretch gap-2 md:flex-row md:items-center lg:max-w-3xl">
+              <label className="relative min-w-0 flex-1">
                 <span className="sr-only">Search dashboard</span>
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">/</span>
                 <input
@@ -151,7 +154,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
                 <select
                   value={selectedOrgId || ''}
                   onChange={(event) => setSelectedOrgId(event.target.value || null)}
-                  className="vs-input hidden h-10 max-w-[220px] text-sm md:block"
+                  className="vs-input h-10 w-full text-sm md:max-w-[220px]"
                   aria-label="Organization"
                 >
                   <option value="">All organizations</option>
@@ -162,6 +165,7 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
               )}
             </form>
 
+            <button type="button" className="vs-button-secondary shrink-0" onClick={() => void toggleTheme()} aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}>{theme === 'light' ? 'Dark' : 'Light'}</button>
             <div className="hidden items-center gap-3 md:flex">
               <div
                 className={`rounded-full border px-3 py-2 text-xs font-semibold shadow-sm ${

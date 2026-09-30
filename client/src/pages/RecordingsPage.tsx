@@ -335,19 +335,19 @@ export function RecordingsPage() {
 		          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,260px),180px,180px,180px,1fr] lg:items-end">
 	            <div>
 	              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Search Number</label>
-	              <input value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => fetchRecordings(true)} placeholder="+1212..." className="vs-input w-full" />
+	              <input aria-label="Search Number" value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => fetchRecordings(true)} placeholder="+1212..." className="vs-input w-full" />
 	            </div>
 	            <div>
 	              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Start Date</label>
-	              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input w-full" />
+	              <input aria-label="Start Date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input w-full" />
 	            </div>
 		            <div>
 		              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">End Date</label>
-		              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input w-full" />
+		              <input aria-label="End Date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input w-full" />
 		            </div>
 		            <div>
 		              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Direction</label>
-		              <select value={directionFilter} onChange={(e) => setDirectionFilter(e.target.value)} className="vs-input w-full">
+		              <select aria-label="Direction" value={directionFilter} onChange={(e) => setDirectionFilter(e.target.value)} className="vs-input w-full">
 		                <option value="all">All</option>
 		                <option value="inbound">Inbound</option>
 		                <option value="outbound">Outbound</option>

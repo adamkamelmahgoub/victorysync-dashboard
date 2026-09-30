@@ -189,7 +189,7 @@ export function OrgDashboardPage() {
         <div className="mb-6 flex items-center gap-4">
           <div className="flex items-center gap-2">
             <label className="text-sm text-slate-300">View:</label>
-            <select
+            <select aria-label="View:"
               value={daysBack}
               onChange={(e) => setDaysBack(parseInt(e.target.value))}
               className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm hover:border-slate-600 transition"
@@ -321,7 +321,7 @@ export function OrgDashboardPage() {
                         {perNumberMetrics.map((metric) => (
                           <tr key={metric.phoneId} className="border-b border-slate-800 hover:bg-slate-800/30 transition">
                             <td className="px-4 py-3 text-sm font-medium text-emerald-300">{metric.number}</td>
-                            <td className="px-4 py-3 text-sm text-slate-400">{metric.label || '—'}</td>
+                            <td className="px-4 py-3 text-sm text-slate-400">{metric.label || '-'}</td>
                             <td className="px-4 py-3 text-sm text-center text-slate-300">
                               <span className="inline-block px-2 py-1 bg-slate-700/50 rounded">{metric.callsCount}</span>
                             </td>
@@ -336,7 +336,7 @@ export function OrgDashboardPage() {
                               </span>
                             </td>
                             <td className="px-4 py-3 text-sm text-center">
-                              <span className="inline-block px-2 py-1 bg-slate-700/30 rounded">{metric.avgSpeedSeconds ? `${metric.avgSpeedSeconds}s` : '—'}</span>
+                              <span className="inline-block px-2 py-1 bg-slate-700/30 rounded">{metric.avgSpeedSeconds ? `${metric.avgSpeedSeconds}s` : '-'}</span>
                             </td>
                             <td className="px-4 py-3 text-sm text-center">
                               <span className={`inline-block px-2 py-1 rounded font-semibold ${

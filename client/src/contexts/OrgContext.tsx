@@ -48,20 +48,18 @@ type OrgContextValue = {
 const OrgContext = createContext<OrgContextValue | undefined>(undefined);
 
 export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { user, globalRole } = useAuth();
+  const { user, globalRole, selectedOrgId } = useAuth();
   const [org, setOrg] = useState<Org | null>(null);
   const [member, setMember] = useState<OrgMember | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fetchInProgressRef = useRef(false);
+  const requestVersionRef = useRef(0);
   const lastUserIdRef = useRef<string | null>(null);
 
   const fetchOrgData = async () => {
-    // Prevent concurrent fetches
-    if (fetchInProgressRef.current) {
-      console.debug('[OrgContext] Fetch already in progress, skipping');
-      return;
-    }
+    // Only the latest selected organization may update the active context.
+    const requestVersion = ++requestVersionRef.current;
 
     if (!user) {
       console.debug('[OrgContext] No user, clearing org data');
@@ -73,8 +71,12 @@ export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
       return;
     }
 
+    if (!['platform_admin','admin','super_admin'].includes(String(globalRole))) {
+      setOrg(null); setMember(null); setError(null); setLoading(false); return;
+    }
+
     // Prevent re-fetching for same user unless forced
-    if (lastUserIdRef.current === user.id && org !== null && !loading && !error) {
+    if (lastUserIdRef.current === user.id && org !== null && org.id === selectedOrgId && !loading && !error) {
       console.debug('[OrgContext] Already fetched for this user, skipping');
       return;
     }
@@ -85,12 +87,16 @@ export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
       setError(null);
 
       // Check if user is platform admin
-      const isPlatformAdmin = globalRole === 'platform_admin';
+      const isPlatformAdmin = ['platform_admin','admin','super_admin'].includes(String(globalRole));
 
       // For platform admins, don't require org membership
       if (isPlatformAdmin) {
-        console.debug('[OrgContext] User is platform admin, no org required');
-        setOrg(null);
+        if (selectedOrgId) {
+          const result = await supabase.from('organizations').select('*').eq('id',selectedOrgId).single();
+          if (requestVersion !== requestVersionRef.current) return;
+          if (result.error) throw result.error;
+          setOrg(result.data as Org);
+        } else setOrg(null);
         setMember(null);
         setLoading(false);
         lastUserIdRef.current = user.id;
@@ -277,6 +283,7 @@ export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
       lastUserIdRef.current = user.id;
 
     } catch (err: any) {
+      if (requestVersion !== requestVersionRef.current) return;
       console.error('[OrgContext] Unexpected error:', err);
       setError(err.message || 'Failed to load organization');
       setOrg(null);
@@ -284,20 +291,20 @@ export const OrgProvider: FC<{ children: ReactNode }> = ({ children }) => {
       setLoading(false);
       lastUserIdRef.current = user.id;
     } finally {
-      fetchInProgressRef.current = false;
+      if (requestVersion === requestVersionRef.current) fetchInProgressRef.current = false;
     }
   };
 
   useEffect(() => {
     fetchOrgData();
-  }, [user?.id, globalRole]); // Only depend on user ID and globalRole to prevent loops
+  }, [user?.id, globalRole, selectedOrgId]); // Only depend on user ID and globalRole to prevent loops
 
   const refresh = async () => {
     lastUserIdRef.current = null; // Force refetch
     await fetchOrgData();
   };
 
-  const isPlatformAdmin = globalRole === 'platform_admin';
+  const isPlatformAdmin = ['platform_admin','admin','super_admin'].includes(String(globalRole));
   // Normalized roles: member?.role is now 'owner', 'admin', or 'member'
   const isAdmin = member?.role === 'admin' || member?.role === 'owner' || isPlatformAdmin;
   const isOwner = member?.role === 'owner' || (member?.role === 'admin' && !isPlatformAdmin);

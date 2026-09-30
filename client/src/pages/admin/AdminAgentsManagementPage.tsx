@@ -555,23 +555,23 @@ const AdminAgentsManagementPage: FC = () => {
           </div>
 
           <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4">
-            <select value={createUserId} onChange={(e) => setCreateUserId(e.target.value)} className="vs-input">
+            <select aria-label="User" value={createUserId} onChange={(e) => setCreateUserId(e.target.value)} className="vs-input">
               <option value="">Select user</option>
               {unassignedUsers.map((row) => (
                 <option key={row.id} value={row.id}>{row.email}</option>
               ))}
             </select>
-            <select value={createOrgId} onChange={(e) => setCreateOrgId(e.target.value)} className="vs-input">
+            <select aria-label="Organization" value={createOrgId} onChange={(e) => setCreateOrgId(e.target.value)} className="vs-input">
               <option value="">Select org</option>
               {orgs.map((row) => (
                 <option key={row.id} value={row.id}>{row.name}</option>
               ))}
             </select>
-            <select value={createRole} onChange={(e) => setCreateRole(e.target.value)} className="vs-input">
+            <select aria-label="Role" value={createRole} onChange={(e) => setCreateRole(e.target.value)} className="vs-input">
               <option value="agent">Agent</option>
               <option value="org_manager">Org Manager</option>
             </select>
-            <select value={createExtension} onChange={(e) => setCreateExtension(e.target.value)} className="vs-input">
+            <select aria-label="Extension" value={createExtension} onChange={(e) => setCreateExtension(e.target.value)} className="vs-input">
               <option value="">{(globalExtensionsLoading || extensionsLoadingByOrg[createOrgId]) ? 'Loading extensions...' : 'Select extension'}</option>
               {createExtensionOptions.map((option) => (
                 <option key={`${option.source_org_id || 'global'}:${option.extension}`} value={option.extension}>
@@ -716,7 +716,7 @@ const AdminAgentsManagementPage: FC = () => {
                         <td className="px-4 py-3 text-slate-700">{orgNameById.get(row.org_id) || row.org_id}</td>
                         <td className="px-4 py-3">
                           {isEditing ? (
-                            <select value={editRole} onChange={(e) => setEditRole(e.target.value)} className="vs-input">
+                            <select aria-label="Role" value={editRole} onChange={(e) => setEditRole(e.target.value)} className="vs-input">
                               <option value="agent">Agent</option>
                               <option value="org_manager">Org Manager</option>
                             </select>
@@ -726,7 +726,7 @@ const AdminAgentsManagementPage: FC = () => {
                         </td>
                         <td className="px-4 py-3">
                           {isEditing ? (
-                            <select value={editExtension} onChange={(e) => setEditExtension(e.target.value)} className="vs-input min-w-[220px]">
+                            <select aria-label="Extension" value={editExtension} onChange={(e) => setEditExtension(e.target.value)} className="vs-input min-w-[220px]">
                               <option value="">{(globalExtensionsLoading || extensionsLoadingByOrg[row.org_id]) ? 'Loading extensions...' : 'Select extension'}</option>
                               {options.map((option) => (
                                 <option key={`${option.source_org_id || row.org_id}:${option.extension}`} value={option.extension}>

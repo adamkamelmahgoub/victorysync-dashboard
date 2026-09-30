@@ -26,7 +26,9 @@ const tabLabels: Array<{ id: ReportTab; label: string }> = [
 ];
 
 function isoDateDaysAgo(days: number) {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function fmtDate(value?: string | null) {
@@ -44,8 +46,8 @@ function rowInDateRange(row: Row, startDate: string, endDate: string) {
   if (!value) return true;
   const timestamp = Date.parse(String(value));
   if (!Number.isFinite(timestamp)) return true;
-  const start = Date.parse(`${startDate}T00:00:00.000Z`);
-  const end = Date.parse(`${endDate}T23:59:59.999Z`);
+  const start = Date.parse(`${startDate}T00:00:00.000`);
+  const end = Date.parse(`${endDate}T23:59:59.999`);
   return timestamp >= start && timestamp <= end;
 }
 
@@ -74,10 +76,11 @@ function badgeTone(value?: string | null): 'neutral' | 'success' | 'warning' | '
 
 function downloadCsv(filename: string, rows: Row[]) {
   if (rows.length === 0) return;
-  const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row).filter((key) => typeof row[key] !== 'object'))));
+  const approved = ['id','org_id','started_at','ended_at','recording_date','sent_at','message_date','transferred_at','created_at','from_number','to_number','phone_number','direction','status','duration_seconds','agent_name','agent_extension','transfer_target','transfer_status'];
+  const keys = approved.filter(key => rows.some(row => row[key] !== undefined));
   const csv = [
     keys.join(','),
-    ...rows.map((row) => keys.map((key) => `"${String(row[key] ?? '').replace(/"/g, '""')}"`).join(',')),
+    ...rows.map((row) => keys.map((key) => `"${String(row[key] ?? '').replace(/^[=+@\-\t\r]/, "'").replace(/"/g, '""')}"`).join(',')),
   ].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -143,8 +146,8 @@ export default function ReportPage() {
   const buildQuery = useCallback((extra?: Record<string, string>, options?: { preload?: boolean }) => {
     const q = new URLSearchParams();
     if (activeOrgId) q.set('org_id', activeOrgId);
-    if (startDate) q.set('start_date', options?.preload ? isoDateDaysAgo(FIVE_YEAR_DAYS) : startDate);
-    if (endDate) q.set('end_date', endDate);
+    if (startDate) q.set('start_date', new Date(`${options?.preload ? isoDateDaysAgo(FIVE_YEAR_DAYS) : startDate}T00:00:00`).toISOString());
+    if (endDate) q.set('end_date', new Date(`${endDate}T23:59:59.999`).toISOString());
     if (selectedNumber) q.set('number', selectedNumber);
     if (agent.trim()) q.set('agent', agent.trim());
     if (direction !== 'all') q.set('direction', direction);
@@ -359,25 +362,25 @@ export default function ReportPage() {
         <SectionCard title="Filters" contentClassName="p-4">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-9">
             {isPlatformAdmin && (
-              <select value={activeOrgId || ''} onChange={(e) => setSelectedOrgId(e.target.value || null)} className="vs-input h-10 text-sm">
+              <select aria-label="Organization" value={activeOrgId || ''} onChange={(e) => setSelectedOrgId(e.target.value || null)} className="vs-input h-10 text-sm">
                 <option value="">All organizations</option>
                 {orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             )}
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input h-10 text-sm" />
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input h-10 text-sm" />
-            <select value={selectedNumber} onChange={(e) => setSelectedNumber(e.target.value)} className="vs-input h-10 text-sm">
+            <input aria-label="Start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="vs-input h-10 text-sm" />
+            <input aria-label="End date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="vs-input h-10 text-sm" />
+            <select aria-label="Phone number" value={selectedNumber} onChange={(e) => setSelectedNumber(e.target.value)} className="vs-input h-10 text-sm">
               <option value="">All numbers</option>
               {numbers.map((number) => <option key={number.id} value={number.number}>{number.label ? `${number.label} - ${number.number}` : number.number}</option>)}
             </select>
             <input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="Extension" className="vs-input h-10 text-sm" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} onBlur={() => loadReport()} placeholder="Search number" className="vs-input h-10 text-sm" />
-            <select value={direction} onChange={(e) => setDirection(e.target.value)} className="vs-input h-10 text-sm">
+            <select aria-label="Direction" value={direction} onChange={(e) => setDirection(e.target.value)} className="vs-input h-10 text-sm">
               <option value="all">All directions</option>
               <option value="inbound">Inbound</option>
               <option value="outbound">Outbound</option>
             </select>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className="vs-input h-10 text-sm">
+            <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)} className="vs-input h-10 text-sm">
               <option value="all">All statuses</option>
               <option value="answered">Answered</option>
               <option value="missed">Missed</option>

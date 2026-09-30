@@ -187,7 +187,7 @@ const SupportPage: FC = () => {
             </div>
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Priority</label>
-              <select value={newPriority} onChange={(e) => setNewPriority(e.target.value)} className="vs-input w-full">
+              <select aria-label="Priority" value={newPriority} onChange={(e) => setNewPriority(e.target.value)} className="vs-input w-full">
                 <option value="low">Low</option>
                 <option value="normal">Normal</option>
                 <option value="high">High</option>

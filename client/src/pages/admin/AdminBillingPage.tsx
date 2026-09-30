@@ -302,7 +302,7 @@ function CreateBillingRecordModal({ onClose, onSubmit }: { onClose: () => void; 
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Type</label>
-            <select
+            <select aria-label="Type"
               value={formData.type}
               onChange={(e) => setFormData({ ...formData, type: e.target.value })}
               className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md"

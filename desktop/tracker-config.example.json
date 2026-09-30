@@ -1,0 +1,5 @@
+{
+  "apiUrl": "https://api.victorysync.com",
+  "supabaseUrl": "https://YOUR_STAGING_PROJECT.supabase.co",
+  "supabaseAnonKey": "YOUR_PUBLIC_ANON_KEY"
+}

@@ -3,7 +3,7 @@ import AdminTopNav from '../../components/AdminTopNav';
 import { PageLayout } from '../../components/PageLayout';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildApiUrl } from '../../config';
-import { EmptyStatePanel, StatusBadge } from '../../components/DashboardPrimitives';
+import { ErrorStatePanel, EmptyStatePanel, StatusBadge } from '../../components/DashboardPrimitives';
 
 interface ChangeRequest {
   id: string;
@@ -20,6 +20,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
   const { user } = useAuth();
   const userId = user?.id;
   
+  const [error, setError] = useState<string | null>(null);
   const [requests, setRequests] = useState<ChangeRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<ChangeRequest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,6 +55,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
   const fetchRequests = async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await fetch(buildApiUrl('/api/admin/number-requests'), {
         headers: {
           'x-user-id': userId || '',
@@ -62,7 +64,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
       });
 
       if (!response.ok) {
-        console.error('Failed to fetch requests');
+        setError('Unable to load number requests. Please retry.');
         setRequests([]);
         return;
       }
@@ -70,7 +72,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
       const data = await response.json();
       setRequests(data.requests || []);
     } catch (error) {
-      console.error('Error fetching requests:', error);
+      setError('Unable to load number requests. Please retry.');
       setRequests([]);
     } finally {
       setLoading(false);
@@ -114,6 +116,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
       <div className="space-y-6">
 
         <AdminTopNav />
+        {error && <ErrorStatePanel error={error} onRetry={() => void fetchRequests()} />}
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Requests List */}
@@ -121,7 +124,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
             <div className="space-y-3 border-b border-slate-200 bg-slate-50 p-4">
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase text-slate-600">Filter by Status</label>
-                <select
+                <select aria-label="Filter by Status"
                   value={filterStatus}
                   onChange={(e) => setFilterStatus(e.target.value)}
                   className="vs-input w-full"
@@ -135,7 +138,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
               </div>
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase text-slate-600">Filter by Organization</label>
-                <select
+                <select aria-label="Filter by Organization"
                   value={filterOrg}
                   onChange={(e) => setFilterOrg(e.target.value)}
                   className="vs-input w-full"
@@ -193,7 +196,7 @@ const AdminNumberChangeRequestsPage: FC = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-semibold uppercase text-slate-600">Status</label>
-                    <select
+                    <select aria-label="Status"
                       value={selectedRequest.status}
                       onChange={(e) => {
                         handleStatusChange(e.target.value);

@@ -192,7 +192,7 @@ const AdminSupportPage: FC = () => {
                 
                 <div>
                   <label className="block text-sm text-slate-300 mb-2">Status</label>
-                  <select
+                  <select aria-label="Status"
                     value={newStatus}
                     onChange={(e) => setNewStatus(e.target.value)}
                     className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white"
@@ -206,7 +206,7 @@ const AdminSupportPage: FC = () => {
 
                 <div>
                   <label className="block text-sm text-slate-300 mb-2">Priority</label>
-                  <select
+                  <select aria-label="Priority"
                     value={newPriority}
                     onChange={(e) => setNewPriority(e.target.value)}
                     className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white"

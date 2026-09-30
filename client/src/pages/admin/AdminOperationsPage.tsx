@@ -1003,7 +1003,7 @@ export function AdminOperationsPage() {
                                           <div className="text-sm font-medium text-slate-200">{feature.label}</div>
                                           <div className="text-xs text-slate-500">Effective: {feature.effective_enabled ? 'enabled' : 'disabled'}</div>
                                         </div>
-                                        <select
+                                        <select aria-label="Feature permission"
                                           className="vs-input max-w-[180px]"
                                           value={feature.override_enabled === null ? 'inherit' : feature.override_enabled ? 'allow' : 'deny'}
                                           onChange={(event) => setUserFeatureRows((rows) => rows.map((row) => {

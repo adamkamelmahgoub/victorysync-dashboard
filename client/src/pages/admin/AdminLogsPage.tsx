@@ -164,7 +164,7 @@ export default function AdminLogsPage() {
 
       <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
-          <select className="vs-input h-10" value={range} onChange={(e) => setRange(e.target.value)} data-log="Changed Logs Date Range">
+          <select aria-label="Date range" className="vs-input h-10" value={range} onChange={(e) => setRange(e.target.value)} data-log="Changed Logs Date Range">
             <option value="1h">Last 1 hour</option>
             <option value="24h">Last 24 hours</option>
             <option value="7d">Last 7 days</option>
@@ -175,7 +175,7 @@ export default function AdminLogsPage() {
             <input className="vs-input h-10" placeholder="Event/error type" value={eventType} onChange={(e) => setEventType(e.target.value)} />
           )}
           {tab === 'errors' && (
-            <select className="vs-input h-10" value={resolved} onChange={(e) => setResolved(e.target.value)}>
+            <select aria-label="Error resolution" className="vs-input h-10" value={resolved} onChange={(e) => setResolved(e.target.value)}>
               <option value="">All errors</option>
               <option value="false">Unresolved</option>
               <option value="true">Resolved</option>
@@ -226,7 +226,7 @@ export default function AdminLogsPage() {
 
       <div className="vs-table-shell mt-4 overflow-hidden">
         <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">{loading ? 'Loading...' : `${rows.length} rows`}</div>
-        <div className="overflow-x-auto">
+        <div tabIndex={0} className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-600">
               <tr>
@@ -264,7 +264,7 @@ export default function AdminLogsPage() {
                   {expandedId === row.id && (
                     <tr>
                       <td colSpan={8} className="bg-slate-50 px-4 py-3">
-                        <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-slate-700">{JSON.stringify(row.metadata || row.request_payload || row, null, 2)}</pre>
+                        <pre tabIndex={0} className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-slate-700">{JSON.stringify(row.metadata || row.request_payload || row, null, 2)}</pre>
                       </td>
                     </tr>
                   )}

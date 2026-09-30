@@ -101,7 +101,7 @@ export function DebugAuthPage() {
         {/* Auth User Info */}
         <div className="bg-slate-800 rounded-lg p-6">
           <h2 className="text-xl font-semibold mb-4">Auth User</h2>
-          <pre className="bg-slate-900 p-4 rounded text-sm overflow-x-auto">
+          <pre tabIndex={0} className="bg-slate-900 p-4 rounded text-sm overflow-x-auto">
             {JSON.stringify({
               id: user?.id,
               email: user?.email,
@@ -129,7 +129,7 @@ export function DebugAuthPage() {
           <div className="mb-4">
             <strong>Count:</strong> {orgUsers.length}
           </div>
-          <pre className="bg-slate-900 p-4 rounded text-sm overflow-x-auto">
+          <pre tabIndex={0} className="bg-slate-900 p-4 rounded text-sm overflow-x-auto">
             {JSON.stringify(orgUsers, null, 2)}
           </pre>
         </div>
@@ -143,7 +143,7 @@ export function DebugAuthPage() {
           <div className="mb-4">
             <strong>Count:</strong> {organizations.length}
           </div>
-          <pre className="bg-slate-900 p-4 rounded text-sm overflow-x-auto">
+          <pre tabIndex={0} className="bg-slate-900 p-4 rounded text-sm overflow-x-auto">
             {JSON.stringify(organizations, null, 2)}
           </pre>
         </div>
