@@ -356,8 +356,8 @@ export default function WorkforcePage() {
     >
       <div className="wf-workspace">
         {error && (
-          <div role="alert" className="vs-surface p-4">
-            <strong>Unable to complete request:</strong> {error}{" "}
+          <div role="alert" className="wf-error">
+            <div><strong>Unable to load your workspace</strong><p>{error}</p></div>
             <button onClick={() => run(load, "Refreshed")}>Retry</button>
           </div>
         )}
@@ -370,22 +370,22 @@ export default function WorkforcePage() {
           <>
             <nav
               aria-label="Workforce sections"
-              className="flex flex-wrap gap-2"
+              className="wf-tabs"
             >
               {tabNames.map((name) => (
                 <button
                   key={name}
                   aria-current={tab === name ? "page" : undefined}
-                  className={
-                    tab === name ? "vs-button-primary" : "vs-button-secondary"
-                  }
+                  className="wf-tab"
                   onClick={() => setTab(name)}
                 >
                   {name}
                 </button>
               ))}
             </nav>
-            <div className="wf-form">
+            {!["Timer", "Administration", "Audit", "Review"].includes(tab) && <section className="wf-filters" aria-label="Report filters">
+            <div className="wf-filter-heading"><h2>Report filters</h2><span>{Intl.DateTimeFormat().resolvedOptions().timeZone}</span></div>
+            <div className="wf-form wf-filter-fields">
               <label>
                 From
                 <input
@@ -403,17 +403,14 @@ export default function WorkforcePage() {
                   onChange={(e) => setTo(e.target.value)}
                 />
               </label>
-              <label>Client<select value={clientFilter} onChange={e=>setClientFilter(e.target.value)}><option value="">All accessible clients</option>{options('clients')}</select></label>
-              <label>Agent<select value={agentFilter} onChange={e=>setAgentFilter(e.target.value)}><option value="">All accessible agents</option>{(data.users || []).filter(r=>r.role==='agent').map(r=><option key={r.user_id} value={r.user_id}>{r.display_name}</option>)}</select></label>
-              <label>Campaign filter<select value={campaignFilter} onChange={e=>setCampaignFilter(e.target.value)}><option value="">All accessible campaigns</option>{options('campaigns')}</select></label>
-              <p>
-                Displayed in {Intl.DateTimeFormat().resolvedOptions().timeZone}.
-                Stored in UTC.
-              </p>
+              <label>Client<select value={clientFilter} onChange={e=>setClientFilter(e.target.value)}><option value="">All clients</option>{options('clients')}</select></label>
+              <label>Agent<select value={agentFilter} onChange={e=>setAgentFilter(e.target.value)}><option value="">All agents</option>{(data.users || []).filter(r=>r.role==='agent').map(r=><option key={r.user_id} value={r.user_id}>{r.display_name}</option>)}</select></label>
+              <label>Campaign<select value={campaignFilter} onChange={e=>setCampaignFilter(e.target.value)}><option value="">All campaigns</option>{options('campaigns')}</select></label>
             </div>
+            </section>}
             {tab === "Overview" && (
               <>
-                <div className="wf-grid">
+                <div className="wf-grid wf-metrics">
                   {[
                     ["Transfers", transfers.length],
                     [
@@ -428,12 +425,14 @@ export default function WorkforcePage() {
                         : "No hours recorded",
                     ],
                   ].map(([name, value]) => (
-                    <section className="vs-surface p-5" key={name}>
+                    <section className="wf-metric" key={name}>
                       <h2>{name}</h2>
-                      <strong className="text-2xl">{value}</strong>
+                      <strong className={typeof value === 'string' && value.length > 12 ? 'wf-metric-empty' : 'text-2xl'}>{value}</strong>
                     </section>
                   ))}
                 </div>
+                <section className="wf-report">
+                <div className="wf-report-heading"><div><h2>Transfer performance</h2><p>Connections and hours across your selected period.</p></div>
                 <label>
                   Group transfers by
                   <select
@@ -452,6 +451,7 @@ export default function WorkforcePage() {
                     ))}
                   </select>
                 </label>
+                </div>
                 <Table
                   headers={[
                     "Group",
@@ -476,6 +476,7 @@ export default function WorkforcePage() {
                         : "No hours recorded",
                     ])}
                 />
+                </section>
               </>
             )}
             {tab === "Timer" && (

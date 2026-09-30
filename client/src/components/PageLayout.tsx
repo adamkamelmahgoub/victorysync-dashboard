@@ -120,11 +120,11 @@ export const PageLayout: FC<PageLayoutProps> = ({ title, description, eyebrow, a
     location.pathname.startsWith('/support');
 
   return (
-    <div className="min-h-screen bg-[var(--vs-bg)] text-[var(--vs-text)]">
+    <div className="vs-app min-h-screen bg-[var(--vs-bg)] text-[var(--vs-text)]">
       <Sidebar isAdmin={isAdmin} currentPath={`${location.pathname}${location.search}`} />
 
       <main className="min-h-screen pt-14 lg:ml-[280px] lg:pt-0">
-        <div className="sticky top-14 z-50 border-b border-slate-200/80 bg-white/88 px-4 shadow-[0_1px_0_rgba(15,23,42,0.03),0_12px_34px_rgba(15,23,42,0.04)] backdrop-blur-xl transition-[box-shadow,background-color] duration-300 lg:top-0 lg:px-6">
+        <div className="vs-topbar sticky top-14 z-50 border-b border-slate-200/80 bg-white/88 px-4 shadow-[0_1px_0_rgba(15,23,42,0.03),0_12px_34px_rgba(15,23,42,0.04)] backdrop-blur-xl transition-[box-shadow,background-color] duration-300 lg:top-0 lg:px-6">
           <div className="mx-auto flex min-h-16 max-w-[1680px] items-center justify-between gap-4 py-3 md:h-16 md:py-0">
             <div className="hidden min-w-0 items-center gap-3 lg:flex">
               <img src={victorySyncLogo} alt="VictorySync logo" className="h-10 w-10 rounded-2xl object-cover shadow-sm ring-1 ring-slate-300" />

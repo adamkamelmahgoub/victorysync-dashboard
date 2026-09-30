@@ -114,6 +114,7 @@ function NavButton({
       onFocus={() => preloadRoute(item.path)}
       data-log={`Navigate ${item.label}`}
       data-log-type="navigation_click"
+      aria-current={active ? 'page' : undefined}
       className={`group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition duration-200 ${
         active
           ? 'bg-white text-violet-950 shadow-[inset_3px_0_0_rgba(124,58,237,0.95),0_10px_28px_rgba(124,58,237,0.12)] ring-1 ring-violet-200/90'

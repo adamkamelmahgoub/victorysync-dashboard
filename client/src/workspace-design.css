@@ -1,0 +1,91 @@
+/* Shared dashboard surfaces. Keyboard focus stays visible; resting cards have no outlines. */
+:root[data-theme] {
+  --vs-shadow: 0 4px 24px rgb(15 23 42 / 4%);
+  --vs-radius: 16px;
+  --workspace-fill: #f0f2f7;
+  --workspace-muted: #526174;
+}
+:root[data-theme='dark'] {
+  --vs-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  --workspace-fill: #1b263b;
+  --workspace-muted: #b6c3d5;
+}
+:root .vs-app :is(.vs-surface, .vs-surface-muted) {
+  border: 0 !important;
+  background-image: none !important;
+  box-shadow: var(--vs-shadow) !important;
+}
+:root .vs-app :is(div, section, article, aside, header, nav, button, a, span)[class*='rounded'][class*='border'] {
+  border-color: transparent !important;
+}
+:root .vs-app :is(button, a, img, span, div)[class*='ring-1'] { box-shadow: none !important; }
+:root .vs-app :is(.vs-button-secondary, .vs-btn-secondary) {
+  border: 0 !important;
+  background: var(--workspace-fill) !important;
+  color: var(--vs-text) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+:root .vs-app :is(.vs-button-primary, .vs-button-destructive) { border: 0 !important; box-shadow: none !important; transform: none !important; }
+:root .vs-app :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  border: 0 !important;
+  border-bottom: 1px solid var(--control-border) !important;
+  border-radius: 8px 8px 0 0 !important;
+  background-color: var(--workspace-fill) !important;
+  box-shadow: none !important;
+  min-height: 42px;
+}
+:root .vs-app button:disabled { border: 0 !important; }
+:root .vs-app .vs-topbar { border: 0; box-shadow: none; }
+:root .vs-app .vs-page-heading { border: 0; }
+.vs-page-heading h1 { letter-spacing: -.035em; }
+.vs-eyebrow { letter-spacing: .13em; }
+:root .vs-app aside { box-shadow: none !important; }
+:root .vs-app aside nav button { box-shadow: none !important; border: 0 !important; transform: none !important; }
+:root .vs-app aside nav button span[class*='h-8'] { background: transparent !important; color: inherit !important; box-shadow: none !important; }
+:root .vs-app aside nav button[aria-current='page'] { background: #ede7ff !important; color: #5429b8 !important; }
+:root[data-theme='dark'] .vs-app aside nav button[aria-current='page'] { background: #2c2250 !important; color: #ddd1ff !important; }
+.wf-workspace { gap: 24px; }
+:root[data-theme] .wf-workspace button { border: 0; box-shadow: none; min-height: 40px; background: var(--workspace-fill); color: var(--vs-text); }
+.wf-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 0 0 4px; }
+:root[data-theme] .wf-tabs .wf-tab { position: relative; flex-shrink: 0; padding: 12px 16px; background: transparent; border-radius: 8px; color: var(--workspace-muted); font-size: 14px; }
+:root[data-theme] .wf-tabs .wf-tab:hover { background: var(--workspace-fill); }
+:root[data-theme] .wf-tabs .wf-tab[aria-current='page'] { background: #ede7ff; color: #5429b8; }
+:root[data-theme='dark'] .wf-tabs .wf-tab[aria-current='page'] { background: #2c2250; color: #ddd1ff; }
+.wf-filters { padding: 20px 24px 24px; background: var(--vs-surface); border-radius: 16px; }
+.wf-filter-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+.wf-filter-heading h2 { font-size: 14px; font-weight: 600; }
+.wf-filter-heading span { font-size: 12px; color: var(--workspace-muted); }
+.wf-filter-fields { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.wf-workspace label { font-size: 12px; font-weight: 600; color: var(--workspace-muted); }
+.wf-form label { gap: 8px; }
+.wf-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.wf-metric { min-width: 0; padding: 24px; border-radius: 16px; background: var(--vs-surface); }
+.wf-metric h2 { font-size: 13px; font-weight: 600; color: var(--workspace-muted); margin-bottom: 12px; }
+.wf-metric strong { display: block; font-size: clamp(22px, 2.3vw, 32px); line-height: 1.3; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.wf-metric strong.wf-metric-empty { font-size: 18px; letter-spacing: -.015em; line-height: 1.6; }
+.wf-report { background: var(--vs-surface); border-radius: 16px; overflow: hidden; }
+.wf-report-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px; }
+.wf-report-heading h2 { font-size: 16px; font-weight: 600; }
+.wf-report-heading p { margin-top: 4px; color: var(--workspace-muted); font-size: 13px; }
+.wf-report-heading label { display: grid; gap: 6px; min-width: 160px; }
+.wf-table-wrap { border-radius: 12px; background: var(--vs-surface); }
+.wf-report .wf-table-wrap { border-radius: 0; }
+:root .wf-workspace .wf-table th { background: var(--workspace-fill) !important; color: var(--workspace-muted); font-weight: 600; font-size: 12px; padding: 14px 20px; border: 0; }
+:root .wf-workspace .wf-table td { padding: 18px 20px; font-size: 13px; border: 0; }
+.wf-table tbody tr + tr { border-top: 1px solid var(--vs-border); }
+.wf-table tbody tr:hover { background: var(--workspace-fill); }
+.wf-error { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 24px; border-radius: 16px; background: var(--vs-surface); }
+.wf-error strong { display: block; font-size: 15px; }
+.wf-error p { font-size: 13px; line-height: 1.7; margin-top: 6px; color: var(--workspace-muted); }
+.wf-error button { flex-shrink: 0; }
+@media (max-width: 1100px) { .wf-filter-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); } .wf-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .wf-workspace { gap: 20px; }
+  .wf-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wf-filter-fields label:last-child { grid-column: 1 / -1; }
+  .wf-filters, .wf-metric, .wf-report-heading { padding: 18px; }
+  .wf-metrics { gap: 12px; }
+  .wf-report-heading { flex-direction: column; align-items: stretch; gap: 16px; }
+  .wf-error { align-items: flex-start; flex-direction: column; gap: 16px; }
+}

@@ -19,12 +19,12 @@ export function DashboardShellHeader({
   meta?: ReactNode;
 }) {
   return (
-    <header className="border-b border-slate-200/80 bg-transparent">
+    <header className="vs-page-heading border-b border-slate-200/80 bg-transparent">
       <div className="px-4 py-6 sm:px-5 lg:px-6 lg:py-8">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
             {eyebrow && (
-              <div className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] font-bold uppercase text-violet-700 shadow-sm">
+              <div className="vs-eyebrow text-[11px] font-semibold uppercase text-violet-700">
                 {eyebrow}
               </div>
             )}
