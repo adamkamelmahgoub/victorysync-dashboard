@@ -69,6 +69,8 @@ import notificationPreferencesRouter from './routes/notificationPreferences';
 import aiQualificationRouter from './routes/aiQualification';
 import adminClientLeadsRouter from './routes/adminClientLeads';
 import { startMightyCallPolling } from './mightycall/sync';
+import { extractTransferEvents } from './mightycall/transferEvents';
+import { transferImportEnabled } from './mightycall/workforceTransferSync';
 import { getBillingAccessForOrgIds, isBillingLockAllowedPath } from './services/billingAccess';
 import { Readable } from 'stream';
 import { writeAuditLog } from './lib/audit';
@@ -1779,18 +1781,17 @@ async function upsertWebhookTransfer(orgId: string, call: ReturnType<typeof norm
       raw_payload: call.payload,
     }, { onConflict: 'org_id,external_transfer_id' });
     if (saved.error) throw saved.error;
-    if (process.env.WORKFORCE_MIGHTYCALL_SYNC === 'true') {
-      const occurredAt = webhookIso(call.payload?.transferredAt || call.payload?.Timestamp || call.payload?.timestamp);
-      const stableId = firstWebhookValue(call.payload?.transfer_id, call.payload?.transferId)
-        || [call.external_id, normalizeExtension(call.agent_extension), call.transfer_target || 'target', occurredAt || 'timestamp-missing'].join(':');
-      const result = await supabaseAdmin.rpc('wf_ingest_transfer', {event: {
-        source_key: String(stableId), identity_confirmed: Boolean(firstWebhookValue(call.payload?.transfer_id, call.payload?.transferId)), occurred_at: occurredAt || null,
-        client_id: orgId, extension: normalizeExtension(call.agent_extension), business_number: call.payload?.businessNumber || call.payload?.business_number || (call.direction === 'outbound' ? call.from_number : call.to_number) || '',
-        phone: call.direction === 'outbound' ? call.to_number : call.from_number,
-        outcome: call.payload?.transferStatus || call.payload?.transfer_status || null,
-        external_call_id: call.external_id
-      }});
-      if (result.error) throw result.error;
+    if (transferImportEnabled()) {
+      const payload = { ...call.payload, transferTarget: call.transfer_target,
+        // Timestamp belongs to this webhook event, never the original call start.
+        transferredAt: call.payload?.transferredAt || call.payload?.Timestamp || call.payload?.timestamp };
+      const context = { clientId: orgId, callId: call.external_id, extension: normalizeExtension(call.agent_extension) || '',
+        businessNumber: (call.direction === 'outbound' ? call.from_number : call.to_number) || '',
+        phone: (call.direction === 'outbound' ? call.to_number : call.from_number) || '' };
+      for (const event of extractTransferEvents(payload, context)) {
+        const result = await supabaseAdmin.rpc('wf_ingest_transfer', { event });
+        if (result.error) throw result.error;
+      }
     }
   } catch (err: any) {
     console.warn('[mightycall webhook] call_transfers write skipped:', fmtErr(err));

@@ -46,6 +46,14 @@
 :root .vs-app aside nav button[aria-current='page'] { background: #ede7ff !important; color: #5429b8 !important; }
 :root[data-theme='dark'] .vs-app aside nav button[aria-current='page'] { background: #2c2250 !important; color: #ddd1ff !important; }
 .wf-workspace { gap: 24px; }
+.wf-transfer-sync { padding: 24px; display: grid; gap: 16px; }
+.wf-sync-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.wf-sync-heading h2 { font-size: 16px; font-weight: 600; }
+.wf-sync-heading span { font-size: 13px; font-weight: 600; }
+.wf-transfer-sync p { color: var(--workspace-muted); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.wf-sync-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.wf-sync-clients { display: grid; gap: 12px; list-style: none; }
+.wf-sync-clients li { padding: 16px; border-radius: 12px; background: var(--workspace-fill); }
 :root[data-theme] .wf-workspace button { border: 0; box-shadow: none; min-height: 40px; background: var(--workspace-fill); color: var(--vs-text); }
 .wf-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 0 0 4px; }
 :root[data-theme] .wf-tabs .wf-tab { position: relative; flex-shrink: 0; padding: 12px 16px; background: transparent; border-radius: 8px; color: var(--workspace-muted); font-size: 14px; }

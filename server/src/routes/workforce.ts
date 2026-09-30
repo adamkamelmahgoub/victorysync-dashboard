@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { refreshTransferImportConfig, runWorkforceTransferSync, transferWorkerStatus } from '../mightycall/workforceTransferSync';
 
 const router = Router();
 const tables = [
@@ -96,6 +97,33 @@ router.use(async (req, res, next) => {
 });
 router.get("/me", (_req, res) => {
   res.json({ role: res.locals.role, user_id: res.locals.userId });
+});
+router.get('/transfer-sync', async (_req,res) => {
+  if(res.locals.role!=='admin')return res.sendStatus(403);
+  try {
+  const available=await refreshTransferImportConfig();
+  const result=await (res.locals.db as SupabaseClient).from('wf_transfer_sync_state').select('*').order('client_id');
+  res.json({...transferWorkerStatus(),available:available&&!result.error,server_enabled:process.env.WORKFORCE_MIGHTYCALL_SYNC==='true',rows:result.data||[]});
+  } catch { res.status(503).json({message:'Unable to load transfer import status. Please retry.'}); }
+});
+router.post('/transfer-sync/enabled', async (req,res) => {
+  if(res.locals.role!=='admin')return res.sendStatus(403);
+  if(typeof req.body?.enabled!=='boolean')return res.sendStatus(400);
+  if(process.env.WORKFORCE_MIGHTYCALL_SYNC==='true'&&!req.body.enabled)return res.status(409).json({message:'Automatic import is enabled by the server environment. Change WORKFORCE_MIGHTYCALL_SYNC there to pause it.'});
+  try {
+  const result=await (res.locals.db as SupabaseClient).from('wf_settings').update({mightycall_import_enabled:req.body.enabled}).eq('id',true);
+  if(result.error)return res.status(400).json({message:'Apply migration 055 before changing automatic import.'});
+  await refreshTransferImportConfig();
+  res.json(transferWorkerStatus());
+  } catch { res.status(503).json({message:'Unable to change transfer import. Please retry.'}); }
+});
+router.post('/transfer-sync/run', async (_req,res) => {
+  if(res.locals.role!=='admin')return res.sendStatus(403);
+  try {
+  if(!await refreshTransferImportConfig())return res.status(503).json({message:'Apply migration 055 before importing transfers.'});
+  void runWorkforceTransferSync(true).catch(()=>console.warn('[workforce transfers] Requested import failed. Check migration and provider configuration.'));
+  res.status(202).json({message:'Transfer import queued. Progress will refresh automatically.'});
+  } catch { res.status(503).json({message:'Unable to start transfer import. Please retry.'}); }
 });
 router.get("/data/:table", async (req, res) => {
   if (!(tables as readonly string[]).includes(req.params.table))

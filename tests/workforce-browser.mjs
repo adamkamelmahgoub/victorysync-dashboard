@@ -59,6 +59,7 @@ try {
           ],
           sessions: [],
           segments: [],
+          provider_routes: [{ id: 'route', agent_id: id, client_id: cid, campaign_id: pid, extension: '101', business_number: '12125550000', active: true }],
           transfers: [
             {
               id: "transfer",
@@ -93,6 +94,8 @@ try {
           },
           { host, token, exp, user, theme },
         );
+        let importEnabled = false;
+        let importRequested = false;
         await page.route("**/*", async (route) => {
           const request = route.request(),
             u = new URL(request.url());
@@ -118,6 +121,13 @@ try {
               body = { csrfToken: "fixture" };
             else if (u.pathname === "/api/workforce/me")
               body = { role, user_id: id };
+            else if (u.pathname.startsWith('/api/workforce/transfer-sync')) {
+              assert.equal(role, 'admin', 'non-admin pages must never request import controls');
+              if (u.pathname.endsWith('/enabled')) importEnabled = request.postDataJSON().enabled;
+              if (u.pathname.endsWith('/run')) importRequested = true;
+              body = { available: true, enabled: importEnabled, polling: true, running: false, server_enabled: false,
+                rows: [{ client_id: cid, last_success_at: null, last_error: 'MightyCall authentication failed. Reconnect this client with working API credentials.', phase: 'calls', page_offset: 0 }] };
+            }
             else if (u.pathname.startsWith("/api/workforce/data/"))
               body = {
                 rows: fixture[u.pathname.split("/").at(-1)] || [],
@@ -160,6 +170,14 @@ try {
             .getByRole("button", { name: tab, exact: true })
             .click();
           await page.waitForTimeout(80);
+          if (role === 'admin' && tab === 'Transfers') {
+            await page.getByRole('button', { name: 'Enable automatic import', exact: true }).click();
+            await page.getByRole('button', { name: 'Pause automatic import', exact: true }).waitFor();
+            assert.equal(importEnabled, true);
+            await page.getByRole('button', { name: 'Sync now', exact: true }).click();
+            await page.getByText('Import requested. Progress refreshes every 10 seconds.', { exact: true }).waitFor();
+            assert.equal(importRequested, true);
+          }
           const axe = await new AxeBuilder({ page })
             .include(".wf-workspace")
             .withTags(["wcag2a", "wcag2aa", "wcag21aa"])

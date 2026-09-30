@@ -1,5 +1,7 @@
 # Implementation and rollout
 
+For the subsequent API transfer importer and migration 055, see [Automatic MightyCall transfer imports](MIGHTYCALL_TRANSFER_IMPORT.md). Its setup and limitations supersede the earlier opt-in transfer bridge instructions below.
+
 The user authorized implementation after the original audit and explicitly deferred completing Clerk authentication. The working application remains Vite/React plus Express. Existing Supabase authentication is retained in both the dashboard and new Windows tracker. The separate Next.js/Clerk starter is unchanged.
 
 No production migrations, data changes or live monitoring were performed. The implementation is prepared for the user-requested Git push; hosting automation may deploy that push.

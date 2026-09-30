@@ -6,6 +6,7 @@ import React, {
   useState,
 } from "react";
 import { PageLayout } from "../components/PageLayout";
+import { MightyCallTransferSync } from '../components/MightyCallTransferSync';
 import { fetchJson } from "../lib/apiClient";
 
 type Row = Record<string, any>;
@@ -193,6 +194,19 @@ export default function WorkforcePage() {
     };
   }, [me?.role, campaign, timer?.session?.status, data.settings]);
   const admin = me?.role === "admin";
+  useEffect(() => {
+    if (!me) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const transfers = await records('transfers');
+        const inbox = me.role === 'admin' ? await records('transfer_inbox') : null;
+        if (active) setData(previous => ({ ...previous, transfers, ...(inbox ? { transfer_inbox: inbox } : {}) }));
+      } catch (e: any) { if (active) setError(e.message); }
+    };
+    const interval = setInterval(refresh, 30000);
+    return () => { active = false; clearInterval(interval); };
+  }, [me?.role]);
   const label = (table: string, id: string) =>
     (data[table] || []).find((r) => (r.id || r.user_id) === id)?.[
       table === "users" ? "display_name" : "name"
@@ -563,6 +577,7 @@ export default function WorkforcePage() {
             )}
             {tab === "Transfers" && (
               <>
+                {admin && <MightyCallTransferSync clients={data.clients || []} routeCount={(data.provider_routes || []).filter(r => r.active).length} assignmentCount={(data.assignments || []).filter(r => r.active).length} />}
                 {me.role !== "client" && (
                   <form
                     className="vs-surface p-5 wf-form"

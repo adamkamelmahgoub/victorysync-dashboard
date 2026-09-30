@@ -1,3 +1,4 @@
+import { startWorkforceTransferPolling } from './workforceTransferSync';
 import { supabaseAdmin } from '../lib/supabaseClient';
 import { getMightyCallToken, mightyCallGetFirst } from './client';
 import {
@@ -1300,18 +1301,8 @@ async function upsertTransfer(callRow: any, raw: any, transfer: NonNullable<Retu
     raw_payload: raw,
   }, { onConflict: 'org_id,external_transfer_id' });
   if (saved.error) throw saved.error;
-  if (process.env.WORKFORCE_MIGHTYCALL_SYNC === 'true') {
-    const occurredAt = firstIso(raw?.transferredAt, raw?.transfer?.createdAt);
-    const providerId = raw?.transfer?.id || raw?.transferId;
-    const result = await supabaseAdmin.rpc('wf_ingest_transfer', {event: {
-      source_key: String(providerId || [externalCallId, callRow.agent_extension || '', transfer.transferTarget || 'target', occurredAt || 'timestamp-missing'].join(':')),
-      client_id: callRow.org_id, occurred_at: occurredAt || null,
-      extension: String(callRow.agent_extension || ''), business_number: String(callRow.business_number || ''),
-      phone: String(callRow.direction === 'outbound' ? callRow.to_number || '' : callRow.from_number || ''),
-      outcome: transfer.transferStatus || null, external_call_id: externalCallId,
-    }});
-    if (result.error) throw result.error;
-  }
+  // Workforce imports use the durable API worker. Legacy call rows may identify
+  // the receiving agent, so they are not a trustworthy source-agent mapping.
 }
 
 export async function syncRecordingsFromCallDetails(): Promise<number> {
@@ -1535,6 +1526,7 @@ async function runRollingVoicemailBackgroundSync() {
 }
 
 export function startMightyCallPolling() {
+  startWorkforceTransferPolling();
   if (schedulerStarted || process.env.MIGHTYCALL_DISABLE_POLLING === 'true') return;
   schedulerStarted = true;
   const tick = async () => {

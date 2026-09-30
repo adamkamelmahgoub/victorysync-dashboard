@@ -54,6 +54,7 @@ test("workforce migrations, RLS isolation, role escalation and timer limits", as
     "052_workforce_monitoring.sql",
     "053_workforce_operations.sql",
     "054_atomic_organization_settings.sql",
+    "055_mightycall_transfer_sync.sql",
   ]) {
     await db.exec(
       readFileSync(
@@ -308,6 +309,29 @@ test("workforce migrations, RLS isolation, role escalation and timer limits", as
   );
   await actor(ids.admin);
   await db.exec(`insert into wf_provider_routes(agent_id,client_id,campaign_id,extension,business_number) values('${ids.agent}','${ids.org}','${ids.campaign}','101','12125550000')`);
+  await db.exec('reset role; set role service_role');
+  assert.equal((await db.query('select mightycall_import_enabled from wf_settings')).rows[0].mightycall_import_enabled, false);
+  await db.query('select * from wf_assignments');
+  const claim = (await db.query('select wf_claim_transfer_sync($1) as job', [ids.org])).rows[0].job;
+  assert.ok(claim.lease_token);
+  assert.equal(claim.page_offset, 0);
+  assert.equal((await db.query('select wf_claim_transfer_sync($1) as job', [ids.org])).rows[0].job, null, 'another worker cannot claim an active lease');
+  await db.query("update wf_transfer_sync_state set lease_until=now()-interval '1 second' where client_id=$1", [ids.org]);
+  const retryClaim = (await db.query('select wf_claim_transfer_sync($1) as job', [ids.org])).rows[0].job;
+  assert.notEqual(retryClaim.lease_token, claim.lease_token);
+  assert.equal(retryClaim.page_offset, 0, 'expired leases retry the same page');
+  assert.equal((await db.query('update wf_transfer_sync_state set page_offset=10 where lease_token=$1 returning id', [claim.lease_token])).rows.length, 0, 'a stale worker cannot advance the cursor');
+  for (const user of [ids.agent, ids.client, ids.client2]) {
+    await actor(user);
+    assert.equal((await db.query('select * from wf_transfer_sync_state')).rows.length, 0);
+    await denied(`select wf_claim_transfer_sync('${ids.org}')`);
+    await denied('update wf_transfer_sync_state set page_offset=999');
+    assert.equal((await db.query('update wf_settings set mightycall_import_enabled=true returning id')).rows.length, 0);
+  }
+  await actor(ids.admin);
+  assert.equal((await db.query('select * from wf_transfer_sync_state')).rows.length, 1);
+  await db.exec('update wf_settings set mightycall_import_enabled=true');
+  await denied(`select wf_claim_transfer_sync('${ids.org}')`);
   await db.exec('reset role; set role service_role');
   const event={client_id:ids.org,source_key:'provider-transfer-1',extension:'101',business_number:'+1 (212) 555-0000',phone:'+12125550100',occurred_at:new Date().toISOString(),outcome:'connected'};
   const ingested=await db.query('select wf_ingest_transfer($1::jsonb) as id',[JSON.stringify(event)]);

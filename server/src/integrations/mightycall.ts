@@ -272,7 +272,7 @@ function normalizeMightyCallAuthBase(base: string) {
   return b;
 }
 
-function normalizeMightyCallApiBase(base: string) {
+export function normalizeMightyCallApiBase(base: string) {
   return `${normalizeMightyCallAuthBase(base)}/api`;
 }
 
@@ -309,7 +309,7 @@ function resolveSyncDateRange(startDate?: string, endDate?: string) {
   };
 }
 
-export async function getMightyCallAccessToken(override?: { clientId?: string; clientSecret?: string; baseUrl?: string }): Promise<string> {
+export async function getMightyCallAccessToken(override?: { clientId?: string; clientSecret?: string; baseUrl?: string; strict?: boolean }): Promise<string> {
   const base = (override?.baseUrl || MIGHTYCALL_BASE_URL || '').replace(/\/$/, '');
   const clientId = override?.clientId || MIGHTYCALL_API_KEY || '';
   const clientSecret = override?.clientSecret || MIGHTYCALL_USER_KEY || '';
@@ -348,8 +348,10 @@ export async function getMightyCallAccessToken(override?: { clientId?: string; c
     }
   ];
 
-  for (const url of candidates) {
-    for (const opts of requestOptions) {
+  // Background transfer jobs have a short lease. Use the documented auth protocol
+  // without probing legacy endpoints when strict mode is requested.
+  for (const url of override?.strict ? buildAuthUrlVariants(base, '/auth/token').slice(0, 1) : candidates) {
+    for (const opts of override?.strict ? requestOptions.slice(0, 1) : requestOptions) {
       try {
         const res = await requestWithRetry(url, opts, 1, 250);
         const text = await res.text().catch(() => '');
